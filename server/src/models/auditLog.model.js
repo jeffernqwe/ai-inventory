@@ -1,0 +1,45 @@
+import mongoose from 'mongoose';
+
+const { Schema } = mongoose;
+
+const auditLogSchema = new Schema(
+  {
+    businessId: {
+      type: Schema.Types.ObjectId,
+      ref: 'Business',
+      required: [true, 'businessId is required'],
+      index: true,
+    },
+    // May be null for system-initiated events (no authenticated user).
+    userId: {
+      type: Schema.Types.ObjectId,
+      ref: 'User',
+    },
+    action: {
+      type: String,
+      required: [true, 'action is required'],
+      trim: true,
+    },
+    entityType: {
+      type: String,
+      required: [true, 'entityType is required'],
+      trim: true,
+    },
+    // Flexible: an entity _id (as string) or a business-defined identifier.
+    entityId: {
+      type: String,
+      trim: true,
+    },
+    metadata: {
+      type: Schema.Types.Mixed,
+    },
+  },
+  { collection: 'audit_logs', timestamps: true }
+);
+
+auditLogSchema.index({ businessId: 1, createdAt: 1 });
+auditLogSchema.index({ businessId: 1, entityType: 1, entityId: 1 });
+
+const AuditLog = mongoose.model('AuditLog', auditLogSchema);
+
+export default AuditLog;

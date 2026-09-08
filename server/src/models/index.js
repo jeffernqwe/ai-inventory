@@ -2,6 +2,8 @@ import Business from './business.model.js';
 import User from './user.model.js';
 import Location from './location.model.js';
 import Category from './category.model.js';
+import Supplier from './supplier.model.js';
+import PurchaseOrder from './purchaseOrder.model.js';
 import Product from './product.model.js';
 import Inventory from './inventory.model.js';
 import InventoryTransaction from './inventoryTransaction.model.js';
@@ -14,6 +16,8 @@ export {
   User,
   Location,
   Category,
+  Supplier,
+  PurchaseOrder,
   Product,
   Inventory,
   InventoryTransaction,
@@ -28,6 +32,8 @@ export const models = [
   User,
   Location,
   Category,
+  Supplier,
+  PurchaseOrder,
   Product,
   Inventory,
   InventoryTransaction,

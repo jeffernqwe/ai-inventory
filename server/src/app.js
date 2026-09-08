@@ -9,6 +9,8 @@ import healthRoutes from './routes/health.routes.js';
 import { createAuthRouter } from './routes/auth.routes.js';
 import categoryRoutes from './routes/categories.routes.js';
 import locationRoutes from './routes/locations.routes.js';
+import supplierRoutes from './routes/suppliers.routes.js';
+import purchaseOrderRoutes from './routes/purchase-orders.routes.js';
 import productRoutes from './routes/products.routes.js';
 import inventoryRoutes from './routes/inventory.routes.js';
 import dashboardRoutes from './routes/dashboard.routes.js';
@@ -90,6 +92,8 @@ export function createApp({
   app.use('/api/auth', createAuthRouter({ limits: authLimits }));
   app.use('/api/categories', categoryRoutes);
   app.use('/api/locations', locationRoutes);
+  app.use('/api/suppliers', supplierRoutes);
+  app.use('/api/purchase-orders', purchaseOrderRoutes);
   app.use('/api/products', productRoutes);
   app.use('/api/inventory', inventoryRoutes);
   app.use('/api/dashboard', dashboardRoutes);

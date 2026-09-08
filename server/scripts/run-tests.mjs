@@ -57,6 +57,8 @@ const MIXED = [
   'phase11-intelligence.test.mjs', // unit: stock-status classifier; db: reorder list + dashboard health + AI restock tool
   'phase12a-barcode.test.mjs', // db: barcode lookup endpoint (success, isolation, duplicate, archived, RBAC)
   'phase12d-barcode-generation.test.mjs', // db: POST /:id/generate-barcode (generate, no-overwrite, lookup, isolation, archived, RBAC)
+  'phase13-suppliers.test.mjs', // db: suppliers CRUD over /api/suppliers (extra contact fields, RBAC, isolation, archive)
+  'phase13-purchase-orders.test.mjs', // db: PO create/list/get/DRAFT-edit/issue/cancel (numbering, lifecycle, RBAC, isolation, no stock writes)
 ];
 
 const FILE_LISTS = {

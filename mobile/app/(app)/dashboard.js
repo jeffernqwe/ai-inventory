@@ -8,7 +8,7 @@ import Button from '../../components/Button';
 import Card, { PressableCard } from '../../components/Card';
 import { CenterLoader, EmptyState, ErrorState, errorText } from '../../components/ListState';
 import Screen from '../../components/Screen';
-import { dashboardApi } from '../../lib/api';
+import { dashboardApi, productsApi } from '../../lib/api';
 import { isSessionError, useSession } from '../../lib/auth';
 import { confirm } from '../../lib/confirm';
 import { formatDateTime, formatNumber } from '../../lib/format';
@@ -44,9 +44,27 @@ function ActivityRow({ item }) {
   );
 }
 
-function StatCard({ label, value, tone, onPress }) {
+/** One "needs restock" preview row — taps into the product detail for stock-in. */
+function ReorderRow({ item }) {
+  const isOut = item.stockStatus === 'OUT_OF_STOCK';
   return (
-    <Pressable style={styles.stat} onPress={onPress} disabled={!onPress}>
+    <PressableCard style={styles.activityRow} onPress={() => router.push(`/products/${item.id}`)}>
+      <Badge text={isOut ? 'Out' : 'Low'} tone={isOut ? 'danger' : 'low'} />
+      <View style={styles.activityBody}>
+        <Text style={styles.activityName} numberOfLines={1}>
+          {item.name}
+        </Text>
+        <Text style={styles.activityMeta} numberOfLines={1}>
+          {formatNumber(item.availableQuantity)} available · min {formatNumber(item.minimumStock)}
+        </Text>
+      </View>
+    </PressableCard>
+  );
+}
+
+function StatCard({ label, value, tone, onPress, style }) {
+  return (
+    <Pressable style={[styles.stat, style]} onPress={onPress} disabled={!onPress}>
       <View style={[styles.statDot, { backgroundColor: tone }]} />
       <Text style={styles.statValue}>{formatNumber(value)}</Text>
       <Text style={styles.statLabel} numberOfLines={2}>
@@ -60,6 +78,7 @@ export default function DashboardScreen() {
   const { user, token, signOut } = useSession();
   const navigation = useNavigation();
   const [summary, setSummary] = useState(null);
+  const [restock, setRestock] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -77,8 +96,22 @@ export default function DashboardScreen() {
     try {
       const data = await dashboardApi.summary(token);
       setSummary(data);
+      // "Needs restock" preview is secondary and never blocks the summary — if
+      // it fails the health tiles still tell the story. Only fetched when the
+      // dashboard itself reports something at or below minimum.
+      if ((data.lowStockProducts ?? 0) + (data.outOfStockProducts ?? 0) > 0) {
+        try {
+          const list = await productsApi.reorder(token, { limit: 5 });
+          setRestock(list.items ?? []);
+        } catch {
+          setRestock(null);
+        }
+      } else {
+        setRestock([]);
+      }
     } catch (err) {
       setError(err);
+      setRestock(null);
       if (isSessionError(err)) await signOut();
     } finally {
       setLoading(false);
@@ -134,12 +167,25 @@ export default function DashboardScreen() {
             </Pressable>
           ) : null}
 
+          <Text style={styles.sectionTitle}>Inventory health</Text>
           <View style={styles.statGrid}>
+            <StatCard style={styles.statThird} label="In stock" value={summary.inStockProducts} tone={colors.success} onPress={() => router.push('/products')} />
+            <StatCard style={styles.statThird} label="Low stock" value={summary.lowStockProducts} tone={colors.warning} onPress={() => router.push('/inventory?status=low')} />
+            <StatCard style={styles.statThird} label="Out of stock" value={summary.outOfStockProducts} tone={colors.danger} onPress={() => router.push('/inventory?status=out')} />
             <StatCard label="Active products" value={summary.totalProducts} tone={colors.primary} onPress={() => router.push('/products')} />
             <StatCard label="Total on-hand qty" value={summary.totalInventoryQuantity} tone={colors.textSecondary} onPress={() => router.push('/inventory')} />
-            <StatCard label="Low stock products" value={summary.lowStockProducts} tone={colors.warning} onPress={() => router.push('/inventory?status=low')} />
-            <StatCard label="Out of stock" value={summary.outOfStockProducts} tone={colors.danger} onPress={() => router.push('/inventory?status=out')} />
           </View>
+
+          {restock && restock.length > 0 ? (
+            <>
+              <Text style={styles.sectionTitle}>Needs restock</Text>
+              <View style={styles.activityList}>
+                {restock.map((item) => (
+                  <ReorderRow key={item.id} item={item} />
+                ))}
+              </View>
+            </>
+          ) : null}
 
           <Text style={styles.sectionTitle}>Actions</Text>
           <View style={styles.tileGrid}>
@@ -232,6 +278,7 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     minWidth: '45%',
   },
+  statThird: { flexBasis: '30%', minWidth: '30%' },
   statDot: { width: 10, height: 10, borderRadius: 5, marginBottom: spacing.sm },
   statValue: { ...type.h1, color: colors.text },
   statLabel: { ...type.caption, color: colors.textSecondary, marginTop: 2 },

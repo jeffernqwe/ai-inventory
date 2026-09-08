@@ -54,6 +54,7 @@ const MIXED = [
   'phase07e-ai-reliability.test.mjs', // unit: message shape; db: M6/M7 routes
   'phase08a-request-logging.test.mjs', // unit: request-id + log shape; db: authed context
   'phase10-commercialization.test.mjs', // unit: plan catalog + decision core; db: plan state
+  'phase11-intelligence.test.mjs', // unit: stock-status classifier; db: reorder list + dashboard health + AI restock tool
 ];
 
 const FILE_LISTS = {

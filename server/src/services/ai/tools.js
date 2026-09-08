@@ -161,7 +161,7 @@ const tools = [
   {
     name: 'getLowStockProducts',
     description:
-      'Products whose available quantity is at or below their configured minimum stock (availability summed across all locations). Returns the current page of matching products.',
+      'Products whose available quantity is at or below their configured minimum stock (availability summed across all locations), including products with nothing available. Returns the current page of matching products. For a restock list that flags each item as out-of-stock or low-stock, prefer getReorderNeededProducts.',
     permission: PERMISSIONS.INVENTORY_VIEW,
     defaultLimit: 20,
     parameters: {
@@ -182,7 +182,7 @@ const tools = [
   {
     name: 'getOutOfStockProducts',
     description:
-      'Products with no available stock (available quantity zero or below, summed across all locations). Returns the current page of matching products.',
+      'Products with no available stock (available quantity zero or below, summed across all locations). Returns the current page of matching products. Use for "what products are out of stock". For a restock list that also includes low-stock items, prefer getReorderNeededProducts.',
     permission: PERMISSIONS.INVENTORY_VIEW,
     defaultLimit: 20,
     parameters: {
@@ -201,9 +201,35 @@ const tools = [
   },
 
   {
+    name: 'getReorderNeededProducts',
+    description:
+      'Products that need restocking: ACTIVE products whose available quantity (summed across all locations) is at or below their configured minimum stock. Each result is flagged stockStatus OUT_OF_STOCK when nothing is available, otherwise LOW_STOCK, and out-of-stock items are listed first. Use for "what products need restocking", "which products are low in stock or out of stock", "what should I reorder", or "what is running low".',
+    permission: PERMISSIONS.INVENTORY_VIEW,
+    defaultLimit: 20,
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        q: { type: 'string', maxLength: 100, description: 'Search product name/SKU/barcode.' },
+        categoryId: objectId,
+        limit: limitParam(20, 50),
+      },
+    },
+    async executor(ctx, args) {
+      const { items, total } = await productService.listReorder(ctx.businessId, {
+        q: args.q,
+        categoryId: args.categoryId,
+        skip: 0,
+        limit: Math.min(args.limit ?? 20, 50),
+      });
+      return { count: total, items: items.map(productService.reorderItemPublic) };
+    },
+  },
+
+  {
     name: 'getInventorySummary',
     description:
-      'Business-wide dashboard counts: active products, total on-hand quantity, number of low-stock products, number of out-of-stock products, and the most recent stock movements.',
+      'Business-wide inventory-health counts: active products, healthy in-stock products (available above their minimum stock), total on-hand quantity, low-stock and out-of-stock product counts, and the most recent stock movements. Use for "how is my inventory doing".',
     permission: PERMISSIONS.DASHBOARD_VIEW,
     parameters: { type: 'object', additionalProperties: false, properties: {} },
     async executor(ctx) {

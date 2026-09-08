@@ -100,10 +100,15 @@ export const dashboardService = {
     ]);
 
     const facet = stockFacets[0] ?? {};
+    const lowStockProducts = facet.low?.[0]?.count ?? 0;
     return {
       totalProducts,
       totalInventoryQuantity: qtyAgg[0]?.total ?? 0,
-      lowStockProducts: facet.low?.[0]?.count ?? 0,
+      lowStockProducts,
+      // Healthy = available > minimumStock. Within the ACTIVE products counted
+      // above this is exactly the complement of the low-stock set (§19), so it
+      // needs no extra query and can never disagree with lowStockProducts.
+      inStockProducts: totalProducts - lowStockProducts,
       outOfStockProducts: facet.out?.[0]?.count ?? 0,
       recentActivity: recent.map(recentPublic),
     };

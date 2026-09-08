@@ -11,6 +11,8 @@ const router = Router();
 // with products.manage (OWNER, ADMIN, MANAGER per spec §7).
 router.get('/', requireAuth, productsController.list);
 router.post('/', requireAuth, requirePermission(PERMISSIONS.PRODUCTS_MANAGE), productsController.create);
+// Static path must be registered before the parameterized /:id routes below.
+router.get('/reorder', requireAuth, productsController.reorder);
 router.get('/:id', requireAuth, productsController.get);
 router.patch('/:id', requireAuth, requirePermission(PERMISSIONS.PRODUCTS_MANAGE), productsController.update);
 router.post('/:id/archive', requireAuth, requirePermission(PERMISSIONS.PRODUCTS_MANAGE), productsController.archive);

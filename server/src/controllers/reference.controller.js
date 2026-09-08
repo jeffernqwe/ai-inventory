@@ -29,10 +29,7 @@ export function createReferenceController(service, validateFn) {
     async create(req, res) {
       const v = validateFn(req.body ?? {});
       if (v.problems.length) throwValidation(v.problems);
-      const doc = await service.create(req.user.businessId, req.user.id, {
-        name: v.name,
-        description: v.description,
-      });
+      const doc = await service.create(req.user.businessId, req.user.id, v);
       res.status(201).json(service.toPublic(doc));
     },
 
@@ -40,10 +37,7 @@ export function createReferenceController(service, validateFn) {
       const id = paramId(req);
       const v = validateFn(req.body ?? {}, { partial: true });
       if (v.problems.length) throwValidation(v.problems);
-      const doc = await service.update(req.user.businessId, id, req.user.id, {
-        name: v.name,
-        description: v.description,
-      });
+      const doc = await service.update(req.user.businessId, id, req.user.id, v);
       res.json(service.toPublic(doc));
     },
 

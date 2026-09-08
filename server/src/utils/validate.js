@@ -178,6 +178,42 @@ export function validateLocation(body, { partial = false } = {}) {
   return { problems, name, description };
 }
 
+const SUPPLIER_NAME_MAX = 100;
+const CONTACT_NAME_MAX = 100;
+const PHONE_MAX = 50;
+
+export function validateSupplier(body, { partial = false } = {}) {
+  const problems = [];
+
+  const name = partial ? optionalString(body?.name, 'name', SUPPLIER_NAME_MAX)
+    : requiredString(body?.name, 'name', SUPPLIER_NAME_MAX);
+  problems.push(...name.problems);
+
+  const description = optionalString(body?.description, 'description', DESCRIPTION_MAX);
+  problems.push(...description.problems);
+
+  const contactName = optionalString(body?.contactName, 'contactName', CONTACT_NAME_MAX);
+  problems.push(...contactName.problems);
+
+  const phone = optionalString(body?.phone, 'phone', PHONE_MAX);
+  problems.push(...phone.problems);
+
+  const email = optionalString(body?.email, 'email', MAX_EMAIL);
+  problems.push(...email.problems);
+  if (email.value !== undefined && !EMAIL_RE.test(email.value)) {
+    problems.push({ field: 'email', message: 'email must be a valid email address' });
+  }
+
+  return {
+    problems,
+    name: name.value,
+    description: description.value,
+    contactName: contactName.value,
+    phone: phone.value,
+    email: email.value,
+  };
+}
+
 const PRODUCT_NAME_MAX = 120;
 const PRODUCT_DESCRIPTION_MAX = 1000;
 /** Shared SKU / barcode length cap (products, and the barcode lookup query). */
@@ -264,6 +300,104 @@ export function validateStockMovement(body, { allowZero = false } = {}) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Purchase orders (Phase 13B)
+// ---------------------------------------------------------------------------
+
+const PO_ITEMS_MAX = 200;
+const PO_NOTES_MAX = 1000;
+
+function optionalDate(value, field) {
+  if (value === undefined || value === null || value === '') {
+    return { value: undefined, problems: [] };
+  }
+  const d = value instanceof Date ? new Date(value.getTime()) : new Date(value);
+  if (Number.isNaN(d.getTime())) {
+    return { value: undefined, problems: [{ field, message: `${field} must be a valid date` }] };
+  }
+  return { value: d, problems: [] };
+}
+
+function parsePoLine(line, idx, problems, seenProductIds) {
+  const prefix = `items[${idx}]`;
+  const obj = line && typeof line === 'object' ? line : {};
+
+  const productId = isObjectId(obj.productId) ? obj.productId : undefined;
+  if (!productId) {
+    problems.push({ field: `${prefix}.productId`, message: 'productId is required and must be a valid id' });
+  } else {
+    const key = productId.toLowerCase();
+    if (seenProductIds.has(key)) {
+      problems.push({ field: `${prefix}.productId`, message: 'duplicate productId in items' });
+    }
+    seenProductIds.add(key);
+  }
+
+  const quantityOrdered = requiredNumber(obj.quantityOrdered, 'quantityOrdered', { min: 1, integer: true });
+  for (const p of quantityOrdered.problems) {
+    problems.push({ field: `${prefix}.${p.field}`, message: p.message });
+  }
+
+  const unitCost = optionalNumber(obj.unitCost, 'unitCost', { min: 0 });
+  for (const p of unitCost.problems) {
+    problems.push({ field: `${prefix}.${p.field}`, message: p.message });
+  }
+
+  return { productId, quantityOrdered: quantityOrdered.value, unitCost: unitCost.value };
+}
+
+/**
+ * Purchase order payload validation. `partial` (PATCH) treats every reference
+ * as optional; when `items` is present on a PATCH it is a full replacement of
+ * the line set. Service-side operational checks (references belong to the
+ * business and are ACTIVE) happen separately, after this structural pass.
+ */
+export function validatePurchaseOrder(body, { partial = false } = {}) {
+  const problems = [];
+
+  const requiredRef = (field) => {
+    if (partial) return optionalObjectId(body?.[field], field);
+    if (!body?.[field]) return { value: undefined, problems: [{ field, message: `${field} is required` }] };
+    return optionalObjectId(body[field], field);
+  };
+
+  const supplierId = requiredRef('supplierId');
+  problems.push(...supplierId.problems);
+  const locationId = requiredRef('locationId');
+  problems.push(...locationId.problems);
+
+  const expectedAt = optionalDate(body?.expectedAt, 'expectedAt');
+  problems.push(...expectedAt.problems);
+  const notes = optionalString(body?.notes, 'notes', PO_NOTES_MAX);
+  problems.push(...notes.problems);
+
+  let items;
+  const rawItems = body?.items;
+  if (rawItems === undefined) {
+    if (!partial) problems.push({ field: 'items', message: 'items is required' });
+    items = undefined;
+  } else if (!Array.isArray(rawItems)) {
+    problems.push({ field: 'items', message: 'items must be an array' });
+    items = undefined;
+  } else {
+    if (rawItems.length === 0) problems.push({ field: 'items', message: 'items must not be empty' });
+    if (rawItems.length > PO_ITEMS_MAX) {
+      problems.push({ field: 'items', message: `items must have at most ${PO_ITEMS_MAX} entries` });
+    }
+    const seenProductIds = new Set();
+    items = rawItems.map((line, idx) => parsePoLine(line, idx, problems, seenProductIds));
+  }
+
+  return {
+    problems,
+    supplierId: supplierId.value,
+    locationId: locationId.value,
+    expectedAt: expectedAt.value,
+    notes: notes.value,
+    items,
+  };
+}
+
 export default {
   normalizeEmail,
   validateRegister,
@@ -276,7 +410,9 @@ export default {
   optionalNumber,
   validateCategory,
   validateLocation,
+  validateSupplier,
   validateProduct,
   validateStockMovement,
+  validatePurchaseOrder,
   CODE_MAX,
 };

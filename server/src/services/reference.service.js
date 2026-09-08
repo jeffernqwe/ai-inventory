@@ -1,5 +1,6 @@
 import Category from '../models/category.model.js';
 import Location from '../models/location.model.js';
+import Supplier from '../models/supplier.model.js';
 import { recordAudit } from './audit.service.js';
 import { notFound } from '../utils/errors.js';
 import {
@@ -18,9 +19,10 @@ export function createReferenceService({
   Model,
   entityType,
   actions,
+  fields = [],
 }) {
   function toPublic(doc) {
-    return {
+    const out = {
       id: String(doc._id),
       businessId: String(doc.businessId),
       name: doc.name,
@@ -29,13 +31,21 @@ export function createReferenceService({
       createdAt: doc.createdAt,
       updatedAt: doc.updatedAt,
     };
+    for (const field of fields) {
+      if (doc[field] != null) out[field] = doc[field];
+    }
+    return out;
   }
 
   return {
     toPublic,
 
-    async create(businessId, userId, { name, description }) {
-      const doc = await Model.create({ businessId, name, description });
+    async create(businessId, userId, payload) {
+      const data = { businessId, name: payload.name, description: payload.description };
+      for (const field of fields) {
+        if (payload[field] != null) data[field] = payload[field];
+      }
+      const doc = await Model.create(data);
       await recordAudit({
         businessId,
         userId,
@@ -67,18 +77,24 @@ export function createReferenceService({
       return { items: docs.map(toPublic), total };
     },
 
-    async update(businessId, id, userId, { name, description }) {
+    async update(businessId, id, userId, payload) {
       const doc = await Model.findOne({ _id: id, businessId });
       if (!doc) notFound();
 
       const updatedFields = [];
-      if (name !== undefined && name !== doc.name) {
-        doc.name = name;
+      if (payload.name !== undefined && payload.name !== doc.name) {
+        doc.name = payload.name;
         updatedFields.push('name');
       }
-      if (description !== undefined && description !== doc.description) {
-        doc.description = description;
+      if (payload.description !== undefined && payload.description !== doc.description) {
+        doc.description = payload.description;
         updatedFields.push('description');
+      }
+      for (const field of fields) {
+        if (payload[field] !== undefined && payload[field] !== doc[field]) {
+          doc[field] = payload[field];
+          updatedFields.push(field);
+        }
       }
       if (updatedFields.length > 0) {
         await doc.save();
@@ -135,4 +151,20 @@ export const locationService = createReferenceService({
   },
 });
 
-export default { createReferenceService, categoryService, locationService };
+export const supplierService = createReferenceService({
+  Model: Supplier,
+  entityType: AUDIT_ENTITY_TYPES.SUPPLIER,
+  fields: ['contactName', 'phone', 'email'],
+  actions: {
+    create: AUDIT_ACTIONS.SUPPLIER_CREATED,
+    update: AUDIT_ACTIONS.SUPPLIER_UPDATED,
+    archive: AUDIT_ACTIONS.SUPPLIER_ARCHIVED,
+  },
+});
+
+export default {
+  createReferenceService,
+  categoryService,
+  locationService,
+  supplierService,
+};

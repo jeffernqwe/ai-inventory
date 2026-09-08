@@ -3,6 +3,8 @@ import helmet from 'helmet';
 
 import env from './config/env.js';
 import { createCors } from './middlewares/cors.js';
+import requestId from './middlewares/requestId.js';
+import requestLogger from './middlewares/httpLogger.js';
 import healthRoutes from './routes/health.routes.js';
 import { createAuthRouter } from './routes/auth.routes.js';
 import categoryRoutes from './routes/categories.routes.js';
@@ -25,18 +27,29 @@ import errorHandler from './middlewares/errorHandler.js';
  * @param {string[]} [options.corsOrigins]  Explicit CORS allow-list (M3).
  * @param {string}  [options.jsonBodyLimit] express.json() body limit (L2).
  * @param {object}  [options.authLimits]    Auth rate-limiter overrides (tests).
+ * @param {boolean} [options.requestLogging] Structured per-request access log
+ *                                            (Phase 08A). Default: on unless
+ *                                            LOG_REQUESTS=0.
  */
 export function createApp({
   trustProxy = env.trustProxy,
   corsOrigins = env.corsOrigins,
   jsonBodyLimit = env.jsonBodyLimit,
   authLimits,
+  requestLogging = process.env.LOG_REQUESTS !== '0',
 } = {}) {
   const app = express();
 
   // H6: never advertise the framework. Express-level config, not per-route
   // header deletion (which Express would re-add on the next response anyway).
   app.disable('x-powered-by');
+
+  // Phase 08A: correlation id FIRST so every downstream layer (rate limiters,
+  // body parser, routes, error handler) runs under a stable req.requestId, and
+  // every response — success or error — echoes X-Request-ID. The request access
+  // log then records one structured line per completed request.
+  app.use(requestId);
+  app.use(requestLogger({ enabled: requestLogging }));
 
   // M4: only trust a known number of reverse-proxy hops when explicitly
   // configured (TRUST_PROXY, numeric hop count). Default 0 = trust no proxy:

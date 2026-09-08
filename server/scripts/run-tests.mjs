@@ -52,6 +52,7 @@ const MIXED = [
   'phase07c-http-security.test.mjs',  // unit: headers/body-limit/CORS; db: auth cases + M4
   'phase07d-db-reliability.test.mjs', // unit: error mapping; db: readiness + DB-down
   'phase07e-ai-reliability.test.mjs', // unit: message shape; db: M6/M7 routes
+  'phase08a-request-logging.test.mjs', // unit: request-id + log shape; db: authed context
 ];
 
 const FILE_LISTS = {
@@ -87,7 +88,10 @@ console.log(`[run-tests] files: ${FILE_LISTS[mode].join(', ')}`);
 
 const child = spawn(process.execPath, ['--test', ...files], {
   cwd: serverRoot,
-  env: { ...process.env, TEST_MODE: mode },
+  // LOG_REQUESTS=0 keeps the Phase 08A per-request access log off during test
+  // runs (error logs are unaffected and always emit). Individual suites that
+  // must exercise the access log enable it explicitly via createApp.
+  env: { ...process.env, TEST_MODE: mode, LOG_REQUESTS: process.env.LOG_REQUESTS || '0' },
   stdio: 'inherit',
 });
 

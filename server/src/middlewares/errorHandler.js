@@ -3,6 +3,7 @@
  * Keeps responses consistent and prevents leaking internal details to clients.
  */
 import { isDatabaseDownError, sanitizeMongoMessage } from '../config/db.js';
+import { error as logError } from '../utils/logger.js';
 
 /**
  * body-parser tags the failures it raises with a machine-readable `type`.
@@ -38,6 +39,22 @@ function describeRequest(req) {
   return `${req.method} ${req.path || req.originalUrl || '/'}${user}`;
 }
 
+/**
+ * Structured fields attached to a server-side error log (Phase 08A). Method,
+ * path and user are already inside describeRequest's message; repeating them
+ * as machine-readable fields keeps the record filterable without adding any
+ * data — headers, bodies and query strings are never included.
+ */
+function requestContext(req) {
+  if (!req || typeof req.method !== 'string') return {};
+  return {
+    requestId: req.requestId,
+    method: req.method,
+    path: req.path || req.originalUrl || '/',
+    userId: req.user && req.user.id ? String(req.user.id) : undefined,
+  };
+}
+
 const errorHandler = (err, req, res, next) => {
   // If headers were already sent, defer to Express's default handler.
   if (res.headersSent) {
@@ -62,9 +79,11 @@ const errorHandler = (err, req, res, next) => {
   // internals) and never a stack trace. Intercepts before the generic path, so
   // the mapping holds in every environment.
   if (isServerError && isDatabaseDownError(err)) {
-    console.error(
-      `[db] ${describeRequest(req) || 'unknown request'} — database unavailable, request could not be served: ${sanitizeMongoMessage(err)}`
-    );
+    logError({
+      type: 'db_error',
+      ...requestContext(req),
+      message: `[db] ${describeRequest(req) || 'unknown request'} — database unavailable, request could not be served: ${sanitizeMongoMessage(err)}`,
+    });
     return res.status(503).json({
       error: 'Service temporarily unavailable',
       code: 'DB_UNAVAILABLE',
@@ -76,7 +95,11 @@ const errorHandler = (err, req, res, next) => {
   if (status >= 500) {
     // Log server errors server-side (never returned verbatim to the client).
     // Include the request context so a production 5xx is traceable to a call.
-    console.error(`[error] ${describeRequest(req) || 'unknown request'} — ${err.message || err}`);
+    logError({
+      type: 'error',
+      ...requestContext(req),
+      message: `[error] ${describeRequest(req) || 'unknown request'} — ${err.message || err}`,
+    });
   }
 
   const body = {

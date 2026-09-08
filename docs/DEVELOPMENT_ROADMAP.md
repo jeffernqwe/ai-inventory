@@ -84,6 +84,9 @@ AI Assistant
         ↓
 Phase 07
 Testing + Production Hardening
+        ↓
+Phase 08
+Owner-Directed Hardening (08A, 08B)
 ```
 
 ---
@@ -758,7 +761,74 @@ Prepare:
 
 ---
 
-# 12. Phase Gate System
+# 12. Phase 08 — Owner-Directed Hardening
+
+## Objective
+
+Phase 08 is an owner-directed hardening extension approved after Phase 07, beyond the original
+Phase 00–07 plan. It is delivered in approved lettered increments; each increment is recorded here
+with its scope and verified status when it completes, so the roadmap stays aligned with the
+committed implementation (spec §54 acceptance criterion 29 — documentation accurately reflects the
+implementation).
+
+## 08A — Structured Request Logging + Correlation IDs
+
+### Scope
+
+Implemented (commit `fc11823`):
+
+- Dependency-free structured logger (`src/utils/logger.js`) — one JSON object per line; info →
+  stdout, error → stderr; `undefined` fields are omitted so absent context simply does not appear.
+- Request/correlation-ID middleware (`src/middlewares/requestId.js`), registered first in the app
+  chain so every downstream layer (rate limiters, body parser, routes, error handler) runs under a
+  single stable id. A safe client-supplied `X-Request-ID` (≤ 128 chars, charset
+  `[A-Za-z0-9._:-]`) is echoed verbatim; anything unsafe or overlong is replaced by a fresh
+  `crypto.randomUUID()`. Every response — success, 404, or body error — returns `X-Request-ID`.
+- Per-request access log (`src/middlewares/httpLogger.js`) emitted on response `finish`: requestId,
+  method, path (captured at entry — never the query string), status, authenticated userId when
+  present, and duration.
+- Structured server-side error records from the centralized error handler carrying requestId + user
+  context, while preserving the human-readable message text (Phase 07G log assertions unchanged).
+- Logs NEVER contain authorization headers, cookies, request bodies, query strings, or full AI
+  prompts/responses.
+- Request logging is on by default and disabled with `LOG_REQUESTS=0`; the test runner forces `0`
+  so suites stay quiet. Configuration documented in `server/.env.example`.
+
+### Verified
+
+- New Phase 08A test file (`server/test/phase08a-request-logging.test.mjs`) covering id
+  generation/echo/sanitization, access-log fields, the no-secrets guarantee, and authenticated
+  user-id capture.
+- Full backend suite: 223/223 passing.
+
+## 08B — Backend ESLint Baseline
+
+### Scope
+
+Implemented (commit `5525c61`):
+
+- `server/eslint.config.js` — ESLint 10 flat config: `@eslint/js` `recommended` + Node globals +
+  `sourceType: 'module'`, plus a single consistency rule (`eqeqeq`, smart). No prettier or stylistic
+  packs — a practical, bug-focused baseline, not a style system.
+- Covers `server/src`, `server/test`, `server/scripts`, and the config itself.
+- Dev dependencies `eslint`, `@eslint/js`, `globals`; `npm run lint` script (`eslint .`).
+- Behavior-preserving fixes for recommended-level findings (unused imports/bindings/helpers and
+  dead assignments removed). No runtime behavior change.
+
+### Verified
+
+- `npm run lint`: 0 errors / 0 warnings.
+- Full backend suite unchanged: 223/223.
+
+## Definition of Done
+
+- Phase 08 increments are recorded in this roadmap and in `CLAUDE.md`.
+- Logging/correlation-ID behavior and the lint command are documented in README and `.env.example`.
+- `npm run lint`, `npm run test:unit`, and `npm test` all pass.
+
+---
+
+# 13. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.
 
@@ -799,7 +869,7 @@ The project owner decides whether to proceed.
 
 ---
 
-# 13. Change Control
+# 14. Change Control
 
 If Claude discovers that the current specification is incomplete or incorrect:
 
@@ -817,7 +887,7 @@ Minor implementation improvements that do not alter architectural decisions may 
 
 ---
 
-# 14. Bug Handling
+# 15. Bug Handling
 
 If a bug is discovered during a phase:
 
@@ -842,7 +912,7 @@ Only fix it immediately if it blocks the current phase.
 
 ---
 
-# 15. Refactoring Rules
+# 16. Refactoring Rules
 
 Refactoring is allowed when it:
 
@@ -860,7 +930,7 @@ Keep changes focused.
 
 ---
 
-# 16. Dependency Rules
+# 17. Dependency Rules
 
 Before adding a dependency:
 
@@ -874,7 +944,7 @@ Do not add dependencies simply for convenience.
 
 ---
 
-# 17. Git Checkpoints
+# 18. Git Checkpoints
 
 A Git commit should be created after a stable phase.
 
@@ -889,6 +959,8 @@ phase 04: inventory core complete
 phase 05: mobile application complete
 phase 06: AI assistant complete
 phase 07: production hardening complete
+phase 08A: structured request logging complete
+phase 08B: ESLint baseline complete
 ```
 
 Before committing:
@@ -900,7 +972,7 @@ Before committing:
 
 ---
 
-# 18. V1 Completion
+# 19. V1 Completion
 
 V1 is complete only when all major requirements in:
 
@@ -942,7 +1014,7 @@ AI Inventory Questions
 
 ---
 
-# 19. Future Development
+# 20. Future Development
 
 After V1, future features must be planned separately.
 
@@ -977,7 +1049,7 @@ Future functionality must not be implemented during V1 unless explicitly approve
 
 ---
 
-# 20. Final Development Rule
+# 21. Final Development Rule
 
 The goal is not to produce the largest amount of code as quickly as possible.
 

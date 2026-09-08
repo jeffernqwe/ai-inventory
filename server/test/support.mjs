@@ -94,6 +94,23 @@ export function createTracker(dbOk) {
       await deleteByBusiness('categories');
       await deleteByBusiness('locations');
       await deleteByBusiness('audit_logs');
+      // AI conversations/messages have no businessId on the message, so remove
+      // messages by the conversations owned by these businesses first.
+      if (biz.length) {
+        try {
+          const convs = await db
+            .collection('ai_conversations')
+            .find({ businessId: { $in: biz } }, { projection: { _id: 1 } })
+            .toArray();
+          const cids = convs.map((c) => c._id);
+          if (cids.length) {
+            await db.collection('ai_messages').deleteMany({ conversationId: { $in: cids } });
+          }
+          await db.collection('ai_conversations').deleteMany({ businessId: { $in: biz } });
+        } catch {
+          /* best effort */
+        }
+      }
       await deleteByBusiness('businesses');
       if (users.length) {
         try {

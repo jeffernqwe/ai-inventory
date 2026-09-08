@@ -87,6 +87,7 @@ export const canViewDashboard = (u) => can(u, PERMISSIONS.DASHBOARD_VIEW);
 export const canAdjustStock = (u) => can(u, PERMISSIONS.INVENTORY_MANAGE);
 export const canStockIn = (u) => can(u, PERMISSIONS.INVENTORY_STOCK_IN);
 export const canStockOut = (u) => can(u, PERMISSIONS.INVENTORY_STOCK_OUT);
+export const canUseAi = (u) => can(u, PERMISSIONS.AI_USE);
 
 /** Label used in the UI ("Profile" / headers). */
 export function roleLabel(role) {
@@ -108,4 +109,4 @@ export function defaultHomePath(user) {
   return canViewDashboard(user) ? '/dashboard' : '/inventory';
 }
 
-export default { ROLES, PERMISSIONS, ROLE_PERMISSIONS, can, roleLabel };
+export default { ROLES, PERMISSIONS, ROLE_PERMISSIONS, can, roleLabel, canUseAi };

@@ -134,6 +134,27 @@ export const productService = {
     return doc;
   },
 
+  /**
+   * Find a single product by id, SKU, or barcode, scoped to the business.
+   * Returns null (never throws) when nothing matches or the identifier is
+   * malformed — used by the read-only AI getProduct tool so "not found" is
+   * data the assistant can report instead of an internal error.
+   */
+  async getByIdentifier(businessId, { id, sku, barcode } = {}) {
+    let by;
+    if (id) {
+      if (!/^[0-9a-fA-F]{24}$/.test(String(id))) return null;
+      by = { _id: id };
+    } else if (sku) {
+      by = { sku: String(sku) };
+    } else if (barcode) {
+      by = { barcode: String(barcode) };
+    } else {
+      return null;
+    }
+    return Product.findOne({ ...by, businessId }).populate('categoryId', 'name status');
+  },
+
   async update(businessId, id, userId, payload) {
     const doc = await Product.findOne({ _id: id, businessId }).populate('categoryId', 'name status');
     if (!doc) notFound('Product not found');

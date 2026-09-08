@@ -190,6 +190,11 @@ describe('Phase 06 — AI security', { skip: !dbOk }, () => {
     for (const leak of ['businessId', 'ANTHROPIC_API_KEY', 'GEMINI_API_KEY', 'passwordHash']) {
       assert.ok(!stored.toLowerCase().includes(leak.toLowerCase()), `response leaked "${leak}"`);
     }
-    assert.equal(lastCtx.messages.length, 2, 'system/history/user only — no tool state leaks into later turns');
+    // The provider sees exactly one message for a first turn: the current user
+    // message alone, no duplicated history and no tool state (Phase 07E / M6).
+    const userTurns = lastCtx.messages.filter((m) => m.role === 'user');
+    assert.equal(lastCtx.messages.length, 1, 'system/history/user only — no tool state leaks into later turns');
+    assert.equal(userTurns.length, 1, 'the current user message is sent exactly once');
+    assert.equal(userTurns[0].content, 'ok');
   });
 });

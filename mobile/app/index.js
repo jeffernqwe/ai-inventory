@@ -1,32 +1,30 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { Redirect } from 'expo-router';
+import { View } from 'react-native';
 
-export default function HomeScreen() {
-  return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Inventory AI</Text>
-      <Text style={styles.subtitle}>
-        Mobile foundation is ready (Expo Router).
-      </Text>
-    </View>
-  );
+import { CenterLoader } from '../components/ListState';
+import { useSession } from '../lib/auth';
+import { defaultHomePath } from '../lib/permissions';
+import { colors } from '../lib/theme';
+
+/**
+ * '/' entry — resolves once, then redirects to the right first screen:
+ *   loading  -> spinner while the stored session is restored on boot
+ *   signedIn -> dashboard (MANAGER+) or inventory (STAFF fallback)
+ *   signedOut-> login
+ */
+export default function IndexRoute() {
+  const { status, user } = useSession();
+
+  if (status === 'loading') {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <CenterLoader label="Loading your workspace…" />
+      </View>
+    );
+  }
+
+  if (status === 'signedIn') {
+    return <Redirect href={defaultHomePath(user)} />;
+  }
+  return <Redirect href="/login" />;
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#fff',
-    padding: 24,
-  },
-  title: {
-    fontSize: 26,
-    fontWeight: '700',
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: '#555',
-    textAlign: 'center',
-  },
-});

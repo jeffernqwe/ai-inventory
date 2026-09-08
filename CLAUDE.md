@@ -207,7 +207,14 @@ Phase 04 — Inventory Core
 Phase 05 — Mobile Application
 Phase 06 — AI Assistant
 Phase 07 — Testing + Production Hardening
+Phase 08 — Owner-Directed Hardening (lettered increments)
+            08A — Structured request logging + correlation IDs
+            08B — Backend ESLint baseline
 ```
+
+Phase 08 is an owner-directed hardening extension delivered in approved lettered increments
+(08A, 08B, …) beyond the original Phase 00–07 plan; `docs/DEVELOPMENT_ROADMAP.md` records each
+increment's scope and verified status.
 
 When instructed to work on a specific phase:
 

@@ -57,6 +57,7 @@ npm install
 cp .env.example .env        # add MONGODB_URI and JWT_SECRET here (real values, never committed)
 npm run dev                 # start with auto-reload (node --watch)
 npm test                    # full test suite (requires MongoDB — see "Backend tests")
+npm run lint                # backend ESLint baseline (no MongoDB — see "Backend lint")
 ```
 
 ### Backend tests
@@ -84,6 +85,29 @@ npm run test:db       # DB-backed tests only (requires MongoDB)
   an unknown `TEST_MODE` prints a warning and falls back to `full`. If MongoDB is
   unavailable, nothing is skipped: DB-required tests fail loudly so a drop in
   coverage can never look like a passing run.
+
+### Backend lint
+
+`npm run lint` runs the backend ESLint baseline (`eslint .` from `server/`, config in
+`server/eslint.config.js`) across `src/`, `test/`, and `scripts/`. The baseline is practical and
+bug-focused — ESLint's `recommended` rules plus Node globals for ES Modules and one consistency
+rule (`eqeqeq`); it intentionally does **not** enforce formatting. It requires a Node version
+ESLint 10 supports (≥ 20.19, ≥ 22.13, or ≥ 24 — current LTS recommended); that is a
+developer-tool floor only, not a runtime requirement.
+
+### Request logging & correlation IDs
+
+Every response carries an `X-Request-ID` header — a request/correlation id that is also available
+server-side as `req.requestId` throughout the middleware chain and error handling. A client-supplied
+id is echoed only when it is a safe header value (≤ 128 chars, `[A-Za-z0-9._:-]`); otherwise a
+fresh cryptographic id (`crypto.randomUUID()`) is generated.
+
+The server logs one structured JSON line per completed request — `requestId`, method, path (never
+the query string), status, authenticated `userId`, and duration — plus structured server-side error
+records carrying the same id and user context. Logs **never** contain authorization headers,
+cookies, request bodies, query strings, or full AI prompts/responses. The per-request access log is
+on by default; set `LOG_REQUESTS=0` in `server/.env` to disable it (error logs still emit). The
+test runner forces `LOG_REQUESTS=0` so suites stay quiet.
 
 Models (collections):
 
@@ -250,4 +274,14 @@ committed.
   changes data. Verified by 128 backend tests (Phase 06 suites included) and an emulator
   walkthrough of the mobile chat screens
 
-Phase 07 (testing + production hardening) is **not yet implemented**.
+Phase 07 (testing + production hardening) and Phase 08 (owner-directed hardening) are **complete**:
+
+- **Phase 07 — Testing + Production Hardening:** complete, delivered as increments 07A–07G —
+  tenant/auth security (login/register rate limiting, business status), HTTP security hardening
+  (helmet headers, CORS allow-list, JSON body limit, trust proxy), inventory + database-operation
+  hardening, production config with fail-fast startup and graceful shutdown, AI conversation
+  reliability, fail-loud DB-gated test infrastructure, and final production hardening
+- **Phase 08 — Owner-Directed Hardening:** complete, delivered as increments 08A and 08B —
+  structured request logging + correlation IDs (`X-Request-ID`, `LOG_REQUESTS`; see
+  "Request logging & correlation IDs") and a backend ESLint baseline (`npm run lint`; see
+  "Backend lint")

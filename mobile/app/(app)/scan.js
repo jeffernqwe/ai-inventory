@@ -1,26 +1,29 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { router, useFocusEffect } from 'expo-router';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { StatusBadge } from '../../components/Badge';
+import Badge, { StatusBadge } from '../../components/Badge';
 import Banner from '../../components/Banner';
 import Button from '../../components/Button';
 import Card from '../../components/Card';
 import { CenterLoader, LoadingBlock, errorText } from '../../components/ListState';
-import { productsApi } from '../../lib/api';
+import { inventoryApi, productsApi } from '../../lib/api';
 import { isSessionError, useSession } from '../../lib/auth';
 import { ApiError } from '../../lib/client';
 import { formatMoney, formatNumber } from '../../lib/format';
+import useRefetchOnFocus from '../../hooks/useRefetchOnFocus';
 import { colors, radius, spacing, type } from '../../lib/theme';
 
 /**
- * Camera barcode scanner (Phase 12B). Detects common retail barcodes, then
+ * Camera barcode scanner (Phase 12B + 12C). Detects common retail barcodes, then
  * resolves the code through the authenticated business-scoped endpoint
- * GET /api/products/barcode (Phase 12A) and shows the matched product. The
- * lookup is a read shared by every role; product management stays on the
- * product screens. No stock mutations here — Phase 12C wires those in.
+ * GET /api/products/barcode (Phase 12A) and shows the matched product with its
+ * per-location stock. For ACTIVE products it offers Stock In / Stock Out, which
+ * push the existing movement screens with the scanned product pre-selected and
+ * locked (Phase 12C). Stock is never mutated here — every movement goes through
+ * the existing movement forms and inventory API.
  *
  * Screens inside a native stack stay mounted under a push, and only one camera
  * preview may be active at a time, so the CameraView is rendered ONLY while
@@ -240,8 +243,66 @@ export default function ScanScreen() {
   );
 }
 
+function StockRow({ row }) {
+  return (
+    <View style={styles.stockRow}>
+      <View style={styles.stockInfo}>
+        <Text style={styles.stockLocation} numberOfLines={1}>
+          {row.location?.name ?? 'Unknown location'}
+        </Text>
+        <Text style={styles.stockQty}>
+          {formatNumber(row.availableQuantity)} available · {formatNumber(row.quantity)} on hand
+        </Text>
+      </View>
+      <View style={styles.stockBadges}>
+        {row.isLowStock ? <Badge text="Low" tone="low" /> : null}
+        {row.isOutOfStock ? <Badge text="Out" tone="danger" /> : null}
+      </View>
+    </View>
+  );
+}
+
 function FoundProduct({ product, onRescan }) {
   const archived = product.status === 'ARCHIVED';
+  const { token } = useSession();
+
+  // Per-location availability for this product. Read through the normal
+  // inventory endpoint (INVENTORY_VIEW, business-scoped); reloaded on focus so
+  // quantity shown here is fresh after a stock movement pushed from this card.
+  const [stock, setStock] = useState([]);
+  const [stockLoading, setStockLoading] = useState(true);
+
+  const loadStock = useCallback(async () => {
+    if (!token) return;
+    setStockLoading(true);
+    try {
+      const res = await inventoryApi.list(token, { productId: product.id, page: 1, limit: 100 });
+      setStock(res?.items ?? []);
+    } catch {
+      // Supporting context — keep failures non-blocking, like product detail.
+    } finally {
+      setStockLoading(false);
+    }
+  }, [token, product.id]);
+
+  useEffect(() => {
+    loadStock();
+  }, [loadStock]);
+  useRefetchOnFocus(loadStock);
+
+  function openMovement(route) {
+    router.push({
+      pathname: route,
+      params: {
+        productId: product.id,
+        productName: product.name,
+        sku: product.sku || '',
+        barcode: product.barcode || '',
+        lock: '1',
+      },
+    });
+  }
+
   return (
     <View style={styles.resultBox}>
       <Card>
@@ -263,6 +324,25 @@ function FoundProduct({ product, onRescan }) {
         <Field label="Minimum stock" value={product.minimumStock != null ? formatNumber(product.minimumStock) : null} mono />
       </Card>
 
+      <Text style={styles.sectionTitle}>Stock at locations</Text>
+      {stockLoading ? (
+        <View style={styles.stockRow}>
+          <View style={styles.stockEmpty}>
+            <ActivityIndicator color={colors.primary} />
+          </View>
+        </View>
+      ) : stock.length === 0 ? (
+        <View style={styles.stockRow}>
+          <Text style={styles.stockEmptyText}>No stock yet — use Stock In to create a record at a location.</Text>
+        </View>
+      ) : (
+        <View style={styles.stockList}>
+          {stock.map((row) => (
+            <StockRow key={row.id} row={row} />
+          ))}
+        </View>
+      )}
+
       {archived ? (
         <View style={styles.archivedNote}>
           <Text style={styles.archivedText}>
@@ -270,12 +350,18 @@ function FoundProduct({ product, onRescan }) {
             you need it again.
           </Text>
         </View>
-      ) : null}
-
-      {archived ? null : (
-        <Button title="Open product" variant="secondary" full style={styles.button} onPress={() => router.push(`/products/${product.id}`)} />
+      ) : (
+        <>
+          <View style={styles.moveRow}>
+            <Button title="Stock In" style={styles.flexBtn} onPress={() => openMovement('/stock-in')} />
+            <Button title="Stock Out" variant="secondary" style={styles.flexBtn} onPress={() => openMovement('/stock-out')} />
+          </View>
+          <Button title="Scan another barcode" variant="secondary" full style={styles.button} onPress={onRescan} />
+          <Button title="Open product" variant="ghost" full style={styles.button} onPress={() => router.push(`/products/${product.id}`)} />
+        </>
       )}
-      <Button title="Scan again" full onPress={onRescan} style={styles.button} />
+
+      {archived ? <Button title="Scan another barcode" full style={styles.button} onPress={onRescan} /> : null}
     </View>
   );
 }
@@ -341,4 +427,26 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
   },
   archivedText: { ...type.bodySmall, color: colors.warning, fontWeight: '600', lineHeight: 19 },
+
+  // Stock availability + movement actions
+  sectionTitle: { ...type.h3, color: colors.text, marginTop: spacing.xxl, marginBottom: spacing.md },
+  stockList: { gap: spacing.sm },
+  stockRow: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.lg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  stockInfo: { flex: 1, marginRight: spacing.md },
+  stockLocation: { ...type.body, color: colors.text, fontWeight: '600' },
+  stockQty: { ...type.caption, color: colors.textSecondary, marginTop: 2, fontVariant: ['tabular-nums'] },
+  stockBadges: { flexDirection: 'row', gap: 6 },
+  stockEmpty: { flex: 1, alignItems: 'center' },
+  stockEmptyText: { ...type.bodySmall, color: colors.textMuted },
+  moveRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.lg },
+  flexBtn: { flex: 1 },
 });

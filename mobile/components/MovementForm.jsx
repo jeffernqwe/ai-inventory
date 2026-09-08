@@ -96,9 +96,23 @@ function useCurrentRow(token, productId, locationId) {
   return { row, loading, loaded };
 }
 
-export default function MovementForm({ kind, initialProductId, initialProductName, initialLocationId, initialLocationName }) {
+export default function MovementForm({
+  kind,
+  initialProductId,
+  initialProductName,
+  initialProductSku,
+  initialProductBarcode,
+  lockProduct = false,
+  initialLocationId,
+  initialLocationName,
+}) {
   const cfg = CONFIG[kind] ?? CONFIG['stock-in'];
   const { token } = useSession();
+
+  // When a workflow has already identified the product (e.g. a barcode scan),
+  // the product is fixed and its identity is shown read-only so the user can
+  // confirm they are moving the right product before submitting.
+  const lockedProduct = lockProduct && Boolean(initialProductId);
 
   const products = useActiveRef(token, productsApi);
   const locations = useActiveRef(token, locationsApi);
@@ -190,7 +204,9 @@ export default function MovementForm({ kind, initialProductId, initialProductNam
     }
   }
 
-  if (products.loading && products.items.length === 0) {
+  // A locked (scanned) product doesn't need the product picker's list, so don't
+  // block the form on loading products that won't be shown.
+  if (!lockedProduct && products.loading && products.items.length === 0) {
     return <CenterLoader label="Loading products…" />;
   }
 
@@ -209,16 +225,25 @@ export default function MovementForm({ kind, initialProductId, initialProductNam
         <Banner type="warn" text="This product is already at that quantity — no adjustment is needed." />
       ) : null}
 
-      <SelectField
-        label="Product"
-        placeholder="Choose a product…"
-        options={productOptions}
-        value={productId}
-        onChange={setProductId}
-        error={fieldErrors.productId}
-        required
-        searchable
-      />
+      {lockedProduct ? (
+        <View style={styles.lockedCard}>
+          <Text style={styles.lockedHeading}>Product</Text>
+          <Text style={styles.lockedName}>{initialProductName ?? 'Scanned product'}</Text>
+          {initialProductSku ? <Text style={styles.lockedMeta}>SKU · {initialProductSku}</Text> : null}
+          {initialProductBarcode ? <Text style={styles.lockedMeta}>Barcode · {initialProductBarcode}</Text> : null}
+        </View>
+      ) : (
+        <SelectField
+          label="Product"
+          placeholder="Choose a product…"
+          options={productOptions}
+          value={productId}
+          onChange={setProductId}
+          error={fieldErrors.productId}
+          required
+          searchable
+        />
+      )}
       <SelectField
         label="Location"
         placeholder="Choose a location…"
@@ -280,5 +305,16 @@ const styles = StyleSheet.create({
   },
   availLabel: { ...type.body, color: colors.textMuted },
   availValue: { ...type.h3, color: colors.text },
+  lockedCard: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 10,
+    padding: spacing.md,
+    marginBottom: spacing.lg,
+  },
+  lockedHeading: { ...type.label, color: colors.textMuted, marginBottom: 4 },
+  lockedName: { ...type.body, fontWeight: '700', color: colors.text, marginBottom: 2 },
+  lockedMeta: { ...type.caption, color: colors.textMuted, marginTop: 2 },
   hint: { ...type.caption, color: colors.textMuted, textAlign: 'center', marginTop: spacing.lg, lineHeight: 18 },
 });

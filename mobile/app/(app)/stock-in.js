@@ -22,6 +22,9 @@ export default function StockInScreen() {
         kind="stock-in"
         initialProductId={str(p.productId)}
         initialProductName={str(p.productName)}
+        initialProductSku={str(p.sku)}
+        initialProductBarcode={str(p.barcode)}
+        lockProduct={str(p.lock) === '1'}
         initialLocationId={str(p.locationId)}
         initialLocationName={str(p.locationName)}
       />

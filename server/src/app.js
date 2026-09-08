@@ -7,6 +7,7 @@ import locationRoutes from './routes/locations.routes.js';
 import productRoutes from './routes/products.routes.js';
 import inventoryRoutes from './routes/inventory.routes.js';
 import dashboardRoutes from './routes/dashboard.routes.js';
+import aiRoutes from './routes/ai.routes.js';
 import notFound from './middlewares/notFound.js';
 import errorHandler from './middlewares/errorHandler.js';
 
@@ -28,6 +29,7 @@ app.use('/api/locations', locationRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/inventory', inventoryRoutes);
 app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/ai', aiRoutes);
 
 // Unknown routes -> structured 404
 app.use(notFound);

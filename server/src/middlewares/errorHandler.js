@@ -20,8 +20,12 @@ const errorHandler = (err, req, res, next) => {
     error: isServerError ? 'Internal Server Error' : err.message || 'Error',
   };
 
-  // Stable machine-readable code for client logic, when the error carries one.
-  if (err.code && status < 500) {
+  // Stable machine-readable code for client logic. Codes travel with 4xx
+  // errors (validation, auth, conflict). Deliberately coded server errors —
+  // e.g. AI_NOT_CONFIGURED (503) / AI_UNAVAILABLE (502) — carry a string code
+  // too, so clients can branch without parsing human text. Generic internal
+  // errors never have a code and are excluded here as before.
+  if (typeof err.code === 'string' && err.code) {
     body.code = err.code;
   }
 

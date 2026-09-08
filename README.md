@@ -103,6 +103,24 @@ Phase 04 — catalog, inventory, dashboard (all `Authorization: Bearer <token>`)
 | GET    | `/api/inventory/history` | Transaction history (filters, pagination)         |
 | GET    | `/api/dashboard` | Totals, low/out counts, recent activity (MANAGER+)     |
 
+Phase 06 — AI assistant (all `Authorization: Bearer <token>`, require `ai.use`):
+
+| Method | Path            | Description                                             |
+| ------ | --------------- | ------------------------------------------------------- |
+| POST   | `/api/ai/chat`  | Run a chat turn — creates the conversation on first turn, persists user + assistant messages, executes read-only tools. Per-user rate limited |
+| GET    | `/api/ai/conversations` | List my conversations (newest first, paginated)   |
+| POST   | `/api/ai/conversations` | Create a conversation (optional `title`)           |
+| GET    | `/api/ai/conversations/:id/messages` | Get one conversation's messages (oldest first)  |
+
+The V1 assistant is **read-only**: it answers questions about the caller's catalog and
+stock through 8 server-side, authorization-aware tools (`searchProducts`, `getProduct`,
+`getInventory`, `getLowStockProducts`, `getOutOfStockProducts`, `getInventorySummary`,
+`getInventoryHistory`, `getProductsByLocation`). Tools always run inside the
+authenticated user's role and `businessId` context — the AI never connects to MongoDB
+directly and can never change products, stock, transactions, users or roles. If no AI
+provider is configured, chat returns `503 AI_NOT_CONFIGURED`; the rest of the API keeps
+working normally.
+
 Roles: `OWNER`, `ADMIN`, `MANAGER`, `STAFF`. Protected routes derive role, status,
 and `businessId` from the database for every request (never from the client or token
 claims); `DISABLED` accounts are rejected. Phase 04 reuses that RBAC permission set:
@@ -147,7 +165,9 @@ npx expo start              # start Metro dev server (Expo Go / simulator)
 - **Screens (Expo Router, authenticated group):** dashboard (MANAGER+), products
   (list/new/edit/detail with search, status/category/location and low/out filters),
   categories, locations, inventory (with low/out views), stock in, stock out, adjust
-  (MANAGER+), inventory history, profile.
+  (MANAGER+), inventory history, **AI assistant** (conversation hub, new chat and
+  conversation threads — read-only; a configured provider is required for real answers),
+  profile.
 - **Client-side RBAC gating mirrors the server permission matrix** purely to hide
   actions a role cannot perform (e.g. adjust for STAFF). The backend still enforces every
   permission, role and `businessId` on each request.
@@ -167,6 +187,11 @@ committed.
 
 - Copy `server/.env.example` to `server/.env` for local development.
 - `.env` files are git-ignored; `.env.example` contains variable **names only**.
+- **AI provider (Phase 06):** set `AI_PROVIDER` to `claude`, `gemini`, or `agentrouter`
+  (an Anthropic-compatible gateway, e.g. routing to DeepSeek-V4-Flash) in `server/.env`
+  and add the matching `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, or
+  `AGENTROUTER_API_KEY` + `AGENTROUTER_BASE_URL`. AI credentials stay server-side —
+  they are never sent to the mobile app.
 
 ---
 
@@ -190,5 +215,13 @@ committed.
   stock in/out, adjust (MANAGER+), history and profile screens; centralized API client with
   timeout/network handling; client RBAC gating mirrors the server; verified by `expo export`
   bundling for Android and iOS plus a secret scan
+- **Phase 06 — AI Assistant:** complete — provider abstraction (Claude/Gemini over Node `fetch`,
+  no AI SDK dependency), an AI service that orchestrates tool calls with strict read-only,
+  authorization-aware tools (8 inventory tools), conversation/message persistence, a rate-limited
+  `/api/ai/chat` endpoint plus conversation listing/creation and message retrieval, and a mobile
+  chat UI (hub, new chat, threads) with loading/error/empty states. Tool execution is bound to the
+  authenticated user's role and `businessId`; the AI never reaches MongoDB directly and never
+  changes data. Verified by 128 backend tests (Phase 06 suites included) and an emulator
+  walkthrough of the mobile chat screens
 
-Phases 06–07 (AI assistant, testing + production hardening) are **not yet implemented**.
+Phase 07 (testing + production hardening) is **not yet implemented**.

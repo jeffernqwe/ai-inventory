@@ -105,4 +105,39 @@ export const dashboardApi = {
   summary: (token) => apiFetch('/api/dashboard', { token }),
 };
 
-export default { register, login, me, categoriesApi, locationsApi, productsApi, inventoryApi, dashboardApi };
+// ---------------------------------------------------------------------------
+// AI Assistant (Phase 06)
+// ---------------------------------------------------------------------------
+// Read-only assistant over inventory tools. Conversations and messages are
+// scoped server-side to the signed-in user's business. Chat returns a 503
+// (AI_NOT_CONFIGURED) when the backend has no provider enabled — the UI maps
+// that onto a friendly "ask an administrator" message.
+
+export const aiApi = {
+  /** The user's conversations, newest first (paginated). */
+  conversations: (token, params) => apiFetch('/api/ai/conversations', { token, params }),
+  /** Start a (possibly empty) conversation with an optional title. */
+  createConversation: (token, { title } = {}) =>
+    apiFetch('/api/ai/conversations', { token, method: 'POST', body: { title } }),
+  /** Messages in one conversation, oldest first (paginated). */
+  messages: (token, id, params) => apiFetch(`/api/ai/conversations/${id}/messages`, { token, params }),
+  /**
+   * Run one user message through the assistant. Omit conversationId to start a
+   * new conversation (title is derived from the first message). Returns
+   * { conversation, userMessage, assistantMessage }.
+   */
+  chat: (token, { conversationId, message }) =>
+    apiFetch('/api/ai/chat', { token, method: 'POST', body: { conversationId, message } }),
+};
+
+export default {
+  register,
+  login,
+  me,
+  categoriesApi,
+  locationsApi,
+  productsApi,
+  inventoryApi,
+  dashboardApi,
+  aiApi,
+};

@@ -12,7 +12,7 @@ import { dashboardApi } from '../../lib/api';
 import { isSessionError, useSession } from '../../lib/auth';
 import { confirm } from '../../lib/confirm';
 import { formatDateTime, formatNumber } from '../../lib/format';
-import { canAdjustStock, canViewDashboard, roleLabel } from '../../lib/permissions';
+import { canAdjustStock, canUseAi, canViewDashboard, roleLabel } from '../../lib/permissions';
 import { colors, radius, spacing, type } from '../../lib/theme';
 
 function deltaText(t) {
@@ -108,6 +108,7 @@ export default function DashboardScreen() {
     { label: 'Stock Out', sub: 'Remove quantity', route: '/stock-out' },
     ...(canAdjust ? [{ label: 'Adjust', sub: 'Set exact stock', route: '/adjust' }] : []),
     { label: 'History', sub: 'All movements', route: '/history' },
+    ...(canUseAi(user) ? [{ label: 'AI Assistant', sub: 'Ask about stock', route: '/ai' }] : []),
     { label: 'Inventory', sub: 'Rows & status', route: '/inventory' },
     { label: 'Products', sub: 'Catalog', route: '/products' },
     { label: 'Categories', sub: 'Group products', route: '/categories' },

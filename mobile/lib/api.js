@@ -59,6 +59,8 @@ export const locationsApi = referenceGroup('/api/locations');
 export const productsApi = {
   /** Paginated { items, page, limit, total, totalPages }. */
   list: (token, params) => apiFetch('/api/products', { token, params }),
+  /** Products needing restock (available ≤ minimum, worst first, each flagged OUT_OF_STOCK/LOW_STOCK). */
+  reorder: (token, params) => apiFetch('/api/products/reorder', { token, params }),
   get: (token, id) => apiFetch(`/api/products/${id}`, { token }),
   create: (token, payload) => apiFetch('/api/products', { token, method: 'POST', body: payload }),
   update: (token, id, payload) => apiFetch(`/api/products/${id}`, { token, method: 'PATCH', body: payload }),

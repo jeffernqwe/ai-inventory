@@ -6,6 +6,7 @@ import ApiError from '../utils/ApiError.js';
 import { recordAudit } from './audit.service.js';
 import { notFound } from '../utils/errors.js';
 import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../constants/audit.js';
+import { classifyStockStatus } from '../constants/stockStatus.js';
 
 const { ObjectId } = mongoose.Types;
 const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -69,12 +70,86 @@ function toProductDTO(doc) {
 }
 
 /**
+ * Product-level restock item: the catalog fields a restock decision needs plus
+ * the product's summed availability and its stock status (OUT_OF_STOCK vs
+ * LOW_STOCK, §19). Shared by the /api/products/reorder endpoint and the
+ * read-only AI restock tool so both surfaces return identical data.
+ */
+function reorderItemPublic(doc) {
+  const base = toProductDTO(doc);
+  return {
+    id: base.id,
+    name: base.name,
+    sku: base.sku,
+    barcode: base.barcode,
+    unit: base.unit,
+    status: base.status,
+    minimumStock: base.minimumStock,
+    category: base.category,
+    sellingPrice: base.sellingPrice,
+    availableQuantity: Number.isFinite(doc.available) ? doc.available : null,
+    stockStatus: classifyStockStatus(doc.available, base.minimumStock),
+  };
+}
+
+/**
+ * Aggregation stages that attach each product's summed availability: $lookup
+ * its inventory rows (optionally narrowed by extra $expr conditions) then
+ * reduce to available = quantity − reservedQuantity across every location that
+ * matches. Shared by listWithStock and listReorder so every stock list uses the
+ * same §19 math and can never disagree with the dashboard.
+ */
+function availabilityStages(bizOid, locCond = []) {
+  return [
+    {
+      $lookup: {
+        from: 'inventory',
+        let: { pid: '$_id' },
+        pipeline: [
+          {
+            $match: {
+              $expr: {
+                $and: [
+                  { $eq: ['$businessId', bizOid] },
+                  { $eq: ['$productId', '$$pid'] },
+                  ...locCond,
+                ],
+              },
+            },
+          },
+          {
+            $group: {
+              _id: null,
+              quantity: { $sum: '$quantity' },
+              reserved: { $sum: '$reservedQuantity' },
+            },
+          },
+        ],
+        as: 'inv',
+      },
+    },
+    { $addFields: { invRow: { $arrayElemAt: ['$inv', 0] } } },
+    {
+      $addFields: {
+        available: {
+          $subtract: [
+            { $ifNull: ['$invRow.quantity', 0] },
+            { $ifNull: ['$invRow.reserved', 0] },
+          ],
+        },
+      },
+    },
+  ];
+}
+
+/**
  * Product business service. Every read/write is scoped by the server-derived
  * businessId. SKU/barcode uniqueness is enforced within the business (partial
  * unique index + friendly 409 mapping).
  */
 export const productService = {
   toProductDTO,
+  reorderItemPublic,
 
   async assertCategoryOfBusiness(businessId, categoryId) {
     if (!categoryId) return null;
@@ -272,51 +347,7 @@ export const productService = {
 
     const locCond = locationId ? [{ $eq: ['$locationId', new ObjectId(locationId)] }] : [];
 
-    const pipeline = [
-      { $match: match },
-      {
-        $lookup: {
-          from: 'inventory',
-          let: { pid: '$_id' },
-          pipeline: [
-            {
-              $match: {
-                $expr: {
-                  $and: [
-                    { $eq: ['$businessId', bizOid] },
-                    { $eq: ['$productId', '$$pid'] },
-                    ...locCond,
-                  ],
-                },
-              },
-            },
-            {
-              $group: {
-                _id: null,
-                quantity: { $sum: '$quantity' },
-                reserved: { $sum: '$reservedQuantity' },
-              },
-            },
-          ],
-          as: 'inv',
-        },
-      },
-      {
-        $addFields: {
-          invRow: { $arrayElemAt: ['$inv', 0] },
-        },
-      },
-      {
-        $addFields: {
-          available: {
-            $subtract: [
-              { $ifNull: ['$invRow.quantity', 0] },
-              { $ifNull: ['$invRow.reserved', 0] },
-            ],
-          },
-        },
-      },
-    ];
+    const pipeline = [{ $match: match }, ...availabilityStages(bizOid, locCond)];
 
     // Only products actually stocked at the chosen location.
     if (locationId) {
@@ -353,6 +384,56 @@ export const productService = {
 
     // Normalise into the populated shape the DTO expects: categoryId becomes
     // the category document when found, null when the reference is missing.
+    for (const doc of items) {
+      if (doc.category && doc.category._id) doc.categoryId = doc.category;
+      else doc.categoryId = null;
+    }
+    return { items, total };
+  },
+
+  /**
+   * Products that need restocking — by default ACTIVE products whose summed
+   * availability is at or below their configured minimum stock (§19 low-stock
+   * definition, over the product catalog). Out-of-stock items (available <= 0)
+   * sort before low-stock items so the worst-off products come first. Rows are
+   * tagged OUT_OF_STOCK vs LOW_STOCK by reorderItemPublic.
+   */
+  async listReorder(businessId, { q, status = 'ACTIVE', categoryId, skip = 0, limit = 20 }) {
+    const bizOid = new ObjectId(businessId);
+    const match = { businessId: bizOid };
+    if (status === 'ACTIVE' || status === 'ARCHIVED') match.status = status;
+    if (categoryId) match.categoryId = new ObjectId(categoryId);
+    if (q) {
+      const re = { $regex: escapeRegExp(q), $options: 'i' };
+      match.$or = [{ name: re }, { sku: re }, { barcode: re }];
+    }
+
+    const pipeline = [
+      { $match: match },
+      ...availabilityStages(bizOid),
+      { $match: { $expr: { $lte: ['$available', '$minimumStock'] } } },
+      {
+        $lookup: {
+          from: 'categories',
+          let: { cat: '$categoryId' },
+          pipeline: [
+            { $match: { $expr: { $and: [{ $eq: ['$businessId', bizOid] }, { $eq: ['$_id', '$$cat'] }] } } },
+          ],
+          as: 'category',
+        },
+      },
+      { $addFields: { category: { $arrayElemAt: ['$category', 0] } } },
+      {
+        $facet: {
+          metadata: [{ $count: 'total' }],
+          data: [{ $sort: { available: 1, createdAt: -1 } }, { $skip: skip }, { $limit: limit }],
+        },
+      },
+    ];
+
+    const [result] = await Product.aggregate(pipeline);
+    const items = result?.data ?? [];
+    const total = result?.metadata?.[0]?.total ?? 0;
     for (const doc of items) {
       if (doc.category && doc.category._id) doc.categoryId = doc.category;
       else doc.categoryId = null;

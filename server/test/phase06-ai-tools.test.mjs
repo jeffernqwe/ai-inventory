@@ -337,7 +337,7 @@ dbSuite('Phase 06 — AI tools', dbOk, () => {
     assert.equal(res.code, 'TOOL_ERROR');
   });
 
-  it('the tool catalog is strictly read-only (8 tools, no write verbs)', async () => {
+  it('the tool catalog is strictly read-only (9 tools, no write verbs)', async () => {
     const names = AI_TOOL_DEFS.map((t) => t.name).sort();
     assert.deepEqual(names, [
       'getInventory',
@@ -347,6 +347,7 @@ dbSuite('Phase 06 — AI tools', dbOk, () => {
       'getOutOfStockProducts',
       'getProduct',
       'getProductsByLocation',
+      'getReorderNeededProducts',
       'searchProducts',
     ]);
     for (const def of AI_TOOL_DEFS) {

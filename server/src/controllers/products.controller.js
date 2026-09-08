@@ -62,6 +62,24 @@ const productsController = {
     res.json(pageResult(items.map(productService.toProductDTO), total, parsed.page, parsed.limit));
   },
 
+  /**
+   * Products that need restocking: ACTIVE (by default) products whose summed
+   * availability is at or below their minimum stock, worst first, each tagged
+   * OUT_OF_STOCK or LOW_STOCK. Read-only, same role surface as the product list.
+   */
+  async reorder(req, res) {
+    const parsed = parseQueryList(req);
+    if (parsed.problems.length) throwValidation(parsed.problems);
+    const { items, total } = await productService.listReorder(req.user.businessId, {
+      q: parsed.q,
+      status: parsed.status ?? 'ACTIVE',
+      categoryId: parsed.categoryId,
+      skip: parsed.skip,
+      limit: parsed.limit,
+    });
+    res.json(pageResult(items.map(productService.reorderItemPublic), total, parsed.page, parsed.limit));
+  },
+
   async get(req, res) {
     const doc = await productService.get(req.user.businessId, paramId(req));
     res.json(productService.toProductDTO(doc));

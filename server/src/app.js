@@ -1,5 +1,6 @@
 import express from 'express';
 
+import env from './config/env.js';
 import healthRoutes from './routes/health.routes.js';
 import authRoutes from './routes/auth.routes.js';
 import categoryRoutes from './routes/categories.routes.js';
@@ -12,6 +13,13 @@ import notFound from './middlewares/notFound.js';
 import errorHandler from './middlewares/errorHandler.js';
 
 const app = express();
+
+// Only trust a known number of reverse-proxy hops when explicitly configured
+// (TRUST_PROXY). The default — trust nobody — keeps X-Forwarded-For spoofing
+// from bypassing the auth rate limiters. See config/env.js parseTrustProxy.
+if (env.trustProxy > 0) {
+  app.set('trust proxy', env.trustProxy);
+}
 
 // Parse JSON request bodies
 app.use(express.json());

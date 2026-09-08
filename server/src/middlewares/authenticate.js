@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import User from '../models/user.model.js';
 import ApiError from '../utils/ApiError.js';
 import { verifyAccessToken } from '../config/jwt.js';
+import { assertActiveBusiness } from '../services/business.service.js';
 
 /**
  * Authentication middleware. Extracts a Bearer token, verifies signature and
@@ -16,7 +17,8 @@ import { verifyAccessToken } from '../config/jwt.js';
  *   - passwordHash is never loaded here.
  *
  * 401 -> missing / malformed / invalid / expired token, or user no longer exists
- * 403 -> user is DISABLED
+ * 403 -> user is DISABLED, or the user's business is missing / not ACTIVE
+ *        (SUSPENDED or ARCHIVED revoke existing JWTs immediately — Phase 07B)
  */
 export async function requireAuth(req, res, next) {
   try {
@@ -45,6 +47,10 @@ export async function requireAuth(req, res, next) {
     if (user.status !== 'ACTIVE') {
       throw new ApiError(403, 'This account is disabled', 'ACCOUNT_DISABLED');
     }
+    // Phase 07B / H2: the token alone is never enough — the tenant must still
+    // exist and be ACTIVE. SUSPENDING/ARCHIVING (or deleting) a business
+    // immediately revokes every outstanding JWT for its users.
+    await assertActiveBusiness(user.businessId);
 
     req.user = {
       id: String(user._id),

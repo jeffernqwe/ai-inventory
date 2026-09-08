@@ -5,6 +5,7 @@ import User from '../models/user.model.js';
 import ApiError from '../utils/ApiError.js';
 import { signAccessToken } from '../config/jwt.js';
 import { normalizeEmail } from '../utils/validate.js';
+import { assertActiveBusiness } from './business.service.js';
 
 const BCRYPT_ROUNDS = 10;
 const OWNER_ROLE = 'OWNER';
@@ -90,6 +91,11 @@ export async function loginWithPassword({ email, password }) {
   if (user.status !== ACTIVE_STATUS) {
     throw new ApiError(403, 'This account is disabled. Contact an administrator.', 'ACCOUNT_DISABLED');
   }
+  // Phase 07B / H2: the credentials are valid, but the tenant must be present
+  // and ACTIVE. SUSPENDED / ARCHIVED / deleted businesses cannot log in. This
+  // runs after the password check so the response never reveals whether an
+  // email merely exists in an inactive business.
+  await assertActiveBusiness(user.businessId);
 
   const token = signAccessToken(user._id);
   return { token, user };

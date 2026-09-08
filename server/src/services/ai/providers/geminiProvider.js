@@ -44,7 +44,7 @@ function toGeminiContents(messages) {
       if (parts.length === 0) parts.push({ text: '' });
       contents.push({ role: 'model', parts });
     } else if (m.role === 'tool') {
-      let response = m.content;
+      let response;
       try {
         response = JSON.parse(m.content);
       } catch {

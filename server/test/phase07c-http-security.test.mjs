@@ -60,7 +60,7 @@ async function request(baseUrl, { method = 'GET', path, token, body, extraHeader
   const headers = { ...extraHeaders, 'content-type': 'application/json' };
   if (token) headers.authorization = `Bearer ${token}`;
   const res = await fetch(`${baseUrl}${path}`, { method, headers, body });
-  let json = null;
+  let json;
   try {
     json = await res.json();
   } catch {

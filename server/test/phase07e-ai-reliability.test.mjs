@@ -19,7 +19,7 @@
 //     brief) plus conversationId ownership semantics. DB-gated: fails loudly
 //     when MongoDB is unreachable (Phase 07F / M9).
 
-import { describe, it, before, after, afterEach } from 'node:test';
+import { it, before, after, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { startServer, makeApi, createTracker, registerOwner, disconnectDb } from './support.mjs';
@@ -174,20 +174,12 @@ unitSuite('M6 provider message shape (Phase 07E, DB-free)', () => {
 // M6 + M7 — real HTTP routes, real persistence (Cases A–D)
 // ---------------------------------------------------------------------------
 dbSuite('Phase 07E — M6/M7 over the real routes', dbOk, () => {
-  let ownerA;
-
   before(async () => {
-    ownerA = await registerOwner(api, tracker);
+    await registerOwner(api, tracker);
   });
 
   function chat(token, body) {
     return api('POST', '/api/ai/chat', { token, body });
-  }
-
-  async function messagesOf(token, conversationId) {
-    const res = await api('GET', `/api/ai/conversations/${conversationId}/messages`, { token });
-    assert.equal(res.status, 200, JSON.stringify(res.json));
-    return res.json.items;
   }
 
   /** Fresh owner so each case starts with a clean business (isolated counts). */

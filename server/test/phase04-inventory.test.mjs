@@ -4,7 +4,7 @@
 // against the real shipped app + MongoDB (DB-backed; fails loudly when MongoDB
 // is unreachable — Phase 07F / M9).
 
-import { describe, it, before, after } from 'node:test';
+import { it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
@@ -330,7 +330,7 @@ dbSuite('Phase 04 — inventory core + dashboard', dbOk, () => {
     await stockIn(dash, d1, l, 10);
     const d2 = await newProduct(dash, { minimumStock: 3 });
     await stockIn(dash, d2, l, 3);
-    const d3 = await newProduct(dash, { minimumStock: 0 }); // no stock row at all
+    await newProduct(dash, { minimumStock: 0 }); // no stock row at all
     const d4 = await newProduct(dash, { minimumStock: 2 });
     await stockIn(dash, d4, l, 1);
     await api('POST', `/api/products/${d4}/archive`, { token: dash.token });

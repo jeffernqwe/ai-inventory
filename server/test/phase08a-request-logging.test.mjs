@@ -18,7 +18,7 @@
 
 import 'dotenv/config';
 
-import { describe, it, before, after, mock } from 'node:test';
+import { it, before, after, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import bcrypt from 'bcryptjs';
 
@@ -56,7 +56,7 @@ async function request(baseUrl, { method = 'GET', path = '/', headers = {}, body
     headers: { 'content-type': 'application/json', ...headers },
     body: typeof body === 'string' ? body : body === undefined ? undefined : JSON.stringify(body),
   });
-  let json = null;
+  let json;
   try {
     json = await res.json();
   } catch {

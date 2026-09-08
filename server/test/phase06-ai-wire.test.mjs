@@ -48,7 +48,7 @@ async function listen() {
     let raw = '';
     req.on('data', (c) => (raw += c));
     req.on('end', () => {
-      let body = null;
+      let body;
       try {
         body = raw ? JSON.parse(raw) : null;
       } catch {

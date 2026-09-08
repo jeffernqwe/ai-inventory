@@ -20,16 +20,6 @@ export function normalizeEmail(value) {
   return typeof value === 'string' ? value.trim().toLowerCase() : '';
 }
 
-function nameProblems(value, field, max) {
-  if (typeof value !== 'string' || value.trim().length === 0) {
-    return [{ field, message: `${field} is required` }];
-  }
-  if (value.trim().length > max) {
-    return [{ field, message: `${field} must be at most ${max} characters` }];
-  }
-  return [];
-}
-
 export function validateRegister(body) {
   const problems = [];
   const businessName = typeof body?.businessName === 'string' ? body.businessName.trim() : '';

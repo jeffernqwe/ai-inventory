@@ -13,7 +13,7 @@
  */
 
 import { aiConfig } from './aiConfig.js';
-import { AiNotConfigured, AiProviderError, isAiError } from './aiErrors.js';
+import { AiProviderError, isAiError } from './aiErrors.js';
 import { selectProvider } from './providers/index.js';
 import { executeTool, AI_TOOL_DEFS } from './tools.js';
 

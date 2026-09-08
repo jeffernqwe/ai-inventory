@@ -1,6 +1,6 @@
 import 'dotenv/config';
 
-import { describe, it, after } from 'node:test';
+import { it, after } from 'node:test';
 import assert from 'node:assert/strict';
 import express, { Router } from 'express';
 import jwt from 'jsonwebtoken';
@@ -97,7 +97,7 @@ async function api(method, path, { token, body } = {}) {
     headers,
     body: body ? JSON.stringify(body) : undefined,
   });
-  let json = null;
+  let json;
   try {
     json = await res.json();
   } catch {

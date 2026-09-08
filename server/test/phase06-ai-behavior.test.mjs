@@ -7,7 +7,7 @@
 // results and nothing is written). DB-backed; fails loudly when MongoDB is
 // unreachable (Phase 07F / M9).
 
-import { describe, it, before, after, afterEach } from 'node:test';
+import { it, before, after, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
@@ -191,7 +191,7 @@ dbSuite('Phase 06 — AI chat behavior', dbOk, () => {
   it('write requests are refused: no write tool exists and nothing is written', async () => {
     const beforeCount = await productTotal(biz.token);
     let turn = 0;
-    setFakeScenario((ctx) => {
+    setFakeScenario(() => {
       turn += 1;
       if (turn === 1) {
         return fakeCalls([
@@ -256,7 +256,7 @@ dbSuite('Phase 06 — AI chat behavior', dbOk, () => {
 
   it('conversations and messages have the public shape with model/usage/tools', async () => {
     let turn = 0;
-    setFakeScenario((ctx) => {
+    setFakeScenario(() => {
       turn += 1;
       if (turn === 1) return fakeCalls([{ id: 'c1', name: 'getInventoryHistory', input: { limit: 5 } }]);
       return fakeText('here is recent history');

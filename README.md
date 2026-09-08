@@ -127,13 +127,33 @@ unreachable — `/api/health` reports `db: connected|disconnected`.
 
 ## Mobile (`mobile/`)
 
-Expo app with Expo Router (file-based routing), written in JavaScript.
+Expo app with Expo Router (file-based routing), written in JavaScript. It is a **client
+only** — the backend is the security boundary. The app never connects to MongoDB and
+never holds MongoDB or AI credentials. The JWT is the only thing persisted (Expo
+SecureStore); the user profile is re-fetched from `/api/auth/me` on every launch so
+role/status always reflect the server.
 
 ```sh
 cd mobile
 npm install
+cp .env.example .env        # optional: set EXPO_PUBLIC_API_URL (see below)
 npx expo start              # start Metro dev server (Expo Go / simulator)
 ```
+
+- **API base URL:** the app reads `EXPO_PUBLIC_API_URL`. When it is unset it defaults to
+  `http://10.0.2.2:4000` on Android (emulator loopback) and `http://localhost:4000`
+  elsewhere — i.e. the local Phase 03/04 backend. Point `EXPO_PUBLIC_API_URL` at your
+  server when running on a physical device.
+- **Screens (Expo Router, authenticated group):** dashboard (MANAGER+), products
+  (list/new/edit/detail with search, status/category/location and low/out filters),
+  categories, locations, inventory (with low/out views), stock in, stock out, adjust
+  (MANAGER+), inventory history, profile.
+- **Client-side RBAC gating mirrors the server permission matrix** purely to hide
+  actions a role cannot perform (e.g. adjust for STAFF). The backend still enforces every
+  permission, role and `businessId` on each request.
+- Stock quantities are always read from the server (`/api/inventory`) — the client never
+  independently computes stock. Movement forms submit to the atomic server endpoints and
+  surface backend errors (insufficient stock, archived product/location, no change, etc.).
 
 > Install React Native related packages with `npx expo install`, not plain `npm install`,
 > so versions stay compatible with the Expo SDK.
@@ -164,5 +184,11 @@ committed.
   inventory stock-in/stock-out/adjust, availability + low/out-of-stock flags, transaction history,
   dashboard, and audit logs; multi-tenant isolation and RBAC reused from Phase 03; verified by 65
   integration tests against a live Atlas connection
+- **Phase 05 — Mobile Application:** complete — Expo (SDK 57) + Expo Router app consuming the
+  Phase 03/04 API: register/login/logout with secure JWT persistence (Expo SecureStore) and
+  session restore via `/api/auth/me`; dashboard, products, categories, locations, inventory,
+  stock in/out, adjust (MANAGER+), history and profile screens; centralized API client with
+  timeout/network handling; client RBAC gating mirrors the server; verified by `expo export`
+  bundling for Android and iOS plus a secret scan
 
-Phases 05–07 (mobile UI, AI, hardening) are **not yet implemented**.
+Phases 06–07 (AI assistant, testing + production hardening) are **not yet implemented**.

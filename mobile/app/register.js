@@ -1,0 +1,133 @@
+import { useState } from 'react';
+import { Link, Redirect } from 'expo-router';
+import { StyleSheet, Text } from 'react-native';
+
+import AuthLayout from '../components/AuthLayout';
+import Banner from '../components/Banner';
+import Button from '../components/Button';
+import Input from '../components/Input';
+import { ApiError } from '../lib/client';
+import { useSession } from '../lib/auth';
+import { defaultHomePath } from '../lib/permissions';
+import { colors, spacing, type } from '../lib/theme';
+
+function fieldMap(err) {
+  const out = {};
+  if (err instanceof ApiError && Array.isArray(err.fields)) {
+    for (const f of err.fields) out[f.field] = f.message;
+  }
+  return out;
+}
+
+export default function RegisterScreen() {
+  const { status, user, signUp } = useSession();
+  const [businessName, setBusinessName] = useState('');
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [fieldErrors, setFieldErrors] = useState({});
+  const [formError, setFormError] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  if (status === 'signedIn') return <Redirect href={defaultHomePath(user)} />;
+
+  async function submit() {
+    const next = {};
+    if (confirm && confirm !== password) {
+      next.confirm = 'Passwords do not match';
+    }
+    if (Object.keys(next).length) {
+      setFieldErrors(next);
+      return;
+    }
+    setBusy(true);
+    setFormError(null);
+    setFieldErrors({});
+    try {
+      // Register issues no token — signUp logs the new owner in afterwards.
+      await signUp({ businessName, name, email, password });
+    } catch (err) {
+      const fields = fieldMap(err);
+      if (Object.keys(fields).length) setFieldErrors(fields);
+      else setFormError(err?.message || 'Unable to create your account. Please try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <AuthLayout
+      title="Create your workspace"
+      subtitle="You'll get a new business and an Owner account."
+      footer={
+        <Text style={styles.footerText}>
+          Already have an account?{' '}
+          <Link href="/login" style={styles.link}>
+            Sign in
+          </Link>
+        </Text>
+      }
+    >
+      <Banner type="error" text={formError} />
+      <Input
+        name="businessName"
+        label="Business name"
+        value={businessName}
+        onChangeText={setBusinessName}
+        placeholder="Acme Retail"
+        error={fieldErrors.businessName}
+        required
+      />
+      <Input
+        name="name"
+        label="Your name"
+        value={name}
+        onChangeText={setName}
+        placeholder="Jane Doe"
+        error={fieldErrors.name}
+        required
+      />
+      <Input
+        name="email"
+        label="Email"
+        value={email}
+        onChangeText={setEmail}
+        keyboardType="email-address"
+        autoCapitalize="none"
+        placeholder="you@company.com"
+        error={fieldErrors.email}
+        required
+      />
+      <Input
+        name="password"
+        label="Password"
+        value={password}
+        onChangeText={setPassword}
+        secureTextEntry
+        placeholder="At least 8 characters"
+        helper="Min 8 characters"
+        error={fieldErrors.password}
+        required
+      />
+      <Input
+        name="confirm"
+        label="Confirm password"
+        value={confirm}
+        onChangeText={setConfirm}
+        secureTextEntry
+        placeholder="Repeat your password"
+        error={fieldErrors.confirm}
+        required
+        returnKeyType="go"
+        onSubmitEditing={submit}
+      />
+      <Button title="Create Account" onPress={submit} loading={busy} full />
+    </AuthLayout>
+  );
+}
+
+const styles = StyleSheet.create({
+  footerText: { ...type.bodySmall, color: colors.textMuted },
+  link: { color: colors.link, fontWeight: '700' },
+});

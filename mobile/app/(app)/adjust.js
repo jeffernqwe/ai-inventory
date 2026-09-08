@@ -1,0 +1,30 @@
+import { useLocalSearchParams } from 'expo-router';
+
+import AccessDenied from '../../components/AccessDenied';
+import Screen from '../../components/Screen';
+import MovementForm from '../../components/MovementForm';
+import { useSession } from '../../lib/auth';
+import { canAdjustStock } from '../../lib/permissions';
+
+function str(v) {
+  return Array.isArray(v) ? v[0] : v;
+}
+
+export default function AdjustStockScreen() {
+  const { user } = useSession();
+  const p = useLocalSearchParams();
+  if (!canAdjustStock(user)) {
+    return <AccessDenied message="Only managers and above can adjust stock." />;
+  }
+  return (
+    <Screen padded={false}>
+      <MovementForm
+        kind="adjust"
+        initialProductId={str(p.productId)}
+        initialProductName={str(p.productName)}
+        initialLocationId={str(p.locationId)}
+        initialLocationName={str(p.locationName)}
+      />
+    </Screen>
+  );
+}

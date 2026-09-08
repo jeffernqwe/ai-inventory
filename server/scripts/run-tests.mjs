@@ -55,6 +55,7 @@ const MIXED = [
   'phase08a-request-logging.test.mjs', // unit: request-id + log shape; db: authed context
   'phase10-commercialization.test.mjs', // unit: plan catalog + decision core; db: plan state
   'phase11-intelligence.test.mjs', // unit: stock-status classifier; db: reorder list + dashboard health + AI restock tool
+  'phase12a-barcode.test.mjs', // db: barcode lookup endpoint (success, isolation, duplicate, archived, RBAC)
 ];
 
 const FILE_LISTS = {

@@ -180,7 +180,8 @@ export function validateLocation(body, { partial = false } = {}) {
 
 const PRODUCT_NAME_MAX = 120;
 const PRODUCT_DESCRIPTION_MAX = 1000;
-const CODE_MAX = 100;
+/** Shared SKU / barcode length cap (products, and the barcode lookup query). */
+export const CODE_MAX = 100;
 const UNIT_MAX = 30;
 const IMAGE_URL_MAX = 1000;
 
@@ -277,4 +278,5 @@ export default {
   validateLocation,
   validateProduct,
   validateStockMovement,
+  CODE_MAX,
 };

@@ -13,6 +13,7 @@ router.get('/', requireAuth, productsController.list);
 router.post('/', requireAuth, requirePermission(PERMISSIONS.PRODUCTS_MANAGE), productsController.create);
 // Static path must be registered before the parameterized /:id routes below.
 router.get('/reorder', requireAuth, productsController.reorder);
+router.get('/barcode', requireAuth, productsController.byBarcode);
 router.get('/:id', requireAuth, productsController.get);
 router.patch('/:id', requireAuth, requirePermission(PERMISSIONS.PRODUCTS_MANAGE), productsController.update);
 router.post('/:id/archive', requireAuth, requirePermission(PERMISSIONS.PRODUCTS_MANAGE), productsController.archive);

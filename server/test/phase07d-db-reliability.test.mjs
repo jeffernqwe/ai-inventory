@@ -12,7 +12,7 @@
 
 import 'dotenv/config';
 
-import { describe, it, after, mock } from 'node:test';
+import { it, after, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import mongoose from 'mongoose';
 

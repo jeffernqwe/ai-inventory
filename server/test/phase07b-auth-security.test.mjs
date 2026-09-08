@@ -19,7 +19,7 @@
 
 import 'dotenv/config';
 
-import { describe, it, before, after } from 'node:test';
+import { it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import bcrypt from 'bcryptjs';
 import express from 'express';
@@ -93,7 +93,7 @@ async function api(baseUrl, method, path, { token, body } = {}) {
     headers,
     body: body ? JSON.stringify(body) : undefined,
   });
-  let json = null;
+  let json;
   try {
     json = await res.json();
   } catch {

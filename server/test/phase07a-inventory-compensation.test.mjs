@@ -16,7 +16,7 @@
 // statics InventoryTransaction.create / AuditLog.create (runtime property
 // lookups inside recordMovement / recordAudit), always restored afterwards.
 
-import { describe, it, before, after } from 'node:test';
+import { it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {

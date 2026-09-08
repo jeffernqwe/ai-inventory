@@ -48,7 +48,7 @@ export function makeApi(baseUrl) {
       headers,
       body: body ? JSON.stringify(body) : undefined,
     });
-    let json = null;
+    let json;
     try {
       json = await res.json();
     } catch {

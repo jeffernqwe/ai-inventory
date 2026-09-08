@@ -4,8 +4,8 @@
 // flows work, history carries across follow-ups, conversations/messages persist
 // with the expected public shape, message length is bounded, and write requests
 // are refused (no write tool exists — they surface as TOOL_NOT_FOUND soft
-// results and nothing is written). DB-backed; skipped when MongoDB is
-// unreachable.
+// results and nothing is written). DB-backed; fails loudly when MongoDB is
+// unreachable (Phase 07F / M9).
 
 import { describe, it, before, after, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -18,6 +18,7 @@ import {
   uniqueName,
   disconnectDb,
 } from './support.mjs';
+import { dbSuite } from './testEnv.mjs';
 import {
   registerFakeProvider,
   setFakeScenario,
@@ -79,7 +80,7 @@ after(async () => {
   await disconnectDb();
 });
 
-describe('Phase 06 — AI chat behavior', { skip: !dbOk }, () => {
+dbSuite('Phase 06 — AI chat behavior', dbOk, () => {
   before(async () => {
     biz = await registerOwner(api, tracker);
     locationId = await newLocation(biz);

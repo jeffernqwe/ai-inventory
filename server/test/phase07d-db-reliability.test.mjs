@@ -5,7 +5,8 @@
 //   * DB-independent tests that ALWAYS run: the centralized error mapping
 //     (isDatabaseDownError / errorHandler) answers driver/buffering errors with
 //     a fixed 503 and never leaks a connection string.
-//   * DB-gated integration tests: real MongoDB reachable -> readiness 200;
+//   * DB-gated integration tests (fail loudly when MongoDB is unreachable —
+//     Phase 07F / M9): real MongoDB reachable -> readiness 200;
 //     after disconnecting, database requests answer a safe 503 and readiness
 //     reports not-ready, while liveness stays 200.
 
@@ -16,6 +17,7 @@ import assert from 'node:assert/strict';
 import mongoose from 'mongoose';
 
 import { ensureDb, disconnectDb } from './helpers.mjs';
+import { dbSuite, unitSuite } from './testEnv.mjs';
 import { createApp } from '../src/app.js';
 import errorHandler from '../src/middlewares/errorHandler.js';
 import { isDatabaseDownError } from '../src/config/db.js';
@@ -51,7 +53,7 @@ function dbError(name, message) {
 // ---------------------------------------------------------------------------
 // H8 — DB-unavailable request behavior (deterministic, no database needed)
 // ---------------------------------------------------------------------------
-describe('H8 DB-unavailable error mapping (Phase 07D)', () => {
+unitSuite('H8 DB-unavailable error mapping (Phase 07D)', () => {
   // Built by concatenation so the SOURCE never contains a credential-shaped
   // literal that a repo secret scan would flag — this is a leak-detection
   // fixture, and the code under test must prove the value never reaches a reply.
@@ -119,7 +121,7 @@ describe('H8 DB-unavailable error mapping (Phase 07D)', () => {
 // The final test deliberately disconnects MongoDB and must run LAST in the
 // file: nothing after it may use the database.
 // ---------------------------------------------------------------------------
-describe('H8 readiness + DB-unavailable over the real app (Phase 07D)', { skip: !dbOk }, () => {
+dbSuite('H8 readiness + DB-unavailable over the real app (Phase 07D)', dbOk, () => {
   let server;
   let baseUrl;
 

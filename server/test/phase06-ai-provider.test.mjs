@@ -1,7 +1,7 @@
 // Phase 06 — AI provider selection, orchestration loop and HTTP failure
 // mapping. Exercises the shipped aiConfig / aiErrors / provider registry /
 // aiService over the registered 'fake' provider and the real routes. DB-backed
-// sections are skipped when MongoDB is unreachable.
+// sections fail loudly when MongoDB is unreachable (Phase 07F / M9).
 
 import { describe, it, before, after, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -13,6 +13,7 @@ import {
   registerOwner,
   disconnectDb,
 } from './support.mjs';
+import { dbSuite, unitSuite } from './testEnv.mjs';
 import Product from '../src/models/product.model.js';
 import { ROLES } from '../src/constants/roles.js';
 import { AiNotConfigured, AiProviderError } from '../src/services/ai/aiErrors.js';
@@ -65,7 +66,7 @@ after(async () => {
 // ---------------------------------------------------------------------------
 // Provider selection — no database required.
 // ---------------------------------------------------------------------------
-describe('Phase 06 — AI provider selection', () => {
+unitSuite('Phase 06 — AI provider selection', () => {
   it('registered provider catalog contains the fake used by tests', () => {
     assert.ok(registeredProviders().includes('fake'));
   });
@@ -187,7 +188,7 @@ describe('Phase 06 — AI provider selection', () => {
 // ---------------------------------------------------------------------------
 // Orchestration loop (runAiChat) — needs one seeded business for tool calls.
 // ---------------------------------------------------------------------------
-describe('Phase 06 — AI orchestration loop', { skip: !dbOk }, () => {
+dbSuite('Phase 06 — AI orchestration loop', dbOk, () => {
   before(async () => {
     owner = await registerOwner(api, tracker);
     setFakeScenario(null);
@@ -340,7 +341,7 @@ describe('Phase 06 — AI orchestration loop', { skip: !dbOk }, () => {
 // ---------------------------------------------------------------------------
 // HTTP mapping of failures over the real chat route.
 // ---------------------------------------------------------------------------
-describe('Phase 06 — HTTP failure mapping', { skip: !dbOk }, () => {
+dbSuite('Phase 06 — HTTP failure mapping', dbOk, () => {
   before(async () => {
     if (!owner) owner = await registerOwner(api, tracker);
   });

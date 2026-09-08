@@ -16,12 +16,14 @@
 //     context and the AgentRouter/Anthropic wire mapping, with no database and
 //     no real credentials.
 //   * DB-gated integration tests over the real routes (Cases A–D from the M7
-//     brief) plus conversationId ownership semantics.
+//     brief) plus conversationId ownership semantics. DB-gated: fails loudly
+//     when MongoDB is unreachable (Phase 07F / M9).
 
 import { describe, it, before, after, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { startServer, makeApi, createTracker, registerOwner, disconnectDb } from './support.mjs';
+import { dbSuite, unitSuite } from './testEnv.mjs';
 import { ROLES } from '../src/constants/roles.js';
 import { AIConversation, AIMessage } from '../src/models/index.js';
 import { runAiChat } from '../src/services/ai/ai.service.js';
@@ -65,7 +67,7 @@ function rolesOf(ctx) {
 // ---------------------------------------------------------------------------
 // M6 — service-level message shape (no database, no credentials required)
 // ---------------------------------------------------------------------------
-describe('M6 provider message shape (Phase 07E, DB-free)', () => {
+unitSuite('M6 provider message shape (Phase 07E, DB-free)', () => {
   it('a first turn reaches the provider as exactly one user message', async () => {
     let seen = null;
     setFakeScenario((ctx) => {
@@ -171,7 +173,7 @@ describe('M6 provider message shape (Phase 07E, DB-free)', () => {
 // ---------------------------------------------------------------------------
 // M6 + M7 — real HTTP routes, real persistence (Cases A–D)
 // ---------------------------------------------------------------------------
-describe('Phase 07E — M6/M7 over the real routes', { skip: !dbOk }, () => {
+dbSuite('Phase 07E — M6/M7 over the real routes', dbOk, () => {
   let ownerA;
 
   before(async () => {

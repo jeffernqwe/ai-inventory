@@ -3,7 +3,7 @@
 // with each business's authenticated session context. Covers valid execution,
 // strict argument validation (incl. the "no arbitrary Mongo / no client
 // businessId" guarantees), cross-business isolation, role permission checks and
-// result caps. Skipped entirely when MongoDB is unreachable.
+// result caps. DB-backed; fails loudly when MongoDB is unreachable (Phase 07F / M9).
 
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -17,6 +17,7 @@ import {
   uniqueName,
   disconnectDb,
 } from './support.mjs';
+import { dbSuite } from './testEnv.mjs';
 import { ROLES } from '../src/constants/roles.js';
 import { executeTool, validateToolArgs, AI_TOOL_DEFS, aiToolsById } from '../src/services/ai/tools.js';
 
@@ -75,7 +76,7 @@ let alphaLoc;
 let secretA;
 let secretB;
 
-describe('Phase 06 — AI tools', { skip: !dbOk }, () => {
+dbSuite('Phase 06 — AI tools', dbOk, () => {
   before(async () => {
     A = await registerOwner(api, tracker);
     B = await registerOwner(api, tracker);

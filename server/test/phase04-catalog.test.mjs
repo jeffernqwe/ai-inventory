@@ -1,6 +1,7 @@
 // Phase 04 — Categories, Locations, Products (catalog): CRUD, search, RBAC,
 // business isolation, validation, and audit logging, over the real shipped app.
-// Integration tests; the whole suite is skipped when MongoDB is unreachable.
+// Integration tests over the real app + MongoDB (DB-backed; fails loudly when
+// MongoDB is unreachable — Phase 07F / M9).
 
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -14,6 +15,7 @@ import {
   uniqueName,
   disconnectDb,
 } from './support.mjs';
+import { dbSuite } from './testEnv.mjs';
 import AuditLog from '../src/models/auditLog.model.js';
 import { ROLES } from '../src/constants/roles.js';
 
@@ -52,7 +54,7 @@ after(async () => {
   await disconnectDb();
 });
 
-describe('Phase 04 — catalog: categories, locations, products', { skip: !dbOk }, () => {
+dbSuite('Phase 04 — catalog: categories, locations, products', dbOk, () => {
   before(async () => {
     owner = await registerOwner(api, tracker);
     other = await registerOwner(api, tracker);

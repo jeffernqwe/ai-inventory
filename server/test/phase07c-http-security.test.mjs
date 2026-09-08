@@ -10,9 +10,10 @@
 //     the limiter see real forwarded client IPs.
 //
 // Integration tests over the real shipped app (createApp factory) + MongoDB.
-// DB-independent tests (headers, body limit, most CORS) always run; only the
-// tests that need a real authenticated session / login lookup are skipped when
-// the database is unreachable. NOTE: server/.env sets NODE_ENV=development, so
+// DB-independent tests (headers, body limit, most CORS) always run; tests that
+// need a real authenticated session / login lookup are DB-required and FAIL
+// loudly when MongoDB is unreachable (Phase 07F / M9). NOTE: server/.env sets
+// NODE_ENV=development, so
 // generic errorHandler responses append a dev-only `stack` — exact key-set
 // assertions are therefore applied ONLY to the body-limit responses, which the
 // handler's Phase 07C mapping answers with a fixed shape before the generic path.
@@ -24,6 +25,7 @@ import assert from 'node:assert/strict';
 import bcrypt from 'bcryptjs';
 
 import { ensureDb, disconnectDb } from './helpers.mjs';
+import { dbSuite, unitSuite } from './testEnv.mjs';
 import Business from '../src/models/business.model.js';
 import User from '../src/models/user.model.js';
 import { signAccessToken } from '../src/config/jwt.js';
@@ -113,7 +115,10 @@ describe('H6 security headers (Phase 07C)', () => {
     if (stop) await stop();
   });
 
-  it('health endpoint carries helmet headers and no X-Powered-By', async () => {
+  // DB-free cases below always run; the authenticated case needs MongoDB and is
+  // registered through dbSuite (fails loudly when MongoDB is unreachable).
+  unitSuite('H6 security headers — DB-free cases (Phase 07C)', () => {
+    it('health endpoint carries helmet headers and no X-Powered-By', async () => {
     const res = await request(baseUrl, { path: '/api/health' });
     assert.equal(res.status, 200);
     assertSecurityHeaders(res, 'GET /api/health');
@@ -132,23 +137,23 @@ describe('H6 security headers (Phase 07C)', () => {
     assertSecurityHeaders(res, '404');
   });
 
-  it(
-    'authenticated endpoint works and stays hardened',
-    { skip: !dbOk },
-    async () => {
+  }); // end unitSuite DB-free cases
+
+  dbSuite('H6 security headers — authenticated case (Phase 07C)', dbOk, () => {
+    it('authenticated endpoint works and stays hardened', async () => {
       const owner = await seedOwner();
       const res = await request(baseUrl, { path: '/api/auth/me', token: owner.token });
       assert.equal(res.status, 200);
       assert.equal(res.json?.user?.id, owner.userId);
       assertSecurityHeaders(res, 'GET /api/auth/me');
-    }
-  );
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
 // L2 — explicit JSON body-size limit
 // ---------------------------------------------------------------------------
-describe('L2 JSON body limit (Phase 07C)', () => {
+unitSuite('L2 JSON body limit (Phase 07C)', () => {
   // Tiny explicit limit so oversized tests are fast and deterministic.
   let baseUrl;
   let stop;
@@ -218,7 +223,10 @@ describe('M3 CORS allow-list (Phase 07C)', () => {
     if (stop) await stop();
   });
 
-  it('allow-listed origin gets a grant for that exact origin (never *)', async () => {
+  // DB-free cases below always run; the authenticated case needs MongoDB and is
+  // registered through dbSuite (fails loudly when MongoDB is unreachable).
+  unitSuite('M3 CORS allow-list — DB-free cases (Phase 07C)', () => {
+    it('allow-listed origin gets a grant for that exact origin (never *)', async () => {
     const res = await request(baseUrl, { path: '/api/health', extraHeaders: { origin: ALLOWED } });
     assert.equal(res.status, 200);
     assert.equal(res.header('access-control-allow-origin'), ALLOWED);
@@ -274,10 +282,10 @@ describe('M3 CORS allow-list (Phase 07C)', () => {
     assert.equal(res.status, 200);
   });
 
-  it(
-    'authenticated API usage reflects only allow-listed origins (never *)',
-    { skip: !dbOk },
-    async () => {
+  }); // end unitSuite DB-free cases
+
+  dbSuite('M3 CORS allow-list — authenticated case (Phase 07C)', dbOk, () => {
+    it('authenticated API usage reflects only allow-listed origins (never *)', async () => {
       const owner = await seedOwner();
       const allowed = await request(baseUrl, {
         path: '/api/auth/me',
@@ -296,14 +304,14 @@ describe('M3 CORS allow-list (Phase 07C)', () => {
       // the browser gets no grant — CORS never weakens auth.
       assert.equal(evil.status, 200);
       assert.equal(evil.header('access-control-allow-origin'), null);
-    }
-  );
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
 // M4 — trust-proxy: spoofed X-Forwarded-For vs the login rate limiter
 // ---------------------------------------------------------------------------
-describe('M4 trust proxy (Phase 07C)', { skip: !dbOk }, () => {
+dbSuite('M4 trust proxy (Phase 07C)', dbOk, () => {
   // Small per-IP cap so the spray limiter trips within a few requests; loginMax
   // stays high so the account limiter never interferes.
   const authLimits = { loginMax: 1000, loginIpMax: 2 };

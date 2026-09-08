@@ -2,7 +2,8 @@
 // always comes from the authenticated session (never the request body), that
 // conversations/messages are isolated per business AND per user, that STAFF
 // permissions are enforced on the tools inside a live chat, and that client
-// responses carry no secrets. DB-backed; skipped when MongoDB is unreachable.
+// responses carry no secrets. DB-backed; fails loudly when MongoDB is
+// unreachable (Phase 07F / M9).
 
 import { describe, it, before, after, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -16,6 +17,7 @@ import {
   uniqueName,
   disconnectDb,
 } from './support.mjs';
+import { dbSuite } from './testEnv.mjs';
 import { ROLES } from '../src/constants/roles.js';
 import AIConversation from '../src/models/aiConversation.model.js';
 import {
@@ -57,7 +59,7 @@ after(async () => {
   await disconnectDb();
 });
 
-describe('Phase 06 — AI security', { skip: !dbOk }, () => {
+dbSuite('Phase 06 — AI security', dbOk, () => {
   before(async () => {
     ownerA = await registerOwner(api, tracker);
     ownerB = await registerOwner(api, tracker);

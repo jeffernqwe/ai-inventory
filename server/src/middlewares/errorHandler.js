@@ -25,6 +25,19 @@ const BODY_ERRORS = {
   },
 };
 
+/**
+ * Short server-side identifier for the request a failure belongs to, so a 5xx
+ * in the logs can be traced to a call: "POST /api/inventory/stock-out (user
+ * 651a…)". Path only (no query string) and never headers/bodies — nothing
+ * client-supplied beyond the path is echoed. Empty when no request object is
+ * present (e.g. an error raised outside a request).
+ */
+function describeRequest(req) {
+  if (!req || typeof req.method !== 'string') return '';
+  const user = req.user && req.user.id ? ` (user ${req.user.id})` : '';
+  return `${req.method} ${req.path || req.originalUrl || '/'}${user}`;
+}
+
 const errorHandler = (err, req, res, next) => {
   // If headers were already sent, defer to Express's default handler.
   if (res.headersSent) {
@@ -49,7 +62,9 @@ const errorHandler = (err, req, res, next) => {
   // internals) and never a stack trace. Intercepts before the generic path, so
   // the mapping holds in every environment.
   if (isServerError && isDatabaseDownError(err)) {
-    console.error(`[db] database unavailable — request could not be served: ${sanitizeMongoMessage(err)}`);
+    console.error(
+      `[db] ${describeRequest(req) || 'unknown request'} — database unavailable, request could not be served: ${sanitizeMongoMessage(err)}`
+    );
     return res.status(503).json({
       error: 'Service temporarily unavailable',
       code: 'DB_UNAVAILABLE',
@@ -60,7 +75,8 @@ const errorHandler = (err, req, res, next) => {
 
   if (status >= 500) {
     // Log server errors server-side (never returned verbatim to the client).
-    console.error(`[error] ${err.message || err}`);
+    // Include the request context so a production 5xx is traceable to a call.
+    console.error(`[error] ${describeRequest(req) || 'unknown request'} — ${err.message || err}`);
   }
 
   const body = {

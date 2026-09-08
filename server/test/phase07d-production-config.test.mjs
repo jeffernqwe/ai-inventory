@@ -8,12 +8,15 @@
 
 import 'dotenv/config';
 
-import { describe, it, after } from 'node:test';
+import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
 import { EventEmitter } from 'node:events';
+import jwt from 'jsonwebtoken';
 
 import { validateProductionConfig, JWT_SECRET_MIN_LENGTH } from '../src/config/validateConfig.js';
+import { signAccessToken, verifyAccessToken } from '../src/config/jwt.js';
+import env from '../src/config/env.js';
 import { createHealthRouter } from '../src/routes/health.routes.js';
 import { createShutdownHandler, registerSignalHandlers } from '../src/config/shutdown.js';
 import { startServer } from '../src/config/startup.js';
@@ -186,6 +189,66 @@ describe('H7 production config validation (Phase 07D)', () => {
       // Every problem names the variable that is wrong.
       for (const p of problems) assert.ok(p.message.includes(p.variable));
     });
+  });
+
+  it('flags a malformed JWT_EXPIRES_IN so it fails at boot, never on the first login', async () => {
+    await withEnv(
+      { MONGODB_URI: DUMMY_URI, JWT_SECRET: LONG_SECRET, AI_PROVIDER: '', JWT_EXPIRES_IN: 'not-a-timespan' },
+      () => {
+        const problems = validateProductionConfig();
+        const problem = problems.find((p) => p.variable === 'JWT_EXPIRES_IN');
+        assert.ok(problem, 'a value jsonwebtoken cannot parse must be flagged');
+        assert.match(problem.message, /JWT_EXPIRES_IN/);
+        assert.ok(!problem.message.includes('not-a-timespan'), 'the bad value must never be echoed');
+      }
+    );
+  });
+
+  it('accepts a valid JWT_EXPIRES_IN timespan', async () => {
+    await withEnv(
+      { MONGODB_URI: DUMMY_URI, JWT_SECRET: LONG_SECRET, AI_PROVIDER: '', JWT_EXPIRES_IN: '15m' },
+      () => {
+        assert.deepEqual(validateProductionConfig(), [], 'a valid timespan is not a problem');
+      }
+    );
+  });
+
+  it('treats an absent JWT_EXPIRES_IN as fine (env.js applies the "7d" default)', async () => {
+    await withEnv(
+      { MONGODB_URI: DUMMY_URI, JWT_SECRET: LONG_SECRET, AI_PROVIDER: '', JWT_EXPIRES_IN: undefined },
+      () => {
+        assert.deepEqual(validateProductionConfig(), []);
+      }
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 07G — JWT verification is pinned to HS256 (defense-in-depth; the token
+// carries only `sub` and jsonwebtoken with a string secret already restricts to
+// HMAC — this locks the algorithm in as an explicit contract).
+// ---------------------------------------------------------------------------
+describe('JWT algorithm pinning (Phase 07G)', () => {
+  // Pin the jwt helpers' secret to a local throwaway so the assertions are
+  // deterministic and independent of whatever JWT_SECRET server/.env holds.
+  const PROBE_SECRET = 'x'.repeat(JWT_SECRET_MIN_LENGTH + 10);
+  const savedSecret = env.jwtSecret;
+  before(() => {
+    env.jwtSecret = PROBE_SECRET;
+  });
+  after(() => {
+    env.jwtSecret = savedSecret;
+  });
+
+  it('verifyAccessToken accepts a token signed by signAccessToken (HS256)', () => {
+    const token = signAccessToken('507f1f77bcf86cd799439011');
+    const payload = verifyAccessToken(token);
+    assert.equal(payload.sub, '507f1f77bcf86cd799439011');
+  });
+
+  it('verifyAccessToken rejects a token signed with a different HMAC algorithm (HS384)', () => {
+    const rogue = jwt.sign({ sub: '507f1f77bcf86cd799439011' }, PROBE_SECRET, { algorithm: 'HS384' });
+    assert.throws(() => verifyAccessToken(rogue), /algorithm/i, 'non-HS256 signatures must be refused');
   });
 });
 

@@ -12,7 +12,7 @@
 
 import 'dotenv/config';
 
-import { describe, it, after } from 'node:test';
+import { describe, it, after, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import mongoose from 'mongoose';
 
@@ -113,6 +113,43 @@ unitSuite('H8 DB-unavailable error mapping (Phase 07D)', () => {
     errorHandler(new Error('some application bug'), {}, res, () => {});
     assert.equal(res.statusCode, 500);
     assert.notEqual(res.body.code, 'DB_UNAVAILABLE');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 07G — 5xx server logs identify the request they belong to, so a
+// production error is traceable to a call. The log line is captured (never the
+// response body) and must carry method + path + user, without crashing when no
+// request object exists.
+// ---------------------------------------------------------------------------
+unitSuite('error-log request context (Phase 07G)', () => {
+  /** Capture console.error for one errorHandler call; returns the log line. */
+  function logLineFor(req) {
+    const spy = mock.method(console, 'error', () => {});
+    try {
+      const res = fakeRes();
+      errorHandler(new Error('simulated failure'), req, res, () => {});
+      return String(spy.mock.calls[0]?.arguments?.[0] || '');
+    } finally {
+      spy.mock.restore();
+    }
+  }
+
+  it('includes method, path and user on the 5xx server log line', () => {
+    const line = logLineFor({
+      method: 'POST',
+      path: '/api/inventory/stock-out',
+      user: { id: 'u-abc' },
+    });
+    assert.ok(line.includes('POST /api/inventory/stock-out'), `log should identify the request: ${line}`);
+    assert.ok(line.includes('user u-abc'), `log should include the actor: ${line}`);
+    assert.ok(line.includes('simulated failure'), 'the error message is still logged');
+  });
+
+  it('still logs a 5xx cleanly when no request object is available', () => {
+    const line = logLineFor({});
+    assert.ok(line.includes('unknown request'), `falls back to a stable label: ${line}`);
+    assert.ok(line.includes('simulated failure'));
   });
 });
 

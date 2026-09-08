@@ -9,6 +9,9 @@
  *   - MONGODB_URI   present (never logged; "usable" is verified by the startup
  *                   database connection — see config/startup.js).
  *   - JWT_SECRET    present and long enough to be a credible signing secret.
+ *   - JWT_EXPIRES_IN, when set, is a timespan jsonwebtoken can parse (probed
+ *                   with a throwaway signature so a malformed value fails at
+ *                   boot instead of turning the first login into a 500).
  *   - AI_PROVIDER   when a provider IS configured, the keys that provider needs
  *                   are present (respecting the provider abstraction: the
  *                   provider layer declares its own requirements). An empty
@@ -18,6 +21,8 @@
  * VARIABLE that is wrong — they never contain the variable's value, so no
  * secret (connection string, JWT, API key) can ever be printed.
  */
+
+import jwt from 'jsonwebtoken';
 
 import { providerRequiredEnv } from '../services/ai/providers/index.js';
 
@@ -52,6 +57,28 @@ export function validateProductionConfig(values = process.env) {
       variable: 'JWT_SECRET',
       message: `JWT_SECRET must be at least ${JWT_SECRET_MIN_LENGTH} characters in production`,
     });
+  }
+
+  // Phase 07G: env.js passes JWT_EXPIRES_IN straight to jsonwebtoken, so a
+  // malformed value today only fails on the FIRST login — as a 500 — instead of
+  // at boot. Probe it with a throwaway signature (never transmitted, nothing
+  // persisted) reusing jsonwebtoken's own parser, so this check can never
+  // disagree with signAccessToken about what is valid. An empty value is left
+  // alone: env.js already treats it as absent and applies the "7d" default.
+  const jwtExpiresIn = get('JWT_EXPIRES_IN');
+  if (jwtSecret && jwtExpiresIn) {
+    try {
+      jwt.sign({ sub: 'startup-config-probe' }, jwtSecret, {
+        algorithm: 'HS256',
+        expiresIn: jwtExpiresIn,
+      });
+    } catch {
+      problems.push({
+        variable: 'JWT_EXPIRES_IN',
+        message:
+          'JWT_EXPIRES_IN is not a valid expiration string. Use a jsonwebtoken timespan such as "7d", "15m", or "2h", or a number of seconds.',
+      });
+    }
   }
 
   const provider = get('AI_PROVIDER');

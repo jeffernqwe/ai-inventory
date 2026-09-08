@@ -68,6 +68,12 @@ export const productsApi = {
   update: (token, id, payload) => apiFetch(`/api/products/${id}`, { token, method: 'PATCH', body: payload }),
   archive: (token, id) => apiFetch(`/api/products/${id}/archive`, { token, method: 'POST' }),
   restore: (token, id) => apiFetch(`/api/products/${id}/restore`, { token, method: 'POST' }),
+  /**
+   * Issue an internal EAN-13 barcode for a product that has none (Phase 12D).
+   * Returns the updated product DTO. PRODUCTS_MANAGE; 409 if the product already
+   * has a barcode or is archived. Never overwrites an existing code.
+   */
+  generateBarcode: (token, id) => apiFetch(`/api/products/${id}/generate-barcode`, { token, method: 'POST' }),
 };
 
 // ---------------------------------------------------------------------------

@@ -1,15 +1,19 @@
 import { useCallback, useEffect, useState } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { printAsync, printToFileAsync } from 'expo-print';
+import * as Sharing from 'expo-sharing';
 
 import Badge, { StatusBadge } from '../../../../components/Badge';
 import Button from '../../../../components/Button';
 import Card from '../../../../components/Card';
+import Ean13Barcode from '../../../../components/Ean13Barcode';
 import { CenterLoader, EmptyState, ErrorState, errorText } from '../../../../components/ListState';
 import Screen from '../../../../components/Screen';
 import { inventoryApi, productsApi } from '../../../../lib/api';
 import { useSession } from '../../../../lib/auth';
 import { confirm } from '../../../../lib/confirm';
+import { barcodeLabelHtml, isEan13 } from '../../../../lib/ean13';
 import { formatDateTime, formatMoney, formatNumber } from '../../../../lib/format';
 import { canAdjustStock, canManageProducts } from '../../../../lib/permissions';
 import { useProductDetail } from '../../../../hooks/useProductDetail';
@@ -58,6 +62,8 @@ export default function ProductDetailScreen() {
   const [stock, setStock] = useState([]);
   const [stockLoading, setStockLoading] = useState(true);
   const [busyArchive, setBusyArchive] = useState(false);
+  const [busyGen, setBusyGen] = useState(false);
+  const [busyLabel, setBusyLabel] = useState(false);
 
   const loadStock = useCallback(async () => {
     if (!token || !id) return;
@@ -109,6 +115,68 @@ export default function ProductDetailScreen() {
     }
   }
 
+  async function onGenerateBarcode() {
+    if (!product || busyGen) return;
+    setBusyGen(true);
+    try {
+      // Server issues an internal EAN-13 onto Product.barcode (never overwrites
+      // an existing code, refuses ARCHIVED products). Reload to show it.
+      await productsApi.generateBarcode(token, product.id);
+      await reload();
+    } catch (err) {
+      Alert.alert('Could not generate a barcode', errorText(err));
+    } finally {
+      setBusyGen(false);
+    }
+  }
+
+  function labelHtml() {
+    return barcodeLabelHtml(product.barcode, { productName: product.name, sku: product.sku });
+  }
+
+  /** Open the OS print dialog with a plain label page (no printer config). */
+  async function onPrintLabel() {
+    if (busyLabel) return;
+    setBusyLabel(true);
+    try {
+      await printAsync({ html: labelHtml().html });
+    } catch (err) {
+      Alert.alert('Could not print the label', errorText(err));
+    } finally {
+      setBusyLabel(false);
+    }
+  }
+
+  /** Render the label to a PDF file, then open the OS share/save sheet. */
+  async function onShareLabel() {
+    if (busyLabel) return;
+    let available = false;
+    try {
+      available = await Sharing.isAvailableAsync();
+    } catch {
+      available = false;
+    }
+    if (!available) {
+      Alert.alert('Sharing is not available on this device.');
+      return;
+    }
+    setBusyLabel(true);
+    try {
+      const { html, width, height } = labelHtml();
+      const { uri } = await printToFileAsync({ html, width, height });
+      if (!uri) throw new Error('The app could not create a PDF of this label.');
+      await Sharing.shareAsync(uri, {
+        mimeType: 'application/pdf',
+        dialogTitle: 'Save or share the barcode label',
+        UTI: 'com.adobe.pdf',
+      });
+    } catch (err) {
+      Alert.alert('Could not save or share the label', errorText(err));
+    } finally {
+      setBusyLabel(false);
+    }
+  }
+
   if (loading && !product) return <CenterLoader label="Loading product…" />;
   if (error && !product) return <ErrorState title="Couldn't load the product" message={errorText(error)} onRetry={reload} />;
   if (!product) return null;
@@ -139,6 +207,34 @@ export default function ProductDetailScreen() {
         <Field label="Minimum stock" value={product.minimumStock != null ? formatNumber(product.minimumStock) : null} mono />
         <Field label="Updated" value={formatDateTime(product.updatedAt)} />
       </Card>
+
+      {product.barcode && isEan13(product.barcode) ? (
+        <Card style={styles.barcodeCard}>
+          <View style={styles.barcodeHeader}>
+            <Text style={styles.barcodeTitle}>Barcode label</Text>
+            {product.barcode.startsWith('2') ? <Badge text="Internal" tone="info" /> : null}
+          </View>
+          <Ean13Barcode code={product.barcode} />
+          <Text style={styles.barcodeHint}>
+            EAN-13 preview. Print it or save/share a PDF, then scan the printed code with the scanner to verify it.
+          </Text>
+          <View style={styles.barcodeActions}>
+            <Button title="Print label" variant="secondary" style={styles.flexBtn} loading={busyLabel} onPress={onPrintLabel} />
+            <Button title="Share PDF" variant="secondary" style={styles.flexBtn} loading={busyLabel} onPress={onShareLabel} />
+          </View>
+        </Card>
+      ) : null}
+
+      {manage && product.status === 'ACTIVE' && !product.barcode ? (
+        <Card style={styles.barcodeCard}>
+          <Text style={styles.barcodeTitle}>No barcode yet</Text>
+          <Text style={styles.barcodeHint}>
+            Generate an internal EAN-13 so this product can be scanned and looked up from the scanner. An existing
+            manufacturer barcode is never replaced.
+          </Text>
+          <Button title="Generate internal barcode" full style={styles.genBtn} loading={busyGen} onPress={onGenerateBarcode} />
+        </Card>
+      ) : null}
 
       {manage ? (
         <View style={styles.actions}>
@@ -201,6 +297,12 @@ const styles = StyleSheet.create({
   name: { ...type.h2, color: colors.text, flex: 1 },
   description: { ...type.body, color: colors.textSecondary, marginTop: spacing.sm, lineHeight: 22 },
   divider: { height: StyleSheet.hairlineWidth, backgroundColor: colors.divider, marginVertical: spacing.lg },
+  barcodeCard: { marginTop: spacing.lg },
+  barcodeHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.md },
+  barcodeTitle: { ...type.h3, color: colors.text },
+  barcodeHint: { ...type.bodySmall, color: colors.textSecondary, lineHeight: 19, marginTop: spacing.sm },
+  barcodeActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.lg },
+  genBtn: { marginTop: spacing.md },
   fieldRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 5 },
   fieldLabel: { ...type.body, color: colors.textMuted },
   fieldValue: { ...type.body, color: colors.text, fontWeight: '600', flexShrink: 1, marginLeft: spacing.lg },

@@ -2,10 +2,41 @@
  * Centralized error handler. Must be registered last, after all routes/middleware.
  * Keeps responses consistent and prevents leaking internal details to clients.
  */
+/**
+ * body-parser tags the failures it raises with a machine-readable `type`.
+ * These arrive before any route logic, so we respond here with a fixed,
+ * generic shape: the parser's own message can echo the offending input
+ * (content / length), and the generic path would also append a dev-mode stack.
+ * Mapping deliberately covers only the cases we reject; anything else keeps
+ * flowing to the generic handler below.
+ */
+const BODY_ERRORS = {
+  'entity.parse.failed': {
+    status: 400,
+    code: 'INVALID_JSON',
+    message: 'Request body is not valid JSON',
+  },
+  'entity.too.large': {
+    status: 413,
+    code: 'BODY_TOO_LARGE',
+    message: 'Request body exceeds the allowed size',
+  },
+};
+
 const errorHandler = (err, req, res, next) => {
   // If headers were already sent, defer to Express's default handler.
   if (res.headersSent) {
     return next(err);
+  }
+
+  // Oversized / malformed JSON (Phase 07C / L2): stable code + fixed message,
+  // no request-content echo, no stack trace (not even in development).
+  const bodyError = BODY_ERRORS[err.type];
+  if (bodyError) {
+    return res.status(bodyError.status).json({
+      error: bodyError.message,
+      code: bodyError.code,
+    });
   }
 
   const isServerError = !err.status && !err.statusCode;

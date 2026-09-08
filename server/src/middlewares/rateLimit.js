@@ -89,6 +89,16 @@ export function createLoginAccountLimiter(overrides = {}) {
 /**
  * Login limiter #2 — per IP, higher cap. Stops password spraying (many
  * accounts, one source) that would otherwise hop between per-account buckets.
+ *
+ * Keyed explicitly on request.ip (not the library default keyGenerator):
+ * express-rate-limit's default keyGenerator throws ERR_ERL_UNEXPECTED_X_FORWARDED_FOR
+ * whenever a request carries X-Forwarded-For while `trust proxy` is off —
+ * turning a spoofed header into a 500. Deliberately keying on request.ip keeps
+ * the same behavior in the common case while IGNORING forwarded headers until
+ * the operator explicitly sets TRUST_PROXY (see config/env.js): under trust 0,
+ * request.ip is always the direct peer, so spoofed headers cannot create fresh
+ * buckets; under trust N, request.ip resolves to the forwarded client IP and
+ * the limiter keys on the real client, exactly as configured.
  */
 export function createLoginIpLimiter(overrides = {}) {
   const { loginIpWindowMs, loginIpMax } = authRateConfig(overrides);
@@ -96,6 +106,9 @@ export function createLoginIpLimiter(overrides = {}) {
     windowMs: loginIpWindowMs,
     limit: loginIpMax,
     skipSuccessfulRequests: true,
+    keyGenerator(request) {
+      return ipKeyGenerator(request.ip);
+    },
     ...limitResponse(
       'LOGIN_RATE_LIMITED',
       'Too many login attempts. Please wait a moment and try again.'
@@ -103,12 +116,18 @@ export function createLoginIpLimiter(overrides = {}) {
   });
 }
 
-/** Registration limiter — per IP, counting every attempt (mass signups). */
+/**
+ * Registration limiter — per IP, counting every attempt (mass signups). Same
+ * explicit request.ip keying rationale as createLoginIpLimiter above.
+ */
 export function createRegisterLimiter(overrides = {}) {
   const { registerWindowMs, registerMax } = authRateConfig(overrides);
   return rateLimit({
     windowMs: registerWindowMs,
     limit: registerMax,
+    keyGenerator(request) {
+      return ipKeyGenerator(request.ip);
+    },
     ...limitResponse(
       'REGISTER_RATE_LIMITED',
       'Too many registration attempts. Please wait a while and try again.'

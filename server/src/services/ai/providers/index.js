@@ -19,6 +19,29 @@ import { createGeminiProvider } from './geminiProvider.js';
 
 const registry = new Map();
 
+/**
+ * Built-in providers: which factory resolves each name, and which server-side
+ * environment variables that factory requires at creation time (its key, and for
+ * the gateway also its base URL). Kept next to selectProvider() so production
+ * config validation (Phase 07D / H7) checks the SAME requirements the chat route
+ * would hit — one source of truth for provider names and their keys. A registry
+ * override (tests) is not covered here; those run outside production.
+ */
+const BUILTINS = {
+  claude: {
+    factory: createClaudeProvider,
+    requiredEnv: ['ANTHROPIC_API_KEY'],
+  },
+  gemini: {
+    factory: createGeminiProvider,
+    requiredEnv: ['GEMINI_API_KEY'],
+  },
+  agentrouter: {
+    factory: createAgentrouterProvider,
+    requiredEnv: ['AGENTROUTER_API_KEY', 'AGENTROUTER_BASE_URL'],
+  },
+};
+
 /** Register (or override) a provider factory, primarily for tests. */
 export function registerProvider(name, factory) {
   registry.set(String(name).toLowerCase(), factory);
@@ -30,6 +53,12 @@ export function deregisterProvider(name) {
 
 export function registeredProviders() {
   return [...registry.keys()];
+}
+
+/** Environment variables a built-in provider needs at creation, or null when unknown. */
+export function providerRequiredEnv(name) {
+  const entry = BUILTINS[String(name || '').trim().toLowerCase()];
+  return entry ? [...entry.requiredEnv] : null;
 }
 
 /**
@@ -44,12 +73,11 @@ export function selectProvider() {
     throw new AiNotConfigured('AI_PROVIDER is not set, so the AI assistant is disabled on this server.');
   }
   if (registry.has(name)) return registry.get(name)();
-  if (name === 'claude') return createClaudeProvider();
-  if (name === 'gemini') return createGeminiProvider();
-  if (name === 'agentrouter') return createAgentrouterProvider();
+  const builtin = BUILTINS[name];
+  if (builtin) return builtin.factory();
   throw new AiNotConfigured(
     `The configured AI provider "${raw}" is not supported. Set AI_PROVIDER to "claude", "gemini", or "agentrouter".`
   );
 }
 
-export default { registerProvider, deregisterProvider, registeredProviders, selectProvider };
+export default { registerProvider, deregisterProvider, registeredProviders, selectProvider, providerRequiredEnv };

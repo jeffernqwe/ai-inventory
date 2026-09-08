@@ -41,6 +41,17 @@ function parseJsonBodyLimit() {
   return raw || '100kb';
 }
 
+/**
+ * Graceful-shutdown grace period (Phase 07D / M2): how long the process waits
+ * for in-flight requests to finish after a SIGTERM/SIGINT before it force-exits.
+ * Bounded and configurable; the default is short on purpose so a stuck request
+ * can never hold a deploy/restart hostage for long.
+ */
+function parseShutdownTimeoutMs() {
+  const n = Number(process.env.SHUTDOWN_TIMEOUT_MS || '');
+  return Number.isFinite(n) && n > 0 ? n : 10000;
+}
+
 const env = {
   nodeEnv: process.env.NODE_ENV || 'development',
   port: Number(process.env.PORT) || 4000,
@@ -56,6 +67,8 @@ const env = {
   corsOrigins: parseCorsOrigins(),
   // express.json() body limit. See parseJsonBodyLimit.
   jsonBodyLimit: parseJsonBodyLimit(),
+  // Graceful-shutdown grace period (ms). See parseShutdownTimeoutMs.
+  shutdownTimeoutMs: parseShutdownTimeoutMs(),
 };
 
 export default env;

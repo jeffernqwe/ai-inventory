@@ -2,6 +2,8 @@
  * Centralized error handler. Must be registered last, after all routes/middleware.
  * Keeps responses consistent and prevents leaking internal details to clients.
  */
+import { isDatabaseDownError, sanitizeMongoMessage } from '../config/db.js';
+
 /**
  * body-parser tags the failures it raises with a machine-readable `type`.
  * These arrive before any route logic, so we respond here with a fixed,
@@ -40,6 +42,20 @@ const errorHandler = (err, req, res, next) => {
   }
 
   const isServerError = !err.status && !err.statusCode;
+
+  // MongoDB unreachable (Phase 07D / H8): a driver/buffering error reached a
+  // handler while the database is down. Answer with a fixed, secret-free 503 —
+  // never the raw driver message (it can carry a connection string or topology
+  // internals) and never a stack trace. Intercepts before the generic path, so
+  // the mapping holds in every environment.
+  if (isServerError && isDatabaseDownError(err)) {
+    console.error(`[db] database unavailable — request could not be served: ${sanitizeMongoMessage(err)}`);
+    return res.status(503).json({
+      error: 'Service temporarily unavailable',
+      code: 'DB_UNAVAILABLE',
+    });
+  }
+
   const status = err.status || err.statusCode || 500;
 
   if (status >= 500) {

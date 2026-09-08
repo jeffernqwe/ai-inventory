@@ -18,6 +18,7 @@ import env from '../src/config/env.js';
 import User from '../src/models/user.model.js';
 import Business from '../src/models/business.model.js';
 import { ensureDb, disconnectDb } from './helpers.mjs';
+import { dbSuite } from './testEnv.mjs';
 
 // ---------------------------------------------------------------------------
 // Test app: real shipped routers + middleware, composed over HTTP.
@@ -136,18 +137,17 @@ after(async () => {
   await disconnectDb();
 });
 
-const SKIP = { skip: !dbOk };
-
+// DB-backed suite: dbSuite fails loudly if MongoDB is unreachable (Phase 07F/M9).
 // ---------------------------------------------------------------------------
-describe('Phase 03 authentication + authorization (integration)', () => {
-  it('GET /api/health still works', SKIP, async () => {
+dbSuite('Phase 03 authentication + authorization (integration)', dbOk, () => {
+  it('GET /api/health still works', async () => {
     const { status, json } = await api('GET', '/api/health');
     assert.equal(status, 200);
     assert.equal(json.status, 'ok');
     assert.ok(['connected', 'disconnected'].includes(json.db));
   });
 
-  it('registration creates Business + OWNER and returns a safe public user', SKIP, async () => {
+  it('registration creates Business + OWNER and returns a safe public user', async () => {
     const email = uniqueEmail();
     const { status, json } = await registerViaHttp({
       businessName: 'Acme Grocery',
@@ -172,7 +172,7 @@ describe('Phase 03 authentication + authorization (integration)', () => {
     assert.equal(dbUser.status, 'ACTIVE');
   });
 
-  it('password is stored hashed (bcrypt) and never equals the raw password', SKIP, async () => {
+  it('password is stored hashed (bcrypt) and never equals the raw password', async () => {
     const email = uniqueEmail();
     await registerViaHttp({
       businessName: 'HashCo',
@@ -188,7 +188,7 @@ describe('Phase 03 authentication + authorization (integration)', () => {
     assert.equal(await bcrypt.compare('WrongPass!', dbUser.passwordHash), false);
   });
 
-  it('successful login returns a verifiable JWT and public user', SKIP, async () => {
+  it('successful login returns a verifiable JWT and public user', async () => {
     const email = uniqueEmail();
     await registerViaHttp({
       businessName: 'LoginBiz',
@@ -208,7 +208,7 @@ describe('Phase 03 authentication + authorization (integration)', () => {
     assert.equal(payload.sub, json.user.id);
   });
 
-  it('login normalizes email case/whitespace', SKIP, async () => {
+  it('login normalizes email case/whitespace', async () => {
     const email = uniqueEmail();
     await registerViaHttp({
       businessName: 'CaseBiz',
@@ -222,7 +222,7 @@ describe('Phase 03 authentication + authorization (integration)', () => {
     assert.equal(status, 200);
   });
 
-  it('invalid password / unknown email returns generic 401', SKIP, async () => {
+  it('invalid password / unknown email returns generic 401', async () => {
     const email = uniqueEmail();
     await registerViaHttp({
       businessName: 'LeakBiz',
@@ -244,7 +244,7 @@ describe('Phase 03 authentication + authorization (integration)', () => {
     assert.equal(unknown.json.error, 'Invalid email or password');
   });
 
-  it('DISABLED user is rejected at login (403)', SKIP, async () => {
+  it('DISABLED user is rejected at login (403)', async () => {
     const email = uniqueEmail();
     await registerViaHttp({
       businessName: 'DisableBiz',
@@ -260,7 +260,7 @@ describe('Phase 03 authentication + authorization (integration)', () => {
     assert.equal(json.code, 'ACCOUNT_DISABLED');
   });
 
-  it('duplicate registration returns 409 EMAIL_IN_USE', SKIP, async () => {
+  it('duplicate registration returns 409 EMAIL_IN_USE', async () => {
     const email = uniqueEmail();
     const first = await registerViaHttp({
       businessName: 'DupBiz',
@@ -279,7 +279,7 @@ describe('Phase 03 authentication + authorization (integration)', () => {
     assert.equal(second.json.code, 'EMAIL_IN_USE');
   });
 
-  it('registration validates required fields / bad email (400 with fields)', SKIP, async () => {
+  it('registration validates required fields / bad email (400 with fields)', async () => {
     const r1 = await api('POST', '/api/auth/register', { body: { name: 'No Email' } });
     assert.equal(r1.status, 400);
     assert.equal(r1.json.code, 'VALIDATION_ERROR');
@@ -292,7 +292,7 @@ describe('Phase 03 authentication + authorization (integration)', () => {
     assert.ok(r2.json.fields.some((f) => f.field === 'email'));
   });
 
-  it('GET /api/auth/me requires a valid token (missing / invalid / expired / wrong secret)', SKIP, async () => {
+  it('GET /api/auth/me requires a valid token (missing / invalid / expired / wrong secret)', async () => {
     const missing = await api('GET', '/api/auth/me');
     assert.equal(missing.status, 401);
     assert.equal(missing.json.code, 'AUTH_REQUIRED');
@@ -319,7 +319,7 @@ describe('Phase 03 authentication + authorization (integration)', () => {
     assert.equal(wrongRes.status, 401);
   });
 
-  it('GET /api/auth/me returns the server-authoritative current user', SKIP, async () => {
+  it('GET /api/auth/me returns the server-authoritative current user', async () => {
     const email = uniqueEmail();
     const reg = await registerViaHttp({
       businessName: 'Me2Biz',
@@ -338,7 +338,7 @@ describe('Phase 03 authentication + authorization (integration)', () => {
     assert.equal(JSON.stringify(json).includes('passwordHash'), false);
   });
 
-  it('DISABLED user is rejected on a protected route (403)', SKIP, async () => {
+  it('DISABLED user is rejected on a protected route (403)', async () => {
     const email = uniqueEmail();
     await registerViaHttp({
       businessName: 'Dis2Biz',
@@ -355,7 +355,7 @@ describe('Phase 03 authentication + authorization (integration)', () => {
     assert.equal(json.code, 'ACCOUNT_DISABLED');
   });
 
-  it('role authorization: OWNER vs ADMIN vs MANAGER vs STAFF', SKIP, async () => {
+  it('role authorization: OWNER vs ADMIN vs MANAGER vs STAFF', async () => {
     const owner = await makeDirectUser('OWNER');
     const admin = await makeDirectUser('ADMIN');
     const manager = await makeDirectUser('MANAGER');
@@ -385,7 +385,7 @@ describe('Phase 03 authentication + authorization (integration)', () => {
     }
   });
 
-  it('business isolation: cross-business access is prevented (403)', SKIP, async () => {
+  it('business isolation: cross-business access is prevented (403)', async () => {
     const a = await makeDirectUser('OWNER'); // Business A
     const b = await makeDirectUser('OWNER'); // Business B
 
@@ -404,7 +404,7 @@ describe('Phase 03 authentication + authorization (integration)', () => {
     assert.equal(hijack.status, 403);
   });
 
-  it('unknown routes return the structured 404', SKIP, async () => {
+  it('unknown routes return the structured 404', async () => {
     const { status, json } = await api('GET', '/api/does-not-exist');
     assert.equal(status, 404);
     assert.equal(json.error, 'Not Found');

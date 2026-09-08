@@ -56,8 +56,34 @@ cd server
 npm install
 cp .env.example .env        # add MONGODB_URI and JWT_SECRET here (real values, never committed)
 npm run dev                 # start with auto-reload (node --watch)
-npm test                    # run the test suite (node --test)
+npm test                    # full test suite (requires MongoDB — see "Backend tests")
 ```
+
+### Backend tests
+
+The backend test suite is **classified** (DB-independent vs DB-required) and is
+**never silently green** when MongoDB is unreachable.
+
+```sh
+npm test              # full suite: DB-independent + DB-required (requires MongoDB)
+npm run test:unit     # DB-independent tests only (never touches MongoDB)
+npm run test:db       # DB-backed tests only (requires MongoDB)
+```
+
+- **`npm test` (default) requires MongoDB.** A DB-required suite that cannot reach
+  the database becomes **one failing test** with an actionable message — the run
+  exits non-zero instead of skipping and reporting a false green.
+- **`npm run test:unit`** runs only the DB-independent tests and is safe with
+  MongoDB down or unset. DB-backed suites become one visibly **skipped** test each,
+  each carrying the reason (`TEST_MODE=unit`).
+- **`npm run test:db`** runs only the DB-backed tests; DB-independent suites are
+  likewise shown as visibly skipped.
+- **Intentional skipping is explicit and never silent.** Suites declare their class
+  through `dbSuite()` / `unitSuite()` in `server/test/testEnv.mjs`; an out-of-mode
+  suite is always a *visible* skipped test (never a hidden describe-level skip), and
+  an unknown `TEST_MODE` prints a warning and falls back to `full`. If MongoDB is
+  unavailable, nothing is skipped: DB-required tests fail loudly so a drop in
+  coverage can never look like a passing run.
 
 Models (collections):
 

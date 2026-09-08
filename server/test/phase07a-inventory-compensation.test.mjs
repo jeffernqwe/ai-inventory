@@ -10,8 +10,9 @@
 //   H5 — compensation can never create a negative quantity.
 //   L5 — a failed first stock-in must not leave a zero-quantity orphan row.
 //
-// Integration tests against the real shipped app + MongoDB; skipped entirely
-// when MongoDB is unreachable. Failures are injected by stubbing the model
+// Integration tests against the real shipped app + MongoDB (DB-backed; fails
+// loudly when MongoDB is unreachable — Phase 07F / M9). Failures are injected by
+// stubbing the model
 // statics InventoryTransaction.create / AuditLog.create (runtime property
 // lookups inside recordMovement / recordAudit), always restored afterwards.
 
@@ -26,6 +27,7 @@ import {
   uniqueName,
   disconnectDb,
 } from './support.mjs';
+import { dbSuite } from './testEnv.mjs';
 import Inventory from '../src/models/inventory.model.js';
 import InventoryTransaction from '../src/models/inventoryTransaction.model.js';
 import AuditLog from '../src/models/auditLog.model.js';
@@ -138,7 +140,7 @@ after(async () => {
   await disconnectDb();
 });
 
-describe('Phase 07A — inventory compensation failure-injection', { skip: !dbOk }, () => {
+dbSuite('Phase 07A — inventory compensation failure-injection', dbOk, () => {
   before(async () => {
     owner = await registerOwner(api, tracker);
   });

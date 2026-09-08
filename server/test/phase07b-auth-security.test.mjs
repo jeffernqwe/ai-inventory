@@ -10,8 +10,9 @@
 //     businesses cannot log in AND immediately revoke existing JWTs
 //     (requireAuth), while ACTIVE tenants behave exactly as before.
 //
-// Integration tests over the real shipped routers + MongoDB. Skipped as a whole
-// when the database is unreachable. NOTE: server/.env sets NODE_ENV=development,
+// Integration tests over the real shipped routers + MongoDB (DB-backed; fails
+// loudly when the database is unreachable — Phase 07F / M9). NOTE: server/.env
+// sets NODE_ENV=development,
 // so errorHandler appends a dev-only `stack` to ApiError responses routed
 // through it (production strips it) — key-set assertions are therefore applied
 // ONLY to the rate-limiters' own 429 bodies, which bypass errorHandler.
@@ -25,6 +26,7 @@ import express from 'express';
 import mongoose from 'mongoose';
 
 import { ensureDb, disconnectDb } from './helpers.mjs';
+import { dbSuite } from './testEnv.mjs';
 import Business from '../src/models/business.model.js';
 import User from '../src/models/user.model.js';
 import Product from '../src/models/product.model.js';
@@ -217,8 +219,6 @@ after(async () => {
   await disconnectDb();
 });
 
-const SKIP = { skip: !dbOk };
-
 const BUSINESS_NOT_ACTIVE_ERROR =
   'This business is not active. Contact an administrator.';
 
@@ -227,7 +227,7 @@ const BUSINESS_NOT_ACTIVE_ERROR =
 // One app (production default limits) reused across these cases; every seeded
 // account is distinct, so the default per-IP caps are never approached.
 // ---------------------------------------------------------------------------
-describe('Phase 07B — H2 business status enforcement (login + existing JWT)', () => {
+dbSuite('Phase 07B — H2 business status enforcement (login + existing JWT)', dbOk, () => {
   let serverCtx;
   let url;
 
@@ -242,7 +242,7 @@ describe('Phase 07B — H2 business status enforcement (login + existing JWT)', 
     if (serverCtx) await serverCtx.close();
   });
 
-  it('ACTIVE business: login succeeds and protected endpoints work', SKIP, async () => {
+  it('ACTIVE business: login succeeds and protected endpoints work', async () => {
     const seed = await seedBusinessUser();
     const login = await api(url, 'POST', '/api/auth/login', {
       body: { email: seed.email, password: seed.password },
@@ -263,7 +263,7 @@ describe('Phase 07B — H2 business status enforcement (login + existing JWT)', 
     assert.ok(Array.isArray(products.json.items));
   });
 
-  it('SUSPENDED business: login is rejected and an existing JWT is revoked', SKIP, async () => {
+  it('SUSPENDED business: login is rejected and an existing JWT is revoked', async () => {
     const seed = await seedBusinessUser();
     const before2 = await api(url, 'POST', '/api/auth/login', {
       body: { email: seed.email, password: seed.password },
@@ -293,7 +293,7 @@ describe('Phase 07B — H2 business status enforcement (login + existing JWT)', 
     }
   });
 
-  it('ARCHIVED business: login is rejected and an existing JWT is revoked', SKIP, async () => {
+  it('ARCHIVED business: login is rejected and an existing JWT is revoked', async () => {
     const seed = await seedBusinessUser();
     const before2 = await api(url, 'POST', '/api/auth/login', {
       body: { email: seed.email, password: seed.password },
@@ -317,7 +317,7 @@ describe('Phase 07B — H2 business status enforcement (login + existing JWT)', 
     assertNoSecrets(me.json);
   });
 
-  it('missing business (deleted): fails safely with the same generic error, nothing leaks', SKIP, async () => {
+  it('missing business (deleted): fails safely with the same generic error, nothing leaks', async () => {
     const seed = await seedBusinessUser();
     const before2 = await api(url, 'POST', '/api/auth/login', {
       body: { email: seed.email, password: seed.password },
@@ -344,7 +344,7 @@ describe('Phase 07B — H2 business status enforcement (login + existing JWT)', 
     assertNoSecrets(me.json, [seed.business.name, seed.email]);
   });
 
-  it('DISABLED users stay blocked (user check is independent of the business check)', SKIP, async () => {
+  it('DISABLED users stay blocked (user check is independent of the business check)', async () => {
     const seed = await seedBusinessUser();
     const before2 = await api(url, 'POST', '/api/auth/login', {
       body: { email: seed.email, password: seed.password },
@@ -365,7 +365,7 @@ describe('Phase 07B — H2 business status enforcement (login + existing JWT)', 
     assert.equal(me.json.code, 'ACCOUNT_DISABLED');
   });
 
-  it('wrong password / unknown email both return the same generic 401 (no account enumeration)', SKIP, async () => {
+  it('wrong password / unknown email both return the same generic 401 (no account enumeration)', async () => {
     const seed = await seedBusinessUser();
     const wrongKnown = await api(url, 'POST', '/api/auth/login', {
       body: { email: seed.email, password: 'WrongPass123!' },
@@ -386,7 +386,7 @@ describe('Phase 07B — H2 business status enforcement (login + existing JWT)', 
     assert.equal(wrongUnknown.json.error, wrongKnown.json.error);
   });
 
-  it('OWNER / ADMIN / MANAGER / STAFF still work per their permissions in an ACTIVE business', SKIP, async () => {
+  it('OWNER / ADMIN / MANAGER / STAFF still work per their permissions in an ACTIVE business', async () => {
     const business = await Business.create({ name: unique('BizRoles') });
     trackBusiness(business._id);
 
@@ -432,7 +432,7 @@ describe('Phase 07B — H2 business status enforcement (login + existing JWT)', 
     }
   });
 
-  it('cross-business isolation is intact (a product of another business is never visible)', SKIP, async () => {
+  it('cross-business isolation is intact (a product of another business is never visible)', async () => {
     const a = await seedBusinessUser();
     const b = await seedBusinessUser();
     const created = await api(url, 'POST', '/api/products', {
@@ -458,7 +458,7 @@ describe('Phase 07B — H2 business status enforcement (login + existing JWT)', 
 // Every case builds a FRESH app so each limiter starts with an empty store;
 // tiny windows/limits keep every case fast and deterministic.
 // ---------------------------------------------------------------------------
-describe('Phase 07B — H1 authentication rate limiting', () => {
+dbSuite('Phase 07B — H1 authentication rate limiting', dbOk, () => {
   const build = async (limits, fn) => {
     const ctx = await startApp(buildApp({ limits }));
     try {
@@ -468,7 +468,7 @@ describe('Phase 07B — H1 authentication rate limiting', () => {
     }
   };
 
-  it('normal login succeeds when under the limit and never returns a hash', SKIP, async () => {
+  it('normal login succeeds when under the limit and never returns a hash', async () => {
     await build({ loginWindowMs: 60000, loginMax: 3, loginIpMax: 100 }, async (url2) => {
       const seed = await seedBusinessUser();
       const res = await api(url2, 'POST', '/api/auth/login', {
@@ -480,7 +480,7 @@ describe('Phase 07B — H1 authentication rate limiting', () => {
     });
   });
 
-  it('repeated failed logins eventually return a safe 429 (brute-force lock)', SKIP, async () => {
+  it('repeated failed logins eventually return a safe 429 (brute-force lock)', async () => {
     await build({ loginWindowMs: 60000, loginMax: 3, loginIpMax: 100 }, async (url2) => {
       const seed = await seedBusinessUser();
       for (let i = 0; i < 3; i++) {
@@ -498,7 +498,7 @@ describe('Phase 07B — H1 authentication rate limiting', () => {
     });
   });
 
-  it('successful logins never consume the budget (legitimate users are not locked out)', SKIP, async () => {
+  it('successful logins never consume the budget (legitimate users are not locked out)', async () => {
     await build({ loginWindowMs: 60000, loginMax: 3, loginIpMax: 100 }, async (url2) => {
       const seed = await seedBusinessUser();
       for (let i = 0; i < 6; i++) {
@@ -510,7 +510,7 @@ describe('Phase 07B — H1 authentication rate limiting', () => {
     });
   });
 
-  it('login recovers once the window elapses (short window, no long waits)', SKIP, async () => {
+  it('login recovers once the window elapses (short window, no long waits)', async () => {
     const windowMs = 1100;
     await build({ loginWindowMs: windowMs, loginMax: 2, loginIpMax: 100 }, async (url2) => {
       const seed = await seedBusinessUser();
@@ -534,7 +534,7 @@ describe('Phase 07B — H1 authentication rate limiting', () => {
     });
   });
 
-  it('rate limiting is scoped per normalized account+IP: another account is not blocked', SKIP, async () => {
+  it('rate limiting is scoped per normalized account+IP: another account is not blocked', async () => {
     await build({ loginWindowMs: 60000, loginMax: 3, loginIpMax: 100 }, async (url2) => {
       const locked = await seedBusinessUser();
       const other = await seedBusinessUser();
@@ -555,7 +555,7 @@ describe('Phase 07B — H1 authentication rate limiting', () => {
     });
   });
 
-  it('login rate limit keys on the NORMALIZED email (case/whitespace cannot bypass)', SKIP, async () => {
+  it('login rate limit keys on the NORMALIZED email (case/whitespace cannot bypass)', async () => {
     await build({ loginWindowMs: 60000, loginMax: 2, loginIpMax: 100 }, async (url2) => {
       const seed = await seedBusinessUser();
       // Two failures with the canonical email exhaust the account budget.
@@ -575,7 +575,7 @@ describe('Phase 07B — H1 authentication rate limiting', () => {
     });
   });
 
-  it('registration is rate limited per IP with a safe 429 body', SKIP, async () => {
+  it('registration is rate limited per IP with a safe 429 body', async () => {
     await build({ registerWindowMs: 60000, registerMax: 3 }, async (url2) => {
       for (let i = 0; i < 3; i++) {
         const reg = await registerViaHttp(url2);
@@ -588,7 +588,7 @@ describe('Phase 07B — H1 authentication rate limiting', () => {
     });
   });
 
-  it('registration still works for legitimate volume on the production-default app', SKIP, async () => {
+  it('registration still works for legitimate volume on the production-default app', async () => {
     const ctx = await startApp(buildApp());
     try {
       for (let i = 0; i < 3; i++) {

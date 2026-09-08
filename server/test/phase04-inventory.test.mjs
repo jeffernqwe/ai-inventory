@@ -1,7 +1,8 @@
 // Phase 04 — Inventory core + dashboard: stock in/out/adjust semantics,
 // negative-stock prevention, concurrency, history, low/out-of-stock logic,
 // RBAC, business isolation, validation and audit logging. Integration tests
-// against the real shipped app; skipped entirely when MongoDB is unreachable.
+// against the real shipped app + MongoDB (DB-backed; fails loudly when MongoDB
+// is unreachable — Phase 07F / M9).
 
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -15,6 +16,7 @@ import {
   uniqueName,
   disconnectDb,
 } from './support.mjs';
+import { dbSuite } from './testEnv.mjs';
 import Inventory from '../src/models/inventory.model.js';
 import InventoryTransaction from '../src/models/inventoryTransaction.model.js';
 import AuditLog from '../src/models/auditLog.model.js';
@@ -89,7 +91,7 @@ after(async () => {
   await disconnectDb();
 });
 
-describe('Phase 04 — inventory core + dashboard', { skip: !dbOk }, () => {
+dbSuite('Phase 04 — inventory core + dashboard', dbOk, () => {
   before(async () => {
     owner = await registerOwner(api, tracker);
     other = await registerOwner(api, tracker);

@@ -144,6 +144,16 @@ const productsController = {
     const doc = await productService.setStatus(req.user.businessId, paramId(req), req.user.id, 'ACTIVE');
     res.json(productService.toProductDTO(doc));
   },
+
+  /**
+   * Issue an internal EAN-13 barcode for a product without one (Phase 12D).
+   * PRODUCTS_MANAGE (OWNER/ADMIN/MANAGER). Never overwrites an existing barcode;
+   * refuses ARCHIVED products; business-scoped like every product write.
+   */
+  async generateBarcode(req, res) {
+    const doc = await productService.generateBarcode(req.user.businessId, paramId(req), req.user.id);
+    res.json(productService.toProductDTO(doc));
+  },
 };
 
 export default productsController;

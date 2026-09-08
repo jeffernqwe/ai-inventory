@@ -7,6 +7,7 @@ import { recordAudit } from './audit.service.js';
 import { notFound } from '../utils/errors.js';
 import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../constants/audit.js';
 import { classifyStockStatus } from '../constants/stockStatus.js';
+import { internalEan13Candidates } from '../utils/internalBarcode.js';
 
 const { ObjectId } = mongoose.Types;
 const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -301,6 +302,89 @@ export const productService = {
       });
     }
     return doc;
+  },
+
+  /**
+   * Issue an internal EAN-13 barcode (Phase 12D) for a product that has none.
+   * Manufacturer barcodes are never overwritten and ARCHIVED products are
+   * refused — only ACTIVE products without a barcode can receive one. The value
+   * is deterministic from the product's ObjectId and unique within the business;
+   * the partial (businessId, barcode) index is the final authority.
+   */
+  async generateBarcode(businessId, id, userId) {
+    const doc = await this.get(businessId, id); // 404 when not in this business
+    if (doc.status === 'ARCHIVED') {
+      throw new ApiError(409, 'Archived products cannot receive a new barcode', 'PRODUCT_ARCHIVED');
+    }
+    if (doc.barcode) {
+      throw new ApiError(
+        409,
+        'This product already has a barcode and it will not be overwritten',
+        'PRODUCT_ALREADY_HAS_BARCODE'
+      );
+    }
+
+    let barcode = null;
+    for (const candidate of internalEan13Candidates(doc._id.toHexString())) {
+      const taken = await Product.exists({ businessId, barcode: candidate });
+      if (!taken) {
+        barcode = candidate;
+        break;
+      }
+    }
+    if (!barcode) {
+      throw new ApiError(
+        409,
+        'Could not allocate a unique internal barcode for this product',
+        'PRODUCT_CONFLICT'
+      );
+    }
+
+    // Atomic claim: only succeeds while the product still has no barcode, so two
+    // concurrent generates can never both overwrite/lose a manufacturer code.
+    let updated;
+    try {
+      updated = await Product.findOneAndUpdate(
+        { _id: doc._id, businessId, status: 'ACTIVE', barcode: { $in: [null, ''] } },
+        { $set: { barcode } },
+        { returnDocument: 'after' }
+      );
+    } catch (err) {
+      if (isDuplicateKey(err)) {
+        throw new ApiError(
+          409,
+          'A conflicting barcode was added concurrently — try again',
+          'PRODUCT_CONFLICT'
+        );
+      }
+      throw err;
+    }
+
+    if (!updated) {
+      const fresh = await Product.findOne({ _id: doc._id, businessId });
+      if (fresh?.status === 'ARCHIVED') {
+        throw new ApiError(409, 'Archived products cannot receive a new barcode', 'PRODUCT_ARCHIVED');
+      }
+      if (fresh?.barcode) {
+        throw new ApiError(
+          409,
+          'This product already has a barcode and it will not be overwritten',
+          'PRODUCT_ALREADY_HAS_BARCODE'
+        );
+      }
+      throw new ApiError(409, 'The product changed while the barcode was being generated — try again', 'PRODUCT_CONFLICT');
+    }
+
+    await recordAudit({
+      businessId,
+      userId,
+      action: AUDIT_ACTIONS.PRODUCT_UPDATED,
+      entityType: AUDIT_ENTITY_TYPES.PRODUCT,
+      entityId: doc._id,
+      metadata: { updated: ['barcode'], internalBarcode: true },
+    });
+    // Re-read so the DTO carries the populated category like every other read.
+    return this.get(businessId, id);
   },
 
   async setStatus(businessId, id, userId, status) {

@@ -18,5 +18,6 @@ router.get('/:id', requireAuth, productsController.get);
 router.patch('/:id', requireAuth, requirePermission(PERMISSIONS.PRODUCTS_MANAGE), productsController.update);
 router.post('/:id/archive', requireAuth, requirePermission(PERMISSIONS.PRODUCTS_MANAGE), productsController.archive);
 router.post('/:id/restore', requireAuth, requirePermission(PERMISSIONS.PRODUCTS_MANAGE), productsController.restore);
+router.post('/:id/generate-barcode', requireAuth, requirePermission(PERMISSIONS.PRODUCTS_MANAGE), productsController.generateBarcode);
 
 export default router;

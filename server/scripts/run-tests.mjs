@@ -56,6 +56,7 @@ const MIXED = [
   'phase10-commercialization.test.mjs', // unit: plan catalog + decision core; db: plan state
   'phase11-intelligence.test.mjs', // unit: stock-status classifier; db: reorder list + dashboard health + AI restock tool
   'phase12a-barcode.test.mjs', // db: barcode lookup endpoint (success, isolation, duplicate, archived, RBAC)
+  'phase12d-barcode-generation.test.mjs', // db: POST /:id/generate-barcode (generate, no-overwrite, lookup, isolation, archived, RBAC)
 ];
 
 const FILE_LISTS = {

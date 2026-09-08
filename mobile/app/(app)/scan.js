@@ -1,0 +1,344 @@
+import { useCallback, useRef, useState } from 'react';
+import { router, useFocusEffect } from 'expo-router';
+import { CameraView, useCameraPermissions } from 'expo-camera';
+import { Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+
+import { StatusBadge } from '../../components/Badge';
+import Banner from '../../components/Banner';
+import Button from '../../components/Button';
+import Card from '../../components/Card';
+import { CenterLoader, LoadingBlock, errorText } from '../../components/ListState';
+import { productsApi } from '../../lib/api';
+import { isSessionError, useSession } from '../../lib/auth';
+import { ApiError } from '../../lib/client';
+import { formatMoney, formatNumber } from '../../lib/format';
+import { colors, radius, spacing, type } from '../../lib/theme';
+
+/**
+ * Camera barcode scanner (Phase 12B). Detects common retail barcodes, then
+ * resolves the code through the authenticated business-scoped endpoint
+ * GET /api/products/barcode (Phase 12A) and shows the matched product. The
+ * lookup is a read shared by every role; product management stays on the
+ * product screens. No stock mutations here — Phase 12C wires those in.
+ *
+ * Screens inside a native stack stay mounted under a push, and only one camera
+ * preview may be active at a time, so the CameraView is rendered ONLY while
+ * actively scanning and is unmounted for every non-scanning state (resolving,
+ * result, not-found, error, permission).
+ */
+
+/** Retail 1D symbologies this scanner enables (EAN/UPC/Code 39,93,128/ITF). */
+const BARCODE_TYPES = ['ean13', 'ean8', 'upc_a', 'upc_e', 'code39', 'code93', 'code128', 'itf14', 'codabar'];
+
+const TYPE_LABELS = {
+  ean13: 'EAN-13',
+  ean8: 'EAN-8',
+  upc_a: 'UPC-A',
+  upc_e: 'UPC-E',
+  code39: 'Code 39',
+  code93: 'Code 93',
+  code128: 'Code 128',
+  itf14: 'ITF-14',
+  codabar: 'Codabar',
+};
+
+/** How long an identical re-scan is ignored after "Scan again" (item still in frame). */
+const RESCAN_IGNORE_MS = 1500;
+
+function Field({ label, value, mono }) {
+  if (value == null || value === '' || value === false) return null;
+  return (
+    <View style={styles.fieldRow}>
+      <Text style={styles.fieldLabel}>{label}</Text>
+      <Text style={[styles.fieldValue, mono && styles.fieldMono]} numberOfLines={1}>
+        {value}
+      </Text>
+    </View>
+  );
+}
+
+export default function ScanScreen() {
+  const { token, signOut } = useSession();
+  const [permission, requestPermission, getPermission] = useCameraPermissions();
+
+  // Which surface is showing. Camera is mounted only while === 'scanning'.
+  const [view, setView] = useState('scanning'); // scanning | looking | found | notFound | error
+  const [product, setProduct] = useState(null);
+  const [lookupError, setLookupError] = useState(null);
+  const [last, setLast] = useState(null); // { code, type } from the most recent capture
+
+  // Synchronous latch so a burst of onBarcodeScanned callbacks from one frame
+  // can only trigger one lookup, plus a cooldown so an identical code isn't
+  // instantly re-captured right after "Scan again".
+  const captureLocked = useRef(false);
+  const lastScanned = useRef(null); // { code, at }
+
+  const codeLabel = (type) => TYPE_LABELS[type] ?? (type ? type.toUpperCase() : '');
+
+  // Re-read permission when the screen regains focus so returning from the OS
+  // Settings screen reflects the user's choice.
+  useFocusEffect(
+    useCallback(() => {
+      if (getPermission && !permission?.granted) getPermission();
+    }, [getPermission, permission?.granted])
+  );
+
+  async function lookup(code) {
+    if (!token) {
+      setView('error');
+      setLookupError(new ApiError(401, 'AUTH_REQUIRED', 'Your session ended. Sign in again.'));
+      return;
+    }
+    setProduct(null);
+    setLookupError(null);
+    setView('looking');
+    try {
+      const found = await productsApi.barcode(token, code);
+      setProduct(found);
+      setView('found');
+    } catch (err) {
+      if (isSessionError(err)) {
+        await signOut();
+        return;
+      }
+      if (err instanceof ApiError && err.status === 404) {
+        setView('notFound');
+      } else {
+        setLookupError(err);
+        setView('error');
+      }
+    }
+  }
+
+  const onScanned = useCallback(
+    ({ data, type }) => {
+      const code = typeof data === 'string' ? data.trim() : '';
+      if (!code || captureLocked.current) return;
+      // Ignore a repeat of the immediately-previous code until the cooldown
+      // elapses, so re-arming the scanner does not instantly re-fire on an item
+      // that is still inside the frame.
+      const now = Date.now();
+      if (lastScanned.current?.code === code && now - lastScanned.current.at < RESCAN_IGNORE_MS) return;
+      captureLocked.current = true;
+      lastScanned.current = { code, at: now };
+      setLast({ code, type });
+      lookup(code);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [token]
+  );
+
+  function rescan() {
+    captureLocked.current = false;
+    setProduct(null);
+    setLookupError(null);
+    setView('scanning');
+  }
+
+  // --- Camera permission ---------------------------------------------------
+  if (!permission) {
+    return <CenterLoader label="Preparing camera…" />;
+  }
+
+  if (!permission.granted) {
+    return (
+      <SafeAreaView style={styles.safe} edges={['bottom']}>
+        <View style={styles.centerCard}>
+          <Text style={styles.bigIcon}>📷</Text>
+          <Text style={styles.title}>Camera access needed</Text>
+          <Text style={styles.message}>
+            Inventory AI uses the camera to scan product barcodes. Your photos are never stored or uploaded — only the
+            decoded barcode number is looked up.
+          </Text>
+          {permission.canAskAgain ? (
+            <Button title="Allow camera access" full onPress={requestPermission} style={styles.button} />
+          ) : (
+            <>
+              <Banner
+                type="warn"
+                text="Camera access is turned off for this app in your device settings."
+                style={styles.button}
+              />
+              <Button title="Open Settings" full variant="secondary" onPress={() => Linking.openSettings()} style={styles.button} />
+            </>
+          )}
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // --- Actively scanning ----------------------------------------------------
+  if (view === 'scanning') {
+    return (
+      <View style={styles.cameraShell}>
+        <CameraView
+          style={StyleSheet.absoluteFill}
+          facing="back"
+          barcodeScannerSettings={{ barcodeTypes: BARCODE_TYPES }}
+          onBarcodeScanned={onScanned}
+        />
+        <View style={styles.reticle} pointerEvents="none">
+          <View style={styles.scanFrame}>
+            <View style={[styles.corner, styles.cornerTL]} />
+            <View style={[styles.corner, styles.cornerTR]} />
+            <View style={[styles.corner, styles.cornerBL]} />
+            <View style={[styles.corner, styles.cornerBR]} />
+          </View>
+        </View>
+        <SafeAreaView style={styles.bottomHintWrap} edges={['bottom']} pointerEvents="box-none">
+          <View style={styles.bottomHint}>
+            <Text style={styles.hintTitle}>Scan a product barcode</Text>
+            <Text style={styles.hintText}>Point the camera at the code on the product or its label and hold steady.</Text>
+          </View>
+        </SafeAreaView>
+      </View>
+    );
+  }
+
+  // --- Resolving / result states (camera unmounted) -------------------------
+  return (
+    <SafeAreaView style={styles.safe} edges={['bottom']}>
+      <ScrollView contentContainerStyle={styles.resultContent} showsVerticalScrollIndicator={false}>
+        {view === 'looking' ? (
+          <View style={styles.looking}>
+            <LoadingBlock label="Looking up barcode…" />
+            {last ? (
+              <Text style={styles.codeChip}>
+                {codeLabel(last.type)} · {last.code}
+              </Text>
+            ) : null}
+            <Button title="Cancel" variant="secondary" onPress={rescan} style={styles.button} />
+          </View>
+        ) : view === 'found' && product ? (
+          <FoundProduct product={product} onRescan={rescan} />
+        ) : view === 'notFound' ? (
+          <View style={styles.resultBox}>
+            <Text style={styles.bigIcon}>🔍</Text>
+            <Text style={styles.title}>Product not found</Text>
+            {last ? (
+              <Text style={styles.message}>
+                No product in this business matches barcode {codeLabel(last.type)} · {last.code}.
+              </Text>
+            ) : (
+              <Text style={styles.message}>No product in this business matches the scanned barcode.</Text>
+            )}
+            <Text style={styles.message}>The barcode may not be registered yet, or it belongs to another business.</Text>
+            <Button title="Scan again" full onPress={rescan} style={styles.button} />
+          </View>
+        ) : (
+          <View style={styles.resultBox}>
+            <Text style={styles.bigIcon}>⚠️</Text>
+            <Text style={styles.title}>Couldn't look up the barcode</Text>
+            <Banner type="error" text={errorText(lookupError)} style={styles.button} />
+            <Button title="Try again" full onPress={() => last && lookup(last.code)} style={styles.button} />
+            <Button title="Scan again" full variant="secondary" onPress={rescan} style={styles.button} />
+          </View>
+        )}
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+function FoundProduct({ product, onRescan }) {
+  const archived = product.status === 'ARCHIVED';
+  return (
+    <View style={styles.resultBox}>
+      <Card>
+        <View style={styles.titleRow}>
+          <Text style={styles.productName} numberOfLines={2}>
+            {product.name}
+          </Text>
+          <StatusBadge status={product.status} />
+        </View>
+        {product.description ? <Text style={styles.description}>{product.description}</Text> : null}
+
+        <View style={styles.divider} />
+        <Field label="Barcode" value={product.barcode} mono />
+        <Field label="SKU" value={product.sku} mono />
+        <Field label="Category" value={product.category?.name} />
+        <Field label="Unit" value={product.unit} />
+        <Field label="Cost price" value={product.costPrice != null ? formatMoney(product.costPrice) : null} mono />
+        <Field label="Selling price" value={product.sellingPrice != null ? formatMoney(product.sellingPrice) : null} mono />
+        <Field label="Minimum stock" value={product.minimumStock != null ? formatNumber(product.minimumStock) : null} mono />
+      </Card>
+
+      {archived ? (
+        <View style={styles.archivedNote}>
+          <Text style={styles.archivedText}>
+            This product is archived and cannot be used in stock movements. Restore it from the product screen first if
+            you need it again.
+          </Text>
+        </View>
+      ) : null}
+
+      {archived ? null : (
+        <Button title="Open product" variant="secondary" full style={styles.button} onPress={() => router.push(`/products/${product.id}`)} />
+      )}
+      <Button title="Scan again" full onPress={onRescan} style={styles.button} />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: colors.background },
+
+  // Camera scanning
+  cameraShell: { flex: 1, backgroundColor: colors.text, justifyContent: 'flex-end' },
+  reticle: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scanFrame: { width: 250, height: 160 },
+  corner: {
+    position: 'absolute',
+    width: 36,
+    height: 36,
+    borderColor: '#FFFFFF',
+  },
+  cornerTL: { top: 0, left: 0, borderTopWidth: 3, borderLeftWidth: 3, borderTopLeftRadius: radius.md },
+  cornerTR: { top: 0, right: 0, borderTopWidth: 3, borderRightWidth: 3, borderTopRightRadius: radius.md },
+  cornerBL: { bottom: 0, left: 0, borderBottomWidth: 3, borderLeftWidth: 3, borderBottomLeftRadius: radius.md },
+  cornerBR: { bottom: 0, right: 0, borderBottomWidth: 3, borderRightWidth: 3, borderBottomRightRadius: radius.md },
+  bottomHintWrap: { padding: spacing.lg },
+  bottomHint: {
+    backgroundColor: colors.overlay,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+  },
+  hintTitle: { color: '#FFF', ...type.label, marginBottom: 4 },
+  hintText: { color: 'rgba(255,255,255,0.85)', ...type.bodySmall, lineHeight: 19 },
+
+  // Permission / status / result layouts
+  centerCard: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
+  resultContent: { padding: spacing.lg, paddingBottom: spacing.huge, flexGrow: 1 },
+  looking: { alignItems: 'center', paddingTop: spacing.xxl },
+  resultBox: {},
+  title: { ...type.h2, color: colors.text, textAlign: 'center', marginBottom: spacing.xs },
+  message: { ...type.body, color: colors.textSecondary, textAlign: 'center', lineHeight: 22, marginTop: spacing.xs },
+  bigIcon: { fontSize: 40, marginBottom: spacing.md },
+  button: { marginTop: spacing.lg },
+  codeChip: { ...type.caption, color: colors.textMuted, marginTop: spacing.md },
+
+  // Found product card
+  titleRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: spacing.md },
+  productName: { ...type.h2, color: colors.text, flex: 1 },
+  description: { ...type.body, color: colors.textSecondary, marginTop: spacing.sm, lineHeight: 22 },
+  divider: { height: StyleSheet.hairlineWidth, backgroundColor: colors.divider, marginVertical: spacing.lg },
+  fieldRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 5 },
+  fieldLabel: { ...type.body, color: colors.textMuted },
+  fieldValue: { ...type.body, color: colors.text, fontWeight: '600', flexShrink: 1, marginLeft: spacing.lg },
+  fieldMono: { fontVariant: ['tabular-nums'] },
+  archivedNote: {
+    marginTop: spacing.lg,
+    backgroundColor: colors.warningSoft,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    gap: spacing.sm,
+    alignItems: 'flex-start',
+  },
+  archivedText: { ...type.bodySmall, color: colors.warning, fontWeight: '600', lineHeight: 19 },
+});

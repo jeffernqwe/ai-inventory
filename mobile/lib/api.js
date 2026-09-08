@@ -62,6 +62,8 @@ export const productsApi = {
   /** Products needing restock (available ≤ minimum, worst first, each flagged OUT_OF_STOCK/LOW_STOCK). */
   reorder: (token, params) => apiFetch('/api/products/reorder', { token, params }),
   get: (token, id) => apiFetch(`/api/products/${id}`, { token }),
+  /** Look up one product by its exact barcode (business-scoped). 404 when unknown. */
+  barcode: (token, barcode) => apiFetch('/api/products/barcode', { token, params: { barcode } }),
   create: (token, payload) => apiFetch('/api/products', { token, method: 'POST', body: payload }),
   update: (token, id, payload) => apiFetch(`/api/products/${id}`, { token, method: 'PATCH', body: payload }),
   archive: (token, id) => apiFetch(`/api/products/${id}/archive`, { token, method: 'POST' }),

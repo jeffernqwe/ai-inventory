@@ -65,6 +65,24 @@ function mapAiFailure(err) {
   return err;
 }
 
+/**
+ * Load the text turns already stored for a conversation (USER/ASSISTANT only) as
+ * prior provider context. Called BEFORE the current turn is persisted, so the
+ * result can never include the in-flight user message — the provider service
+ * appends that message itself, and persisting/loading it first would send it
+ * twice (Phase 07E / M6).
+ */
+async function priorTurnHistory(conversationId, limit) {
+  const historyFilter = { conversationId, role: { $in: ['USER', 'ASSISTANT'] } };
+  const historyCount = await AIMessage.countDocuments(historyFilter);
+  const skip = Math.max(0, historyCount - limit);
+  const recent = await AIMessage.find(historyFilter)
+    .sort({ createdAt: 1, _id: 1 })
+    .skip(skip)
+    .limit(limit);
+  return recent.map((m) => ({ role: m.role === 'ASSISTANT' ? 'assistant' : 'user', content: m.content }));
+}
+
 const aiController = {
   /** POST /api/ai/conversations -> start an (empty) conversation. */
   async createConversation(req, res) {
@@ -108,9 +126,19 @@ const aiController = {
   },
 
   /**
-   * POST /api/ai/chat -> run one user message through the AI service and store
-   * the user + assistant messages. When conversationId is omitted a new
-   * conversation is started (title derived from the first message).
+   * POST /api/ai/chat -> run one user message through the AI service.
+   *
+   * Persistence semantics (Phase 07E / M7):
+   *   * An existing conversationId is resolved up front and ownership-checked
+   *     (business + user); an unknown/foreign id is a 404 and nothing is written.
+   *   * A brand-new conversation is NOT created until the provider has produced a
+   *     final answer, and the USER + ASSISTANT messages are persisted together
+   *     only after that success. A provider failure therefore writes nothing:
+   *     no empty conversation, no orphaned USER message, no misleading ASSISTANT
+   *     reply — and retrying the same request is a fresh, predictable attempt.
+   *   * On success the current user message appears exactly once in the provider
+   *     request: prior history is loaded BEFORE this turn exists, and the AI
+   *     service appends the current message once (Phase 07E / M6).
    */
   async sendMessage(req, res) {
     const cfg = aiConfig();
@@ -122,52 +150,45 @@ const aiController = {
     if (problems.length) throwValidation(problems);
     const message = msg.value;
 
-    // Resolve or create the conversation — always under the session's user.
-    let conversation;
+    const { businessId, id: userId, role } = req.user;
+
+    // Resolve an existing conversation (never created client-side, always under
+    // the authenticated session). A new conversation is created lazily below.
+    let conversation = null;
+    let history = [];
     if (convId.value) {
       conversation = await AIConversation.findOne({
         _id: convId.value,
-        businessId: req.user.businessId,
-        userId: req.user.id,
+        businessId,
+        userId,
       });
       if (!conversation) notFound('Conversation not found');
-    } else {
+      history = await priorTurnHistory(conversation._id, cfg.contextMessages);
+    }
+
+    let result;
+    try {
+      result = await runAiChat({ businessId, userId, role, history, message });
+    } catch (err) {
+      // Nothing was persisted yet, so a failed request leaves no trace and a
+      // retry is deterministic — the same conversation is reused when an id was
+      // given, or a fresh attempt starts cleanly when there was none.
+      throw mapAiFailure(err);
+    }
+
+    // Provider succeeded — persist the turn durably now.
+    if (!conversation) {
       conversation = await AIConversation.create({
-        businessId: req.user.businessId,
-        userId: req.user.id,
+        businessId,
+        userId,
         title: titleFrom(message),
       });
     }
-
     const userMessage = await AIMessage.create({
       conversationId: conversation._id,
       role: 'USER',
       content: message,
     });
-
-    // Recent history (text turns only) to give the provider conversation context.
-    const historyFilter = { conversationId: conversation._id, role: { $in: ['USER', 'ASSISTANT'] } };
-    const historyCount = await AIMessage.countDocuments(historyFilter);
-    const historySkip = Math.max(0, historyCount - cfg.contextMessages);
-    const recent = await AIMessage.find(historyFilter)
-      .sort({ createdAt: 1, _id: 1 })
-      .skip(historySkip)
-      .limit(cfg.contextMessages);
-    const history = recent.map((m) => ({ role: m.role === 'ASSISTANT' ? 'assistant' : 'user', content: m.content }));
-
-    let result;
-    try {
-      result = await runAiChat({
-        businessId: req.user.businessId,
-        userId: req.user.id,
-        role: req.user.role,
-        history,
-        message,
-      });
-    } catch (err) {
-      throw mapAiFailure(err);
-    }
-
     const assistantMessage = await AIMessage.create({
       conversationId: conversation._id,
       role: 'ASSISTANT',

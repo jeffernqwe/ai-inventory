@@ -1,5 +1,5 @@
 import { parsePagination, pageResult } from '../utils/pagination.js';
-import { isObjectId, optionalObjectId, validateProduct } from '../utils/validate.js';
+import { isObjectId, optionalObjectId, requiredString, validateProduct, CODE_MAX } from '../utils/validate.js';
 import { throwValidation, invalidId } from '../utils/errors.js';
 import { productService } from '../services/product.service.js';
 
@@ -82,6 +82,19 @@ const productsController = {
 
   async get(req, res) {
     const doc = await productService.get(req.user.businessId, paramId(req));
+    res.json(productService.toProductDTO(doc));
+  },
+
+  /**
+   * Look up one product by an exact barcode, scoped to the authenticated
+   * business. Barcodes are unique within a business (partial unique index), so
+   * this returns at most one product; ARCHIVED products are returned with their
+   * status. 404 when the barcode is unknown here.
+   */
+  async byBarcode(req, res) {
+    const b = requiredString(req.query.barcode, 'barcode', CODE_MAX);
+    if (b.problems.length) throwValidation(b.problems);
+    const doc = await productService.getByBarcode(req.user.businessId, b.value);
     res.json(productService.toProductDTO(doc));
   },
 

@@ -230,6 +230,18 @@ export const productService = {
     return Product.findOne({ ...by, businessId }).populate('categoryId', 'name status');
   },
 
+  /**
+   * Single-product barcode lookup for the REST endpoint. Barcodes are unique
+   * within a business (partial unique index), so this resolves to at most one
+   * product; ARCHIVED products are returned with their status (never treated as
+   * active — the caller sees `status`). 404 when the barcode is unknown here.
+   */
+  async getByBarcode(businessId, barcode) {
+    const doc = await this.getByIdentifier(businessId, { barcode });
+    if (!doc) notFound('Product not found');
+    return doc;
+  },
+
   async update(businessId, id, userId, payload) {
     const doc = await Product.findOne({ _id: id, businessId }).populate('categoryId', 'name status');
     if (!doc) notFound('Product not found');

@@ -90,6 +90,9 @@ Owner-Directed Hardening (08A, 08B)
         ↓
 Phase 10
 Commercialization Foundation (10A, 10B)
+        ↓
+Phase 11
+Inventory Intelligence & Alerts (11A, 11B)
 ```
 
 ---
@@ -902,7 +905,91 @@ code, tests, mobile code, dependencies, or configuration changed.
 
 ---
 
-# 14. Phase Gate System
+# 14. Phase 11 — Inventory Intelligence & Alerts
+
+## Objective
+
+Phase 11 is an owner-directed extension approved after Phase 10, beyond the original Phase 00–07 plan
+and the V1 completion gate. It turns stock data the V1 core already tracks into read-only decision
+support — per-business inventory-health counts and a "what needs restocking" answer — surfaced
+through the existing dashboard API, the product API, the MANAGER+ mobile dashboard, and the read-only
+AI assistant. It is delivered in approved lettered increments; each is recorded here with its scope
+and verified status when it completes. Phase 11 adds no data-model change, no new dependency, no
+forecasting/purchasing, and no AI write action.
+
+## 11A — Inventory Intelligence & Alerts
+
+### Scope
+
+Implemented (approved; commit `fe1b21d`):
+
+- Shared stock-status vocabulary and pure classifier (`server/src/constants/stockStatus.js`):
+  `STOCK_STATUSES` (IN_STOCK / LOW_STOCK / OUT_OF_STOCK) and `classifyStockStatus(available,
+  minimumStock)` implementing the §19 semantics — OUT when available ≤ 0, LOW when available ≤
+  minimumStock, IN when available > minimumStock.
+- Inventory health in the dashboard summary (`dashboard.service.js`): the dashboard now reports a
+  healthy **in-stock** count alongside active products, total on-hand quantity, low-stock, and
+  out-of-stock. In-stock is the exact complement of low among the same ACTIVE-product set
+  (`inStockProducts = totalProducts − lowStockProducts`), so it needs no extra query and can never
+  disagree with the low count.
+- Reorder-needed endpoint `GET /api/products/reorder` (`product.service.js` `listReorder` + products
+  controller/route): ACTIVE products whose summed availability is at or below their `minimumStock`,
+  each item flagged OUT_OF_STOCK vs LOW_STOCK, out-of-stock first, with `q`/category filters and the
+  standard pagination envelope. It reuses the same availability join as the product stock lists so
+  every surface agrees (verified equal to the dashboard low count).
+- Read-only AI tool `getReorderNeededProducts` (`services/ai/tools.js`): the tool set grew from 8 to
+  9. Permissioned (INVENTORY_VIEW) and business-isolated like its siblings, it returns `{ count,
+  items }` so the assistant can answer "what needs restocking", "which products are out or low in
+  stock", and how the inventory is doing. It can never write.
+- Mobile dashboard (MANAGER+, `mobile/app/(app)/dashboard.js` + `productsApi.reorder`): an
+  "Inventory health" tile row (In stock / Low stock / Out of stock / Active products / Total on-hand
+  quantity) and a compact "Needs restock" preview of the worst restock candidates (top 5; each row
+  taps into product detail for stock-in). The preview is secondary — a failure never blocks the
+  summary. No new screen; no redesign.
+
+### Explicitly Out of Scope
+
+Nothing below was added; each remains a Future Development feature:
+
+- AI write actions, forecasting, demand prediction, and purchase recommendations
+- Supplier management and automated purchasing
+- RAG / vector search
+
+### Verified
+
+- New Phase 11 test file (`server/test/phase11-intelligence.test.mjs`, classified MIXED) covering
+  the classifier boundary matrix (incl. `minimumStock = 0`), the reorder endpoint (ACTIVE
+  at-or-below-min only, OUT/LOW tags, worst-first, q + pagination), dashboard health consistency
+  (`inStockProducts == totalProducts − lowStockProducts`), cross-business isolation, STAFF/OWNER
+  RBAC, and the read-only restock tool (incl. rejecting a model-supplied `businessId`).
+- `npm run lint`: 0 errors / 0 warnings.
+- DB-free unit run: 106 passed / 10 skipped / 0 failed (Phase 11 classifier units included).
+- Full backend suite: 257/257 passing (was 240/240 before Phase 11A).
+- Mobile: `npx expo export` bundles cleanly for Android and iOS (bundle/type sanity check).
+
+## 11B — Documentation Close-out
+
+### Scope
+
+Documentation only — records Phase 11 in `CLAUDE.md`, this roadmap, and `README.md`. No application
+code, tests, mobile code, dependencies, or configuration changed.
+
+### Verified
+
+- `npm run lint`, `npm run test:unit`, and `npm test` pass (unchanged — documentation-only change).
+- `git diff` confirms only the three documentation files changed; the approved Phase 11A code is
+  unchanged.
+
+## Definition of Done
+
+- Phase 11 increments are recorded in this roadmap, in `CLAUDE.md`, and in README.
+- Phase 11 stays read-only: no AI write action, forecasting, purchasing, or new data model.
+- The V1 completion status and the Phase 10 status are preserved.
+- `npm run lint`, `npm run test:unit`, and `npm test` all pass.
+
+---
+
+# 15. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.
 
@@ -943,7 +1030,7 @@ The project owner decides whether to proceed.
 
 ---
 
-# 15. Change Control
+# 16. Change Control
 
 If Claude discovers that the current specification is incomplete or incorrect:
 
@@ -961,7 +1048,7 @@ Minor implementation improvements that do not alter architectural decisions may 
 
 ---
 
-# 16. Bug Handling
+# 17. Bug Handling
 
 If a bug is discovered during a phase:
 
@@ -986,7 +1073,7 @@ Only fix it immediately if it blocks the current phase.
 
 ---
 
-# 17. Refactoring Rules
+# 18. Refactoring Rules
 
 Refactoring is allowed when it:
 
@@ -1004,7 +1091,7 @@ Keep changes focused.
 
 ---
 
-# 18. Dependency Rules
+# 19. Dependency Rules
 
 Before adding a dependency:
 
@@ -1018,7 +1105,7 @@ Do not add dependencies simply for convenience.
 
 ---
 
-# 19. Git Checkpoints
+# 20. Git Checkpoints
 
 A Git commit should be created after a stable phase.
 
@@ -1037,6 +1124,8 @@ phase 08A: structured request logging complete
 phase 08B: ESLint baseline complete
 phase 10A: commercialization foundation complete
 phase 10B: commercialization documentation close-out complete
+phase 11A: inventory intelligence + restock alerts complete
+phase 11B: inventory intelligence documentation close-out complete
 ```
 
 Before committing:
@@ -1048,7 +1137,7 @@ Before committing:
 
 ---
 
-# 20. V1 Completion
+# 21. V1 Completion
 
 V1 is complete only when all major requirements in:
 
@@ -1090,7 +1179,7 @@ AI Inventory Questions
 
 ---
 
-# 21. Future Development
+# 22. Future Development
 
 After V1, future features must be planned separately.
 
@@ -1125,7 +1214,7 @@ Future functionality must not be implemented during V1 unless explicitly approve
 
 ---
 
-# 22. Final Development Rule
+# 23. Final Development Rule
 
 The goal is not to produce the largest amount of code as quickly as possible.
 

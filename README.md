@@ -118,6 +118,21 @@ are available through `getBusinessPlan` / `assertBusinessEntitled`. This is grou
 subscriptions, the billing lifecycle, payment providers, AI usage metering, and paid-plan
 enforcement are **deferred** (V4) and not implemented. No V1 behavior is gated or changed.
 
+### Inventory intelligence & restock alerts (Phase 11)
+
+The dashboard summary and the product API now expose read-only decision support built on the existing
+availability math. The dashboard reports a healthy **in-stock** count alongside active products,
+total on-hand quantity, low-stock, and out-of-stock counts (low = available ≤ `minimumStock`; out =
+available ≤ 0; in-stock = active products above minimum — the exact complement of low, i.e.
+`totalProducts − lowStockProducts`, so it always agrees with the low count). `GET
+/api/products/reorder` returns ACTIVE products whose available quantity is at or below their minimum,
+each flagged `OUT_OF_STOCK` vs `LOW_STOCK`, worst (most depleted) first, with `q`/category filters
+and standard pagination. The AI assistant gained a ninth read-only tool, `getReorderNeededProducts`
+(permissioned and business-isolated like its siblings), which answers "what needs restocking" /
+"which products are out or low in stock". The MANAGER+ mobile dashboard shows an "Inventory health"
+tile row and a compact "Needs restock" preview of the worst candidates (taps into product detail for
+stock-in). Read-only throughout — no data-model change, no AI write action, no new dependency.
+
 Models (collections):
 
 ```text
@@ -150,6 +165,7 @@ Phase 04 — catalog, inventory, dashboard (all `Authorization: Bearer <token>`)
 | PATCH  | `/api/locations/:id` | Update location                                    |
 | POST   | `/api/locations/:id/archive` `/restore` | Archive/restore                     |
 | GET    | `/api/products` | List/search products (`q`, `status`, `categoryId`, `locationId`, `lowStock`, `outOfStock`) |
+| GET    | `/api/products/reorder` | Products needing restock — available ≤ `minimumStock`, each OUT/LOW, OUT first |
 | POST   | `/api/products` | Create product (MANAGER+)                              |
 | GET    | `/api/products/:id` | Get one product (nested category)                  |
 | PATCH  | `/api/products/:id` | Update product (MANAGER+)                          |
@@ -160,7 +176,7 @@ Phase 04 — catalog, inventory, dashboard (all `Authorization: Bearer <token>`)
 | POST   | `/api/inventory/stock-out` | Stock out (STAFF+)                              |
 | POST   | `/api/inventory/adjust` | Adjust to absolute quantity (MANAGER+)             |
 | GET    | `/api/inventory/history` | Transaction history (filters, pagination)         |
-| GET    | `/api/dashboard` | Totals, low/out counts, recent activity (MANAGER+)     |
+| GET    | `/api/dashboard` | Totals, in-stock/low/out counts, recent activity (MANAGER+) |
 
 Phase 06 — AI assistant (all `Authorization: Bearer <token>`, require `ai.use`):
 
@@ -172,9 +188,9 @@ Phase 06 — AI assistant (all `Authorization: Bearer <token>`, require `ai.use`
 | GET    | `/api/ai/conversations/:id/messages` | Get one conversation's messages (oldest first)  |
 
 The V1 assistant is **read-only**: it answers questions about the caller's catalog and
-stock through 8 server-side, authorization-aware tools (`searchProducts`, `getProduct`,
+stock through 9 server-side, authorization-aware tools (`searchProducts`, `getProduct`,
 `getInventory`, `getLowStockProducts`, `getOutOfStockProducts`, `getInventorySummary`,
-`getInventoryHistory`, `getProductsByLocation`). Tools always run inside the
+`getInventoryHistory`, `getProductsByLocation`, `getReorderNeededProducts`). Tools always run inside the
 authenticated user's role and `businessId` context — the AI never connects to MongoDB
 directly and can never change products, stock, transactions, users or roles. If no AI
 provider is configured, chat returns `503 AI_NOT_CONFIGURED`; the rest of the API keeps
@@ -221,7 +237,7 @@ npx expo start              # start Metro dev server (Expo Go / simulator)
   `http://10.0.2.2:4000` on Android (emulator loopback) and `http://localhost:4000`
   elsewhere — i.e. the local Phase 03/04 backend. Point `EXPO_PUBLIC_API_URL` at your
   server when running on a physical device.
-- **Screens (Expo Router, authenticated group):** dashboard (MANAGER+), products
+- **Screens (Expo Router, authenticated group):** dashboard (MANAGER+; inventory-health tiles and a "Needs restock" preview), products
   (list/new/edit/detail with search, status/category/location and low/out filters),
   categories, locations, inventory (with low/out views), stock in, stock out, adjust
   (MANAGER+), inventory history, **AI assistant** (conversation hub, new chat and
@@ -276,7 +292,7 @@ committed.
   bundling for Android and iOS plus a secret scan
 - **Phase 06 — AI Assistant:** complete — provider abstraction (Claude/Gemini over Node `fetch`,
   no AI SDK dependency), an AI service that orchestrates tool calls with strict read-only,
-  authorization-aware tools (8 inventory tools), conversation/message persistence, a rate-limited
+  authorization-aware tools (9 inventory tools), conversation/message persistence, a rate-limited
   `/api/ai/chat` endpoint plus conversation listing/creation and message retrieval, and a mobile
   chat UI (hub, new chat, threads) with loading/error/empty states. Tool execution is bound to the
   authenticated user's role and `businessId`; the AI never reaches MongoDB directly and never
@@ -301,3 +317,10 @@ Phase 07 (testing + production hardening) and Phase 08 (owner-directed hardening
   payment providers, AI usage metering, and paid-plan enforcement are **deferred** (V4) and not
   implemented. V1 completion status is unchanged. Verified by `npm run lint` (0/0) and the full
   backend suite (240/240).
+- **Phase 11 — Inventory Intelligence & Alerts:** 11A (implementation) approved and committed
+  (`fe1b21d`), 11B (documentation close-out) recorded — dashboard inventory-health counts
+  (in-stock / low / out, plus active products and total on-hand), a reorder-needed endpoint
+  (`GET /api/products/reorder`), a read-only `getReorderNeededProducts` AI tool, and a mobile
+  dashboard inventory-health + "Needs restock" preview (see "Inventory intelligence & restock
+  alerts"). Read-only throughout — no data-model, RBAC, or V1 status change. Verified by
+  `npm run lint` (0/0), the DB-free unit run (106 passed), and the full backend suite (257/257).

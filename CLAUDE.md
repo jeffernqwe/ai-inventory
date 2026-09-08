@@ -213,6 +213,9 @@ Phase 08 — Owner-Directed Hardening (lettered increments)
 Phase 10 — Commercialization Foundation (lettered increments)
             10A — SaaS plan state + centralized entitlement checks
             10B — Documentation close-out
+Phase 11 — Inventory Intelligence & Alerts (lettered increments)
+            11A — Inventory health counts + reorder list + read-only restock tool
+            11B — Documentation close-out
 ```
 
 Phase 08 is an owner-directed hardening extension delivered in approved lettered increments
@@ -226,6 +229,15 @@ plan catalog with feature limits (`server/src/constants/plans.js`), and business
 checks (`server/src/services/entitlement.service.js`). Actual subscriptions, the billing lifecycle,
 payment providers, AI usage metering, and paid-plan enforcement remain deferred (V4) and are NOT
 implemented.
+
+Phase 11 is an owner-directed inventory-intelligence extension delivered in approved lettered
+increments (11A, 11B, …) after Phase 10. It turns stock data V1 already tracks into read-only
+decision support WITHOUT changing the data model or enabling AI writes: 11A added a shared
+stock-status classifier (IN / LOW / OUT), a healthy in-stock count to the dashboard summary, the
+reorder-needed endpoint `GET /api/products/reorder`, the read-only `getReorderNeededProducts` AI
+tool, and a mobile dashboard inventory-health + "Needs restock" preview. Everything reuses the §19
+availability math, stays business-isolated and RBAC-gated, and never modifies products or inventory;
+forecasting, demand prediction, purchasing, and AI write actions were NOT added.
 
 When instructed to work on a specific phase:
 
@@ -319,6 +331,7 @@ getOutOfStockProducts
 getInventorySummary
 getInventoryHistory
 getProductsByLocation
+getReorderNeededProducts
 ```
 
 AI tools must receive authenticated user context.

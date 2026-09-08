@@ -94,8 +94,15 @@ export function transactionPublic(txn) {
 
 /**
  * Makes a stock movement durable by creating the inventory transaction and the
- * audit log. Runs only AFTER the inventory quantity was updated atomically; if
- * this persistence step fails the caller rolls the inventory change back.
+ * audit log. Runs only AFTER the inventory quantity was updated atomically.
+ *
+ * The InventoryTransaction is the authoritative, durable record of the change.
+ * Once it is written the movement must stand: an audit-logging failure is
+ * therefore logged and swallowed, never propagated — surfacing it would make
+ * the caller compensate an already-durable change and orphan the transaction
+ * (Phase 07A / H3). The only failure that propagates is
+ * InventoryTransaction.create itself, i.e. no transaction row was created by
+ * this call, which is exactly the safe point for the caller to compensate.
  */
 async function recordMovement({
   businessId,
@@ -121,38 +128,76 @@ async function recordMovement({
     reference: reference || undefined,
     userId,
   });
-  await recordAudit({
-    businessId,
-    userId,
-    action: AUDIT_ACTION_BY_TYPE[type],
-    entityType: AUDIT_ENTITY_TYPES.INVENTORY_TRANSACTION,
-    entityId: txn._id,
-    metadata: {
-      productId: String(productId),
-      locationId: String(locationId),
-      type,
-      quantity,
-      previousQuantity,
-      newQuantity,
-    },
-  });
+  try {
+    await recordAudit({
+      businessId,
+      userId,
+      action: AUDIT_ACTION_BY_TYPE[type],
+      entityType: AUDIT_ENTITY_TYPES.INVENTORY_TRANSACTION,
+      entityId: txn._id,
+      metadata: {
+        productId: String(productId),
+        locationId: String(locationId),
+        type,
+        quantity,
+        previousQuantity,
+        newQuantity,
+      },
+    });
+  } catch (err) {
+    console.error(
+      `[inventory] audit record failed for ${type} transaction ${String(txn._id)} (movement preserved): ${err.message}`
+    );
+  }
   return txn;
 }
 
 /**
- * Best-effort compensation for an inventory change whose transaction/audit
+ * Concurrency-safe compensation for an inventory change whose transaction
  * record could not be persisted (SYSTEM_SPECIFICATION.md §16 — the inventory
- * must never move without its transaction). Compensation failures are logged,
- * never masked, so the original error still reaches the caller.
+ * must never move without its transaction). Reverts ONLY the quantity this
+ * operation wrote, and ONLY while the row is still exactly at that quantity
+ * (`filter` must anchor on the current quantity this operation produced). If a
+ * concurrent movement has already committed a newer quantity, the update
+ * matches nothing and the rollback no-ops — it never blindly overwrites a newer
+ * value (Phase 07A / H4). The rollback restores a previously legal,
+ * non-negative quantity in a single atomic update, so it can never create a
+ * negative quantity (Phase 07A / H5). Compensation failures are logged, never
+ * masked, so the original error still reaches the caller.
  */
-async function rollbackInventory(filter, operation) {
+async function rollbackInventory(filter, operation, label) {
   try {
     const res = await Inventory.updateOne(filter, operation);
     if (res.modifiedCount !== 1) {
-      console.error('[inventory] compensation did not match a document', JSON.stringify(filter));
+      console.error(`[inventory] ${label}: rollback skipped (row no longer at the written quantity)`);
     }
   } catch (err) {
-    console.error('[inventory] compensation failed:', err.message);
+    console.error(`[inventory] ${label}: rollback failed:`, err.message);
+  }
+}
+
+/**
+ * Compensation for a first stock-in whose row this operation created (upsert).
+ * Deletes the row instead of decrementing it, and only while the row is still
+ * exactly as this operation left it (quantity + reservedQuantity anchored), so
+ * a failed first stock-in can never leave a zero-quantity orphan row (Phase 07A
+ * / L5) and a concurrent movement that built on the new row is never removed.
+ * Best-effort like rollbackInventory.
+ */
+async function rollbackCreatedRow(businessId, productId, locationId, quantity, label) {
+  try {
+    const res = await Inventory.deleteOne({
+      businessId,
+      productId,
+      locationId,
+      quantity,
+      reservedQuantity: 0,
+    });
+    if (res.deletedCount !== 1) {
+      console.error(`[inventory] ${label}: created-row rollback skipped (row no longer at quantity ${quantity})`);
+    }
+  } catch (err) {
+    console.error(`[inventory] ${label}: created-row rollback failed:`, err.message);
   }
 }
 
@@ -227,7 +272,22 @@ export const inventoryService = {
       });
       return { transaction: transactionPublic(txn), previousQuantity, newQuantity };
     } catch (err) {
-      await rollbackInventory(filter, { $inc: { quantity: -quantity } });
+      if (prev == null) {
+        // This stock-in created the row (first stock-in, upsert inserted it).
+        // Compensate by deleting the freshly created row — never by decrementing
+        // it to zero and leaving an orphan row (L5). The delete is anchored on
+        // the exact quantity we wrote so a concurrent movement that built on
+        // the new row is preserved.
+        await rollbackCreatedRow(filter.businessId, filter.productId, filter.locationId, newQuantity, 'stock-in');
+      } else {
+        // Existing row: revert only while it is still exactly at the quantity
+        // this operation produced; a concurrent movement makes it a no-op.
+        await rollbackInventory(
+          { _id: prev._id, quantity: newQuantity },
+          { $inc: { quantity: -quantity } },
+          'stock-in'
+        );
+      }
       throw err;
     }
   },
@@ -280,7 +340,13 @@ export const inventoryService = {
       });
       return { transaction: transactionPublic(txn), previousQuantity, newQuantity };
     } catch (err) {
-      await rollbackInventory({ _id: prev._id }, { $inc: { quantity } });
+      // Revert only while the row is still exactly at the quantity this
+      // stock-out produced; a concurrent movement makes it a no-op.
+      await rollbackInventory(
+        { _id: prev._id, quantity: newQuantity },
+        { $inc: { quantity } },
+        'stock-out'
+      );
       throw err;
     }
   },
@@ -338,7 +404,13 @@ export const inventoryService = {
       });
       return { transaction: transactionPublic(txn), previousQuantity, newQuantity: target };
     } catch (err) {
-      await rollbackInventory({ _id: prev._id }, { $set: { quantity: previousQuantity } });
+      // Revert only while the row is still exactly at the target quantity this
+      // adjustment wrote; a concurrent movement makes it a no-op.
+      await rollbackInventory(
+        { _id: prev._id, quantity: target },
+        { $set: { quantity: previousQuantity } },
+        'adjust'
+      );
       throw err;
     }
   },

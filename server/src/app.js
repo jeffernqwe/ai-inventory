@@ -1,8 +1,10 @@
 import express from 'express';
+import helmet from 'helmet';
 
 import env from './config/env.js';
+import { createCors } from './middlewares/cors.js';
 import healthRoutes from './routes/health.routes.js';
-import authRoutes from './routes/auth.routes.js';
+import { createAuthRouter } from './routes/auth.routes.js';
 import categoryRoutes from './routes/categories.routes.js';
 import locationRoutes from './routes/locations.routes.js';
 import productRoutes from './routes/products.routes.js';
@@ -12,37 +14,83 @@ import aiRoutes from './routes/ai.routes.js';
 import notFound from './middlewares/notFound.js';
 import errorHandler from './middlewares/errorHandler.js';
 
-const app = express();
+/**
+ * Build a fully wired Express app. Exported as a factory so tests can exercise
+ * the real middleware chain (headers, CORS, body limit, trust proxy, auth rate
+ * limiters) deterministically, without mutating process.env. The module's
+ * default export is the singleton the server boots (see index.js).
+ *
+ * @param {object}  [options]
+ * @param {number}  [options.trustProxy]    Reverse-proxy hops (Phase 07B/M4).
+ * @param {string[]} [options.corsOrigins]  Explicit CORS allow-list (M3).
+ * @param {string}  [options.jsonBodyLimit] express.json() body limit (L2).
+ * @param {object}  [options.authLimits]    Auth rate-limiter overrides (tests).
+ */
+export function createApp({
+  trustProxy = env.trustProxy,
+  corsOrigins = env.corsOrigins,
+  jsonBodyLimit = env.jsonBodyLimit,
+  authLimits,
+} = {}) {
+  const app = express();
 
-// Only trust a known number of reverse-proxy hops when explicitly configured
-// (TRUST_PROXY). The default — trust nobody — keeps X-Forwarded-For spoofing
-// from bypassing the auth rate limiters. See config/env.js parseTrustProxy.
-if (env.trustProxy > 0) {
-  app.set('trust proxy', env.trustProxy);
+  // H6: never advertise the framework. Express-level config, not per-route
+  // header deletion (which Express would re-add on the next response anyway).
+  app.disable('x-powered-by');
+
+  // M4: only trust a known number of reverse-proxy hops when explicitly
+  // configured (TRUST_PROXY, numeric hop count). Default 0 = trust no proxy:
+  // forwarded headers are ignored, so spoofed X-Forwarded-For cannot bypass
+  // the IP-based auth rate limiters. See config/env.js parseTrustProxy.
+  if (trustProxy > 0) {
+    app.set('trust proxy', trustProxy);
+  }
+
+  // H6: defense-in-depth security headers. This is a JSON API for native mobile
+  // clients — no HTML documents are served, so the document-oriented controls
+  // (Content-Security-Policy, Cross-Origin-Embedder-Policy) are disabled. The
+  // remaining headers (nosniff, frame/opener isolation, HSTS, etc.) apply to
+  // every response, health and auth included.
+  app.use(
+    helmet({
+      contentSecurityPolicy: false,
+      crossOriginEmbedderPolicy: false,
+    })
+  );
+
+  // M3: explicit browser CORS allow-list (see middlewares/cors.js). Native
+  // mobile sends no Origin and is unaffected; browsers only get a grant for
+  // allow-listed origins — never '*'.
+  app.use(createCors(corsOrigins));
+
+  // L2: explicit JSON body-size cap. Oversized bodies are rejected with a
+  // clean 413 before any route logic runs (see errorHandler bodyError mapping).
+  app.use(express.json({ limit: jsonBodyLimit }));
+
+  // Service info
+  app.get('/', (req, res) => {
+    res.json({ service: 'inventory-ai-server', status: 'ok' });
+  });
+
+  // API routes
+  app.use('/api/health', healthRoutes);
+  app.use('/api/auth', createAuthRouter({ limits: authLimits }));
+  app.use('/api/categories', categoryRoutes);
+  app.use('/api/locations', locationRoutes);
+  app.use('/api/products', productRoutes);
+  app.use('/api/inventory', inventoryRoutes);
+  app.use('/api/dashboard', dashboardRoutes);
+  app.use('/api/ai', aiRoutes);
+
+  // Unknown routes -> structured 404
+  app.use(notFound);
+
+  // Centralized error handler (must be registered last)
+  app.use(errorHandler);
+
+  return app;
 }
 
-// Parse JSON request bodies
-app.use(express.json());
-
-// Service info
-app.get('/', (req, res) => {
-  res.json({ service: 'inventory-ai-server', status: 'ok' });
-});
-
-// API routes
-app.use('/api/health', healthRoutes);
-app.use('/api/auth', authRoutes);
-app.use('/api/categories', categoryRoutes);
-app.use('/api/locations', locationRoutes);
-app.use('/api/products', productRoutes);
-app.use('/api/inventory', inventoryRoutes);
-app.use('/api/dashboard', dashboardRoutes);
-app.use('/api/ai', aiRoutes);
-
-// Unknown routes -> structured 404
-app.use(notFound);
-
-// Centralized error handler (must be registered last)
-app.use(errorHandler);
+const app = createApp();
 
 export default app;

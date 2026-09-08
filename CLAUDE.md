@@ -210,11 +210,22 @@ Phase 07 — Testing + Production Hardening
 Phase 08 — Owner-Directed Hardening (lettered increments)
             08A — Structured request logging + correlation IDs
             08B — Backend ESLint baseline
+Phase 10 — Commercialization Foundation (lettered increments)
+            10A — SaaS plan state + centralized entitlement checks
+            10B — Documentation close-out
 ```
 
 Phase 08 is an owner-directed hardening extension delivered in approved lettered increments
 (08A, 08B, …) beyond the original Phase 00–07 plan; `docs/DEVELOPMENT_ROADMAP.md` records each
 increment's scope and verified status.
+
+Phase 10 is an owner-directed commercialization extension delivered in approved lettered increments
+(10A, 10B, …) beyond the V1 completion gate. It prepares the backend for future SaaS
+subscriptions/paid plans WITHOUT implementing payments: 10A added `Business.planCode`, a centralized
+plan catalog with feature limits (`server/src/constants/plans.js`), and business-level entitlement
+checks (`server/src/services/entitlement.service.js`). Actual subscriptions, the billing lifecycle,
+payment providers, AI usage metering, and paid-plan enforcement remain deferred (V4) and are NOT
+implemented.
 
 When instructed to work on a specific phase:
 

@@ -53,6 +53,7 @@ const MIXED = [
   'phase07d-db-reliability.test.mjs', // unit: error mapping; db: readiness + DB-down
   'phase07e-ai-reliability.test.mjs', // unit: message shape; db: M6/M7 routes
   'phase08a-request-logging.test.mjs', // unit: request-id + log shape; db: authed context
+  'phase10-commercialization.test.mjs', // unit: plan catalog + decision core; db: plan state
 ];
 
 const FILE_LISTS = {

@@ -109,6 +109,15 @@ cookies, request bodies, query strings, or full AI prompts/responses. The per-re
 on by default; set `LOG_REQUESTS=0` in `server/.env` to disable it (error logs still emit). The
 test runner forces `LOG_REQUESTS=0` so suites stay quiet.
 
+### Commercialization foundation (Phase 10)
+
+`Business.planCode`, the centralized plan catalog (`server/src/constants/plans.js`), and
+`server/src/services/entitlement.service.js` provide the SaaS foundation. Every business carries a
+plan code — default `FOUNDATION`, the unlimited V1 baseline — and business-level entitlement checks
+are available through `getBusinessPlan` / `assertBusinessEntitled`. This is groundwork only: actual
+subscriptions, the billing lifecycle, payment providers, AI usage metering, and paid-plan
+enforcement are **deferred** (V4) and not implemented. No V1 behavior is gated or changed.
+
 Models (collections):
 
 ```text
@@ -285,3 +294,10 @@ Phase 07 (testing + production hardening) and Phase 08 (owner-directed hardening
   structured request logging + correlation IDs (`X-Request-ID`, `LOG_REQUESTS`; see
   "Request logging & correlation IDs") and a backend ESLint baseline (`npm run lint`; see
   "Backend lint")
+- **Phase 10 — Commercialization Foundation:** 10A (foundation) approved and 10B (documentation
+  close-out) recorded — `Business.planCode`, a centralized plan catalog with feature limits, and
+  `entitlement.service.js` entitlement checks now provide the SaaS foundation (see
+  "Commercialization foundation"). Groundwork only: actual subscriptions, the billing lifecycle,
+  payment providers, AI usage metering, and paid-plan enforcement are **deferred** (V4) and not
+  implemented. V1 completion status is unchanged. Verified by `npm run lint` (0/0) and the full
+  backend suite (240/240).

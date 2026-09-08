@@ -87,6 +87,9 @@ Testing + Production Hardening
         ↓
 Phase 08
 Owner-Directed Hardening (08A, 08B)
+        ↓
+Phase 10
+Commercialization Foundation (10A, 10B)
 ```
 
 ---
@@ -828,7 +831,78 @@ Implemented (commit `5525c61`):
 
 ---
 
-# 13. Phase Gate System
+# 13. Phase 10 — Commercialization Foundation
+
+## Objective
+
+Phase 10 is an owner-directed extension approved after the V1 completion gate, beyond the original
+Phase 00–07 plan. It prepares the backend for future SaaS subscriptions and paid plans WITHOUT
+implementing payments. It is delivered in approved lettered increments; each is recorded here with
+its scope and verified status when it completes.
+
+## 10A — Commercialization Foundation
+
+### Scope
+
+Implemented (approved; commit pending owner sign-off):
+
+- `Business.planCode` — which catalog plan a business is on. Defaults to `FOUNDATION` (the
+  unlimited V1 baseline), so existing and newly registered businesses keep current behavior;
+  pre-Phase-10 documents without the field resolve to `FOUNDATION`.
+- Centralized plan definitions and feature limits in `server/src/constants/plans.js` — the `PLANS`
+  catalog, canonical `PLAN_FEATURES`, and `resolvePlan` (lenient fallback to the default plan so an
+  unknown code never locks a tenant out).
+- Business-level entitlement checks in `server/src/services/entitlement.service.js` —
+  `getBusinessPlan(businessId)`, `assertBusinessEntitled(businessId, feature, { usage })`, and the
+  pure decision core `decideFeature`. Server-authoritative: `businessId` comes from the session, the
+  tenant is verified ACTIVE (`assertActiveBusiness`), and decisions fail closed per feature.
+- `server/test/phase10-commercialization.test.mjs` — catalog + decision-core unit tests and
+  DB-backed tests for planCode defaulting, capped-plan enforcement, tenant isolation, and
+  fail-closed behavior.
+
+### Explicitly Deferred
+
+The following are NOT implemented and remain Future Development features:
+
+- Subscriptions and the billing lifecycle (plan periods, renewals, status)
+- Payment providers and payment processing
+- AI usage metering / quotas
+- Paid-plan enforcement on any route or business rule
+
+Phase 10 only defines plan state and the entitlement-check primitive a future billing flow will
+drive. No V1 route or business rule is gated and nothing is charged.
+
+### Verified
+
+- New Phase 10 test file covering catalog integrity, the entitlement decision matrix, planCode
+  defaulting, capped-plan enforcement, tenant isolation, and fail-closed behavior.
+- `npm run lint`: 0 errors / 0 warnings.
+- Full backend suite: 240/240 (was 223/223 before Phase 10A).
+
+## 10B — Documentation Close-out
+
+### Scope
+
+Documentation only — records Phase 10 in `CLAUDE.md`, this roadmap, and `README.md`. No application
+code, tests, mobile code, dependencies, or configuration changed.
+
+### Verified
+
+- `npm run lint`, `npm run test:unit`, and `npm test` pass (unchanged — documentation-only change).
+- `git diff` confirms only the three documentation files changed; the approved Phase 10A code is
+  unchanged.
+
+## Definition of Done
+
+- Phase 10 increments are recorded in this roadmap, in `CLAUDE.md`, and in README.
+- Deferred items (subscriptions / billing lifecycle / payment providers / AI usage metering /
+  paid-plan enforcement) are stated as deferred.
+- The V1 completion status is preserved.
+- `npm run lint`, `npm run test:unit`, and `npm test` all pass.
+
+---
+
+# 14. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.
 
@@ -869,7 +943,7 @@ The project owner decides whether to proceed.
 
 ---
 
-# 14. Change Control
+# 15. Change Control
 
 If Claude discovers that the current specification is incomplete or incorrect:
 
@@ -887,7 +961,7 @@ Minor implementation improvements that do not alter architectural decisions may 
 
 ---
 
-# 15. Bug Handling
+# 16. Bug Handling
 
 If a bug is discovered during a phase:
 
@@ -912,7 +986,7 @@ Only fix it immediately if it blocks the current phase.
 
 ---
 
-# 16. Refactoring Rules
+# 17. Refactoring Rules
 
 Refactoring is allowed when it:
 
@@ -930,7 +1004,7 @@ Keep changes focused.
 
 ---
 
-# 17. Dependency Rules
+# 18. Dependency Rules
 
 Before adding a dependency:
 
@@ -944,7 +1018,7 @@ Do not add dependencies simply for convenience.
 
 ---
 
-# 18. Git Checkpoints
+# 19. Git Checkpoints
 
 A Git commit should be created after a stable phase.
 
@@ -961,6 +1035,8 @@ phase 06: AI assistant complete
 phase 07: production hardening complete
 phase 08A: structured request logging complete
 phase 08B: ESLint baseline complete
+phase 10A: commercialization foundation complete
+phase 10B: commercialization documentation close-out complete
 ```
 
 Before committing:
@@ -972,7 +1048,7 @@ Before committing:
 
 ---
 
-# 19. V1 Completion
+# 20. V1 Completion
 
 V1 is complete only when all major requirements in:
 
@@ -1014,7 +1090,7 @@ AI Inventory Questions
 
 ---
 
-# 20. Future Development
+# 21. Future Development
 
 After V1, future features must be planned separately.
 
@@ -1049,7 +1125,7 @@ Future functionality must not be implemented during V1 unless explicitly approve
 
 ---
 
-# 21. Final Development Rule
+# 22. Final Development Rule
 
 The goal is not to produce the largest amount of code as quickly as possible.
 

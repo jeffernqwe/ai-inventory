@@ -58,6 +58,13 @@ export default function ProductsScreen() {
 
   const header = (
     <View>
+      <Button
+        title="📷  Scan a barcode"
+        variant="secondary"
+        full
+        onPress={() => router.push('/scan')}
+        style={styles.scanBtn}
+      />
       <Input value={q} onChangeText={setQ} placeholder="Search by name, SKU or barcode…" name="q" autoCapitalize="none" />
       <View style={styles.filterRow}>
         <Chip label="All" selected={status === 'ALL'} onPress={() => setStatus('ALL')} />
@@ -134,6 +141,7 @@ const styles = StyleSheet.create({
   filterRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   chipRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
   spacer: { flex: 1 },
+  scanBtn: { marginBottom: spacing.lg },
   addBtn: { backgroundColor: colors.primary, borderRadius: radius.pill, paddingHorizontal: spacing.md, paddingVertical: 8 },
   addBtnText: { color: '#FFF', fontWeight: '700', fontSize: 13 },
   row: {

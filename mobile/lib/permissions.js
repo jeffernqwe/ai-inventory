@@ -105,6 +105,33 @@ export const canViewPurchaseOrders = (u) => can(u, PERMISSIONS.PURCHASE_ORDERS_V
 export const canReceivePurchaseOrders = (u) => can(u, PERMISSIONS.PURCHASE_ORDERS_RECEIVE);
 export const canManageUsers = (u) => can(u, PERMISSIONS.USERS_MANAGE);
 
+/**
+ * Roles an actor may assign when creating/editing a user. OWNER may assign
+ * any non-OWNER role; ADMIN only MANAGER/STAFF (never ADMIN). Mirrors the
+ * server's NON_OWNER_ROLES + ADMIN_RESTRICTED rules — UI-only.
+ */
+export function assignableRoles(actor) {
+  if (actor?.role === ROLES.OWNER) return [ROLES.ADMIN, ROLES.MANAGER, ROLES.STAFF];
+  if (actor?.role === ROLES.ADMIN) return [ROLES.MANAGER, ROLES.STAFF];
+  return [];
+}
+
+/**
+ * Whether `actor` may edit `target`'s role/status. Mirrors the server rule
+ * order in users.service.update: no self-change (CANNOT_MODIFY_SELF), OWNER
+ * immutable (OWNER_IMMUTABLE), ADMIN cannot touch/assign ADMIN
+ * (ADMIN_RESTRICTED). UI hides the Edit affordance; the backend stays
+ * authoritative and rejects anyway.
+ */
+export function canModifyUser(actor, target) {
+  if (!canManageUsers(actor)) return false;
+  if (!target) return false;
+  if (String(actor?.id) === String(target.id)) return false;
+  if (target.role === ROLES.OWNER) return false;
+  if (actor?.role === ROLES.ADMIN && target.role === ROLES.ADMIN) return false;
+  return true;
+}
+
 /** Label used in the UI ("Profile" / headers). */
 export function roleLabel(role) {
   return (

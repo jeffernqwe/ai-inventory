@@ -33,6 +33,23 @@ export function me(token) {
 }
 
 // ---------------------------------------------------------------------------
+// Users (Phase 14A backend / 14B mobile)
+// ---------------------------------------------------------------------------
+// OWNER/ADMIN only (users.manage). Create/assign never includes OWNER; the
+// server enforces no-self-change, OWNER immutability, and ADMIN<->ADMIN rules.
+
+export const usersApi = {
+  /** Paginated { items, page, limit, total, totalPages }. params: { q (name/email), status (ACTIVE|DISABLED), page, limit }. */
+  list: (token, params) => apiFetch('/api/users', { token, params }),
+  /** One business user (public shape: id, name, email, role, status, createdAt). */
+  get: (token, id) => apiFetch(`/api/users/${id}`, { token }),
+  /** Create ADMIN/MANAGER/STAFF. body: { name, email, password, role }. 409 EMAIL_IN_USE; 400 field problems. */
+  create: (token, payload) => apiFetch('/api/users', { token, method: 'POST', body: payload }),
+  /** Change role and/or status — body has >=1 of { role, status }. */
+  update: (token, id, payload) => apiFetch(`/api/users/${id}`, { token, method: 'PATCH', body: payload }),
+};
+
+// ---------------------------------------------------------------------------
 // Reference resources: categories & locations (shared CRUD + archive shape)
 // ---------------------------------------------------------------------------
 
@@ -174,6 +191,7 @@ export default {
   productsApi,
   inventoryApi,
   purchaseOrdersApi,
+  usersApi,
   dashboardApi,
   aiApi,
 };

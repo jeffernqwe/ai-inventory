@@ -120,6 +120,13 @@ const errorHandler = (err, req, res, next) => {
     body.fields = err.fields;
   }
 
+  // Lines already durably applied when a partial receive conflicts (Phase 13C
+  // RECEIVE_CONFLICT). Only a 4xx carries them; a 5xx never echoes the partial
+  // state to a client that should retry the whole request.
+  if (Array.isArray(err.applied) && status < 500) {
+    body.applied = err.applied;
+  }
+
   // Expose stack traces only in non-production environments for easier debugging.
   if (envNonProd() && err.stack) {
     body.stack = err.stack;

@@ -94,6 +94,8 @@ export function createTracker(dbOk) {
       await deleteByBusiness('categories');
       await deleteByBusiness('locations');
       await deleteByBusiness('audit_logs');
+      await deleteByBusiness('suppliers');
+      await deleteByBusiness('purchase_orders');
       // AI conversations/messages have no businessId on the message, so remove
       // messages by the conversations owned by these businesses first.
       if (biz.length) {

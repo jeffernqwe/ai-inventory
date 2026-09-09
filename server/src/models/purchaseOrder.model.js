@@ -8,6 +8,16 @@ export const PURCHASE_ORDER_STATUSES = ['DRAFT', 'OPEN', 'RECEIVED', 'CANCELED']
  * One ordered product line. Snapshot productName/sku at order time so the PO
  * keeps its own record if the product is later renamed or archived. quantityReceived
  * starts at 0 and is only ever increased by receiving (Phase 13C) — never edited.
+ *
+ * quantityCommitted is the claim-first receiving counter: quantity durably received
+ * PLUS quantity held by in-flight receive claims (reservations that have won the PO
+ * race but whose inventory movement + final receipt may not have landed yet). At rest
+ * quantityCommitted == quantityReceived and `claims` is empty; while a receive is
+ * mid-flight a line can have quantityCommitted > quantityReceived. It exists because a
+ * cross-field `quantityReceived + claimed <= quantityOrdered` guard is not expressible
+ * in Mongo arrayFilters/$elemMatch — a single filterable scalar is. quantityReceived
+ * itself must stay durable/receipt-linked (it drives auto-RECEIVED and reconciliation),
+ * so claims reserve in this separate counter, never in quantityReceived.
  */
 const poItemSchema = new Schema(
   {
@@ -36,9 +46,119 @@ const poItemSchema = new Schema(
       default: 0,
       min: [0, 'quantityReceived cannot be negative'],
     },
+    quantityCommitted: {
+      type: Number,
+      required: true,
+      default: 0,
+      min: [0, 'quantityCommitted cannot be negative'],
+    },
     unitCost: {
       type: Number,
       min: [0, 'unitCost cannot be negative'],
+    },
+  },
+  { _id: false }
+);
+
+/**
+ * One in-flight receive claim on a PO line (claim-first receiving, Phase 13C
+ * redesign). Created by Op1 CLAIM before any inventory is moved and removed by
+ * Op3 FINALIZE (claim -> durable receipt) or Op4 RELEASE (compensation). Its
+ * sub-document _id is KEPT (unlike items/receipts): it is generated up front so
+ * every compensation is a targeted, idempotent `$pull` by that exact id — it can
+ * never touch another request's claim.
+ */
+const poClaimSchema = new Schema(
+  {
+    productId: {
+      type: Schema.Types.ObjectId,
+      ref: 'Product',
+      required: [true, 'productId is required'],
+    },
+    quantity: {
+      type: Number,
+      required: [true, 'quantity is required'],
+      min: [1, 'quantity must be at least 1'],
+    },
+    createdBy: {
+      type: Schema.Types.ObjectId,
+      ref: 'User',
+      required: [true, 'createdBy is required'],
+    },
+    createdAt: {
+      type: Date,
+      default: Date.now,
+    },
+  }
+);
+
+/**
+ * One line of a receiving receipt (Phase 13C). Records the exact inventory
+ * movement the receive caused so a receipt can be traced to its ledger
+ * transaction (inventoryTransactionId) and back via the movement's reference
+ * (= the PO number). previousQuantity/newQuantity mirror the stock-in's ledger
+ * transaction for reconciliation.
+ */
+const receiptLineSchema = new Schema(
+  {
+    productId: {
+      type: Schema.Types.ObjectId,
+      ref: 'Product',
+      required: [true, 'productId is required'],
+    },
+    quantity: {
+      type: Number,
+      required: [true, 'quantity is required'],
+      min: [1, 'quantity must be at least 1'],
+    },
+    inventoryTransactionId: {
+      type: Schema.Types.ObjectId,
+      ref: 'InventoryTransaction',
+      required: [true, 'inventoryTransactionId is required'],
+    },
+    previousQuantity: {
+      type: Number,
+      required: true,
+      min: [0, 'previousQuantity cannot be negative'],
+    },
+    newQuantity: {
+      type: Number,
+      required: true,
+      min: [0, 'newQuantity cannot be negative'],
+    },
+  },
+  { _id: false }
+);
+
+/**
+ * One receiving event against this PO (Phase 13C). Embedded on the purchase
+ * order — receipts are only ever read with the PO, never queried independently,
+ * so a separate collection would add joins/cleanup for nothing in V1. The
+ * `$inc` of each item's quantityReceived and the `$push` of this record are one
+ * atomic document update, so the PO can never record a receipt without
+ * advancing the counter (or vice-versa).
+ */
+const receiptSchema = new Schema(
+  {
+    receivedAt: {
+      type: Date,
+      default: Date.now,
+    },
+    userId: {
+      type: Schema.Types.ObjectId,
+      ref: 'User',
+      required: [true, 'userId is required'],
+    },
+    // Optional invoice / delivery note, displayed only.
+    reference: {
+      type: String,
+      trim: true,
+      maxlength: [200, 'reference must be at most 200 characters'],
+      default: '',
+    },
+    lines: {
+      type: [receiptLineSchema],
+      default: [],
     },
   },
   { _id: false }
@@ -81,6 +201,19 @@ const purchaseOrderSchema = new Schema(
     },
     items: {
       type: [poItemSchema],
+      default: [],
+    },
+    receipts: {
+      type: [receiptSchema],
+      default: [],
+    },
+    // In-flight receive claims (claim-first receiving). Empty at rest. Each entry
+    // reserves quantity on a line that a receive is between its PO claim and its
+    // durable receipt; if the process dies mid-receive a claim can remain (ghost),
+    // blocking over-receiving while the on-hand stays truthful — visible via the
+    // detail endpoint's pendingClaims and recoverable by cancel + re-create.
+    claims: {
+      type: [poClaimSchema],
       default: [],
     },
   },

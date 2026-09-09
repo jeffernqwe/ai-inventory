@@ -59,6 +59,7 @@ const MIXED = [
   'phase12d-barcode-generation.test.mjs', // db: POST /:id/generate-barcode (generate, no-overwrite, lookup, isolation, archived, RBAC)
   'phase13-suppliers.test.mjs', // db: suppliers CRUD over /api/suppliers (extra contact fields, RBAC, isolation, archive)
   'phase13-purchase-orders.test.mjs', // db: PO create/list/get/DRAFT-edit/issue/cancel (numbering, lifecycle, RBAC, isolation, no stock writes)
+  'phase13-receiving.test.mjs', // db: PO receiving into the ledger (partial/full, auto-RECEIVED, over-receive 409, concurrency, full precise undo, RBAC/isolation)
 ];
 
 const FILE_LISTS = {

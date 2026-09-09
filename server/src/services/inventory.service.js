@@ -138,6 +138,9 @@ async function recordMovement({
       metadata: {
         productId: String(productId),
         locationId: String(locationId),
+        // Link the audit row to the exact transaction so a compensation can
+        // delete precisely the audit it caused (Phase 13C receiving undo).
+        inventoryTransactionId: String(txn._id),
         type,
         quantity,
         previousQuantity,
@@ -270,7 +273,15 @@ export const inventoryService = {
         reason,
         reference,
       });
-      return { transaction: transactionPublic(txn), previousQuantity, newQuantity };
+      return {
+        transaction: transactionPublic(txn),
+        previousQuantity,
+        newQuantity,
+        // True when this stock-in created the inventory row (upsert inserted a
+        // new row). Lets a caller that must undo this movement choose between
+        // deleting the freshly created row and reverting a pre-existing one.
+        createdRow: prev == null,
+      };
     } catch (err) {
       if (prev == null) {
         // This stock-in created the row (first stock-in, upsert inserted it).

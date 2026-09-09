@@ -1,5 +1,5 @@
 import { parsePagination, pageResult } from '../utils/pagination.js';
-import { isObjectId, validatePurchaseOrder } from '../utils/validate.js';
+import { isObjectId, validatePurchaseOrder, validateReceive } from '../utils/validate.js';
 import { throwValidation, invalidId } from '../utils/errors.js';
 import { purchaseOrderService } from '../services/purchase-orders.service.js';
 
@@ -57,6 +57,17 @@ export const purchaseOrdersController = {
   async cancel(req, res) {
     const po = await purchaseOrderService.cancel(req.user.businessId, paramId(req), req.user.id);
     res.json(po);
+  },
+
+  /** Receive stock against an OPEN purchase order (Phase 13C). */
+  async receive(req, res) {
+    const v = validateReceive(req.body ?? {});
+    if (v.problems.length) throwValidation(v.problems);
+    const result = await purchaseOrderService.receive(req.user.businessId, req.user.id, paramId(req), {
+      lines: v.lines,
+      reference: v.reference,
+    });
+    res.json(result);
   },
 };
 

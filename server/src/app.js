@@ -7,6 +7,7 @@ import requestId from './middlewares/requestId.js';
 import requestLogger from './middlewares/httpLogger.js';
 import healthRoutes from './routes/health.routes.js';
 import { createAuthRouter } from './routes/auth.routes.js';
+import userRoutes from './routes/users.routes.js';
 import categoryRoutes from './routes/categories.routes.js';
 import locationRoutes from './routes/locations.routes.js';
 import supplierRoutes from './routes/suppliers.routes.js';
@@ -90,6 +91,7 @@ export function createApp({
   // API routes
   app.use('/api/health', healthRoutes);
   app.use('/api/auth', createAuthRouter({ limits: authLimits }));
+  app.use('/api/users', userRoutes);
   app.use('/api/categories', categoryRoutes);
   app.use('/api/locations', locationRoutes);
   app.use('/api/suppliers', supplierRoutes);

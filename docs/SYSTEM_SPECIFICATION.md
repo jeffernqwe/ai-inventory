@@ -326,6 +326,7 @@ Administrative access excluding ownership-level controls.
 
 Capabilities:
 
+- Manage users (create/assign MANAGER or STAFF, enable/disable; never ADMIN or OWNER)
 - Manage products
 - Manage categories
 - Manage locations
@@ -333,6 +334,11 @@ Capabilities:
 - View transactions
 - View dashboard
 - Use AI assistant
+
+User management is strictly business-scoped and server-enforced: no user can
+create or assign the OWNER role, no user can change their own role/status, and
+an ADMIN can neither create, assign, nor modify another ADMIN. Disabling a user
+revokes their access immediately.
 
 ## MANAGER
 
@@ -1094,6 +1100,11 @@ Example endpoints:
 ```text
 POST   /api/auth/register
 POST   /api/auth/login
+
+GET    /api/users
+POST   /api/users
+GET    /api/users/:id
+PATCH  /api/users/:id
 
 GET    /api/products
 POST   /api/products

@@ -152,9 +152,11 @@ export async function registerOwner(api, tracker) {
 }
 
 /**
- * Creates a user directly in the database with the given role (there is no
- * /api/users route yet) so role-guarded Phase 04 endpoints can be exercised as
- * ADMIN/MANAGER/STAFF. Reuses an existing business when businessId is given.
+ * Creates a user directly in the database with the given role so role-guarded
+ * endpoints can be exercised as ADMIN/MANAGER/STAFF. Reuses an existing business
+ * when businessId is given. (Phase 14A added the /api/users management routes;
+ * this helper still writes directly to seed fixture roles like the OWNER, which
+ * the management API intentionally cannot create.)
  */
 export async function makeRoleUser({ role, businessId }, tracker) {
   let bid = businessId;

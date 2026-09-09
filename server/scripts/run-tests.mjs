@@ -60,6 +60,7 @@ const MIXED = [
   'phase13-suppliers.test.mjs', // db: suppliers CRUD over /api/suppliers (extra contact fields, RBAC, isolation, archive)
   'phase13-purchase-orders.test.mjs', // db: PO create/list/get/DRAFT-edit/issue/cancel (numbering, lifecycle, RBAC, isolation, no stock writes)
   'phase13-receiving.test.mjs', // db: PO receiving into the ledger (partial/full, auto-RECEIVED, over-receive 409, concurrency, full precise undo, RBAC/isolation)
+  'phase14-users.test.mjs', // db: user management over /api/users (create/list/role+status, RBAC, OWNER/ADMIN/self protections, dup email, disabled, isolation, audit)
 ];
 
 const FILE_LISTS = {

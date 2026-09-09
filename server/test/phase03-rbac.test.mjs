@@ -11,6 +11,7 @@ import {
   ROLE_VALUES,
   ROLE_PERMISSIONS,
   PERMISSIONS,
+  NON_OWNER_ROLES,
   hasPermission,
 } from '../src/constants/roles.js';
 import assertBusinessAccess from '../src/utils/businessAccess.js';
@@ -42,10 +43,11 @@ describe('roles constants', () => {
     }
   });
 
-  it('ADMIN holds operational permissions but not OWNER-only business/user/role management', () => {
-    for (const p of [PERMISSIONS.BUSINESS_MANAGE, PERMISSIONS.USERS_MANAGE, PERMISSIONS.ROLES_MANAGE]) {
+  it('ADMIN holds operational permissions and users.manage but not OWNER-only business/role management', () => {
+    for (const p of [PERMISSIONS.BUSINESS_MANAGE, PERMISSIONS.ROLES_MANAGE]) {
       assert.equal(hasPermission(ROLES.ADMIN, p), false, `ADMIN should NOT hold ${p}`);
     }
+    assert.equal(hasPermission(ROLES.ADMIN, PERMISSIONS.USERS_MANAGE), true, 'ADMIN should hold users.manage (Phase 14A)');
     assert.equal(hasPermission(ROLES.ADMIN, PERMISSIONS.PRODUCTS_MANAGE), true);
     assert.equal(hasPermission(ROLES.ADMIN, PERMISSIONS.DASHBOARD_VIEW), true);
     assert.equal(hasPermission(ROLES.ADMIN, PERMISSIONS.AI_USE), true);
@@ -92,6 +94,11 @@ describe('roles constants', () => {
       assert.equal(hasPermission(ROLES.STAFF, p), false, `STAFF should NOT hold ${p}`);
     }
   });
+
+  it('NON_OWNER_ROLES is exactly ADMIN, MANAGER, STAFF (Phase 14A create/assign bound)', () => {
+    assert.deepEqual([...NON_OWNER_ROLES].sort(), ['ADMIN', 'MANAGER', 'STAFF']);
+    assert.ok(!NON_OWNER_ROLES.includes(ROLES.OWNER), 'OWNER must never be creatable/assignable');
+  });
 });
 
 describe('requireRole middleware', () => {
@@ -135,15 +142,19 @@ describe('requirePermission middleware', () => {
     assert.equal(err?.status, 403);
   });
 
-  it('blocks ADMIN from OWNER-only users.manage', async () => {
-    const err = await callMw(requirePermission(PERMISSIONS.USERS_MANAGE), {
-      user: userOf(ROLES.ADMIN),
-    });
-    assert.equal(err?.status, 403);
-    const ownerErr = await callMw(requirePermission(PERMISSIONS.USERS_MANAGE), {
-      user: userOf(ROLES.OWNER),
-    });
-    assert.equal(ownerErr, null);
+  it('passes OWNER and ADMIN on users.manage and blocks MANAGER/STAFF', async () => {
+    for (const role of [ROLES.OWNER, ROLES.ADMIN]) {
+      const err = await callMw(requirePermission(PERMISSIONS.USERS_MANAGE), {
+        user: userOf(role),
+      });
+      assert.equal(err, null, `${role} should hold users.manage (Phase 14A)`);
+    }
+    for (const role of [ROLES.MANAGER, ROLES.STAFF]) {
+      const err = await callMw(requirePermission(PERMISSIONS.USERS_MANAGE), {
+        user: userOf(role),
+      });
+      assert.equal(err?.status, 403, `${role} should be blocked from users.manage`);
+    }
   });
 
   it('returns 401 when there is no authenticated user', async () => {

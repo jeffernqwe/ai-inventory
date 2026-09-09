@@ -93,6 +93,9 @@ Commercialization Foundation (10A, 10B)
         ↓
 Phase 11
 Inventory Intelligence & Alerts (11A, 11B)
+        ↓
+Phase 14A
+User Management Foundation
 ```
 
 ---
@@ -989,7 +992,79 @@ code, tests, mobile code, dependencies, or configuration changed.
 
 ---
 
-# 15. Phase Gate System
+# 15. Phase 14A — User Management Foundation
+
+## Objective
+
+Phase 14A is an owner-directed foundation extension approved after Phase 13 (the current V1 feature
+baseline), beyond the original Phase 00–07 plan. The RBAC layer has always defined `users.manage` but
+no route exposed it — a business could not create ADMIN/MANAGER/STAFF accounts or disable a departing
+employee through the product. This phase delivers the secure, business-scoped User Management API for
+OWNER/ADMIN that closes that gap, reusing the existing permission key, `User` model (role/status
+enums + global unique email index), validation, error, audit, and bcrypt conventions. Delivered as a
+single approved increment; nothing is committed or pushed (owner sign-off pending).
+
+## Scope
+
+Implemented (approved; commit pending owner sign-off):
+
+- `/api/users` routes — `GET /` (list, paginated with `q` on name/email and `status` filter),
+  `POST /` (create), `GET /:id`, `PATCH /:id` (role and/or status). Every route requires
+  `requireAuth` + `requirePermission(users.manage)`.
+- `users.service.js` carries the authoritative cross-role rules, applied after tenant scoping:
+  business context always comes from the authenticated session (a client `businessId` is never
+  accepted, and a foreign id is a 404, never a leak); no OWNER can be created or assigned; no user
+  can change their own role/status (`CANNOT_MODIFY_SELF`); the OWNER account is immutable through
+  the API (`OWNER_IMMUTABLE`); and an ADMIN can neither create, assign, nor modify another ADMIN
+  (`ADMIN_RESTRICTED` — ADMIN creates/assigns MANAGER or STAFF only).
+- ADMIN granted `users.manage` in the server RBAC matrix (deliberate spec §7 change — ADMIN
+  previously had no user management; unit tests updated accordingly). MANAGER/STAFF still hold no
+  user-management permission.
+- Create validates name/email/password via the shared auth helpers and a role in
+  ADMIN/MANAGER/STAFF; passwords hashed with bcryptjs (10 rounds, the same cost as registration);
+  email uniqueness pre-checked then E11000-caught → `409 EMAIL_IN_USE` (global index).
+- Update accepts `role` and/or `status` (ACTIVE/DISABLED), at least one required. Disabling takes
+  effect instantly because `requireAuth` reloads user status per request — the disabled user's login
+  and every existing JWT are rejected with `403 ACCOUNT_DISABLED`; re-enabling restores access.
+- Responses reuse `toPublicUser` (never a password hash). `USER_CREATED` / `USER_UPDATED` audit rows
+  with `entityType: 'USER'` and secret-free metadata.
+- `NON_OWNER_ROLES` constant and `validateUserCreate` / `validateUserUpdate` in `validate.js`; new
+  audit constants; the mobile permissions mirror gained `USERS_MANAGE` for ADMIN and a
+  `canManageUsers` predicate (no mobile UI this phase).
+
+### Explicitly Out of Scope
+
+No invitations or email sending, no password reset/change, no billing/subscriptions, no hard delete,
+no name/email editing, no OWNER creation/assignment, and no mobile user-management screens. Phase 13
+(suppliers, purchase orders, receiving) remains at the 13C/13D baseline; this phase builds on it
+without changing its scope. The roadmap's earlier Phase 12/13 entries were never added as sections
+(pre-existing gap) and are not backfilled here.
+
+### Verified
+
+- New `server/test/phase14-users.test.mjs` (classified MIXED) covers RBAC (no token 401, STAFF/
+  MANAGER 403, OWNER/ADMIN pass), tenant isolation (list scoping, foreign get/patch → 404, client
+  businessId ignored), self-modification, OWNER immutability, ADMIN restrictions, duplicate emails
+  (same + cross business), disabled-user login/JWT revocation and re-enable, invalid role/status
+  validation, the bcrypt round-trip, and the USER_CREATED/USER_UPDATED audit rows. The Phase 03 RBAC
+  unit tests were updated for the ADMIN `users.manage` grant and `NON_OWNER_ROLES`.
+- `npm run lint`: 0 errors / 0 warnings.
+- DB-free unit run: 107 passed / 16 skipped / 0 failed (Phase 14A users suite skips in unit mode as
+  a DB-backed suite; the updated Phase 03 RBAC units run).
+- Full backend suite: 332/332 passing (was 312/312 before Phase 14A).
+
+## Definition of Done
+
+- The Phase 14A increment is recorded in this roadmap, in `CLAUDE.md`, and in the specification
+  (spec §7 ADMIN capabilities and §31 API structure).
+- User management is OWNER/ADMIN-only, business-scoped, and server-enforced; the cross-role
+  protections (no OWNER, no self-change, no ADMIN-to-ADMIN) are covered by tests.
+- `npm run lint`, `npm run test:unit`, and `npm test` all pass.
+- No commit and no push — the working tree keeps the change uncommitted for owner review.
+
+---
+
+# 16. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.
 
@@ -1030,7 +1105,7 @@ The project owner decides whether to proceed.
 
 ---
 
-# 16. Change Control
+# 17. Change Control
 
 If Claude discovers that the current specification is incomplete or incorrect:
 
@@ -1048,7 +1123,7 @@ Minor implementation improvements that do not alter architectural decisions may 
 
 ---
 
-# 17. Bug Handling
+# 18. Bug Handling
 
 If a bug is discovered during a phase:
 
@@ -1073,7 +1148,7 @@ Only fix it immediately if it blocks the current phase.
 
 ---
 
-# 18. Refactoring Rules
+# 19. Refactoring Rules
 
 Refactoring is allowed when it:
 
@@ -1091,7 +1166,7 @@ Keep changes focused.
 
 ---
 
-# 19. Dependency Rules
+# 20. Dependency Rules
 
 Before adding a dependency:
 
@@ -1105,7 +1180,7 @@ Do not add dependencies simply for convenience.
 
 ---
 
-# 20. Git Checkpoints
+# 21. Git Checkpoints
 
 A Git commit should be created after a stable phase.
 
@@ -1126,6 +1201,7 @@ phase 10A: commercialization foundation complete
 phase 10B: commercialization documentation close-out complete
 phase 11A: inventory intelligence + restock alerts complete
 phase 11B: inventory intelligence documentation close-out complete
+phase 14A: user management foundation complete (pending owner sign-off)
 ```
 
 Before committing:
@@ -1137,7 +1213,7 @@ Before committing:
 
 ---
 
-# 21. V1 Completion
+# 22. V1 Completion
 
 V1 is complete only when all major requirements in:
 
@@ -1179,7 +1255,7 @@ AI Inventory Questions
 
 ---
 
-# 22. Future Development
+# 23. Future Development
 
 After V1, future features must be planned separately.
 
@@ -1214,7 +1290,7 @@ Future functionality must not be implemented during V1 unless explicitly approve
 
 ---
 
-# 23. Final Development Rule
+# 24. Final Development Rule
 
 The goal is not to produce the largest amount of code as quickly as possible.
 

@@ -41,6 +41,7 @@ const ALL = Object.freeze(Object.values(PERMISSIONS));
 export const ROLE_PERMISSIONS = Object.freeze({
   OWNER: ALL,
   ADMIN: Object.freeze([
+    PERMISSIONS.USERS_MANAGE,
     PERMISSIONS.LOCATIONS_MANAGE,
     PERMISSIONS.CATEGORIES_MANAGE,
     PERMISSIONS.PRODUCTS_MANAGE,
@@ -102,6 +103,7 @@ export const canUseAi = (u) => can(u, PERMISSIONS.AI_USE);
 export const canManagePurchaseOrders = (u) => can(u, PERMISSIONS.PURCHASE_ORDERS_MANAGE);
 export const canViewPurchaseOrders = (u) => can(u, PERMISSIONS.PURCHASE_ORDERS_VIEW);
 export const canReceivePurchaseOrders = (u) => can(u, PERMISSIONS.PURCHASE_ORDERS_RECEIVE);
+export const canManageUsers = (u) => can(u, PERMISSIONS.USERS_MANAGE);
 
 /** Label used in the UI ("Profile" / headers). */
 export function roleLabel(role) {

@@ -16,13 +16,20 @@ export const ROLES = Object.freeze({
 export const ROLE_VALUES = Object.freeze(Object.values(ROLES));
 
 /**
+ * Roles that can be assigned through the user-management API (Phase 14A).
+ * OWNER is deliberately excluded: an OWNER user is only ever created by
+ * registration, never created or assigned by the API.
+ */
+export const NON_OWNER_ROLES = Object.freeze([ROLES.ADMIN, ROLES.MANAGER, ROLES.STAFF]);
+
+/**
  * Permission catalogue. Coarse, resource-level capabilities used by protected
  * routes (Phases 04+). Explicit here so the spec's capability matrix is
  * encoded in one place.
  */
 export const PERMISSIONS = Object.freeze({
   BUSINESS_MANAGE: 'business.manage', // OWNER only
-  USERS_MANAGE: 'users.manage', // OWNER only
+  USERS_MANAGE: 'users.manage', // OWNER + ADMIN (Phase 14A)
   ROLES_MANAGE: 'roles.manage', // OWNER only
   LOCATIONS_MANAGE: 'locations.manage',
   CATEGORIES_MANAGE: 'categories.manage',
@@ -49,6 +56,7 @@ const ALL = Object.freeze(Object.values(PERMISSIONS));
 export const ROLE_PERMISSIONS = Object.freeze({
   OWNER: ALL,
   ADMIN: Object.freeze([
+    PERMISSIONS.USERS_MANAGE,
     PERMISSIONS.LOCATIONS_MANAGE,
     PERMISSIONS.CATEGORIES_MANAGE,
     PERMISSIONS.PRODUCTS_MANAGE,
@@ -103,4 +111,4 @@ export function hasPermission(role, permission) {
   return Array.isArray(granted) && granted.includes(permission);
 }
 
-export default { ROLES, ROLE_VALUES, PERMISSIONS, ROLE_PERMISSIONS, hasPermission };
+export default { ROLES, ROLE_VALUES, NON_OWNER_ROLES, PERMISSIONS, ROLE_PERMISSIONS, hasPermission };

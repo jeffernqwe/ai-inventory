@@ -6,6 +6,8 @@
  * normalize input and collect errors in one pass.
  */
 
+import { NON_OWNER_ROLES } from '../constants/roles.js';
+
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_EMAIL = 254;
 const PASSWORD_MIN = 8;
@@ -13,8 +15,30 @@ const PASSWORD_MIN = 8;
 const PASSWORD_MAX = 72;
 
 // ---------------------------------------------------------------------------
-// Auth (Phase 03)
+// Auth (Phase 03) + user management (Phase 14A)
 // ---------------------------------------------------------------------------
+
+function emailProblems(value) {
+  const problems = [];
+  if (!value) {
+    problems.push({ field: 'email', message: 'email is required' });
+  } else if (value.length > MAX_EMAIL || !EMAIL_RE.test(value)) {
+    problems.push({ field: 'email', message: 'email must be a valid email address' });
+  }
+  return problems;
+}
+
+function passwordProblems(password) {
+  const problems = [];
+  if (typeof password !== 'string' || password.length === 0) {
+    problems.push({ field: 'password', message: 'password is required' });
+  } else if (password.length < PASSWORD_MIN) {
+    problems.push({ field: 'password', message: `password must be at least ${PASSWORD_MIN} characters` });
+  } else if (password.length > PASSWORD_MAX) {
+    problems.push({ field: 'password', message: `password must be at most ${PASSWORD_MAX} characters` });
+  }
+  return problems;
+}
 
 export function normalizeEmail(value) {
   return typeof value === 'string' ? value.trim().toLowerCase() : '';
@@ -34,17 +58,8 @@ export function validateRegister(body) {
   if (!name) problems.push({ field: 'name', message: 'name is required' });
   else if (name.length > 100) problems.push({ field: 'name', message: 'name must be at most 100 characters' });
 
-  if (!email) problems.push({ field: 'email', message: 'email is required' });
-  else if (email.length > MAX_EMAIL || !EMAIL_RE.test(email))
-    problems.push({ field: 'email', message: 'email must be a valid email address' });
-
-  if (typeof password !== 'string' || password.length === 0) {
-    problems.push({ field: 'password', message: 'password is required' });
-  } else if (password.length < PASSWORD_MIN) {
-    problems.push({ field: 'password', message: `password must be at least ${PASSWORD_MIN} characters` });
-  } else if (password.length > PASSWORD_MAX) {
-    problems.push({ field: 'password', message: `password must be at most ${PASSWORD_MAX} characters` });
-  }
+  problems.push(...emailProblems(email));
+  problems.push(...passwordProblems(password));
 
   return problems;
 }
@@ -54,15 +69,76 @@ export function validateLogin(body) {
   const email = normalizeEmail(body?.email);
   const password = body?.password;
 
-  if (!email) problems.push({ field: 'email', message: 'email is required' });
-  else if (email.length > MAX_EMAIL || !EMAIL_RE.test(email))
-    problems.push({ field: 'email', message: 'email must be a valid email address' });
+  problems.push(...emailProblems(email));
 
   if (typeof password !== 'string' || password.length === 0) {
     problems.push({ field: 'password', message: 'password is required' });
   }
 
   return problems;
+}
+
+// ---------------------------------------------------------------------------
+// User management (Phase 14A)
+// ---------------------------------------------------------------------------
+
+const USER_NAME_MAX = 100;
+/** User statuses assignable through the user-management API. */
+export const USER_STATUSES = Object.freeze(['ACTIVE', 'DISABLED']);
+
+/**
+ * Create-user payload. role is REQUIRED and must be ADMIN/MANAGER/STAFF —
+ * OWNER can never be created through the API (registration is the only path
+ * that mints an OWNER). businessId is never accepted.
+ */
+export function validateUserCreate(body) {
+  const problems = [];
+
+  const name = requiredString(body?.name, 'name', USER_NAME_MAX);
+  problems.push(...name.problems);
+
+  problems.push(...emailProblems(normalizeEmail(body?.email)));
+  problems.push(...passwordProblems(body?.password));
+
+  const role = body?.role;
+  if (!NON_OWNER_ROLES.includes(role)) {
+    problems.push({ field: 'role', message: 'role is required and must be one of ADMIN, MANAGER, STAFF' });
+  }
+
+  return {
+    problems,
+    name: name.value,
+    email: normalizeEmail(body?.email),
+    password: body?.password,
+    role,
+  };
+}
+
+/**
+ * Update-user payload (Phase 14A): role and/or status, at least one present.
+ * `role` may only be ADMIN/MANAGER/STAFF; `status` only ACTIVE/DISABLED.
+ * Service-side rules (self/OWNER/ADMIN restrictions) run after this pass.
+ */
+export function validateUserUpdate(body) {
+  const problems = [];
+
+  const hasRole = body?.role !== undefined && body?.role !== null && body?.role !== '';
+  const hasStatus = body?.status !== undefined && body?.status !== null && body?.status !== '';
+  if (!hasRole && !hasStatus) {
+    problems.push({ field: 'body', message: 'At least one of role or status is required' });
+  }
+
+  const role = hasRole ? body.role : undefined;
+  if (hasRole && !NON_OWNER_ROLES.includes(role)) {
+    problems.push({ field: 'role', message: 'role must be one of ADMIN, MANAGER, STAFF' });
+  }
+
+  const status = hasStatus ? body.status : undefined;
+  if (hasStatus && !USER_STATUSES.includes(status)) {
+    problems.push({ field: 'status', message: 'status must be one of ACTIVE, DISABLED' });
+  }
+
+  return { problems, role, status };
 }
 
 // ---------------------------------------------------------------------------
@@ -459,6 +535,9 @@ export default {
   normalizeEmail,
   validateRegister,
   validateLogin,
+  validateUserCreate,
+  validateUserUpdate,
+  USER_STATUSES,
   isObjectId,
   optionalObjectId,
   optionalString,

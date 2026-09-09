@@ -216,6 +216,7 @@ Phase 10 — Commercialization Foundation (lettered increments)
 Phase 11 — Inventory Intelligence & Alerts (lettered increments)
             11A — Inventory health counts + reorder list + read-only restock tool
             11B — Documentation close-out
+Phase 14A — User Management Foundation (OWNER/ADMIN users.manage API: list/create/role+status; no OWNER, no self-change, ADMIN↔ADMIN restricted)
 ```
 
 Phase 08 is an owner-directed hardening extension delivered in approved lettered increments
@@ -238,6 +239,16 @@ reorder-needed endpoint `GET /api/products/reorder`, the read-only `getReorderNe
 tool, and a mobile dashboard inventory-health + "Needs restock" preview. Everything reuses the §19
 availability math, stays business-isolated and RBAC-gated, and never modifies products or inventory;
 forecasting, demand prediction, purchasing, and AI write actions were NOT added.
+
+Phase 14A is an owner-directed user-management foundation delivered as a single approved increment
+after Phase 13. It exposes the `users.manage` capability as a real API for the first time: business-
+scoped list/create/get and role+status update over `/api/users`, OWNER/ADMIN only, reusing the
+existing permission key, `User` model, bcrypt, validation, and audit conventions. Enforcement is
+server-side and tenant-isolated (client `businessId` is never accepted). Cross-role rules are strict:
+no OWNER can be created or assigned through the API, no user can change their own role/status, the
+OWNER account is immutable, and an ADMIN can neither create, assign, nor modify another ADMIN
+(ADMIN creates/assigns MANAGER or STAFF only). Disabling a user instantly revokes login and existing
+JWTs. No invitations/email, password reset, billing, hard delete, or mobile UI were added.
 
 When instructed to work on a specific phase:
 

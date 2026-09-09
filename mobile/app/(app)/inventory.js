@@ -3,7 +3,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 
 import Badge from '../../components/Badge';
-import Button from '../../components/Button';
+import Button, { ButtonRow } from '../../components/Button';
 import Chip from '../../components/Chip';
 import Input from '../../components/Input';
 import { EmptyState, ErrorState, LoadingBlock, errorText } from '../../components/ListState';
@@ -81,13 +81,10 @@ export default function InventoryScreen() {
 
   const header = (
     <View>
-      <Button
-        title="📷  Scan a barcode"
-        variant="secondary"
-        full
-        onPress={() => router.push('/scan')}
-        style={styles.scanBtn}
-      />
+      <ButtonRow style={styles.actionRow}>
+        <Button title="📷  Scan" variant="secondary" style={styles.flexBtn} onPress={() => router.push('/scan')} />
+        <Button title="Purchase Orders" variant="secondary" style={styles.flexBtn} onPress={() => router.push('/purchase-orders')} />
+      </ButtonRow>
       <Input value={q} onChangeText={setQ} placeholder="Search by product name, SKU or barcode…" name="q" autoCapitalize="none" />
       <View style={styles.chipRow}>
         <Chip label="Low stock" tone="warning" selected={low} onPress={() => setLow((v) => !v)} />
@@ -136,7 +133,8 @@ export default function InventoryScreen() {
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   content: { padding: spacing.lg, paddingBottom: spacing.huge, flexGrow: 1 },
-  scanBtn: { marginBottom: spacing.lg },
+  actionRow: { marginBottom: spacing.lg },
+  flexBtn: { flex: 1 },
   chipRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.lg },
   row: {
     backgroundColor: colors.surface,

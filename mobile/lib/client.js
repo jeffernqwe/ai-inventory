@@ -6,12 +6,16 @@ import { API_URL, REQUEST_TIMEOUT_MS } from './config';
  * validation problems without scattering fetch logic.
  */
 export class ApiError extends Error {
-  constructor(status, code, message, fields = []) {
+  constructor(status, code, message, fields = [], applied) {
     super(message || 'Request failed');
     this.name = 'ApiError';
     this.status = status; // 0 => the request never reached the server
     this.code = code || null;
     this.fields = fields;
+    // Optional list of partial results the server kept durable while a
+    // multi-part request was rejected (e.g. a partial PO receive, 409
+    // RECEIVE_CONFLICT): [{ productId, quantity, ... }].
+    this.applied = Array.isArray(applied) ? applied : undefined;
   }
 
   get isNetwork() {
@@ -73,7 +77,7 @@ export async function apiFetch(path, { method = 'GET', token, body, params } = {
 
   const data = await readJson(res);
   if (res.status >= 200 && res.status < 300) return data;
-  throw new ApiError(res.status, data?.code, data?.error || `Request failed (${res.status})`, data?.fields || []);
+  throw new ApiError(res.status, data?.code, data?.error || `Request failed (${res.status})`, data?.fields || [], data?.applied);
 }
 
 export default apiFetch;

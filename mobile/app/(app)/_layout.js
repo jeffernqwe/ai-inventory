@@ -40,6 +40,9 @@ export default function AppLayout() {
       <Stack.Screen name="locations" options={{ title: 'Locations' }} />
       <Stack.Screen name="inventory" options={{ title: 'Inventory' }} />
       <Stack.Screen name="inventory/[id]" options={{ title: 'Stock Record' }} />
+      <Stack.Screen name="purchase-orders/index" options={{ title: 'Purchase Orders' }} />
+      <Stack.Screen name="purchase-orders/[id]/index" options={{ title: 'Purchase Order' }} />
+      <Stack.Screen name="purchase-orders/[id]/receive" options={{ title: 'Receive Stock' }} />
       <Stack.Screen name="stock-in" options={{ title: 'Stock In' }} />
       <Stack.Screen name="stock-out" options={{ title: 'Stock Out' }} />
       <Stack.Screen name="adjust" options={{ title: 'Adjust Stock' }} />

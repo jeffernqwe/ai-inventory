@@ -22,6 +22,9 @@ export const PERMISSIONS = Object.freeze({
   CATEGORIES_MANAGE: 'categories.manage',
   PRODUCTS_MANAGE: 'products.manage',
   PRODUCTS_VIEW: 'products.view',
+  PURCHASE_ORDERS_MANAGE: 'purchase-orders.manage',
+  PURCHASE_ORDERS_VIEW: 'purchase-orders.view',
+  PURCHASE_ORDERS_RECEIVE: 'purchase-orders.receive',
   INVENTORY_MANAGE: 'inventory.manage',
   INVENTORY_VIEW: 'inventory.view',
   INVENTORY_STOCK_IN: 'inventory.stock-in',
@@ -42,6 +45,9 @@ export const ROLE_PERMISSIONS = Object.freeze({
     PERMISSIONS.CATEGORIES_MANAGE,
     PERMISSIONS.PRODUCTS_MANAGE,
     PERMISSIONS.PRODUCTS_VIEW,
+    PERMISSIONS.PURCHASE_ORDERS_MANAGE,
+    PERMISSIONS.PURCHASE_ORDERS_VIEW,
+    PERMISSIONS.PURCHASE_ORDERS_RECEIVE,
     PERMISSIONS.INVENTORY_MANAGE,
     PERMISSIONS.INVENTORY_VIEW,
     PERMISSIONS.INVENTORY_STOCK_IN,
@@ -54,6 +60,9 @@ export const ROLE_PERMISSIONS = Object.freeze({
   MANAGER: Object.freeze([
     PERMISSIONS.PRODUCTS_MANAGE,
     PERMISSIONS.PRODUCTS_VIEW,
+    PERMISSIONS.PURCHASE_ORDERS_MANAGE,
+    PERMISSIONS.PURCHASE_ORDERS_VIEW,
+    PERMISSIONS.PURCHASE_ORDERS_RECEIVE,
     PERMISSIONS.INVENTORY_MANAGE,
     PERMISSIONS.INVENTORY_VIEW,
     PERMISSIONS.INVENTORY_STOCK_IN,
@@ -65,6 +74,8 @@ export const ROLE_PERMISSIONS = Object.freeze({
   ]),
   STAFF: Object.freeze([
     PERMISSIONS.PRODUCTS_VIEW,
+    PERMISSIONS.PURCHASE_ORDERS_VIEW,
+    PERMISSIONS.PURCHASE_ORDERS_RECEIVE,
     PERMISSIONS.INVENTORY_VIEW,
     PERMISSIONS.INVENTORY_STOCK_IN,
     PERMISSIONS.INVENTORY_STOCK_OUT,
@@ -88,6 +99,9 @@ export const canAdjustStock = (u) => can(u, PERMISSIONS.INVENTORY_MANAGE);
 export const canStockIn = (u) => can(u, PERMISSIONS.INVENTORY_STOCK_IN);
 export const canStockOut = (u) => can(u, PERMISSIONS.INVENTORY_STOCK_OUT);
 export const canUseAi = (u) => can(u, PERMISSIONS.AI_USE);
+export const canManagePurchaseOrders = (u) => can(u, PERMISSIONS.PURCHASE_ORDERS_MANAGE);
+export const canViewPurchaseOrders = (u) => can(u, PERMISSIONS.PURCHASE_ORDERS_VIEW);
+export const canReceivePurchaseOrders = (u) => can(u, PERMISSIONS.PURCHASE_ORDERS_RECEIVE);
 
 /** Label used in the UI ("Profile" / headers). */
 export function roleLabel(role) {

@@ -108,6 +108,31 @@ export const inventoryApi = {
 };
 
 // ---------------------------------------------------------------------------
+// Purchase orders (Phase 13A–13C)
+// ---------------------------------------------------------------------------
+// Read + receive only on mobile (Phase 13D). Create/edit/issue/cancel stay
+// backend-only — no manage wrappers are exposed until a manage UI exists.
+
+export const purchaseOrdersApi = {
+  /** Paginated PO headers { items, total, ... }. params: { status, q (number), page, limit }. */
+  list: (token, params) => apiFetch('/api/purchase-orders', { token, params }),
+  /** Full detail: header + items + receipts + pendingClaims. */
+  get: (token, id) => apiFetch(`/api/purchase-orders/${id}`, { token }),
+  /**
+   * Claim-first receive (Phase 13C) against an OPEN order. body:
+   * { lines: [{ productId, quantity }], reference? }. 200 -> { allReceived,
+   * applied, po } (the fresh detail). 409 RECEIVE_CONFLICT carries `applied`
+   * with the lines that landed — see ApiError.applied.
+   */
+  receive: (token, id, { lines, reference }) =>
+    apiFetch(`/api/purchase-orders/${id}/receive`, {
+      token,
+      method: 'POST',
+      body: { lines, reference: reference?.trim() || undefined },
+    }),
+};
+
+// ---------------------------------------------------------------------------
 // Dashboard
 // ---------------------------------------------------------------------------
 
@@ -148,6 +173,7 @@ export default {
   locationsApi,
   productsApi,
   inventoryApi,
+  purchaseOrdersApi,
   dashboardApi,
   aiApi,
 };

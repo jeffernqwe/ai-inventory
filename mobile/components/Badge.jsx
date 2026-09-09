@@ -42,6 +42,21 @@ export function TypeBadge({ type }) {
   return <Badge text={m.t} tone={m.tone} />;
 }
 
+/**
+ * Purchase-order status badge (Phase 13D). Only OPEN orders are receivable;
+ * RECEIVED/CANCELED are terminal, DRAFT is pre-issue.
+ */
+export function PoStatusBadge({ status }) {
+  const map = {
+    DRAFT: { t: 'Draft', tone: 'neutral' },
+    OPEN: { t: 'Open', tone: 'info' },
+    RECEIVED: { t: 'Received', tone: 'success' },
+    CANCELED: { t: 'Canceled', tone: 'neutral' },
+  };
+  const m = map[status] ?? { t: status ?? '—', tone: 'neutral' };
+  return <Badge text={m.t} tone={m.tone} />;
+}
+
 const styles = StyleSheet.create({
   pill: {
     borderRadius: radius.pill,

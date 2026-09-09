@@ -141,6 +141,7 @@ export default function DashboardScreen() {
     { label: 'Stock Out', sub: 'Remove quantity', route: '/stock-out' },
     ...(canAdjust ? [{ label: 'Adjust', sub: 'Set exact stock', route: '/adjust' }] : []),
     { label: 'History', sub: 'All movements', route: '/history' },
+    { label: 'Purchase Orders', sub: 'Orders & receiving', route: '/purchase-orders' },
     ...(canUseAi(user) ? [{ label: 'AI Assistant', sub: 'Ask about stock', route: '/ai' }] : []),
     { label: 'Inventory', sub: 'Rows & status', route: '/inventory' },
     { label: 'Products', sub: 'Catalog', route: '/products' },

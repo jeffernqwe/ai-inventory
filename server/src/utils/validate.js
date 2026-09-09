@@ -398,6 +398,63 @@ export function validatePurchaseOrder(body, { partial = false } = {}) {
   };
 }
 
+function parseReceiveLine(line, idx, problems, seenProductIds) {
+  const prefix = `lines[${idx}]`;
+  const obj = line && typeof line === 'object' ? line : {};
+
+  const productId = isObjectId(obj.productId) ? obj.productId : undefined;
+  if (!productId) {
+    problems.push({ field: `${prefix}.productId`, message: 'productId is required and must be a valid id' });
+  } else {
+    const key = productId.toLowerCase();
+    if (seenProductIds.has(key)) {
+      problems.push({ field: `${prefix}.productId`, message: 'duplicate productId in lines' });
+    }
+    seenProductIds.add(key);
+  }
+
+  const quantity = requiredNumber(obj.quantity, 'quantity', { min: 1, integer: true });
+  for (const p of quantity.problems) {
+    problems.push({ field: `${prefix}.${p.field}`, message: p.message });
+  }
+
+  return { productId, quantity: quantity.value };
+}
+
+/**
+ * Receiving payload validation (Phase 13C). `lines` is the quantity received
+ * NOW per product (partial allowed; the server caps each at the remaining
+ * quantity). Only `lines` and `reference` are accepted — the receiving location
+ * is always the PO's own, never a client-supplied one. Service-side checks
+ * (PO state, line membership, remaining, ACTIVE products) happen after this
+ * structural pass, before anything moves.
+ */
+export function validateReceive(body, { partial = false } = {}) {
+  const problems = [];
+
+  const reference = optionalString(body?.reference, 'reference', REFERENCE_MAX);
+  problems.push(...reference.problems);
+
+  let lines;
+  const rawLines = body?.lines;
+  if (rawLines === undefined) {
+    if (!partial) problems.push({ field: 'lines', message: 'lines is required' });
+    lines = undefined;
+  } else if (!Array.isArray(rawLines)) {
+    problems.push({ field: 'lines', message: 'lines must be an array' });
+    lines = undefined;
+  } else {
+    if (rawLines.length === 0) problems.push({ field: 'lines', message: 'lines must not be empty' });
+    if (rawLines.length > PO_ITEMS_MAX) {
+      problems.push({ field: 'lines', message: `lines must have at most ${PO_ITEMS_MAX} entries` });
+    }
+    const seenProductIds = new Set();
+    lines = rawLines.map((line, idx) => parseReceiveLine(line, idx, problems, seenProductIds));
+  }
+
+  return { problems, lines, reference: reference.value };
+}
+
 export default {
   normalizeEmail,
   validateRegister,
@@ -414,5 +471,6 @@ export default {
   validateProduct,
   validateStockMovement,
   validatePurchaseOrder,
+  validateReceive,
   CODE_MAX,
 };

@@ -51,6 +51,12 @@ export default function ProfileScreen() {
         <DetailRow label="Role" value={roleLabel(user?.role)} />
         <DetailRow label="Status" value={user?.status === 'ACTIVE' ? 'Active' : user?.status} />
         <DetailRow label="Member since" value={formatDateTime(user?.createdAt)} />
+        <Button
+          title="Edit name"
+          variant="secondary"
+          style={styles.editName}
+          onPress={() => router.push('/edit-name')}
+        />
       </Card>
 
       <Text style={styles.sectionTitle}>Security</Text>
@@ -59,6 +65,12 @@ export default function ProfileScreen() {
           Inventory AI keeps your sign-in on this device's secure storage. Permissions and business data are
           always enforced by the server — the app never stores your password.
         </Text>
+        <Button
+          title="Change password"
+          variant="secondary"
+          style={styles.editName}
+          onPress={() => router.push('/change-password')}
+        />
       </Card>
 
       <Button title="Refresh account" variant="secondary" style={styles.spaced} onPress={() => refresh()} />
@@ -83,6 +95,7 @@ const styles = StyleSheet.create({
   name: { ...type.h2, color: colors.text, marginBottom: spacing.xs },
   sectionTitle: { ...type.h3, color: colors.text, marginTop: spacing.xxl, marginBottom: spacing.md },
   details: {},
+  editName: { marginTop: spacing.md },
   detailRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: spacing.sm + 2 },
   detailLabel: { ...type.body, color: colors.textMuted },
   detailValue: { ...type.body, color: colors.text, fontWeight: '600', marginLeft: spacing.md, flexShrink: 1 },

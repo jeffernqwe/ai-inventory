@@ -79,6 +79,50 @@ export function validateLogin(body) {
 }
 
 // ---------------------------------------------------------------------------
+// Account security + profile (Phase 15)
+// ---------------------------------------------------------------------------
+
+/**
+ * Change-password payload. currentPassword is required and is verified against
+ * the stored hash in the service BEFORE anything changes. newPassword reuses
+ * the shared password rules (8–72 chars) and is reported under its own field
+ * so the client can anchor the error on the right input.
+ */
+export function validateChangePassword(body) {
+  const problems = [];
+  if (typeof body?.currentPassword !== 'string' || body.currentPassword.length === 0) {
+    problems.push({ field: 'currentPassword', message: 'currentPassword is required' });
+  }
+  problems.push(
+    ...passwordProblems(body?.newPassword).map((p) => ({ ...p, field: 'newPassword' }))
+  );
+  return problems;
+}
+
+const ME_NAME_MAX = 100;
+/** The ONLY field the profile-update endpoint accepts (Phase 15). */
+const ME_UPDATE_FIELDS = new Set(['name']);
+
+/**
+ * Profile-update payload. Strict allowlist: every key outside `name` — email,
+ * role, status, businessId, password, passwordHash, anything else — is
+ * rejected explicitly, never silently ignored. Identity comes exclusively from
+ * the authenticated session, never from the payload.
+ */
+export function validateMeUpdate(body) {
+  const problems = [];
+  const bodyObj = body && typeof body === 'object' ? body : {};
+  for (const key of Object.keys(bodyObj)) {
+    if (!ME_UPDATE_FIELDS.has(key)) {
+      problems.push({ field: key, message: `field '${key}' is not allowed` });
+    }
+  }
+  const name = requiredString(bodyObj?.name, 'name', ME_NAME_MAX);
+  problems.push(...name.problems);
+  return { problems, name: name.value };
+}
+
+// ---------------------------------------------------------------------------
 // User management (Phase 14A)
 // ---------------------------------------------------------------------------
 
@@ -535,6 +579,8 @@ export default {
   normalizeEmail,
   validateRegister,
   validateLogin,
+  validateChangePassword,
+  validateMeUpdate,
   validateUserCreate,
   validateUserUpdate,
   USER_STATUSES,

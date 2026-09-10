@@ -1,7 +1,9 @@
-import { validateRegister, validateLogin } from '../utils/validate.js';
+import { validateRegister, validateLogin, validateChangePassword, validateMeUpdate } from '../utils/validate.js';
 import {
   registerBusinessOwner,
   loginWithPassword,
+  changePassword as changePasswordService,
+  updateMyName,
   toPublicUser,
 } from '../services/auth.service.js';
 import ApiError from '../utils/ApiError.js';
@@ -68,4 +70,42 @@ export async function me(req, res) {
   return res.status(200).json({ user: req.user });
 }
 
-export default { register, login, me };
+/**
+ * POST /api/auth/change-password (Phase 15). Protected by requireAuth. Verifies
+ * the current password, replaces the hash, and stamps passwordChangedAt —
+ * which revokes every previously issued token (401 SESSION_INVALIDATED). The
+ * client signs in again with the new password.
+ */
+export async function changePassword(req, res) {
+  const body = req.body ?? {};
+  const problems = validateChangePassword(body);
+  if (problems.length > 0) {
+    const err = new ApiError(400, 'Validation failed', 'VALIDATION_ERROR');
+    err.fields = problems;
+    throw err;
+  }
+  await changePasswordService(req.user.id, {
+    currentPassword: body.currentPassword,
+    newPassword: body.newPassword,
+  });
+  return res.status(200).json({ message: 'Password changed. Please sign in again.' });
+}
+
+/**
+ * PATCH /api/auth/me (Phase 15). Protected by requireAuth. Updates ONLY the
+ * caller's name; identity is taken exclusively from the authenticated session.
+ * Unknown fields are rejected by the validator, never silently ignored.
+ */
+export async function updateMe(req, res) {
+  const body = req.body ?? {};
+  const { problems, name } = validateMeUpdate(body);
+  if (problems.length > 0) {
+    const err = new ApiError(400, 'Validation failed', 'VALIDATION_ERROR');
+    err.fields = problems;
+    throw err;
+  }
+  const user = await updateMyName(req.user.id, name);
+  return res.status(200).json({ user: toPublicUser(user) });
+}
+
+export default { register, login, me, changePassword, updateMe };

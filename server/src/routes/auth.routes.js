@@ -1,6 +1,6 @@
 import { Router } from 'express';
 
-import { register, login, me } from '../controllers/auth.controller.js';
+import { register, login, me, changePassword, updateMe } from '../controllers/auth.controller.js';
 import requireAuth from '../middlewares/authenticate.js';
 import {
   createLoginAccountLimiter,
@@ -25,6 +25,9 @@ export function createAuthRouter({ limits } = {}) {
 
   // Protected
   router.get('/me', requireAuth, me);
+  // Phase 15: self-service account security + profile.
+  router.patch('/me', requireAuth, updateMe);
+  router.post('/change-password', requireAuth, changePassword);
 
   return router;
 }

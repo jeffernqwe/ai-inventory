@@ -101,4 +101,46 @@ export async function loginWithPassword({ email, password }) {
   return { token, user };
 }
 
-export default { registerBusinessOwner, loginWithPassword, toPublicUser };
+/**
+ * Password change (Phase 15). The current password is verified against the
+ * stored hash FIRST — nothing changes on a wrong password. On success the hash
+ * is replaced and passwordChangedAt is stamped with now, which invalidates
+ * every JWT issued before that moment (requireAuth compares the token's iat
+ * second: iat < changedAtSec → 401 SESSION_INVALIDATED). No new token is
+ * issued here — the client signs in again with the new password, and that
+ * fresh token's iat is at or after changedAtSec, so it is never rejected.
+ */
+export async function changePassword(userId, { currentPassword, newPassword }) {
+  const user = await User.findById(userId).select('+passwordHash');
+  if (!user) {
+    throw new ApiError(401, 'Authentication required', 'AUTH_REQUIRED');
+  }
+  const passwordOk = await bcrypt.compare(currentPassword, user.passwordHash || DUMMY_HASH);
+  if (!passwordOk) {
+    throw new ApiError(400, 'Current password is incorrect', 'INVALID_CURRENT_PASSWORD');
+  }
+  const passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
+  user.passwordHash = passwordHash;
+  user.passwordChangedAt = new Date();
+  await user.save();
+  return { changedAt: user.passwordChangedAt };
+}
+
+/**
+ * Profile name update (Phase 15). The user id comes exclusively from the
+ * authenticated session (req.user.id) — never from the client. Returns the
+ * updated user document for the public DTO.
+ */
+export async function updateMyName(userId, name) {
+  const user = await User.findByIdAndUpdate(
+    userId,
+    { name },
+    { returnDocument: 'after', runValidators: true }
+  );
+  if (!user) {
+    throw new ApiError(401, 'Authentication required', 'AUTH_REQUIRED');
+  }
+  return user;
+}
+
+export default { registerBusinessOwner, loginWithPassword, changePassword, updateMyName, toPublicUser };

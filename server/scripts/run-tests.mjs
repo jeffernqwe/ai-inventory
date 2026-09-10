@@ -61,6 +61,7 @@ const MIXED = [
   'phase13-purchase-orders.test.mjs', // db: PO create/list/get/DRAFT-edit/issue/cancel (numbering, lifecycle, RBAC, isolation, no stock writes)
   'phase13-receiving.test.mjs', // db: PO receiving into the ledger (partial/full, auto-RECEIVED, over-receive 409, concurrency, full precise undo, RBAC/isolation)
   'phase14-users.test.mjs', // db: user management over /api/users (create/list/role+status, RBAC, OWNER/ADMIN/self protections, dup email, disabled, isolation, audit)
+  'phase15-account-security.test.mjs', // db: change-password + PATCH /me (session invalidation via passwordChangedAt vs JWT iat, strict /me whitelist)
 ];
 
 const FILE_LISTS = {

@@ -164,6 +164,17 @@ export const purchaseOrdersApi = {
 };
 
 // ---------------------------------------------------------------------------
+// Audit trail (Phase 16)
+// ---------------------------------------------------------------------------
+// Read-only record of every recorded action, newest first. OWNER/ADMIN only
+// (audit.view). Filters: action, entityType, userId, from, to, q.
+
+export const auditApi = {
+  /** Paginated { items, page, limit, total, totalPages }. */
+  list: (token, params) => apiFetch('/api/audit', { token, params }),
+};
+
+// ---------------------------------------------------------------------------
 // Dashboard
 // ---------------------------------------------------------------------------
 
@@ -206,6 +217,7 @@ export default {
   inventoryApi,
   purchaseOrdersApi,
   usersApi,
+  auditApi,
   dashboardApi,
   aiApi,
 };

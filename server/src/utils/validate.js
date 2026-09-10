@@ -7,6 +7,7 @@
  */
 
 import { NON_OWNER_ROLES } from '../constants/roles.js';
+import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../constants/audit.js';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_EMAIL = 254;
@@ -575,6 +576,61 @@ export function validateReceive(body, { partial = false } = {}) {
   return { problems, lines, reference: reference.value };
 }
 
+// ---------------------------------------------------------------------------
+// Audit trail (Phase 16)
+// ---------------------------------------------------------------------------
+
+const AUDIT_Q_MAX = 100;
+const AUDIT_ACTION_VALUES = new Set(Object.values(AUDIT_ACTIONS));
+const AUDIT_ENTITY_TYPE_VALUES = new Set(Object.values(AUDIT_ENTITY_TYPES));
+
+/**
+ * GET /api/audit query validation. Every filter value must be known:
+ * action/entityType against the constant sets, userId an ObjectId, from/to
+ * valid ISO dates with to >= from, q a bounded string. Unknown filter values
+ * are rejected with field problems — never silently ignored.
+ */
+export function validateAuditList(query) {
+  const problems = [];
+  const q = query ?? {};
+
+  const action = typeof q.action === 'string' && q.action ? q.action : undefined;
+  if (action && !AUDIT_ACTION_VALUES.has(action)) {
+    problems.push({ field: 'action', message: 'action must be a valid audit action' });
+  }
+
+  const entityType = typeof q.entityType === 'string' && q.entityType ? q.entityType : undefined;
+  if (entityType && !AUDIT_ENTITY_TYPE_VALUES.has(entityType)) {
+    problems.push({ field: 'entityType', message: 'entityType must be a valid entity type' });
+  }
+
+  const userId = optionalObjectId(q.userId, 'userId');
+  problems.push(...userId.problems);
+
+  const from = optionalDate(q.from, 'from');
+  problems.push(...from.problems);
+  const to = optionalDate(q.to, 'to');
+  problems.push(...to.problems);
+  if (from.value && to.value && to.value < from.value) {
+    problems.push({ field: 'to', message: 'to must be on or after from' });
+  }
+
+  const text = optionalString(q.q, 'q', AUDIT_Q_MAX);
+  problems.push(...text.problems);
+
+  return {
+    problems,
+    filters: {
+      action,
+      entityType,
+      userId: userId.value,
+      from: from.value,
+      to: to.value,
+      q: text.value,
+    },
+  };
+}
+
 export default {
   normalizeEmail,
   validateRegister,
@@ -597,5 +653,6 @@ export default {
   validateStockMovement,
   validatePurchaseOrder,
   validateReceive,
+  validateAuditList,
   CODE_MAX,
 };

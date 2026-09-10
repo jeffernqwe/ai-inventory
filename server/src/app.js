@@ -16,6 +16,7 @@ import productRoutes from './routes/products.routes.js';
 import inventoryRoutes from './routes/inventory.routes.js';
 import dashboardRoutes from './routes/dashboard.routes.js';
 import aiRoutes from './routes/ai.routes.js';
+import auditRoutes from './routes/audit.routes.js';
 import notFound from './middlewares/notFound.js';
 import errorHandler from './middlewares/errorHandler.js';
 
@@ -100,6 +101,7 @@ export function createApp({
   app.use('/api/inventory', inventoryRoutes);
   app.use('/api/dashboard', dashboardRoutes);
   app.use('/api/ai', aiRoutes);
+  app.use('/api/audit', auditRoutes);
 
   // Unknown routes -> structured 404
   app.use(notFound);

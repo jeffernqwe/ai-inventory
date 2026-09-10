@@ -48,6 +48,7 @@ export const PERMISSIONS = Object.freeze({
   TRANSACTIONS_VIEW: 'transactions.view',
   DASHBOARD_VIEW: 'dashboard.view',
   AI_USE: 'ai.use',
+  AUDIT_VIEW: 'audit.view', // OWNER + ADMIN (Phase 16)
 });
 
 const ALL = Object.freeze(Object.values(PERMISSIONS));
@@ -74,6 +75,7 @@ export const ROLE_PERMISSIONS = Object.freeze({
     PERMISSIONS.TRANSACTIONS_VIEW,
     PERMISSIONS.DASHBOARD_VIEW,
     PERMISSIONS.AI_USE,
+    PERMISSIONS.AUDIT_VIEW,
   ]),
   MANAGER: Object.freeze([
     PERMISSIONS.PRODUCTS_MANAGE,

@@ -187,6 +187,12 @@ Phase 06 — AI assistant (all `Authorization: Bearer <token>`, require `ai.use`
 | POST   | `/api/ai/conversations` | Create a conversation (optional `title`)           |
 | GET    | `/api/ai/conversations/:id/messages` | Get one conversation's messages (oldest first)  |
 
+Phase 16 — audit trail (read-only, `Authorization: Bearer <token>`, OWNER/ADMIN only):
+
+| Method | Path            | Description                                             |
+| ------ | --------------- | ------------------------------------------------------- |
+| GET    | `/api/audit`    | Read-only governance trail — every recorded action, newest first. Filters: `action`, `entityType`, `userId`, `from`/`to`, `q`; paginated. Strict whitelisted DTO with actor name; system rows return `actor: null` |
+
 The V1 assistant is **read-only**: it answers questions about the caller's catalog and
 stock through 9 server-side, authorization-aware tools (`searchProducts`, `getProduct`,
 `getInventory`, `getLowStockProducts`, `getOutOfStockProducts`, `getInventorySummary`,
@@ -324,3 +330,10 @@ Phase 07 (testing + production hardening) and Phase 08 (owner-directed hardening
   dashboard inventory-health + "Needs restock" preview (see "Inventory intelligence & restock
   alerts"). Read-only throughout — no data-model, RBAC, or V1 status change. Verified by
   `npm run lint` (0/0), the DB-free unit run (106 passed), and the full backend suite (257/257).
+- **Phase 16 — Audit Trail Viewer:** implemented, verified, commit pending owner sign-off — the
+  read side of the audit feature (the write path existed since Phase 04). `GET /api/audit` exposes
+  the business-scoped governance trail newest-first with action/entityType/user/date/q filters and
+  pagination, gated by a new `audit.view` permission (OWNER + ADMIN only; MANAGER/STAFF get 403). No
+  model change, no new dependency, no write routes. Mobile: an Audit Log screen + dashboard tile for
+  OWNER/ADMIN. Verified by `npm run lint` (0/0), the DB-free unit run (107 passed), the full backend
+  suite (350/350), and mobile android+iOS exports.

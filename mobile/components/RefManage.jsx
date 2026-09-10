@@ -24,11 +24,24 @@ function fieldMap(err) {
 
 /**
  * Shared manage screen for business-scoped reference lists (Categories,
- * Locations): search, status filter, server-driven pagination, and — for
- * users with the manage permission — create/edit via a modal plus archive/
+ * Locations, Suppliers): search, status filter, server-driven pagination, and —
+ * for users with the manage permission — create/edit via a modal plus archive/
  * restore. The backend stays the authority; this UI only gates what's shown.
+ *
+ * `fields` adds extra optional writable columns (e.g. supplier contactName/
+ * phone/email) to the modal form and the list row. Default `[]` keeps
+ * Categories/Locations behaviour byte-for-byte unchanged.
  */
-export default function RefManage({ api, canManageFn, singular, label, placeholder, emptyTitle, emptyMessage }) {
+export default function RefManage({
+  api,
+  canManageFn,
+  singular,
+  label,
+  placeholder,
+  emptyTitle,
+  emptyMessage,
+  fields = [],
+}) {
   const { user, token, signOut } = useSession();
   const manage = canManageFn(user);
 
@@ -57,6 +70,7 @@ export default function RefManage({ api, canManageFn, singular, label, placehold
   const [editing, setEditing] = useState(null);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+  const [extras, setExtras] = useState({});
   const [fieldErrors, setFieldErrors] = useState({});
   const [formError, setFormError] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -65,6 +79,7 @@ export default function RefManage({ api, canManageFn, singular, label, placehold
     setEditing(null);
     setName('');
     setDescription('');
+    setExtras({});
     setFieldErrors({});
     setFormError(null);
     setFormOpen(true);
@@ -73,6 +88,9 @@ export default function RefManage({ api, canManageFn, singular, label, placehold
     setEditing(item);
     setName(item.name);
     setDescription(item.description ?? '');
+    const next = {};
+    for (const f of fields) next[f.name] = item[f.name] ?? '';
+    setExtras(next);
     setFieldErrors({});
     setFormError(null);
     setFormOpen(true);
@@ -86,6 +104,13 @@ export default function RefManage({ api, canManageFn, singular, label, placehold
     setFormError(null);
     setFieldErrors({});
     const payload = { name: name.trim(), description: description.trim() || undefined };
+    for (const f of fields) {
+      const v = (extras[f.name] ?? '').trim();
+      // create: skip blanks so nothing empty is stored; update: forward '' so
+      // the server clears a previously-set value (its PATCH applies differing fields).
+      if (editing) payload[f.name] = v;
+      else if (v) payload[f.name] = v;
+    }
     try {
       if (editing) await api.update(token, editing.id, payload);
       else await api.create(token, payload);
@@ -158,6 +183,11 @@ export default function RefManage({ api, canManageFn, singular, label, placehold
       {item.description ? (
         <Text style={styles.rowDesc} numberOfLines={2}>
           {item.description}
+        </Text>
+      ) : null}
+      {fields.length > 0 ? (
+        <Text style={styles.rowMeta} numberOfLines={1}>
+          {fields.map((f) => item[f.name]).filter((v) => v != null && String(v).trim() !== '').join(' · ')}
         </Text>
       ) : null}
       {manage ? (
@@ -248,6 +278,19 @@ export default function RefManage({ api, canManageFn, singular, label, placehold
               multiline
               error={fieldErrors.description}
             />
+            {fields.map((f) => (
+              <Input
+                key={f.name}
+                name={f.name}
+                label={f.label}
+                value={extras[f.name] ?? ''}
+                onChangeText={(v) => setExtras((prev) => ({ ...prev, [f.name]: v }))}
+                error={fieldErrors[f.name]}
+                maxLength={f.maxLength}
+                keyboardType={f.keyboardType}
+                autoCapitalize={f.autoCapitalize ?? 'none'}
+              />
+            ))}
             <Button title={editing ? 'Save changes' : `Create ${singular.toLowerCase()}`} onPress={save} loading={saving} full />
             <Button title="Cancel" variant="secondary" onPress={closeForm} style={styles.cancelBtn} full />
           </View>
@@ -279,6 +322,7 @@ const styles = StyleSheet.create({
   rowHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
   rowTitle: { ...type.body, fontWeight: '700', color: colors.text, flexShrink: 1 },
   rowDesc: { ...type.bodySmall, color: colors.textSecondary, marginTop: 4 },
+  rowMeta: { ...type.caption, color: colors.textMuted, marginTop: 4 },
   rowActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
   smallBtn: { flex: 1, minHeight: 38 },
   separator: { height: spacing.md },

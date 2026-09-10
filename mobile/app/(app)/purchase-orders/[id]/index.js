@@ -7,12 +7,18 @@ import { PoStatusBadge } from '../../../../components/Badge';
 import Button from '../../../../components/Button';
 import Card from '../../../../components/Card';
 import { CenterLoader, EmptyState, ErrorState, errorText } from '../../../../components/ListState';
+import { poErrorMessage } from '../../../../components/PoForm';
 import Screen from '../../../../components/Screen';
 import AccessDenied from '../../../../components/AccessDenied';
 import { purchaseOrdersApi } from '../../../../lib/api';
 import { isSessionError, useSession } from '../../../../lib/auth';
+import { alert, confirm } from '../../../../lib/confirm';
 import { formatDate, formatDateTime, formatMoney, formatNumber } from '../../../../lib/format';
-import { canReceivePurchaseOrders, canViewPurchaseOrders } from '../../../../lib/permissions';
+import {
+  canManagePurchaseOrders,
+  canReceivePurchaseOrders,
+  canViewPurchaseOrders,
+} from '../../../../lib/permissions';
 import { colors, radius, spacing, type } from '../../../../lib/theme';
 
 function Row({ label, value, mono, danger }) {
@@ -39,6 +45,7 @@ export default function PurchaseOrderDetailScreen() {
   const { user, token, signOut } = useSession();
   const navigation = useNavigation();
   const canReceive = canReceivePurchaseOrders(user);
+  const canManage = canManagePurchaseOrders(user);
 
   const [po, setPo] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -80,6 +87,37 @@ export default function PurchaseOrderDetailScreen() {
   const pendingUnits = (po.pendingClaims ?? []).reduce((sum, c) => sum + (c.quantity || 0), 0);
   const note = statusNote(po.status);
 
+  async function onIssue() {
+    const ok = await confirm('Issue order', `${po.number} will be opened for receiving. This cannot be undone.`, {
+      confirmText: 'Issue',
+    });
+    if (!ok) return;
+    try {
+      const updated = await purchaseOrdersApi.issue(token, po.id);
+      await load();
+      await alert('Order issued', `${updated?.number ?? po.number} is now open for receiving.`);
+    } catch (err) {
+      await alert('Could not issue', poErrorMessage(err));
+      await load();
+    }
+  }
+
+  async function onCancel() {
+    const ok = await confirm('Cancel order', `${po.number} will be marked canceled and can no longer be received or changed.`, {
+      confirmText: 'Cancel',
+      destructive: true,
+    });
+    if (!ok) return;
+    try {
+      const updated = await purchaseOrdersApi.cancel(token, po.id);
+      await load();
+      await alert('Order canceled', `${updated?.number ?? po.number} was canceled.`);
+    } catch (err) {
+      await alert('Could not cancel', poErrorMessage(err));
+      await load();
+    }
+  }
+
   return (
     <Screen scroll>
       {pendingUnits > 0 ? (
@@ -110,6 +148,21 @@ export default function PurchaseOrderDetailScreen() {
         <Row label="Received" value={formatNumber(totals.quantityReceived)} mono />
         <Row label="Remaining" value={formatNumber(totals.remainingQuantity)} mono />
       </Card>
+
+      {canManage && (po.status === 'DRAFT' || po.status === 'OPEN') ? (
+        <>
+          <Text style={styles.sectionTitle}>Manage</Text>
+          <View style={styles.manageRow}>
+            {po.status === 'DRAFT' ? (
+              <Button title="Edit" variant="secondary" onPress={() => router.push(`/purchase-orders/${po.id}/edit`)} style={styles.manageBtn} />
+            ) : null}
+            {po.status === 'DRAFT' ? (
+              <Button title="Issue" onPress={onIssue} style={styles.manageBtn} />
+            ) : null}
+            <Button title="Cancel" variant="danger" onPress={onCancel} style={styles.manageBtn} />
+          </View>
+        </>
+      ) : null}
 
       <Text style={styles.sectionTitle}>Items</Text>
       <Card>
@@ -196,6 +249,8 @@ const styles = StyleSheet.create({
   fieldValue: { ...type.body, color: colors.text, fontWeight: '600', flexShrink: 1, marginLeft: spacing.lg },
   fieldMono: { fontVariant: ['tabular-nums'] },
   fieldDanger: { color: colors.danger },
+  manageRow: { flexDirection: 'row', gap: spacing.md },
+  manageBtn: { flex: 1 },
   sectionTitle: { ...type.h3, color: colors.text, marginTop: spacing.xxl, marginBottom: spacing.md },
   itemList: { gap: spacing.lg },
   itemRow: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.divider, paddingBottom: spacing.lg },

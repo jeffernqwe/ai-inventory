@@ -1089,6 +1089,8 @@ REST API modules:
 /api/locations
 /api/categories
 /api/products
+/api/purchase-orders
+/api/suppliers
 /api/inventory
 /api/transactions
 /api/dashboard
@@ -1112,6 +1114,21 @@ POST   /api/products
 GET    /api/products/:id
 PATCH  /api/products/:id
 DELETE /api/products/:id
+
+GET    /api/suppliers
+POST   /api/suppliers
+GET    /api/suppliers/:id
+PATCH  /api/suppliers/:id
+POST   /api/suppliers/:id/archive
+POST   /api/suppliers/:id/restore
+
+POST   /api/purchase-orders
+GET    /api/purchase-orders
+GET    /api/purchase-orders/:id
+PATCH  /api/purchase-orders/:id
+POST   /api/purchase-orders/:id/issue
+POST   /api/purchase-orders/:id/cancel
+POST   /api/purchase-orders/:id/receive
 
 GET    /api/inventory
 POST   /api/inventory/stock-in

@@ -99,6 +99,9 @@ User Management Foundation
         ↓
 Phase 16
 Audit Trail Viewer
+        ↓
+Phase 17
+Mobile Supplier & Purchase Order Management
 ```
 
 ---
@@ -1132,7 +1135,93 @@ Phase 14A section) and are not backfilled here.
 
 ---
 
-# 17. Phase Gate System
+# 17. Phase 17 — Mobile Supplier & Purchase Order Management
+
+## Objective
+
+Phase 17 is an owner-directed extension approved after Phase 16. The supplier and purchase-order
+backend has been complete and server-tested since Phase 13 (suppliers CRUD + archive on the shared
+reference stack; POs with numbering, DRAFT-only editing, issue, cancel, and claim-first receiving),
+but mobile was read + receive only (Phase 13D). Phase 17 delivers the mobile management half: a
+Suppliers screen (create/edit/archive/restore incl. contact fields) and the full PO lifecycle on
+mobile (create DRAFT, edit DRAFT, issue, cancel) over the existing Phase 13 API. **Zero backend
+changes** — no model, route, controller, service, validator, RBAC, audit-event, or server-test
+change. Read + receive behaviour is preserved exactly.
+
+## Scope
+
+Implemented (approved; commit pending owner sign-off):
+
+- `mobile/app/(app)/suppliers.js` — Suppliers manage screen reusing the shared `RefManage` pattern
+  (search, Active/Archived chips, pagination, archive/restore) with an additive `fields` prop that
+  adds `contactName` / `phone` / `email` to the create/edit modal and the list rows. Categories and
+  Locations pass no `fields` and behave unchanged.
+- `mobile/lib/api.js` — `suppliersApi` (list/get/create/update/archive/restore with contact fields)
+  via the shared reference wrapper; `purchaseOrdersApi` gains `create`, `update` (PATCH), `issue`,
+  `cancel` — each mapped to the existing Phase 13 endpoints with the exact backend error codes.
+- `mobile/lib/permissions.js` — mirror adds `SUPPLIERS_MANAGE ('suppliers.manage')` and
+  `SUPPLIERS_VIEW ('suppliers.view')` in lock-step with the server matrix (ADMIN + MANAGER manage,
+  every role views) and exports `canManageSuppliers` / `canViewSuppliers`. UI-gating only; the
+  backend stays authoritative.
+- `mobile/components/PoForm.jsx` — shared PO create/edit form: supplier + location searchable
+  pickers, optional `expectedAt` (YYYY-MM-DD text input — verified the server's `optionalDate`
+  accepts it), optional notes, and a line-items editor (product picker, whole quantity ≥ 1, optional
+  unit cost ≥ 0, no duplicate products, ≤ 200 lines). Mirrors `validatePurchaseOrder` for UX;
+  server 400 field problems and the exact PO mutation codes (`PO_NOT_DRAFT`, `PO_STATE_CONFLICT`,
+  `PO_CANCELED`, `PO_ALREADY_RECEIVED`, `PO_ALREADY_OPEN`, `PO_ALREADY_CANCELED`, `PO_NUMBER_CONFLICT`,
+  `SUPPLIER_NOT_FOUND`, `SUPPLIER_ARCHIVED`, `PRODUCT_*`, `LOCATION_*`) map to friendly messages.
+- `mobile/app/(app)/purchase-orders/new.js` and `[id]/edit.js` — create (DRAFT) and edit (DRAFT-only)
+  screens, gated by `purchase-orders.manage` with `AccessDenied` for other roles; edit fetches the
+  order fresh and refuses non-DRAFT states (mirroring `PO_NOT_DRAFT`).
+- `mobile/app/(app)/purchase-orders/[id]/index.js` — manage row (Edit + Issue on DRAFT, Cancel on
+  DRAFT/OPEN) gated by `purchase-orders.manage`, each with a confirm dialog and a refetch after the
+  mutation so the status/actions re-render. The existing Receive flow is untouched.
+- `mobile/app/(app)/dashboard.js` — unconditional "Suppliers" tile (every role views suppliers).
+- Docs: this roadmap section (tail sections renumbered), `CLAUDE.md` phase list, README supplier/PO
+  API tables (fills the pre-existing Phase 13 doc gap), and spec §31 API structure.
+
+### Explicitly Out of Scope
+
+No backend/model/RBAC/audit/test changes of any kind. No supplier deep screen beyond the manage
+modal; no supplier deletion (archive only). No PO deletion, no PO number editing, no editing
+OPEN/RECEIVED/CANCELED orders, no new PO status (partial receiving remains per-line while OPEN),
+no date-range PO filters. No new dependencies (no date picker). Phases 12/13/14B/15 roadmap
+sections remain a pre-existing gap and are not backfilled here. The "New PO" entry point on the PO
+list header was contemplated in planning as optional and is not part of this increment — the create
+screen is reachable via deep link and the dashboard's Purchase Orders tile; adding a list-header
+button is a follow-up decision. Owner-held files (`_layout.js`, `SignOutIcon.jsx`) untouched.
+
+### Verified
+
+- No server file changed: the full backend suite remains 350/350 and `npm run lint` stays 0/0,
+  re-run as a regression sanity check to prove Phase 17 left the server untouched.
+- Mobile: `npx expo export` for android and iOS both green.
+- Android emulator smoke (AVD InventoryAI + Expo Go): OWNER/ADMIN/MANAGER supplier CRUD + archive/
+  restore; OWNER/ADMIN/MANAGER PO create (DRAFT) → edit → issue → partial/full receive → auto-
+  RECEIVED, and cancel from DRAFT/OPEN; STAFF supplier/PO view-only with manage affordances hidden
+  and direct nav denied; invalid transitions return the existing backend 409 codes; business
+  isolation spot-check; Phase 16 audit viewer shows `SUPPLIER_CREATED` and `PURCHASE_ORDER_ISSUED`
+  rows with the correct entity and the logged-in actor. Evidence captured under `.smoke/p17-*`
+  (untracked).
+
+## Definition of Done
+
+- OWNER/ADMIN/MANAGER can manage suppliers and POs from the app; STAFF remains view-only for
+  supplier/PO management and can still receive stock.
+- The full PO lifecycle works on mobile (create → edit DRAFT → issue → receive → auto-RECEIVED, and
+  cancel from DRAFT/OPEN); non-DRAFT edits are never offered and are rejected by the server
+  (`PO_NOT_DRAFT`).
+- Every mobile manage action is UI-gated by the permission mirror; the backend stays authoritative
+  (403/409 on hand-crafted requests) and business-isolated (no client `businessId` anywhere).
+- Receiving and the claim-first flow are unchanged; no `PARTIALLY_RECEIVED` status was introduced.
+- `npm run lint` 0/0 and the full backend suite 350/350 (regression check only — no server change).
+- Mobile android + iOS exports green; emulator smoke evidence captured in `.smoke/p17-*`, untracked.
+- Docs updated (roadmap incl. renumbering, CLAUDE.md, README API table, spec §31); commit pending
+  owner sign-off; nothing pushed.
+
+---
+
+# 18. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.
 
@@ -1173,7 +1262,7 @@ The project owner decides whether to proceed.
 
 ---
 
-# 18. Change Control
+# 19. Change Control
 
 If Claude discovers that the current specification is incomplete or incorrect:
 
@@ -1191,7 +1280,7 @@ Minor implementation improvements that do not alter architectural decisions may 
 
 ---
 
-# 18. Bug Handling
+# 20. Bug Handling
 
 If a bug is discovered during a phase:
 
@@ -1216,7 +1305,7 @@ Only fix it immediately if it blocks the current phase.
 
 ---
 
-# 19. Refactoring Rules
+# 21. Refactoring Rules
 
 Refactoring is allowed when it:
 
@@ -1234,7 +1323,7 @@ Keep changes focused.
 
 ---
 
-# 20. Dependency Rules
+# 22. Dependency Rules
 
 Before adding a dependency:
 
@@ -1248,7 +1337,7 @@ Do not add dependencies simply for convenience.
 
 ---
 
-# 21. Git Checkpoints
+# 23. Git Checkpoints
 
 A Git commit should be created after a stable phase.
 
@@ -1281,7 +1370,7 @@ Before committing:
 
 ---
 
-# 22. V1 Completion
+# 24. V1 Completion
 
 V1 is complete only when all major requirements in:
 
@@ -1323,7 +1412,7 @@ AI Inventory Questions
 
 ---
 
-# 23. Future Development
+# 25. Future Development
 
 After V1, future features must be planned separately.
 
@@ -1358,7 +1447,7 @@ Future functionality must not be implemented during V1 unless explicitly approve
 
 ---
 
-# 24. Final Development Rule
+# 26. Final Development Rule
 
 The goal is not to produce the largest amount of code as quickly as possible.
 

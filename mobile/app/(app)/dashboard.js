@@ -142,6 +142,7 @@ export default function DashboardScreen() {
     ...(canAdjust ? [{ label: 'Adjust', sub: 'Set exact stock', route: '/adjust' }] : []),
     { label: 'History', sub: 'All movements', route: '/history' },
     { label: 'Purchase Orders', sub: 'Orders & receiving', route: '/purchase-orders' },
+    { label: 'Suppliers', sub: 'Manage vendors', route: '/suppliers' },
     ...(canManageUsers(user) ? [{ label: 'Users', sub: 'Manage accounts', route: '/users' }] : []),
     ...(canViewAudit(user) ? [{ label: 'Audit Log', sub: 'Who did what', route: '/audit' }] : []),
     ...(canUseAi(user) ? [{ label: 'AI Assistant', sub: 'Ask about stock', route: '/ai' }] : []),

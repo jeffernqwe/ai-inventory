@@ -1,6 +1,7 @@
 import { Redirect, Stack } from 'expo-router';
 
 import { CenterLoader } from '../../components/ListState';
+import SignOutIcon from '../../components/SignOutIcon';
 import { useSession } from '../../lib/auth';
 import { colors } from '../../lib/theme';
 
@@ -38,7 +39,10 @@ export default function AppLayout() {
       <Stack.Screen name="scan" options={{ title: 'Scan Barcode' }} />
       <Stack.Screen name="categories" options={{ title: 'Categories' }} />
       <Stack.Screen name="locations" options={{ title: 'Locations' }} />
-      <Stack.Screen name="inventory" options={{ title: 'Inventory' }} />
+      <Stack.Screen
+        name="inventory"
+        options={{ title: 'Inventory', headerRight: () => <SignOutIcon /> }}
+      />
       <Stack.Screen name="inventory/[id]" options={{ title: 'Stock Record' }} />
       <Stack.Screen name="purchase-orders/index" options={{ title: 'Purchase Orders' }} />
       <Stack.Screen name="purchase-orders/[id]/index" options={{ title: 'Purchase Order' }} />

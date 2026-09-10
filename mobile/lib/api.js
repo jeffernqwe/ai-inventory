@@ -32,6 +32,20 @@ export function me(token) {
   return apiFetch('/api/auth/me', { token });
 }
 
+/** POST /api/auth/change-password -> { message }. body: { currentPassword, newPassword }. 400 INVALID_CURRENT_PASSWORD / VALIDATION_ERROR; revokes every prior JWT (401 SESSION_INVALIDATED). */
+export function changePassword(token, { currentPassword, newPassword }) {
+  return apiFetch('/api/auth/change-password', {
+    token,
+    method: 'POST',
+    body: { currentPassword, newPassword },
+  });
+}
+
+/** PATCH /api/auth/me -> { user }. Updates ONLY the caller's name. 400 VALIDATION_ERROR for any other field. */
+export function updateMe(token, { name }) {
+  return apiFetch('/api/auth/me', { token, method: 'PATCH', body: { name } });
+}
+
 // ---------------------------------------------------------------------------
 // Users (Phase 14A backend / 14B mobile)
 // ---------------------------------------------------------------------------

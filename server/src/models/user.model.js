@@ -43,6 +43,14 @@ const userSchema = new Schema(
       enum: userStatuses,
       default: 'ACTIVE',
     },
+    // Phase 15: stamped when the user changes their own password. requireAuth
+    // compares a token's issued-at second against this and rejects tokens
+    // minted before it (SESSION_INVALIDATED). null = never changed → no
+    // invalidation (safe default for every pre-existing user, no migration).
+    passwordChangedAt: {
+      type: Date,
+      default: null,
+    },
   },
   { collection: 'users', timestamps: true }
 );

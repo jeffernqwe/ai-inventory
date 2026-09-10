@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import { router } from 'expo-router';
 import { FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
 
@@ -13,9 +13,12 @@ import { formatDateTime } from '../../../lib/format';
 import { canUseAi } from '../../../lib/permissions';
 import usePagedList from '../../../hooks/usePagedList';
 import useRefetchOnFocus from '../../../hooks/useRefetchOnFocus';
-import { colors, radius, spacing, type } from '../../../lib/theme';
+import { radius, spacing, type } from '../../../lib/theme';
+import { useTheme } from '../../../lib/theme-context';
 
 function ConversationRow({ item }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   return (
     <PressableCard style={styles.row} onPress={() => router.push(`/ai/${item.id}`)}>
       <Text style={styles.rowTitle} numberOfLines={1}>
@@ -27,6 +30,8 @@ function ConversationRow({ item }) {
 }
 
 export default function AiHubScreen() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const { user, token, signOut } = useSession();
 
   if (!canUseAi(user)) {
@@ -86,7 +91,7 @@ export default function AiHubScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) => StyleSheet.create({
   content: { padding: spacing.lg, paddingBottom: spacing.huge, flexGrow: 1 },
   newBtn: { marginBottom: spacing.md },
   noteCard: {

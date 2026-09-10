@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import { StyleSheet, Text, View } from 'react-native';
 
@@ -11,9 +11,12 @@ import { inventoryApi } from '../../../lib/api';
 import { isSessionError, useSession } from '../../../lib/auth';
 import { formatDateTime, formatNumber } from '../../../lib/format';
 import { canAdjustStock } from '../../../lib/permissions';
-import { colors, radius, spacing, type } from '../../../lib/theme';
+import { radius, spacing, type } from '../../../lib/theme';
+import { useTheme } from '../../../lib/theme-context';
 
 function Row({ label, value, mono, danger }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   if (value == null || value === '') return null;
   return (
     <View style={styles.fieldRow}>
@@ -26,6 +29,8 @@ function Row({ label, value, mono, danger }) {
 }
 
 export default function InventoryRowScreen() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const { id } = useLocalSearchParams();
   const { user, token, signOut } = useSession();
   const navigation = useNavigation();
@@ -114,7 +119,7 @@ export default function InventoryRowScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) => StyleSheet.create({
   titleRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: spacing.md },
   name: { ...type.h2, color: colors.text, flex: 1 },
   badgeRow: { flexDirection: 'row', gap: 6, marginTop: spacing.md },

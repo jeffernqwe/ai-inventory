@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, Redirect } from 'expo-router';
 import { StyleSheet, Text } from 'react-native';
 
@@ -9,7 +9,14 @@ import Input from '../components/Input';
 import { ApiError } from '../lib/client';
 import { useSession } from '../lib/auth';
 import { defaultHomePath } from '../lib/permissions';
-import { colors, spacing, type } from '../lib/theme';
+import { type } from '../lib/theme';
+import { useTheme } from '../lib/theme-context';
+
+const createStyles = (colors) =>
+  StyleSheet.create({
+    footerText: { ...type.bodySmall, color: colors.textMuted },
+    link: { color: colors.link, fontWeight: '700' },
+  });
 
 function fieldMap(err) {
   const out = {};
@@ -21,6 +28,8 @@ function fieldMap(err) {
 
 export default function RegisterScreen() {
   const { status, user, signUp } = useSession();
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [businessName, setBusinessName] = useState('');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -126,8 +135,3 @@ export default function RegisterScreen() {
     </AuthLayout>
   );
 }
-
-const styles = StyleSheet.create({
-  footerText: { ...type.bodySmall, color: colors.textMuted },
-  link: { color: colors.link, fontWeight: '700' },
-});

@@ -9,7 +9,8 @@ import Input from '../../components/Input';
 import { updateMe } from '../../lib/api';
 import { ApiError } from '../../lib/client';
 import { useSession } from '../../lib/auth';
-import { colors, spacing } from '../../lib/theme';
+import { spacing } from '../../lib/theme';
+import { useTheme } from '../../lib/theme-context';
 
 function fieldMap(err) {
   const out = {};
@@ -26,6 +27,7 @@ function fieldMap(err) {
  * refreshed from /api/auth/me.
  */
 export default function EditNameScreen() {
+  const { colors } = useTheme();
   const { user, token, refresh } = useSession();
 
   const [name, setName] = useState(user?.name ?? '');

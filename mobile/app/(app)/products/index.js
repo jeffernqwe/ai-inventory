@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { router } from 'expo-router';
 import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 
@@ -15,9 +15,12 @@ import { useActiveRef } from '../../../hooks/useReferences';
 import usePagedList from '../../../hooks/usePagedList';
 import useRefetchOnFocus from '../../../hooks/useRefetchOnFocus';
 import { canManageProducts } from '../../../lib/permissions';
-import { colors, radius, spacing, type } from '../../../lib/theme';
+import { radius, spacing, type } from '../../../lib/theme';
+import { useTheme } from '../../../lib/theme-context';
 
 export default function ProductsScreen() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const { token, user, signOut } = useSession();
   const manage = canManageProducts(user);
   const categories = useActiveRef(token, categoriesApi);
@@ -135,7 +138,7 @@ export default function ProductsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) => StyleSheet.create({
   flex: { flex: 1 },
   content: { padding: spacing.lg, paddingBottom: spacing.huge, flexGrow: 1 },
   filterRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
@@ -143,7 +146,7 @@ const styles = StyleSheet.create({
   spacer: { flex: 1 },
   scanBtn: { marginBottom: spacing.lg },
   addBtn: { backgroundColor: colors.primary, borderRadius: radius.pill, paddingHorizontal: spacing.md, paddingVertical: 8 },
-  addBtnText: { color: '#FFF', fontWeight: '700', fontSize: 13 },
+  addBtnText: { color: colors.textOnPrimary, fontWeight: '700', fontSize: 13 },
   row: {
     backgroundColor: colors.surface,
     borderRadius: radius.lg,

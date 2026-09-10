@@ -1,16 +1,20 @@
+import { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { colors, radius, spacing } from '../lib/theme';
+import { radius, spacing } from '../lib/theme';
+import { useTheme } from '../lib/theme-context';
 
-const TONES = {
+const createTones = (colors) => ({
   error: { bg: colors.dangerSoft, fg: colors.danger, border: colors.danger },
   warn: { bg: colors.warningSoft, fg: colors.warning, border: colors.warning },
   info: { bg: colors.infoSoft, fg: colors.info, border: colors.info },
-};
+});
 
 /** Full-width alert strip for form/API errors above or below content. */
 export default function Banner({ type = 'error', text, style }) {
+  const { colors } = useTheme();
+  const tones = useMemo(() => createTones(colors), [colors]);
   if (!text) return null;
-  const t = TONES[type] ?? TONES.error;
+  const t = tones[type] ?? tones.error;
   return (
     <View style={[styles.banner, { backgroundColor: t.bg, borderColor: t.border }, style]}>
       <Text style={[styles.text, { color: t.fg }]}>{text}</Text>

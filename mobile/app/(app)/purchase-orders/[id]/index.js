@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import { StyleSheet, Text, View } from 'react-native';
 
@@ -19,9 +19,12 @@ import {
   canReceivePurchaseOrders,
   canViewPurchaseOrders,
 } from '../../../../lib/permissions';
-import { colors, radius, spacing, type } from '../../../../lib/theme';
+import { radius, spacing, type } from '../../../../lib/theme';
+import { useTheme } from '../../../../lib/theme-context';
 
 function Row({ label, value, mono, danger }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   if (value == null || value === '') return null;
   return (
     <View style={styles.fieldRow}>
@@ -41,6 +44,8 @@ function statusNote(status) {
 }
 
 export default function PurchaseOrderDetailScreen() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const { id } = useLocalSearchParams();
   const { user, token, signOut } = useSession();
   const navigation = useNavigation();
@@ -239,37 +244,38 @@ export default function PurchaseOrderDetailScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md },
-  number: { ...type.h2, color: colors.text, flex: 1, fontVariant: ['tabular-nums'] },
-  notes: { ...type.body, color: colors.textSecondary, marginTop: spacing.sm, lineHeight: 22 },
-  divider: { height: StyleSheet.hairlineWidth, backgroundColor: colors.divider, marginVertical: spacing.lg },
-  fieldRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 5 },
-  fieldLabel: { ...type.body, color: colors.textMuted },
-  fieldValue: { ...type.body, color: colors.text, fontWeight: '600', flexShrink: 1, marginLeft: spacing.lg },
-  fieldMono: { fontVariant: ['tabular-nums'] },
-  fieldDanger: { color: colors.danger },
-  manageRow: { flexDirection: 'row', gap: spacing.md },
-  manageBtn: { flex: 1 },
-  sectionTitle: { ...type.h3, color: colors.text, marginTop: spacing.xxl, marginBottom: spacing.md },
-  itemList: { gap: spacing.lg },
-  itemRow: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.divider, paddingBottom: spacing.lg },
-  itemName: { ...type.body, color: colors.text, fontWeight: '700' },
-  itemSku: { ...type.caption, color: colors.textMuted, marginTop: 2 },
-  itemQty: { ...type.bodySmall, color: colors.textSecondary, marginTop: 6, fontVariant: ['tabular-nums'] },
-  receiptList: { gap: spacing.sm },
-  receiptCard: { padding: spacing.md },
-  receiptTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md },
-  receiptDate: { ...type.body, color: colors.text, fontWeight: '600', flexShrink: 1 },
-  receiptUnits: { ...type.caption, color: colors.textMuted, fontVariant: ['tabular-nums'] },
-  receiptRef: { ...type.caption, color: colors.textMuted, marginTop: 4 },
-  receiptLines: { marginTop: 6, gap: 2 },
-  receiptLine: { ...type.caption, color: colors.textSecondary, fontVariant: ['tabular-nums'] },
-  note: {
-    marginTop: spacing.xxl,
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: radius.md,
-    padding: spacing.md,
-  },
-  noteText: { ...type.bodySmall, color: colors.textSecondary, textAlign: 'center', fontWeight: '600' },
-});
+const createStyles = (colors) =>
+  StyleSheet.create({
+    titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md },
+    number: { ...type.h2, color: colors.text, flex: 1, fontVariant: ['tabular-nums'] },
+    notes: { ...type.body, color: colors.textSecondary, marginTop: spacing.sm, lineHeight: 22 },
+    divider: { height: StyleSheet.hairlineWidth, backgroundColor: colors.divider, marginVertical: spacing.lg },
+    fieldRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 5 },
+    fieldLabel: { ...type.body, color: colors.textMuted },
+    fieldValue: { ...type.body, color: colors.text, fontWeight: '600', flexShrink: 1, marginLeft: spacing.lg },
+    fieldMono: { fontVariant: ['tabular-nums'] },
+    fieldDanger: { color: colors.danger },
+    manageRow: { flexDirection: 'row', gap: spacing.md },
+    manageBtn: { flex: 1 },
+    sectionTitle: { ...type.h3, color: colors.text, marginTop: spacing.xxl, marginBottom: spacing.md },
+    itemList: { gap: spacing.lg },
+    itemRow: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.divider, paddingBottom: spacing.lg },
+    itemName: { ...type.body, color: colors.text, fontWeight: '700' },
+    itemSku: { ...type.caption, color: colors.textMuted, marginTop: 2 },
+    itemQty: { ...type.bodySmall, color: colors.textSecondary, marginTop: 6, fontVariant: ['tabular-nums'] },
+    receiptList: { gap: spacing.sm },
+    receiptCard: { padding: spacing.md },
+    receiptTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md },
+    receiptDate: { ...type.body, color: colors.text, fontWeight: '600', flexShrink: 1 },
+    receiptUnits: { ...type.caption, color: colors.textMuted, fontVariant: ['tabular-nums'] },
+    receiptRef: { ...type.caption, color: colors.textMuted, marginTop: 4 },
+    receiptLines: { marginTop: 6, gap: 2 },
+    receiptLine: { ...type.caption, color: colors.textSecondary, fontVariant: ['tabular-nums'] },
+    note: {
+      marginTop: spacing.xxl,
+      backgroundColor: colors.surfaceMuted,
+      borderRadius: radius.md,
+      padding: spacing.md,
+    },
+    noteText: { ...type.bodySmall, color: colors.textSecondary, textAlign: 'center', fontWeight: '600' },
+  });

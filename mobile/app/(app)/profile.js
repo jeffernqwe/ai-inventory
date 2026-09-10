@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { router } from 'expo-router';
 import { StyleSheet, Text, View } from 'react-native';
 
@@ -9,9 +10,12 @@ import { useSession } from '../../lib/auth';
 import { confirm } from '../../lib/confirm';
 import { formatDateTime } from '../../lib/format';
 import { roleLabel, defaultHomePath } from '../../lib/permissions';
-import { colors, spacing, type } from '../../lib/theme';
+import { spacing, type } from '../../lib/theme';
+import { useTheme } from '../../lib/theme-context';
 
 function DetailRow({ label, value }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   if (value == null || value === '') return null;
   return (
     <View style={styles.detailRow}>
@@ -24,6 +28,8 @@ function DetailRow({ label, value }) {
 }
 
 export default function ProfileScreen() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const { user, signOut, refresh } = useSession();
 
   async function onSignOut() {
@@ -80,7 +86,7 @@ export default function ProfileScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) => StyleSheet.create({
   headerCard: { alignItems: 'center', paddingVertical: spacing.xxl },
   avatar: {
     width: 64,
@@ -91,7 +97,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: spacing.md,
   },
-  avatarText: { color: '#FFF', fontWeight: '800', fontSize: 26 },
+  avatarText: { color: colors.textOnPrimary, fontWeight: '800', fontSize: 26 },
   name: { ...type.h2, color: colors.text, marginBottom: spacing.xs },
   sectionTitle: { ...type.h3, color: colors.text, marginTop: spacing.xxl, marginBottom: spacing.md },
   details: {},

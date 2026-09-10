@@ -1219,9 +1219,92 @@ button is a follow-up decision. Owner-held files (`_layout.js`, `SignOutIcon.jsx
 - Docs updated (roadmap incl. renumbering, CLAUDE.md, README API table, spec §31); commit pending
   owner sign-off; nothing pushed.
 
+# 18. Phase 18 — SaaS-style UI Foundation, Light/Dark Theme System & Readability
+
+## Objective
+
+Phase 18 is an owner-directed mobile UI extension approved after Phase 17. The mobile app has
+accumulated many screens with ad-hoc inline styles and hardcoded colors, and it has always rendered
+in a single light palette regardless of the device theme. Phase 18 delivers the foundation that
+turns the app into a modern SaaS-style product surface: a semantic light **and** dark theme system,
+reusable design primitives, an icon system, a readable dashboard hierarchy, and accessibility
+improvements (44px+ touch targets, labeled icon controls, status conveyed through text/icon + color,
+and layouts verified at increased system font sizes). Navigation remains the existing native-stack
+(expo-router); adding a tab bar would have required touching the owner-held `(app)/_layout.js` and
+is deferred. **Phase 18A is the foundation increment**: tokens, ThemeProvider, the 41-file
+behavior-neutral `useTheme()` conversion, primitive polish, new primitives, and docs. Screen
+redesigns that adopt the new primitives are later increments (18B+).
+
+### Phase 18A Scope
+
+Implemented (approved; commit pending owner sign-off):
+
+- `mobile/lib/theme.js` — semantic token set grows a full dark palette. `palettes = { light, dark }`
+  with light/dark values for surfaces, text, brand, status, and stock-state chips. `colors` is kept
+  as an alias for the **light** palette so the owner-held native-header chrome
+  (`(app)/_layout.js`, `SignOutIcon.jsx`) keeps working unchanged. Shared scales (spacing, radius,
+  type incl. new `stat` + `listTitle` tokens, shadows, duration) are scheme-independent. Light
+  `textMuted` raised `#8A94A6` → `#667085` for WCAG AA.
+- `mobile/lib/theme-context.jsx` — new `ThemeProvider` + `useTheme()`. Resolves scheme from the OS
+  (`useColorScheme`) or a persisted user preference ('system' | 'light' | 'dark', stored via the
+  already-installed `expo-secure-store`; no new dependency). Returns `{ colors, scheme, isDark,
+  preference, setScheme, hydrated }`.
+- `mobile/app.json` — `userInterfaceStyle: "automatic"`; `expo-system-ui` added (required by SDK 57
+  for Android to honor the setting).
+- `mobile/app/_layout.js` (root, modifiable) — app wrapped in `ThemeProvider`; `StatusBar` is
+  scheme-aware (`light` text on dark theme, `dark` on light); root stack `contentStyle` uses the
+  active `colors.background`.
+- All 41 non-owner-held theme importers converted to `useTheme()` with memoized per-theme styles
+  (`const createStyles = (colors) => StyleSheet.create({...})` + `const styles = useMemo(...)`).
+  Light-mode values are unchanged — only where colors come from changed. Module-scope TONES/VARIANTS
+  maps became functions of `colors`; module-scope helpers like `deltaTone` gained a `colors`
+  parameter. Camera-surface whites in `scan.js` stay literal (they sit on the live camera feed).
+  Owner-held `_layout.js` + `SignOutIcon.jsx` are byte-identical (sha256-verified).
+- `mobile/components/icons.js` + `@expo/vector-icons` (15.0.2, SDK-matched) — semantic icon map
+  (`add`, `search`, `scan`, `signOut`, …) so screens never reference raw glyph names.
+- New primitives: `IconButton` (44px+ target, labelled), `SectionHeader`, `ListRow`, `StatCard`
+  (large `stat` value token — 24/800), `Sheet` (shared bottom sheet; `SelectField` refactored onto
+  it), `SearchField`, `ListScreen` (paged-list shell; adoption is 18B). `RefManage` keeps its inline
+  sheet — its footer/button layout differs from `Sheet`, so forcing the swap would change light
+  visuals.
+- Primitive polish: `Button` gains `size` (md 46 / lg 52, both ≥ 44px) + optional `icon`;
+  `Badge` text 11→12 and PO status badges get a leading status dot (state never conveyed by color
+  alone); `Input`/`SelectField` show a primary focus ring; `ListState` empty/error states accept
+  icons.
+- Docs: this roadmap section, `CLAUDE.md` phase list, README, and a new `docs/DESIGN_SYSTEM.md`.
+
+### Explicitly Out of Scope
+
+No screen redesigns (list rows, dashboard cards, forms are re-themed, not re-laid-out — adoption of
+the new primitives is 18B). No tab bar / new navigation. No backend, model, RBAC, audit, or
+server-test change. No `allowFontScaling` disabling anywhere — native React Native font scaling is
+left enabled and layouts were checked at increased system font sizes. No new navigation or
+state-management dependency; `@expo/vector-icons` and `expo-system-ui` are the only new packages.
+
+### Verified
+
+- Mobile: `npx expo export` android and iOS both green (Ionicons + MaterialCommunityIcons fonts
+  bundled).
+- Protected owner-held files sha256-identical to their pre-18A state.
+- Grep: no `import { colors }` from `lib/theme` remains except `SignOutIcon.jsx` (protected).
+- Emulator smoke (light theme → dark theme → increased system font size) evidence in `.smoke/p18-18a-*`
+  (untracked).
+
+## Definition of Done
+
+- The full app renders from the theme system: light and dark palettes resolve at runtime, the
+  status bar follows the scheme, and a persisted preference survives restarts.
+- Light-mode behavior and colors are unchanged after the 41-file conversion.
+- Key information (quantities, stock/PO status, prices, primary actions) uses larger readable type;
+  controls are ≥ 44px; icon-only controls have labels; status reads through text/icon + color.
+- Layouts survive increased system font size without clipping primary actions (verified on the
+  emulator).
+- No backend/test changes; owner-held files untouched; android + iOS exports green.
+- Commit pending owner review of Phase 18A; nothing pushed.
+
 ---
 
-# 18. Phase Gate System
+# 19. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.
 
@@ -1262,7 +1345,7 @@ The project owner decides whether to proceed.
 
 ---
 
-# 19. Change Control
+# 20. Change Control
 
 If Claude discovers that the current specification is incomplete or incorrect:
 
@@ -1280,7 +1363,7 @@ Minor implementation improvements that do not alter architectural decisions may 
 
 ---
 
-# 20. Bug Handling
+# 21. Bug Handling
 
 If a bug is discovered during a phase:
 
@@ -1305,7 +1388,7 @@ Only fix it immediately if it blocks the current phase.
 
 ---
 
-# 21. Refactoring Rules
+# 22. Refactoring Rules
 
 Refactoring is allowed when it:
 
@@ -1323,7 +1406,7 @@ Keep changes focused.
 
 ---
 
-# 22. Dependency Rules
+# 23. Dependency Rules
 
 Before adding a dependency:
 
@@ -1337,7 +1420,7 @@ Do not add dependencies simply for convenience.
 
 ---
 
-# 23. Git Checkpoints
+# 24. Git Checkpoints
 
 A Git commit should be created after a stable phase.
 
@@ -1370,7 +1453,7 @@ Before committing:
 
 ---
 
-# 24. V1 Completion
+# 25. V1 Completion
 
 V1 is complete only when all major requirements in:
 
@@ -1412,7 +1495,7 @@ AI Inventory Questions
 
 ---
 
-# 25. Future Development
+# 26. Future Development
 
 After V1, future features must be planned separately.
 
@@ -1447,7 +1530,7 @@ Future functionality must not be implemented during V1 unless explicitly approve
 
 ---
 
-# 26. Final Development Rule
+# 27. Final Development Rule
 
 The goal is not to produce the largest amount of code as quickly as possible.
 

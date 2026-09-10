@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
 import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 
@@ -15,13 +15,16 @@ import useDebounced from '../../hooks/useDebounced';
 import { useActiveRef } from '../../hooks/useReferences';
 import usePagedList from '../../hooks/usePagedList';
 import useRefetchOnFocus from '../../hooks/useRefetchOnFocus';
-import { colors, radius, spacing, type } from '../../lib/theme';
+import { radius, spacing, type } from '../../lib/theme';
+import { useTheme } from '../../lib/theme-context';
 
 function str(v) {
   return Array.isArray(v) ? v[0] : v;
 }
 
 function StockRow({ item }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const archived = item.product?.status === 'ARCHIVED';
   return (
     <Pressable style={styles.row} onPress={() => router.push(`/inventory/${item.id}`)} accessibilityRole="button">
@@ -48,6 +51,8 @@ function StockRow({ item }) {
 }
 
 export default function InventoryScreen() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const { token, user, signOut } = useSession();
   const locations = useActiveRef(token, locationsApi);
 
@@ -130,7 +135,7 @@ export default function InventoryScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) => StyleSheet.create({
   flex: { flex: 1 },
   content: { padding: spacing.lg, paddingBottom: spacing.huge, flexGrow: 1 },
   actionRow: { marginBottom: spacing.lg },

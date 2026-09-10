@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { router, Stack } from 'expo-router';
 import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 
@@ -11,7 +11,8 @@ import { EmptyState, ErrorState, LoadingBlock, errorText } from '../../../compon
 import { usersApi } from '../../../lib/api';
 import { useSession } from '../../../lib/auth';
 import { ROLES, canManageUsers, canModifyUser, roleLabel } from '../../../lib/permissions';
-import { colors, radius, spacing, type } from '../../../lib/theme';
+import { radius, spacing, type } from '../../../lib/theme';
+import { useTheme } from '../../../lib/theme-context';
 import useDebounced from '../../../hooks/useDebounced';
 import usePagedList from '../../../hooks/usePagedList';
 import useRefetchOnFocus from '../../../hooks/useRefetchOnFocus';
@@ -20,6 +21,8 @@ const STATUS_ACTIVE = 'ACTIVE';
 const STATUS_DISABLED = 'DISABLED';
 
 function UserRow({ item, actor }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const isSelf = String(actor?.id) === String(item.id);
   const editable = canModifyUser(actor, item);
   return (
@@ -52,6 +55,8 @@ function UserRow({ item, actor }) {
 }
 
 export default function UsersScreen() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const { user, token, signOut } = useSession();
   const manage = canManageUsers(user);
 
@@ -129,30 +134,31 @@ export default function UsersScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  flex: { flex: 1 },
-  content: { padding: spacing.lg, paddingBottom: spacing.huge, flexGrow: 1 },
-  filterRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.md },
-  filterSpacer: { flex: 1 },
-  addBtn: {
-    backgroundColor: colors.primary,
-    borderRadius: radius.pill,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 8,
-  },
-  addBtnText: { color: '#FFF', fontWeight: '700', fontSize: 13 },
-  row: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.lg,
-  },
-  rowTop: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  rowName: { ...type.body, fontWeight: '700', color: colors.text, flexShrink: 1 },
-  metaRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.md, marginTop: 6 },
-  meta: { ...type.caption, color: colors.textMuted, flexShrink: 1 },
-  rowActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
-  editBtn: { flex: 1, minHeight: 38 },
-  separator: { height: spacing.md },
-});
+const createStyles = (colors) =>
+  StyleSheet.create({
+    flex: { flex: 1 },
+    content: { padding: spacing.lg, paddingBottom: spacing.huge, flexGrow: 1 },
+    filterRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.md },
+    filterSpacer: { flex: 1 },
+    addBtn: {
+      backgroundColor: colors.primary,
+      borderRadius: radius.pill,
+      paddingHorizontal: spacing.md,
+      paddingVertical: 8,
+    },
+    addBtnText: { color: colors.textOnPrimary, fontWeight: '700', fontSize: 13 },
+    row: {
+      backgroundColor: colors.surface,
+      borderRadius: radius.lg,
+      borderWidth: 1,
+      borderColor: colors.border,
+      padding: spacing.lg,
+    },
+    rowTop: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+    rowName: { ...type.body, fontWeight: '700', color: colors.text, flexShrink: 1 },
+    metaRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.md, marginTop: 6 },
+    meta: { ...type.caption, color: colors.textMuted, flexShrink: 1 },
+    rowActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
+    editBtn: { flex: 1, minHeight: 38 },
+    separator: { height: spacing.md },
+  });

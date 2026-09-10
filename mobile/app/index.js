@@ -4,7 +4,7 @@ import { View } from 'react-native';
 import { CenterLoader } from '../components/ListState';
 import { useSession } from '../lib/auth';
 import { defaultHomePath } from '../lib/permissions';
-import { colors } from '../lib/theme';
+import { useTheme } from '../lib/theme-context';
 
 /**
  * '/' entry — resolves once, then redirects to the right first screen:
@@ -14,6 +14,7 @@ import { colors } from '../lib/theme';
  */
 export default function IndexRoute() {
   const { status, user } = useSession();
+  const { colors } = useTheme();
 
   if (status === 'loading') {
     return (

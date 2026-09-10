@@ -1,12 +1,17 @@
+import { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { colors, radius, spacing } from '../lib/theme';
+import { radius, spacing } from '../lib/theme';
+import { useTheme } from '../lib/theme-context';
 
 /**
- * Small status/label pill. `tone` picks a soft background + strong text pair:
+ * Status/label pill. `tone` picks a soft background + strong text pair:
  *   neutral success danger warning info
  *   in out adjust low   (stock movement / stock-state chips)
+ *
+ * Status text is intentionally not tiny (12/700): PO and stock status are
+ * primary business information, not captions.
  */
-const TONES = {
+const createTones = (colors) => ({
   neutral: { bg: colors.chipNeutral, fg: colors.chipNeutralText },
   success: { bg: colors.successSoft, fg: colors.success },
   danger: { bg: colors.dangerSoft, fg: colors.danger },
@@ -16,12 +21,19 @@ const TONES = {
   out: { bg: colors.chipOut, fg: colors.chipOutText },
   adjust: { bg: colors.chipAdjust, fg: colors.chipAdjustText },
   low: { bg: colors.chipLow, fg: colors.chipLowText },
-};
+});
 
-export default function Badge({ text, tone = 'neutral', style }) {
-  const t = TONES[tone] ?? TONES.neutral;
+/**
+ * Small status/label pill. `dot` renders a leading status dot so state reads
+ * through color AND shape (never color alone).
+ */
+export default function Badge({ text, tone = 'neutral', dot = false, style }) {
+  const { colors } = useTheme();
+  const tones = useMemo(() => createTones(colors), [colors]);
+  const t = tones[tone] ?? tones.neutral;
   return (
     <View style={[styles.pill, { backgroundColor: t.bg }, style]}>
+      {dot ? <View style={[styles.dot, { backgroundColor: t.fg }]} /> : null}
       <Text style={[styles.text, { color: t.fg }]} numberOfLines={1}>
         {text}
       </Text>
@@ -54,15 +66,23 @@ export function PoStatusBadge({ status }) {
     CANCELED: { t: 'Canceled', tone: 'neutral' },
   };
   const m = map[status] ?? { t: status ?? '—', tone: 'neutral' };
-  return <Badge text={m.t} tone={m.tone} />;
+  return <Badge text={m.t} tone={m.tone} dot />;
 }
 
 const styles = StyleSheet.create({
   pill: {
     borderRadius: radius.pill,
     paddingHorizontal: spacing.sm + 2,
-    paddingVertical: 3,
+    paddingVertical: 4,
     alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
   },
-  text: { fontSize: 11, fontWeight: '700', letterSpacing: 0.2 },
+  dot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+  },
+  text: { fontSize: 12, fontWeight: '700', letterSpacing: 0.2 },
 });

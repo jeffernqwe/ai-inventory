@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import Button from './Button';
@@ -6,7 +6,8 @@ import { CenterLoader, ErrorState, errorText } from './ListState';
 import { aiApi } from '../lib/api';
 import { isSessionError, useSession } from '../lib/auth';
 import { formatTime } from '../lib/format';
-import { colors, radius, spacing, type } from '../lib/theme';
+import { radius, spacing, type } from '../lib/theme';
+import { useTheme } from '../lib/theme-context';
 
 /** Server default for AI_MAX_MESSAGE_CHARS — keep the composer bounded to match. */
 const MAX_MESSAGE_CHARS = 4000;
@@ -51,6 +52,8 @@ function toRows(serverMessages) {
 }
 
 function MessageBubble({ item }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const user = item.role === 'user';
   return (
     <View style={[styles.bubbleRow, user ? styles.rowUser : styles.rowAssistant]}>
@@ -68,6 +71,8 @@ function MessageBubble({ item }) {
 }
 
 function ThinkingRow() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   return (
     <View style={[styles.bubbleRow, styles.rowAssistant]}>
       <View style={[styles.bubble, styles.bubbleAssistant, styles.thinking]}>
@@ -79,6 +84,8 @@ function ThinkingRow() {
 }
 
 function Welcome({ onAsk }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   return (
     <View style={styles.welcome}>
       <Text style={styles.welcomeEmoji}>🤖</Text>
@@ -109,6 +116,8 @@ function Welcome({ onAsk }) {
  * than pretending a reply exists.
  */
 export default function AiChat({ conversationId = null }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const { token, signOut } = useSession();
   const [convId, setConvId] = useState(conversationId);
   const [rows, setRows] = useState([]);
@@ -234,79 +243,80 @@ export default function AiChat({ conversationId = null }) {
   );
 }
 
-const styles = StyleSheet.create({
-  flex: { flex: 1 },
-  listContent: { flexGrow: 1, justifyContent: 'flex-end', padding: spacing.lg },
-  bubbleRow: { marginBottom: spacing.md, flexDirection: 'row' },
-  rowUser: { justifyContent: 'flex-end' },
-  rowAssistant: { justifyContent: 'flex-start' },
-  bubble: {
-    maxWidth: '84%',
-    borderRadius: radius.lg,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-  },
-  bubbleUser: {
-    backgroundColor: colors.primary,
-    borderBottomRightRadius: radius.sm,
-  },
-  bubbleAssistant: {
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderBottomLeftRadius: radius.sm,
-  },
-  bubbleText: { ...type.body, color: colors.text, lineHeight: 22 },
-  bubbleTextUser: { color: colors.textOnPrimary },
-  tools: { ...type.caption, color: colors.textMuted, marginTop: spacing.sm, lineHeight: 16 },
-  time: { ...type.caption, color: colors.textMuted, marginTop: 4, textAlign: 'right' },
-  timeUser: { color: 'rgba(255,255,255,0.75)' },
-  thinking: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  thinkingText: { ...type.caption, color: colors.textMuted },
+const createStyles = (colors) =>
+  StyleSheet.create({
+    flex: { flex: 1 },
+    listContent: { flexGrow: 1, justifyContent: 'flex-end', padding: spacing.lg },
+    bubbleRow: { marginBottom: spacing.md, flexDirection: 'row' },
+    rowUser: { justifyContent: 'flex-end' },
+    rowAssistant: { justifyContent: 'flex-start' },
+    bubble: {
+      maxWidth: '84%',
+      borderRadius: radius.lg,
+      paddingHorizontal: spacing.lg,
+      paddingVertical: spacing.md,
+    },
+    bubbleUser: {
+      backgroundColor: colors.primary,
+      borderBottomRightRadius: radius.sm,
+    },
+    bubbleAssistant: {
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderBottomLeftRadius: radius.sm,
+    },
+    bubbleText: { ...type.body, color: colors.text, lineHeight: 22 },
+    bubbleTextUser: { color: colors.textOnPrimary },
+    tools: { ...type.caption, color: colors.textMuted, marginTop: spacing.sm, lineHeight: 16 },
+    time: { ...type.caption, color: colors.textMuted, marginTop: 4, textAlign: 'right' },
+    timeUser: { color: 'rgba(255,255,255,0.75)' },
+    thinking: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+    thinkingText: { ...type.caption, color: colors.textMuted },
 
-  welcome: { paddingVertical: spacing.xxl, alignItems: 'center' },
-  welcomeEmoji: { fontSize: 34, marginBottom: spacing.sm },
-  welcomeTitle: { ...type.h3, color: colors.text, textAlign: 'center' },
-  welcomeBody: { ...type.bodySmall, color: colors.textSecondary, textAlign: 'center', lineHeight: 20, marginTop: spacing.sm, maxWidth: 320 },
-  suggestions: { marginTop: spacing.lg, alignSelf: 'stretch', gap: spacing.sm },
-  suggestion: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    borderColor: colors.borderStrong,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-  suggestionText: { ...type.bodySmall, color: colors.primary, fontWeight: '600', textAlign: 'center' },
+    welcome: { paddingVertical: spacing.xxl, alignItems: 'center' },
+    welcomeEmoji: { fontSize: 34, marginBottom: spacing.sm },
+    welcomeTitle: { ...type.h3, color: colors.text, textAlign: 'center' },
+    welcomeBody: { ...type.bodySmall, color: colors.textSecondary, textAlign: 'center', lineHeight: 20, marginTop: spacing.sm, maxWidth: 320 },
+    suggestions: { marginTop: spacing.lg, alignSelf: 'stretch', gap: spacing.sm },
+    suggestion: {
+      backgroundColor: colors.surface,
+      borderRadius: radius.pill,
+      borderWidth: 1,
+      borderColor: colors.borderStrong,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+    },
+    suggestionText: { ...type.bodySmall, color: colors.primary, fontWeight: '600', textAlign: 'center' },
 
-  composerArea: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.divider, backgroundColor: colors.surface },
-  errorBanner: {
-    backgroundColor: colors.dangerSoft,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-  },
-  errorText: { ...type.caption, color: colors.danger, lineHeight: 17, fontWeight: '600' },
-  composer: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: spacing.sm,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-  },
-  composerInput: {
-    flex: 1,
-    ...type.body,
-    color: colors.text,
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.borderStrong,
-    paddingHorizontal: spacing.md,
-    paddingTop: 10,
-    paddingBottom: 10,
-    minHeight: 44,
-    maxHeight: 120,
-  },
-  composerDisabled: { opacity: 0.6 },
-  sendButton: { minWidth: 84 },
-});
+    composerArea: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.divider, backgroundColor: colors.surface },
+    errorBanner: {
+      backgroundColor: colors.dangerSoft,
+      paddingHorizontal: spacing.lg,
+      paddingVertical: spacing.sm,
+    },
+    errorText: { ...type.caption, color: colors.danger, lineHeight: 17, fontWeight: '600' },
+    composer: {
+      flexDirection: 'row',
+      alignItems: 'flex-end',
+      gap: spacing.sm,
+      paddingHorizontal: spacing.lg,
+      paddingVertical: spacing.md,
+    },
+    composerInput: {
+      flex: 1,
+      ...type.body,
+      color: colors.text,
+      backgroundColor: colors.surfaceMuted,
+      borderRadius: radius.lg,
+      borderWidth: 1,
+      borderColor: colors.borderStrong,
+      paddingHorizontal: spacing.md,
+      paddingTop: 10,
+      paddingBottom: 10,
+      minHeight: 44,
+      maxHeight: 120,
+    },
+    composerDisabled: { opacity: 0.6 },
+    sendButton: { minWidth: 84 },
+  });

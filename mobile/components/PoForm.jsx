@@ -12,7 +12,8 @@ import { ApiError } from '../lib/client';
 import { useSession } from '../lib/auth';
 import { alert } from '../lib/confirm';
 import { useActiveRef } from '../hooks/useReferences';
-import { colors, radius, spacing, type } from '../lib/theme';
+import { radius, spacing, type } from '../lib/theme';
+import { useTheme } from '../lib/theme-context';
 
 const PO_ITEMS_MAX = 200;
 const PO_NOTES_MAX = 1000;
@@ -101,6 +102,8 @@ const nextKey = () => {
  * duplicate products, unit cost >= 0, YYYY-MM-DD date).
  */
 export default function PoForm({ initial }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const { token } = useSession();
   const isEdit = Boolean(initial);
 
@@ -349,7 +352,8 @@ export default function PoForm({ initial }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) =>
+  StyleSheet.create({
   flex: { flex: 1, backgroundColor: colors.background },
   content: { padding: spacing.lg, paddingBottom: 48 },
   sectionTitle: { ...type.h3, color: colors.text, marginTop: spacing.xl, marginBottom: spacing.md },

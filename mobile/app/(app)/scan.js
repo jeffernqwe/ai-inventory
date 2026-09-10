@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { router, useFocusEffect } from 'expo-router';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { ActivityIndicator, Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -14,7 +14,8 @@ import { isSessionError, useSession } from '../../lib/auth';
 import { ApiError } from '../../lib/client';
 import { formatMoney, formatNumber } from '../../lib/format';
 import useRefetchOnFocus from '../../hooks/useRefetchOnFocus';
-import { colors, radius, spacing, type } from '../../lib/theme';
+import { radius, spacing, type } from '../../lib/theme';
+import { useTheme } from '../../lib/theme-context';
 
 /**
  * Camera barcode scanner (Phase 12B + 12C). Detects common retail barcodes, then
@@ -50,6 +51,8 @@ const TYPE_LABELS = {
 const RESCAN_IGNORE_MS = 1500;
 
 function Field({ label, value, mono }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   if (value == null || value === '' || value === false) return null;
   return (
     <View style={styles.fieldRow}>
@@ -62,6 +65,8 @@ function Field({ label, value, mono }) {
 }
 
 export default function ScanScreen() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const { token, signOut } = useSession();
   const [permission, requestPermission, getPermission] = useCameraPermissions();
 
@@ -244,6 +249,8 @@ export default function ScanScreen() {
 }
 
 function StockRow({ row }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   return (
     <View style={styles.stockRow}>
       <View style={styles.stockInfo}>
@@ -263,6 +270,8 @@ function StockRow({ row }) {
 }
 
 function FoundProduct({ product, onRescan }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const archived = product.status === 'ARCHIVED';
   const { token } = useSession();
 
@@ -366,7 +375,7 @@ function FoundProduct({ product, onRescan }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
 
   // Camera scanning

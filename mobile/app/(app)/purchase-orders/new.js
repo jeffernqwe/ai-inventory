@@ -5,9 +5,10 @@ import AccessDenied from '../../../components/AccessDenied';
 import PoForm from '../../../components/PoForm';
 import { useSession } from '../../../lib/auth';
 import { canManagePurchaseOrders } from '../../../lib/permissions';
-import { colors } from '../../../lib/theme';
+import { useTheme } from '../../../lib/theme-context';
 
 export default function NewPurchaseOrderScreen() {
+  const { colors } = useTheme();
   const { user } = useSession();
   return (
     <>

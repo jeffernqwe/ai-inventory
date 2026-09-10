@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { router, useNavigation } from 'expo-router';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
@@ -13,7 +13,8 @@ import { isSessionError, useSession } from '../../lib/auth';
 import { confirm } from '../../lib/confirm';
 import { formatDateTime, formatNumber } from '../../lib/format';
 import { canAdjustStock, canManageUsers, canUseAi, canViewAudit, canViewDashboard, roleLabel } from '../../lib/permissions';
-import { colors, radius, spacing, type } from '../../lib/theme';
+import { radius, spacing, type } from '../../lib/theme';
+import { useTheme } from '../../lib/theme-context';
 
 function deltaText(t) {
   if (t.type === 'STOCK_IN') return `+${t.quantity}`;
@@ -21,13 +22,15 @@ function deltaText(t) {
   const d = t.newQuantity - t.previousQuantity;
   return d >= 0 ? `+${d}` : `−${Math.abs(d)}`;
 }
-function deltaTone(t) {
+function deltaTone(colors, t) {
   if (t.type === 'STOCK_IN') return colors.success;
   if (t.type === 'STOCK_OUT') return colors.danger;
   return colors.textSecondary;
 }
 
 function ActivityRow({ item }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   return (
     <PressableCard style={styles.activityRow} onPress={() => router.push('/history')}>
       <TypeBadge type={item.type} />
@@ -39,13 +42,15 @@ function ActivityRow({ item }) {
           {item.location?.name ?? 'No location'} · {formatDateTime(item.createdAt)}
         </Text>
       </View>
-      <Text style={[styles.delta, { color: deltaTone(item) }]}>{deltaText(item)}</Text>
+      <Text style={[styles.delta, { color: deltaTone(colors, item) }]}>{deltaText(item)}</Text>
     </PressableCard>
   );
 }
 
 /** One "needs restock" preview row — taps into the product detail for stock-in. */
 function ReorderRow({ item }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const isOut = item.stockStatus === 'OUT_OF_STOCK';
   return (
     <PressableCard style={styles.activityRow} onPress={() => router.push(`/products/${item.id}`)}>
@@ -63,6 +68,8 @@ function ReorderRow({ item }) {
 }
 
 function StatCard({ label, value, tone, onPress, style }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   return (
     <Pressable style={[styles.stat, style]} onPress={onPress} disabled={!onPress}>
       <View style={[styles.statDot, { backgroundColor: tone }]} />
@@ -75,6 +82,8 @@ function StatCard({ label, value, tone, onPress, style }) {
 }
 
 export default function DashboardScreen() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const { user, token, signOut } = useSession();
   const navigation = useNavigation();
   const [summary, setSummary] = useState(null);
@@ -226,6 +235,8 @@ export default function DashboardScreen() {
 }
 
 function TopBar({ name, role, onSignOut }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   return (
     <View style={styles.topBar}>
       <View style={styles.brandBlock}>
@@ -244,7 +255,7 @@ function TopBar({ name, role, onSignOut }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) => StyleSheet.create({
   topBar: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: spacing.xl },
   brandBlock: { flex: 1, marginRight: spacing.md },
   brand: { ...type.caption, color: colors.primary, fontWeight: '800', letterSpacing: 0.4, textTransform: 'uppercase' },

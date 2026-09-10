@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Stack } from 'expo-router';
 import { FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
 
@@ -10,7 +10,8 @@ import { EmptyState, ErrorState, LoadingBlock, errorText } from '../../component
 import { auditApi } from '../../lib/api';
 import { useSession } from '../../lib/auth';
 import { canViewAudit } from '../../lib/permissions';
-import { colors, radius, spacing, type } from '../../lib/theme';
+import { radius, spacing, type } from '../../lib/theme';
+import { useTheme } from '../../lib/theme-context';
 import { formatDateTime } from '../../lib/format';
 import useDebounced from '../../hooks/useDebounced';
 import usePagedList from '../../hooks/usePagedList';
@@ -66,6 +67,8 @@ const ENTITY_FILTERS = [
 ];
 
 function AuditRow({ item }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const actionLabel = ACTION_LABELS[item.action] ?? item.action;
   const entityLabel = ENTITY_LABELS[item.entityType] ?? item.entityType;
   const actor = item.actor?.name ?? 'System';
@@ -94,6 +97,8 @@ function AuditRow({ item }) {
 }
 
 export default function AuditScreen() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const { user, token, signOut } = useSession();
   const view = canViewAudit(user);
 
@@ -193,7 +198,7 @@ export default function AuditScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) => StyleSheet.create({
   flex: { flex: 1 },
   content: { padding: spacing.lg, paddingBottom: spacing.huge, flexGrow: 1 },
   filterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.md },

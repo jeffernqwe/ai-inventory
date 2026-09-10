@@ -218,6 +218,7 @@ Phase 11 — Inventory Intelligence & Alerts (lettered increments)
             11B — Documentation close-out
 Phase 14A — User Management Foundation (OWNER/ADMIN users.manage API: list/create/role+status; no OWNER, no self-change, ADMIN↔ADMIN restricted)
 Phase 16 — Audit Trail Viewer (read-only GET /api/audit: OWNER/ADMIN governance trail; action/entityType/user/date/q filters; no write routes)
+Phase 17 — Mobile Supplier & Purchase Order Management (suppliers CRUD/archive + PO create/edit/issue/cancel on mobile; zero backend changes; STAFF view-only)
 ```
 
 Phase 08 is an owner-directed hardening extension delivered in approved lettered increments
@@ -258,6 +259,19 @@ with action/entityType/user/date/q filters, newest-first pagination, and a stric
 It reuses the existing `AuditLog` model + indexes and the standard list/validate/pagination
 conventions — no model change, no new dependency, no write routes. MANAGER/STAFF are denied (403) and
 never see the trail; a client-supplied `businessId` is ignored.
+
+Phase 17 is an owner-directed mobile-management extension delivered as a single approved increment
+after Phase 16, with ZERO backend changes. The supplier and purchase-order backend has been complete
+since Phase 13 (suppliers CRUD + archive; POs with numbering, DRAFT-only editing, issue, cancel, and
+claim-first receiving) and mobile was read + receive only. Phase 17 adds the mobile management half:
+a Suppliers screen (create/edit/archive/restore incl. contact fields via an additive `fields` prop
+on the shared `RefManage` — Categories/Locations unchanged), and the full PO lifecycle on mobile
+(create DRAFT, edit DRAFT, issue, cancel) over the existing Phase 13 API, using the exact existing
+backend error codes. The permission mirror gains `suppliers.manage`/`suppliers.view` in lock-step
+with the server matrix (ADMIN + MANAGER manage, every role views); the backend stays authoritative
+and business-isolated (no client `businessId`). STAFF remains view-only for supplier/PO management
+but can still receive stock; receiving and the claim-first flow are unchanged; no
+`PARTIALLY_RECEIVED` status was introduced.
 
 When instructed to work on a specific phase:
 

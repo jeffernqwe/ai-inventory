@@ -22,6 +22,8 @@ export const PERMISSIONS = Object.freeze({
   CATEGORIES_MANAGE: 'categories.manage',
   PRODUCTS_MANAGE: 'products.manage',
   PRODUCTS_VIEW: 'products.view',
+  SUPPLIERS_MANAGE: 'suppliers.manage',
+  SUPPLIERS_VIEW: 'suppliers.view',
   PURCHASE_ORDERS_MANAGE: 'purchase-orders.manage',
   PURCHASE_ORDERS_VIEW: 'purchase-orders.view',
   PURCHASE_ORDERS_RECEIVE: 'purchase-orders.receive',
@@ -47,6 +49,8 @@ export const ROLE_PERMISSIONS = Object.freeze({
     PERMISSIONS.CATEGORIES_MANAGE,
     PERMISSIONS.PRODUCTS_MANAGE,
     PERMISSIONS.PRODUCTS_VIEW,
+    PERMISSIONS.SUPPLIERS_MANAGE,
+    PERMISSIONS.SUPPLIERS_VIEW,
     PERMISSIONS.PURCHASE_ORDERS_MANAGE,
     PERMISSIONS.PURCHASE_ORDERS_VIEW,
     PERMISSIONS.PURCHASE_ORDERS_RECEIVE,
@@ -63,6 +67,8 @@ export const ROLE_PERMISSIONS = Object.freeze({
   MANAGER: Object.freeze([
     PERMISSIONS.PRODUCTS_MANAGE,
     PERMISSIONS.PRODUCTS_VIEW,
+    PERMISSIONS.SUPPLIERS_MANAGE,
+    PERMISSIONS.SUPPLIERS_VIEW,
     PERMISSIONS.PURCHASE_ORDERS_MANAGE,
     PERMISSIONS.PURCHASE_ORDERS_VIEW,
     PERMISSIONS.PURCHASE_ORDERS_RECEIVE,
@@ -77,6 +83,7 @@ export const ROLE_PERMISSIONS = Object.freeze({
   ]),
   STAFF: Object.freeze([
     PERMISSIONS.PRODUCTS_VIEW,
+    PERMISSIONS.SUPPLIERS_VIEW,
     PERMISSIONS.PURCHASE_ORDERS_VIEW,
     PERMISSIONS.PURCHASE_ORDERS_RECEIVE,
     PERMISSIONS.INVENTORY_VIEW,
@@ -97,6 +104,8 @@ export function can(user, permission) {
 export const canManageCategories = (u) => can(u, PERMISSIONS.CATEGORIES_MANAGE);
 export const canManageLocations = (u) => can(u, PERMISSIONS.LOCATIONS_MANAGE);
 export const canManageProducts = (u) => can(u, PERMISSIONS.PRODUCTS_MANAGE);
+export const canManageSuppliers = (u) => can(u, PERMISSIONS.SUPPLIERS_MANAGE);
+export const canViewSuppliers = (u) => can(u, PERMISSIONS.SUPPLIERS_VIEW);
 export const canViewDashboard = (u) => can(u, PERMISSIONS.DASHBOARD_VIEW);
 export const canAdjustStock = (u) => can(u, PERMISSIONS.INVENTORY_MANAGE);
 export const canStockIn = (u) => can(u, PERMISSIONS.INVENTORY_STOCK_IN);

@@ -187,6 +187,24 @@ Phase 06 — AI assistant (all `Authorization: Bearer <token>`, require `ai.use`
 | POST   | `/api/ai/conversations` | Create a conversation (optional `title`)           |
 | GET    | `/api/ai/conversations/:id/messages` | Get one conversation's messages (oldest first)  |
 
+Phase 13 — suppliers & purchase orders (all `Authorization: Bearer <token>`; list/get viewable by every
+authenticated member, mutations by the noted permissions):
+
+| Method | Path            | Description                                             |
+| ------ | --------------- | ------------------------------------------------------- |
+| GET    | `/api/suppliers` | List/search suppliers                                 |
+| POST   | `/api/suppliers` | Create supplier (`suppliers.manage`: OWNER/ADMIN/MANAGER) |
+| GET    | `/api/suppliers/:id` | Get one supplier                                   |
+| PATCH  | `/api/suppliers/:id` | Update supplier (name, description, contact fields) |
+| POST   | `/api/suppliers/:id/archive` `/restore` | Archive/restore (manage)        |
+| GET    | `/api/purchase-orders` | List purchase orders                                |
+| POST   | `/api/purchase-orders` | Create draft order (`purchase-orders.manage`: OWNER/ADMIN/MANAGER) |
+| GET    | `/api/purchase-orders/:id` | Get one order (lines, totals, receipts, pending claims) |
+| PATCH  | `/api/purchase-orders/:id` | Update a **DRAFT** order (DRAFT-only, `PO_NOT_DRAFT` otherwise) |
+| POST   | `/api/purchase-orders/:id/issue` | Issue DRAFT → OPEN (`PO_ALREADY_OPEN`/`PO_CANCELED` guards) |
+| POST   | `/api/purchase-orders/:id/cancel` | Cancel DRAFT/OPEN → CANCELED              |
+| POST   | `/api/purchase-orders/:id/receive` | Receive stock (`purchase-orders.receive`: STAFF+; claim-first) |
+
 Phase 16 — audit trail (read-only, `Authorization: Bearer <token>`, OWNER/ADMIN only):
 
 | Method | Path            | Description                                             |
@@ -337,3 +355,12 @@ Phase 07 (testing + production hardening) and Phase 08 (owner-directed hardening
   model change, no new dependency, no write routes. Mobile: an Audit Log screen + dashboard tile for
   OWNER/ADMIN. Verified by `npm run lint` (0/0), the DB-free unit run (107 passed), the full backend
   suite (350/350), and mobile android+iOS exports.
+- **Phase 17 — Mobile Supplier & Purchase Order Management:** implemented, verified, commit pending
+  owner sign-off — the mobile management half of the Phase 13 supplier/PO backend, with **ZERO
+  backend changes**. A Suppliers screen (create/edit/archive/restore incl. contact fields) via an
+  additive `fields` prop on the shared `RefManage` (Categories/Locations unchanged), and the full PO
+  lifecycle on mobile — create DRAFT, edit DRAFT, issue, cancel — using the exact existing backend
+  error codes. The permission mirror gains `suppliers.manage`/`suppliers.view` (ADMIN + MANAGER
+  manage, every role views); STAFF stays view-only for supplier/PO management but can still receive.
+  Verified by `npm run lint` (0/0), the full backend suite (350/350 — regression check only, no
+  server file changed), and mobile android+iOS exports.

@@ -67,14 +67,34 @@ export const usersApi = {
 // Reference resources: categories & locations (shared CRUD + archive shape)
 // ---------------------------------------------------------------------------
 
-function referenceGroup(path) {
+/**
+ * Factory for the shared reference CRUD shape (categories, locations,
+ * suppliers). `fields` are optional extra writable columns (e.g. supplier
+ * contactName/phone/email) forwarded verbatim on create/update — blank/absent
+ * values are dropped, keeping categories/locations (fields: []) unchanged.
+ */
+function referenceGroup(path, { fields = [] } = {}) {
+  // Forward extra writable columns (e.g. supplier contact fields). Blanks are
+  // dropped on create so nothing empty is stored; on update an empty string is
+  // kept so the server clears a previously-set value (its PATCH applies any
+  // field that differs from the stored one).
+  const bodyWithExtras = (base, extras, { keepEmpty = false } = {}) => {
+    const out = { ...base };
+    for (const f of fields) {
+      if (extras[f] === undefined || extras[f] === null) continue;
+      const v = String(extras[f]);
+      if (v === '' && !keepEmpty) continue;
+      out[f] = v;
+    }
+    return out;
+  };
   return {
     list: (token, params) => apiFetch(`${path}`, { token, params }),
     get: (token, id) => apiFetch(`${path}/${id}`, { token }),
-    create: (token, { name, description }) =>
-      apiFetch(`${path}`, { token, method: 'POST', body: { name, description } }),
-    update: (token, id, { name, description }) =>
-      apiFetch(`${path}/${id}`, { token, method: 'PATCH', body: { name, description } }),
+    create: (token, { name, description, ...extras }) =>
+      apiFetch(`${path}`, { token, method: 'POST', body: bodyWithExtras({ name, description }, extras) }),
+    update: (token, id, { name, description, ...extras }) =>
+      apiFetch(`${path}/${id}`, { token, method: 'PATCH', body: bodyWithExtras({ name, description }, extras, { keepEmpty: true }) }),
     archive: (token, id) => apiFetch(`${path}/${id}/archive`, { token, method: 'POST' }),
     restore: (token, id) => apiFetch(`${path}/${id}/restore`, { token, method: 'POST' }),
   };
@@ -82,6 +102,16 @@ function referenceGroup(path) {
 
 export const categoriesApi = referenceGroup('/api/categories');
 export const locationsApi = referenceGroup('/api/locations');
+
+// ---------------------------------------------------------------------------
+// Suppliers (Phase 13A backend / 17 mobile)
+// ---------------------------------------------------------------------------
+// Writable by OWNER/ADMIN/MANAGER (suppliers.manage); viewable by every role
+// (suppliers.view). Contact fields join the shared CRUD via `fields`.
+
+export const suppliersApi = referenceGroup('/api/suppliers', {
+  fields: ['contactName', 'phone', 'email'],
+});
 
 // ---------------------------------------------------------------------------
 // Products
@@ -139,16 +169,32 @@ export const inventoryApi = {
 };
 
 // ---------------------------------------------------------------------------
-// Purchase orders (Phase 13A–13C)
+// Purchase orders (Phase 13A–13C backend / 13D read+receive / 17 manage)
 // ---------------------------------------------------------------------------
-// Read + receive only on mobile (Phase 13D). Create/edit/issue/cancel stay
-// backend-only — no manage wrappers are exposed until a manage UI exists.
+// Manage (create/update/issue/cancel) requires purchase-orders.manage
+// (OWNER/ADMIN/MANAGER). Read + receive are open to every role.
 
 export const purchaseOrdersApi = {
   /** Paginated PO headers { items, total, ... }. params: { status, q (number), page, limit }. */
   list: (token, params) => apiFetch('/api/purchase-orders', { token, params }),
   /** Full detail: header + items + receipts + pendingClaims. */
   get: (token, id) => apiFetch(`/api/purchase-orders/${id}`, { token }),
+  /**
+   * Create a DRAFT. body: { supplierId, locationId, expectedAt?, notes?,
+   * items: [{ productId, quantityOrdered, unitCost? }] }. 201 -> detail DTO.
+   * 409 SUPPLIER_ARCHIVED / PO_NUMBER_CONFLICT; 400 field problems.
+   */
+  create: (token, payload) => apiFetch('/api/purchase-orders', { token, method: 'POST', body: payload }),
+  /**
+   * Edit a DRAFT only (PATCH). Any supplied reference is re-verified; a
+   * supplied `items` array replaces the full line set. 409 PO_NOT_DRAFT /
+   * PO_STATE_CONFLICT.
+   */
+  update: (token, id, payload) => apiFetch(`/api/purchase-orders/${id}`, { token, method: 'PATCH', body: payload }),
+  /** Issue a DRAFT -> OPEN. 409 PO_ALREADY_OPEN / PO_CANCELED / PO_ALREADY_RECEIVED. */
+  issue: (token, id) => apiFetch(`/api/purchase-orders/${id}/issue`, { token, method: 'POST' }),
+  /** Cancel a DRAFT or OPEN order -> CANCELED. 409 PO_ALREADY_CANCELED / PO_ALREADY_RECEIVED. */
+  cancel: (token, id) => apiFetch(`/api/purchase-orders/${id}/cancel`, { token, method: 'POST' }),
   /**
    * Claim-first receive (Phase 13C) against an OPEN order. body:
    * { lines: [{ productId, quantity }], reference? }. 200 -> { allReceived,
@@ -213,6 +259,7 @@ export default {
   me,
   categoriesApi,
   locationsApi,
+  suppliersApi,
   productsApi,
   inventoryApi,
   purchaseOrdersApi,

@@ -1093,6 +1093,7 @@ REST API modules:
 /api/transactions
 /api/dashboard
 /api/ai
+/api/audit
 ```
 
 Example endpoints:
@@ -1123,6 +1124,8 @@ GET    /api/dashboard
 POST   /api/ai/chat
 GET    /api/ai/conversations
 GET    /api/ai/conversations/:id
+
+GET    /api/audit
 ```
 
 Exact endpoint design may be refined during implementation while preserving the architecture and security requirements.

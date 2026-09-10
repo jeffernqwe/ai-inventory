@@ -217,6 +217,7 @@ Phase 11 — Inventory Intelligence & Alerts (lettered increments)
             11A — Inventory health counts + reorder list + read-only restock tool
             11B — Documentation close-out
 Phase 14A — User Management Foundation (OWNER/ADMIN users.manage API: list/create/role+status; no OWNER, no self-change, ADMIN↔ADMIN restricted)
+Phase 16 — Audit Trail Viewer (read-only GET /api/audit: OWNER/ADMIN governance trail; action/entityType/user/date/q filters; no write routes)
 ```
 
 Phase 08 is an owner-directed hardening extension delivered in approved lettered increments
@@ -249,6 +250,14 @@ no OWNER can be created or assigned through the API, no user can change their ow
 OWNER account is immutable, and an ADMIN can neither create, assign, nor modify another ADMIN
 (ADMIN creates/assigns MANAGER or STAFF only). Disabling a user instantly revokes login and existing
 JWTs. No invitations/email, password reset, billing, hard delete, or mobile UI were added.
+
+Phase 16 is an owner-directed audit-trail viewer delivered as a single approved increment after
+Phase 15. The audit write path has existed since Phase 04 (`recordAudit`); Phase 16 adds the read
+side: a business-scoped, read-only `GET /api/audit` (new `audit.view` permission, OWNER + ADMIN only)
+with action/entityType/user/date/q filters, newest-first pagination, and a strict whitelisted DTO.
+It reuses the existing `AuditLog` model + indexes and the standard list/validate/pagination
+conventions — no model change, no new dependency, no write routes. MANAGER/STAFF are denied (403) and
+never see the trail; a client-supplied `businessId` is ignored.
 
 When instructed to work on a specific phase:
 

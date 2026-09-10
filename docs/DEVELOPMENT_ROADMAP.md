@@ -96,6 +96,9 @@ Inventory Intelligence & Alerts (11A, 11B)
         ↓
 Phase 14A
 User Management Foundation
+        ↓
+Phase 16
+Audit Trail Viewer
 ```
 
 ---
@@ -1064,7 +1067,72 @@ without changing its scope. The roadmap's earlier Phase 12/13 entries were never
 
 ---
 
-# 16. Phase Gate System
+# 16. Phase 16 — Audit Trail Viewer (read-only governance)
+
+## Objective
+
+Phase 16 is an owner-directed extension approved after Phase 15. The audit write path has been in
+place since Phase 04 — every significant write (categories, locations, suppliers, purchase orders,
+inventory movements, and since 14A user create/role/status changes) records a business-scoped
+`AuditLog` row with a "who/what/entity/when" shape (spec §17). But there was **no read path**: no
+`/api/audit` route, no controller, no mobile screen — the system recorded everything and hid it.
+Phase 16 delivers the read side: a read-only, business-isolated, RBAC-gated audit trail viewer for
+OWNER/ADMIN. Read-only by design — no write routes, no model change, no new dependency.
+
+## Scope
+
+Implemented (approved; commit pending owner sign-off):
+
+- `GET /api/audit` — newest-first, paginated `{ items, page, limit, total, totalPages }`. Requires
+  `requireAuth` + a new `requirePermission(audit.view)`. Filters: `action` (validated against
+  `AUDIT_ACTIONS`), `entityType` (`AUDIT_ENTITY_TYPES`), `userId`, ISO `from`/`to` (with `to >= from`),
+  and `q` (action/entityId text). Unknown filter values are rejected `400 VALIDATION_ERROR`, never
+  silently ignored.
+- `audit.service.listAudit` — business context comes exclusively from the authenticated session (a
+  client `businessId` is ignored; cross-business rows are unreachable). `.populate('userId', 'name')`
+  resolves the actor. Returns a strict whitelisted DTO `{ id, action, entityType, entityId, actor,
+  metadata, createdAt }`; system rows with no `userId` return `actor: null`.
+- New `AUDIT_VIEW ('audit.view')` permission granted to **OWNER + ADMIN only** in the server RBAC
+  matrix (MANAGER/STAFF hold no audit permission → 403). Mirrored in the mobile permissions mirror
+  (`canViewAudit`) — the backend stays authoritative.
+- Mobile: `mobile/app/(app)/audit.js` (OWNER/ADMIN gate + AccessDenied for others, self-declared
+  `<Stack.Screen>`, q search + entityType chips, `usePagedList`/`useRefetchOnFocus`) and an "Audit
+  Log" dashboard tile gated by `canViewAudit`. The owner-held `_layout.js` / `SignOutIcon.jsx` are
+  untouched.
+
+### Explicitly Out of Scope
+
+No write/delete of audit rows, no audit detail screen, no password reset, no invitations, no
+`/api/businesses`, no mobile supplier/PO management, no reports/analytics, no stock transfers, no
+entitlement enforcement, no `api/transactions` standalone route. No new dependencies. Owner-held
+files untouched. Phases 12/13/14B/15 roadmap sections remain a pre-existing gap (as noted in the
+Phase 14A section) and are not backfilled here.
+
+### Verified
+
+- New `server/test/phase16-audit-viewer.test.mjs` (classified MIXED) covers RBAC (401/403/200),
+  tenant isolation (foreign trails never leak; a planted `businessId` is ignored), every filter
+  (action, entityType, userId, from/to incl. bad ranges, q) with unknown values rejected 400,
+  pagination envelope + newest-first ordering, actor population (populated name; `actor: null` for
+  system rows), and DTO hygiene (strict whitelist, no password/hash/sensitive fields).
+- `npm run lint`: 0 errors / 0 warnings.
+- DB-free unit run: 107 passed / 18 skipped / 0 failed (Phase 16 audit suite skips in unit mode as a
+  DB-backed suite).
+- Full backend suite: 350/350 passing (was 339/339 before Phase 16).
+- Mobile: `npx expo export` for android and iOS both green.
+
+## Definition of Done
+
+- The Phase 16 increment is recorded in this roadmap, in `CLAUDE.md`, in the README API table +
+  Phase Status, and in the specification (§31 API structure).
+- The trail is OWNER/ADMIN-only, business-isolated, read-only, and server-enforced; filters and the
+  DTO whitelist are covered by tests.
+- `npm run lint`, `npm run test:unit`, and `npm test` all pass.
+- No commit and no push — the working tree keeps the change uncommitted for owner review.
+
+---
+
+# 17. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.
 
@@ -1105,7 +1173,7 @@ The project owner decides whether to proceed.
 
 ---
 
-# 17. Change Control
+# 18. Change Control
 
 If Claude discovers that the current specification is incomplete or incorrect:
 

@@ -2,19 +2,42 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { router, useNavigation } from 'expo-router';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import Badge, { TypeBadge } from '../../components/Badge';
+import Badge, { PoStatusBadge, TypeBadge } from '../../components/Badge';
 import AccessDenied from '../../components/AccessDenied';
 import Button from '../../components/Button';
 import Card, { PressableCard } from '../../components/Card';
+import IconButton from '../../components/IconButton';
+import { Icon } from '../../components/icons';
 import { CenterLoader, EmptyState, ErrorState, errorText } from '../../components/ListState';
+import ListRow from '../../components/ListRow';
 import Screen from '../../components/Screen';
-import { dashboardApi, productsApi } from '../../lib/api';
+import SectionHeader from '../../components/SectionHeader';
+import StatCard from '../../components/StatCard';
+import { dashboardApi, productsApi, purchaseOrdersApi } from '../../lib/api';
 import { isSessionError, useSession } from '../../lib/auth';
 import { confirm } from '../../lib/confirm';
-import { formatDateTime, formatNumber } from '../../lib/format';
-import { canAdjustStock, canManageUsers, canUseAi, canViewAudit, canViewDashboard, roleLabel } from '../../lib/permissions';
+import { formatDate, formatDateTime, formatNumber } from '../../lib/format';
+import {
+  canAdjustStock,
+  canManagePurchaseOrders,
+  canManageUsers,
+  canStockIn,
+  canStockOut,
+  canUseAi,
+  canViewAudit,
+  canViewDashboard,
+  canViewPurchaseOrders,
+  roleLabel,
+} from '../../lib/permissions';
 import { radius, spacing, type } from '../../lib/theme';
 import { useTheme } from '../../lib/theme-context';
+
+/** Time-aware greeting (A): morning / afternoon / evening by local hour. */
+function greetingForHour(hour) {
+  if (hour < 12) return 'Good morning';
+  if (hour < 18) return 'Good afternoon';
+  return 'Good evening';
+}
 
 function deltaText(t) {
   if (t.type === 'STOCK_IN') return `+${t.quantity}`;
@@ -28,56 +51,121 @@ function deltaTone(colors, t) {
   return colors.textSecondary;
 }
 
+const ACTIVITY_ICONS = { STOCK_IN: 'stockIn', STOCK_OUT: 'stockOut', ADJUSTMENT: 'adjust' };
+
+/** Latest movement row — taps into the full inventory history (G). */
 function ActivityRow({ item }) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   return (
-    <PressableCard style={styles.activityRow} onPress={() => router.push('/history')}>
-      <TypeBadge type={item.type} />
-      <View style={styles.activityBody}>
-        <Text style={styles.activityName} numberOfLines={1}>
-          {item.product?.name ?? 'Unknown product'}
-        </Text>
-        <Text style={styles.activityMeta} numberOfLines={1}>
-          {item.location?.name ?? 'No location'} · {formatDateTime(item.createdAt)}
-        </Text>
-      </View>
-      <Text style={[styles.delta, { color: deltaTone(colors, item) }]}>{deltaText(item)}</Text>
+    <PressableCard onPress={() => router.push('/history')} style={styles.rowCard}>
+      <ListRow
+        leading={<Icon name={ACTIVITY_ICONS[item.type] ?? 'time'} color={deltaTone(colors, item)} size={22} />}
+        title={item.product?.name ?? 'Unknown product'}
+        subtitle={`${item.location?.name ?? 'No location'} · ${formatDateTime(item.createdAt)}`}
+        right={
+          <View style={styles.activityRight}>
+            <TypeBadge type={item.type} />
+            <Text style={[styles.delta, { color: deltaTone(colors, item) }]}>{deltaText(item)}</Text>
+          </View>
+        }
+      />
     </PressableCard>
   );
 }
 
-/** One "needs restock" preview row — taps into the product detail for stock-in. */
-function ReorderRow({ item }) {
+/** One "needs attention" row — taps into the product detail (C). */
+function RestockRow({ item }) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const isOut = item.stockStatus === 'OUT_OF_STOCK';
   return (
-    <PressableCard style={styles.activityRow} onPress={() => router.push(`/products/${item.id}`)}>
-      <Badge text={isOut ? 'Out' : 'Low'} tone={isOut ? 'danger' : 'low'} />
-      <View style={styles.activityBody}>
-        <Text style={styles.activityName} numberOfLines={1}>
-          {item.name}
-        </Text>
-        <Text style={styles.activityMeta} numberOfLines={1}>
-          {formatNumber(item.availableQuantity)} available · min {formatNumber(item.minimumStock)}
-        </Text>
-      </View>
+    <PressableCard onPress={() => router.push(`/products/${item.id}`)} style={styles.rowCard}>
+      <ListRow
+        leading={<Icon name={isOut ? 'alert' : 'warning'} color={isOut ? colors.danger : colors.warning} size={22} />}
+        title={item.name}
+        subtitle={`${formatNumber(item.availableQuantity)} available · minimum ${formatNumber(item.minimumStock)}`}
+        right={<Badge text={isOut ? 'Out' : 'Low'} tone={isOut ? 'danger' : 'low'} dot />}
+      />
     </PressableCard>
   );
 }
 
-function StatCard({ label, value, tone, onPress, style }) {
+/** Open purchase-order awareness row — taps into the PO detail (D). */
+function OpenPoRow({ item }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const meta = [item.supplier?.name, item.location?.name].filter(Boolean).join(' · ') || 'No supplier / location';
+  return (
+    <PressableCard onPress={() => router.push(`/purchase-orders/${item.id}`)} style={styles.rowCard}>
+      <ListRow
+        leading={<Icon name="receipt" color={colors.primary} size={22} />}
+        title={item.number}
+        subtitle={`${meta}${item.expectedAt ? ` · expected ${formatDate(item.expectedAt)}` : ''}`}
+        right={<PoStatusBadge status={item.status} />}
+      />
+    </PressableCard>
+  );
+}
+
+/** Destination row for the workspace navigation hierarchy (F/H). */
+function NavRow({ icon, title, subtitle, route }) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   return (
-    <Pressable style={[styles.stat, style]} onPress={onPress} disabled={!onPress}>
-      <View style={[styles.statDot, { backgroundColor: tone }]} />
-      <Text style={styles.statValue}>{formatNumber(value)}</Text>
-      <Text style={styles.statLabel} numberOfLines={2}>
-        {label}
-      </Text>
+    <PressableCard onPress={() => router.push(route)} style={styles.rowCard}>
+      <ListRow
+        leading={<Icon name={icon} color={colors.primary} size={22} />}
+        title={title}
+        subtitle={subtitle}
+        right={<Icon name="chevronRight" color={colors.textMuted} size={18} />}
+      />
+    </PressableCard>
+  );
+}
+
+/** Compact text link used as a SectionHeader action (keeps a 44px target). */
+function HeaderLink({ label, onPress }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  return (
+    <Pressable onPress={onPress} accessibilityRole="link" accessibilityLabel={label} style={styles.headerLink}>
+      <Text style={styles.headerLinkText}>{label}</Text>
     </Pressable>
+  );
+}
+
+/**
+ * Dashboard header (A): brand identity, role context, theme toggle, and the
+ * same confirm-then-sign-out flow every screen uses. The sign-out is rendered
+ * with the shared semantic signOut glyph via IconButton (44px); SignOutIcon
+ * stays for native-stack headers (inventory) where it already lives.
+ */
+function TopBar({ name, role, onSignOut }) {
+  const { colors, isDark, setScheme } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  return (
+    <View style={styles.topBar}>
+      <View style={styles.brandBlock}>
+        <Text style={styles.brand}>Inventory AI</Text>
+        <View style={styles.roleRow}>
+          <Text style={styles.userName} numberOfLines={1}>
+            {name ?? 'there'}
+          </Text>
+          <Badge text={roleLabel(role)} tone="neutral" />
+        </View>
+      </View>
+      <View style={styles.topBarActions}>
+        <IconButton
+          icon={isDark ? 'sunny' : 'moon'}
+          variant="subtle"
+          size={20}
+          accessibilityLabel={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+          onPress={() => setScheme(isDark ? 'light' : 'dark')}
+        />
+        <IconButton icon="signOut" variant="subtle" size={20} accessibilityLabel="Sign out" onPress={onSignOut} />
+      </View>
+    </View>
   );
 }
 
@@ -88,6 +176,7 @@ export default function DashboardScreen() {
   const navigation = useNavigation();
   const [summary, setSummary] = useState(null);
   const [restock, setRestock] = useState(null);
+  const [openPos, setOpenPos] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -95,8 +184,9 @@ export default function DashboardScreen() {
     return <AccessDenied message="Only managers and above can view the dashboard." />;
   }
 
-  const canAdjust = canAdjustStock(user);
+  const canSeePos = canViewPurchaseOrders(user);
   const firstName = user?.name?.split(' ')[0] ?? 'there';
+  const greeting = `${greetingForHour(new Date().getHours())}, ${firstName}`;
 
   const load = useCallback(async () => {
     if (!token) return;
@@ -105,9 +195,9 @@ export default function DashboardScreen() {
     try {
       const data = await dashboardApi.summary(token);
       setSummary(data);
-      // "Needs restock" preview is secondary and never blocks the summary — if
-      // it fails the health tiles still tell the story. Only fetched when the
-      // dashboard itself reports something at or below minimum.
+      // Restock preview is secondary and never blocks the summary — if it
+      // fails, the Overview tiles still tell the story. Only fetched when the
+      // summary itself reports something at or below minimum.
       if ((data.lowStockProducts ?? 0) + (data.outOfStockProducts ?? 0) > 0) {
         try {
           const list = await productsApi.reorder(token, { limit: 5 });
@@ -118,14 +208,25 @@ export default function DashboardScreen() {
       } else {
         setRestock([]);
       }
+      // Open-PO awareness is fire-and-forget (D): it never blocks the summary,
+      // and the section simply omits itself on failure or when unauthorized.
+      if (canSeePos) {
+        purchaseOrdersApi
+          .list(token, { status: 'OPEN', limit: 3 })
+          .then((res) => setOpenPos(res.items ?? []))
+          .catch(() => setOpenPos(null));
+      } else {
+        setOpenPos(null);
+      }
     } catch (err) {
       setError(err);
       setRestock(null);
+      setOpenPos(null);
       if (isSessionError(err)) await signOut();
     } finally {
       setLoading(false);
     }
-  }, [token, signOut]);
+  }, [token, signOut, canSeePos]);
 
   // Load on first mount and whenever the screen regains focus (stock actions on
   // other screens should be reflected here).
@@ -145,22 +246,37 @@ export default function DashboardScreen() {
     if (ok) await signOut();
   }
 
-  const tiles = [
-    { label: 'Stock In', sub: 'Add quantity', route: '/stock-in' },
-    { label: 'Stock Out', sub: 'Remove quantity', route: '/stock-out' },
-    ...(canAdjust ? [{ label: 'Adjust', sub: 'Set exact stock', route: '/adjust' }] : []),
-    { label: 'History', sub: 'All movements', route: '/history' },
-    { label: 'Purchase Orders', sub: 'Orders & receiving', route: '/purchase-orders' },
-    { label: 'Suppliers', sub: 'Manage vendors', route: '/suppliers' },
-    ...(canManageUsers(user) ? [{ label: 'Users', sub: 'Manage accounts', route: '/users' }] : []),
-    ...(canViewAudit(user) ? [{ label: 'Audit Log', sub: 'Who did what', route: '/audit' }] : []),
-    ...(canUseAi(user) ? [{ label: 'AI Assistant', sub: 'Ask about stock', route: '/ai' }] : []),
-    { label: 'Inventory', sub: 'Rows & status', route: '/inventory' },
-    { label: 'Products', sub: 'Catalog', route: '/products' },
-    { label: 'Categories', sub: 'Group products', route: '/categories' },
-    { label: 'Locations', sub: 'Where stock lives', route: '/locations' },
-    { label: 'Profile', sub: 'Account', route: '/profile' },
+  // Health tiles reuse the existing dashboardApi.summary (B) — only real fields,
+  // and the same deep links the previous dashboard offered.
+  const healthTiles = [
+    { key: 'in', label: 'In stock', value: formatNumber(summary?.inStockProducts), tone: 'success', route: '/products' },
+    { key: 'low', label: 'Low stock', value: formatNumber(summary?.lowStockProducts), tone: 'warning', route: '/inventory?status=low' },
+    { key: 'out', label: 'Out of stock', value: formatNumber(summary?.outOfStockProducts), tone: 'danger', route: '/inventory?status=out' },
+    { key: 'active', label: 'Active products', value: formatNumber(summary?.totalProducts), tone: 'primary', route: '/products' },
+    { key: 'onhand', label: 'Total on-hand qty', value: formatNumber(summary?.totalInventoryQuantity), tone: 'default', route: '/inventory' },
   ];
+
+  // Role-gated quick actions (E): Stock In, Stock Out, Scan, New PO.
+  const quickActions = [
+    ...(canStockIn(user) ? [{ key: 'stock-in', title: 'Stock In', icon: 'stockIn', route: '/stock-in', variant: 'primary' }] : []),
+    ...(canStockOut(user) ? [{ key: 'stock-out', title: 'Stock Out', icon: 'stockOut', route: '/stock-out', variant: 'secondary' }] : []),
+    ...(canStockIn(user) || canStockOut(user) ? [{ key: 'scan', title: 'Scan', icon: 'scan', route: '/scan', variant: 'secondary' }] : []),
+    ...(canManagePurchaseOrders(user) ? [{ key: 'new-po', title: 'New PO', icon: 'receipt', route: '/purchase-orders/new', variant: 'secondary' }] : []),
+  ];
+
+  // Remaining destinations, grouped as the navigation hierarchy (F/H). Every
+  // route already exists in the native stack — nothing renamed, nothing added.
+  const workspace = [
+    { key: 'inventory', icon: 'cube', title: 'Inventory', subtitle: 'Rows & stock status', route: '/inventory', show: true },
+    { key: 'products', icon: 'pricetags', title: 'Products', subtitle: 'Product catalog', route: '/products', show: true },
+    { key: 'categories', icon: 'layers', title: 'Categories', subtitle: 'Group products', route: '/categories', show: true },
+    { key: 'locations', icon: 'location', title: 'Locations', subtitle: 'Where stock lives', route: '/locations', show: true },
+    { key: 'adjust', icon: 'adjust', title: 'Adjust stock', subtitle: 'Set an exact quantity', route: '/adjust', show: canAdjustStock(user) },
+    { key: 'ai', icon: 'sparkles', title: 'AI Assistant', subtitle: 'Ask about inventory', route: '/ai', show: canUseAi(user) },
+    { key: 'users', icon: 'people', title: 'Users', subtitle: 'Manage accounts', route: '/users', show: canManageUsers(user) },
+    { key: 'audit', icon: 'document', title: 'Audit log', subtitle: 'Who did what', route: '/audit', show: canViewAudit(user) },
+    { key: 'profile', icon: 'person', title: 'Profile', subtitle: 'Account & password', route: '/profile', show: true },
+  ].filter((item) => item.show);
 
   return (
     <Screen scroll refreshing={loading} onRefresh={load}>
@@ -172,141 +288,156 @@ export default function DashboardScreen() {
         <ErrorState title="Couldn't load the dashboard" message={errorText(error)} onRetry={load} />
       ) : summary ? (
         <>
-          <Text style={styles.greeting}>Good day, {firstName} 👋</Text>
-          <Text style={styles.greetingSub}>Here's how your stock is doing.</Text>
+          <Text style={styles.greeting}>{greeting}</Text>
           {error ? (
-            <Pressable style={styles.stale} onPress={load}>
+            <Pressable style={styles.stale} onPress={load} accessibilityRole="button" accessibilityLabel="Retry loading">
               <Text style={styles.staleText}>Showing earlier data — pull to retry.</Text>
             </Pressable>
           ) : null}
 
-          <Text style={styles.sectionTitle}>Inventory health</Text>
-          <View style={styles.statGrid}>
-            <StatCard style={styles.statThird} label="In stock" value={summary.inStockProducts} tone={colors.success} onPress={() => router.push('/products')} />
-            <StatCard style={styles.statThird} label="Low stock" value={summary.lowStockProducts} tone={colors.warning} onPress={() => router.push('/inventory?status=low')} />
-            <StatCard style={styles.statThird} label="Out of stock" value={summary.outOfStockProducts} tone={colors.danger} onPress={() => router.push('/inventory?status=out')} />
-            <StatCard label="Active products" value={summary.totalProducts} tone={colors.primary} onPress={() => router.push('/products')} />
-            <StatCard label="Total on-hand qty" value={summary.totalInventoryQuantity} tone={colors.textSecondary} onPress={() => router.push('/inventory')} />
+          <SectionHeader
+            title="Overview"
+            subtitle="Here's how your stock is doing across all locations"
+            style={styles.section}
+          />
+          <View style={styles.healthGrid}>
+            {healthTiles.map((tile) => (
+              <Pressable
+                key={tile.key}
+                onPress={() => router.push(tile.route)}
+                accessibilityRole="button"
+                accessibilityLabel={`${tile.label}: ${tile.value}`}
+                style={styles.healthCell}
+              >
+                <StatCard label={tile.label} value={tile.value} tone={tile.tone} />
+              </Pressable>
+            ))}
           </View>
 
-          {restock && restock.length > 0 ? (
+          {restock !== null ? (
             <>
-              <Text style={styles.sectionTitle}>Needs restock</Text>
-              <View style={styles.activityList}>
-                {restock.map((item) => (
-                  <ReorderRow key={item.id} item={item} />
+              <SectionHeader
+                title="Needs attention"
+                subtitle={restock.length ? 'At or below minimum stock' : 'Nothing below minimum stock right now'}
+                style={styles.section}
+                action={<HeaderLink label="View inventory" onPress={() => router.push('/inventory')} />}
+              />
+              {restock.length ? (
+                <View style={styles.rowList}>
+                  {restock.map((item) => (
+                    <RestockRow key={item.id} item={item} />
+                  ))}
+                </View>
+              ) : (
+                <Card>
+                  <EmptyState
+                    icon="checkCircle"
+                    title="All caught up"
+                    message="No products need restocking right now."
+                  />
+                </Card>
+              )}
+            </>
+          ) : null}
+
+          {quickActions.length ? (
+            <>
+              <SectionHeader title="Quick actions" subtitle="Common stock and order tasks" style={styles.section} />
+              <View style={styles.quickGrid}>
+                {quickActions.map((action) => (
+                  <Button
+                    key={action.key}
+                    title={action.title}
+                    icon={action.icon}
+                    variant={action.variant}
+                    size="lg"
+                    style={styles.quickButton}
+                    onPress={() => router.push(action.route)}
+                  />
                 ))}
               </View>
             </>
           ) : null}
 
-          <Text style={styles.sectionTitle}>Actions</Text>
-          <View style={styles.tileGrid}>
-            {tiles.map((t) => (
-              <PressableCard key={t.route} style={styles.tile} onPress={() => router.push(t.route)}>
-                <Text style={styles.tileLabel} numberOfLines={1}>
-                  {t.label}
-                </Text>
-                <Text style={styles.tileSub} numberOfLines={1}>
-                  {t.sub}
-                </Text>
-              </PressableCard>
-            ))}
-          </View>
+          {canSeePos ? (
+            <>
+              <SectionHeader title="Procurement" subtitle="Open orders & suppliers" style={styles.section} />
+              {openPos === null ? null : openPos.length ? (
+                <View style={styles.rowList}>
+                  {openPos.map((item) => (
+                    <OpenPoRow key={item.id} item={item} />
+                  ))}
+                </View>
+              ) : (
+                <View style={styles.emptyInline}>
+                  <Text style={styles.emptyInlineText}>No open purchase orders — nothing is awaiting receipt.</Text>
+                </View>
+              )}
+              <View style={styles.rowList}>
+                <NavRow icon="receipt" title="Purchase orders" subtitle="Browse, receive, and manage orders" route="/purchase-orders" />
+                <NavRow icon="storefront" title="Suppliers" subtitle="Vendor directory" route="/suppliers" />
+              </View>
+            </>
+          ) : null}
 
-          <Text style={styles.sectionTitle}>Recent activity</Text>
+          <SectionHeader
+            title="Recent activity"
+            subtitle="Latest stock movements"
+            style={styles.section}
+            action={<HeaderLink label="History" onPress={() => router.push('/history')} />}
+          />
           {summary.recentActivity?.length ? (
-            <View style={styles.activityList}>
+            <View style={styles.rowList}>
               {summary.recentActivity.map((item) => (
                 <ActivityRow key={item.id} item={item} />
               ))}
             </View>
           ) : (
             <Card>
-              <EmptyState title="No activity yet" message="Stock in/out and adjustments will appear here." />
+              <EmptyState icon="time" title="No activity yet" message="Stock in, stock out, and adjustments will appear here." />
             </Card>
           )}
 
-          <Button title="Sign out" onPress={onSignOut} variant="secondary" style={styles.signOut} />
+          <SectionHeader title="Workspace" subtitle="Everything else" style={styles.section} />
+          <View style={styles.rowList}>
+            {workspace.map((item) => (
+              <NavRow key={item.key} icon={item.icon} title={item.title} subtitle={item.subtitle} route={item.route} />
+            ))}
+          </View>
         </>
       ) : null}
     </Screen>
   );
 }
 
-function TopBar({ name, role, onSignOut }) {
-  const { colors } = useTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
-  return (
-    <View style={styles.topBar}>
-      <View style={styles.brandBlock}>
-        <Text style={styles.brand}>Inventory AI</Text>
-        <View style={styles.roleRow}>
-          <Text style={styles.userName} numberOfLines={1}>
-            {name}
-          </Text>
-          <Badge text={roleLabel(role)} tone="neutral" />
-        </View>
-      </View>
-      <Pressable onPress={onSignOut} hitSlop={10} style={styles.signOutIcon} accessibilityRole="button">
-        <Text style={styles.signOutIconText}>⎋</Text>
-      </Pressable>
-    </View>
-  );
-}
-
-const createStyles = (colors) => StyleSheet.create({
-  topBar: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: spacing.xl },
-  brandBlock: { flex: 1, marginRight: spacing.md },
-  brand: { ...type.caption, color: colors.primary, fontWeight: '800', letterSpacing: 0.4, textTransform: 'uppercase' },
-  roleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: 2 },
-  userName: { ...type.h3, color: colors.text, flexShrink: 1 },
-  signOutIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: radius.md,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  signOutIconText: { color: colors.textMuted, fontSize: 18, fontWeight: '700' },
-  greeting: { ...type.h1, color: colors.text },
-  greetingSub: { ...type.body, color: colors.textSecondary, marginTop: 2 },
-  stale: {
-    marginTop: spacing.md,
-    backgroundColor: colors.warningSoft,
-    borderRadius: radius.md,
-    padding: spacing.sm + 2,
-    paddingHorizontal: spacing.md,
-  },
-  staleText: { ...type.caption, color: colors.warning, fontWeight: '600' },
-  statGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md, marginTop: spacing.xl },
-  stat: {
-    flexGrow: 1,
-    flexBasis: '45%',
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.lg,
-    minWidth: '45%',
-  },
-  statThird: { flexBasis: '30%', minWidth: '30%' },
-  statDot: { width: 10, height: 10, borderRadius: 5, marginBottom: spacing.sm },
-  statValue: { ...type.h1, color: colors.text },
-  statLabel: { ...type.caption, color: colors.textSecondary, marginTop: 2 },
-  sectionTitle: { ...type.h3, color: colors.text, marginTop: spacing.xxl, marginBottom: spacing.md },
-  tileGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md },
-  tile: { flexBasis: '30%', flexGrow: 1, minWidth: '30%', minHeight: 92, padding: spacing.md },
-  tileLabel: { ...type.label, color: colors.text },
-  tileSub: { ...type.caption, color: colors.textMuted, marginTop: 2 },
-  activityList: { gap: spacing.sm },
-  activityRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
-  activityBody: { flex: 1 },
-  activityName: { ...type.body, color: colors.text, fontWeight: '600' },
-  activityMeta: { ...type.caption, color: colors.textMuted, marginTop: 1 },
-  delta: { ...type.button, fontSize: 16 },
-  signOut: { marginTop: spacing.xxl },
-});
+const createStyles = (colors) =>
+  StyleSheet.create({
+    topBar: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: spacing.xl },
+    brandBlock: { flex: 1, marginRight: spacing.md },
+    brand: { ...type.caption, color: colors.primary, fontWeight: '800', letterSpacing: 0.4, textTransform: 'uppercase' },
+    roleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: 2 },
+    userName: { ...type.h3, color: colors.text, flexShrink: 1 },
+    topBarActions: { flexDirection: 'row', gap: spacing.sm, alignItems: 'center' },
+    greeting: { ...type.h1, color: colors.text },
+    stale: {
+      marginTop: spacing.md,
+      backgroundColor: colors.warningSoft,
+      borderRadius: radius.md,
+      padding: spacing.sm + 2,
+      paddingHorizontal: spacing.md,
+    },
+    staleText: { ...type.caption, color: colors.warning, fontWeight: '600' },
+    section: { marginTop: spacing.xxl },
+    healthGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md },
+    healthCell: { flexGrow: 1, flexBasis: '46%', minWidth: '46%' },
+    quickGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md },
+    quickButton: { flexGrow: 1, flexBasis: '46%' },
+    rowList: { gap: spacing.sm },
+    rowCard: { paddingVertical: spacing.md },
+    activityRight: { alignItems: 'flex-end', gap: spacing.xs },
+    delta: { ...type.button, fontSize: 16 },
+    headerLink: { minHeight: 44, justifyContent: 'center' },
+    headerLinkText: { ...type.label, color: colors.primary, fontWeight: '600' },
+    emptyInline: { paddingVertical: spacing.sm },
+    emptyInlineText: { ...type.body, color: colors.textMuted },
+  });

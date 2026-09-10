@@ -16,6 +16,7 @@ const FAMILIES = {
 const ICONS = {
   // Actions
   add: { family: 'ion', name: 'add' },
+  remove: { family: 'ion', name: 'remove' },
   search: { family: 'ion', name: 'search' },
   close: { family: 'ion', name: 'close' },
   check: { family: 'ion', name: 'checkmark' },
@@ -31,6 +32,13 @@ const ICONS = {
   barcode: { family: 'mci', name: 'barcode' },
   print: { family: 'ion', name: 'print-outline' },
   share: { family: 'ion', name: 'share-outline' },
+  // Movement
+  stockIn: { family: 'ion', name: 'arrow-down-circle-outline' },
+  stockOut: { family: 'ion', name: 'arrow-up-circle-outline' },
+  adjust: { family: 'ion', name: 'swap-vertical' },
+  // Theme
+  sunny: { family: 'ion', name: 'sunny-outline' },
+  moon: { family: 'ion', name: 'moon-outline' },
   // Status
   checkCircle: { family: 'ion', name: 'checkmark-circle' },
   checkCircleOutline: { family: 'ion', name: 'checkmark-circle-outline' },
@@ -45,6 +53,12 @@ const ICONS = {
   time: { family: 'ion', name: 'time-outline' },
   lock: { family: 'ion', name: 'lock-closed-outline' },
   receipt: { family: 'mci', name: 'file-document-outline' },
+  layers: { family: 'ion', name: 'layers-outline' },
+  location: { family: 'ion', name: 'location-outline' },
+  pricetags: { family: 'ion', name: 'pricetags-outline' },
+  settings: { family: 'ion', name: 'settings-outline' },
+  sparkles: { family: 'ion', name: 'sparkles-outline' },
+  storefront: { family: 'ion', name: 'storefront-outline' },
 };
 
 /**

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, FlatList, Modal, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 
 import { StatusBadge } from './Badge';
@@ -12,7 +12,8 @@ import { useSession } from '../lib/auth';
 import { confirm } from '../lib/confirm';
 import useDebounced from '../hooks/useDebounced';
 import usePagedList from '../hooks/usePagedList';
-import { colors, radius, spacing, type } from '../lib/theme';
+import { radius, spacing, type } from '../lib/theme';
+import { useTheme } from '../lib/theme-context';
 
 function fieldMap(err) {
   const out = {};
@@ -43,6 +44,8 @@ export default function RefManage({
   fields = [],
 }) {
   const { user, token, signOut } = useSession();
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const manage = canManageFn(user);
 
   const [q, setQ] = useState('');
@@ -300,7 +303,7 @@ export default function RefManage({
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) => StyleSheet.create({
   flex: { flex: 1 },
   content: { padding: spacing.lg, paddingBottom: spacing.huge, flexGrow: 1 },
   filterRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.md },
@@ -311,7 +314,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: 8,
   },
-  addBtnText: { color: '#FFF', fontWeight: '700', fontSize: 13 },
+  addBtnText: { color: colors.textOnPrimary, fontWeight: '700', fontSize: 13 },
   row: {
     backgroundColor: colors.surface,
     borderRadius: radius.lg,

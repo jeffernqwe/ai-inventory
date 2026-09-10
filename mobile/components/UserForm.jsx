@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { router } from 'expo-router';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
@@ -14,7 +14,8 @@ import { ApiError } from '../lib/client';
 import { useSession } from '../lib/auth';
 import { confirm } from '../lib/confirm';
 import { assignableRoles, canModifyUser, roleLabel } from '../lib/permissions';
-import { colors, spacing, type } from '../lib/theme';
+import { spacing, type } from '../lib/theme';
+import { useTheme } from '../lib/theme-context';
 
 function fieldMap(err) {
   const out = {};
@@ -42,6 +43,8 @@ function blockReason(actor, target) {
  * actor's own role (OWNER assigns ADMIN/MANAGER/STAFF; ADMIN only MANAGER/STAFF).
  */
 export default function UserForm({ initial }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const { user: actor, token } = useSession();
   const isEdit = Boolean(initial);
 
@@ -182,6 +185,8 @@ export default function UserForm({ initial }) {
 }
 
 function TextRow({ label, value }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   return (
     <View style={styles.row}>
       <Text style={styles.rowLabel}>{label}</Text>
@@ -192,7 +197,8 @@ function TextRow({ label, value }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) =>
+  StyleSheet.create({
   content: { padding: spacing.lg, paddingBottom: 48 },
   spaced: { marginTop: spacing.lg },
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: spacing.sm + 2 },

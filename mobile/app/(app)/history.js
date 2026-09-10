@@ -11,7 +11,8 @@ import { useSession } from '../../lib/auth';
 import { formatDateTime, formatNumber } from '../../lib/format';
 import { useActiveRef } from '../../hooks/useReferences';
 import usePagedList from '../../hooks/usePagedList';
-import { colors, radius, spacing, type } from '../../lib/theme';
+import { radius, spacing, type } from '../../lib/theme';
+import { useTheme } from '../../lib/theme-context';
 
 function str(v) {
   return Array.isArray(v) ? v[0] : v;
@@ -30,18 +31,20 @@ function deltaText(item) {
   const d = (item.newQuantity ?? 0) - (item.previousQuantity ?? 0);
   return d >= 0 ? `+${d}` : `−${Math.abs(d)}`;
 }
-function deltaTone(item) {
+function deltaTone(colors, item) {
   if (item.type === 'STOCK_IN') return colors.success;
   if (item.type === 'STOCK_OUT') return colors.danger;
   return colors.textSecondary;
 }
 
 function HistoryRow({ item }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   return (
     <View style={styles.row}>
       <View style={styles.rowTop}>
         <TypeBadge type={item.type} />
-        <Text style={[styles.delta, { color: deltaTone(item) }]}>{deltaText(item)}</Text>
+        <Text style={[styles.delta, { color: deltaTone(colors, item) }]}>{deltaText(item)}</Text>
       </View>
       <Text style={styles.name} numberOfLines={2}>
         {item.product?.name ?? 'Unknown product'}
@@ -65,6 +68,8 @@ function HistoryRow({ item }) {
 }
 
 export default function HistoryScreen() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const { token, signOut } = useSession();
   const p = useLocalSearchParams();
   const paramProductId = str(p.productId);
@@ -149,7 +154,7 @@ export default function HistoryScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) => StyleSheet.create({
   flex: { flex: 1 },
   content: { padding: spacing.lg, paddingBottom: spacing.huge, flexGrow: 1 },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.lg },

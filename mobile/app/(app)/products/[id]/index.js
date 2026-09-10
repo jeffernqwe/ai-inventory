@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { printAsync, printToFileAsync } from 'expo-print';
@@ -18,9 +18,12 @@ import { formatDateTime, formatMoney, formatNumber } from '../../../../lib/forma
 import { canAdjustStock, canManageProducts } from '../../../../lib/permissions';
 import { useProductDetail } from '../../../../hooks/useProductDetail';
 import useRefetchOnFocus from '../../../../hooks/useRefetchOnFocus';
-import { colors, radius, spacing, type } from '../../../../lib/theme';
+import { radius, spacing, type } from '../../../../lib/theme';
+import { useTheme } from '../../../../lib/theme-context';
 
 function Field({ label, value, mono }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   if (value == null || value === '' || value === false) return null;
   return (
     <View style={styles.fieldRow}>
@@ -33,6 +36,8 @@ function Field({ label, value, mono }) {
 }
 
 function StockRow({ row }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   return (
     <View style={styles.stockRow}>
       <View style={styles.stockInfo}>
@@ -52,6 +57,8 @@ function StockRow({ row }) {
 }
 
 export default function ProductDetailScreen() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const { id } = useLocalSearchParams();
   const { user, token } = useSession();
   const manage = canManageProducts(user);
@@ -292,7 +299,7 @@ export default function ProductDetailScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) => StyleSheet.create({
   titleRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: spacing.md },
   name: { ...type.h2, color: colors.text, flex: 1 },
   description: { ...type.body, color: colors.textSecondary, marginTop: spacing.sm, lineHeight: 22 },

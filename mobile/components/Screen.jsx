@@ -1,6 +1,15 @@
+import { useMemo } from 'react';
 import { KeyboardAvoidingView, Platform, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors, spacing } from '../lib/theme';
+import { spacing } from '../lib/theme';
+import { useTheme } from '../lib/theme-context';
+
+const createStyles = (colors) =>
+  StyleSheet.create({
+    safe: { flex: 1, backgroundColor: colors.background },
+    flex: { flex: 1 },
+    padded: { padding: spacing.lg },
+  });
 
 /**
  * Standard screen shell: safe-area background + optional scroll/keyboard
@@ -17,6 +26,9 @@ export default function Screen({
   style,
   edges,
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+
   const refreshControl =
     refreshing !== undefined && onRefresh ? (
       <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} colors={[colors.primary]} />
@@ -52,9 +64,3 @@ export default function Screen({
     </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.background },
-  flex: { flex: 1 },
-  padded: { padding: spacing.lg },
-});

@@ -1,7 +1,9 @@
+import { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { MODULE_COUNT, QUIET_MODULES, ean13Runs } from '../lib/ean13';
-import { colors, type } from '../lib/theme';
+import { type } from '../lib/theme';
+import { useTheme } from '../lib/theme-context';
 
 /**
  * On-screen EAN-13 barcode preview (Phase 12D). Draws the bars with plain
@@ -11,6 +13,8 @@ import { colors, type } from '../lib/theme';
  * scannable if a label is photographed/printed from the preview.
  */
 export default function Ean13Barcode({ code, moduleWidth = 2, barHeight = 54, showDigits = true }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const runs = ean13Runs(code);
   const contentWidth = MODULE_COUNT * moduleWidth;
   const quiet = QUIET_MODULES * moduleWidth;
@@ -42,16 +46,17 @@ export default function Ean13Barcode({ code, moduleWidth = 2, barHeight = 54, sh
   );
 }
 
-const styles = StyleSheet.create({
-  wrap: { alignItems: 'center' },
-  inner: { alignItems: 'center' },
-  bars: { flexDirection: 'row', backgroundColor: '#fff' },
-  digits: {
-    ...type.caption,
-    color: colors.text,
-    fontWeight: '600',
-    fontVariant: ['tabular-nums'],
-    marginTop: 6,
-    textAlign: 'center',
-  },
-});
+const createStyles = (colors) =>
+  StyleSheet.create({
+    wrap: { alignItems: 'center' },
+    inner: { alignItems: 'center' },
+    bars: { flexDirection: 'row', backgroundColor: '#fff' },
+    digits: {
+      ...type.caption,
+      color: colors.text,
+      fontWeight: '600',
+      fontVariant: ['tabular-nums'],
+      marginTop: 6,
+      textAlign: 'center',
+    },
+  });

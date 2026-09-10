@@ -13,7 +13,8 @@ import { useSession } from '../lib/auth';
 import { alert } from '../lib/confirm';
 import { formatNumber } from '../lib/format';
 import { useActiveRef } from '../hooks/useReferences';
-import { colors, spacing, type } from '../lib/theme';
+import { spacing, type } from '../lib/theme';
+import { useTheme } from '../lib/theme-context';
 
 function fieldMap(err) {
   const out = {};
@@ -106,6 +107,8 @@ export default function MovementForm({
   initialLocationId,
   initialLocationName,
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const cfg = CONFIG[kind] ?? CONFIG['stock-in'];
   const { token } = useSession();
 
@@ -289,7 +292,8 @@ export default function MovementForm({
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) =>
+  StyleSheet.create({
   flex: { flex: 1, backgroundColor: colors.background },
   content: { padding: spacing.lg, paddingBottom: 48 },
   availLine: {

@@ -10,7 +10,7 @@ import { productsApi, categoriesApi } from '../lib/api';
 import { ApiError } from '../lib/client';
 import { useSession } from '../lib/auth';
 import { useActiveRef } from '../hooks/useReferences';
-import { colors } from '../lib/theme';
+import { useTheme } from '../lib/theme-context';
 
 function fieldMap(err) {
   const out = {};
@@ -40,6 +40,7 @@ function toWhole(text) {
  * a good UX and surfaces the server's { field, message } problems on submit).
  */
 export default function ProductForm({ initial }) {
+  const { colors } = useTheme();
   const { token } = useSession();
   const isEdit = Boolean(initial);
   const categories = useActiveRef(token, categoriesApi);

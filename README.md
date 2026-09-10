@@ -267,6 +267,15 @@ npx expo start              # start Metro dev server (Expo Go / simulator)
   (MANAGER+), inventory history, **AI assistant** (conversation hub, new chat and
   conversation threads — read-only; a configured provider is required for real answers),
   profile.
+- **Theming & design system (Phase 18A):** the app renders a semantic **light** and **dark**
+  palette from `lib/theme.js` tokens via `ThemeProvider`/`useTheme`
+  (`lib/theme-context.jsx`); the scheme follows the OS automatically
+  (`userInterfaceStyle: "automatic"`) and can be pinned via a persisted preference.
+  Reusable primitives live in `mobile/components/` (`Button`, `Card`, `Badge`, `Chip`,
+  `Input`, `SelectField`, `Screen`, `StatCard`, `ListRow`, `Sheet`, `SearchField`,
+  `IconButton`, …) and icons come from a semantic `icons.js` map over
+  `@expo/vector-icons`. See `docs/DESIGN_SYSTEM.md`. Native font scaling stays enabled;
+  controls are ≥ 44px and status always reads through text/icon + color.
 - **Client-side RBAC gating mirrors the server permission matrix** purely to hide
   actions a role cannot perform (e.g. adjust for STAFF). The backend still enforces every
   permission, role and `businessId` on each request.
@@ -364,3 +373,15 @@ Phase 07 (testing + production hardening) and Phase 08 (owner-directed hardening
   manage, every role views); STAFF stays view-only for supplier/PO management but can still receive.
   Verified by `npm run lint` (0/0), the full backend suite (350/350 — regression check only, no
   server file changed), and mobile android+iOS exports.
+- **Phase 18A — SaaS-style UI Foundation, Light/Dark Theme System & Readability:** implemented,
+  verified, commit pending owner sign-off — a semantic **light + dark** theme system
+  (`lib/theme.js` palettes + `ThemeProvider`/`useTheme` in `lib/theme-context.jsx`, preference
+  persisted via expo-secure-store, `userInterfaceStyle: "automatic"`), the behavior-neutral
+  conversion of all 41 non-owner-held theme importers to `useTheme()`, `@expo/vector-icons` behind a
+  semantic `icons.js` map, new primitives (`IconButton`, `SectionHeader`, `ListRow`, `StatCard`,
+  `Sheet`, `SearchField`, `ListScreen`), and a readability pass (44px+ touch targets, labelled icon
+  controls, status via text/icon + color, larger type for key quantities/status/prices, native font
+  scaling kept enabled, WCAG-AA contrast in both themes, layouts verified at increased font sizes).
+  **Zero backend changes.** Verified by mobile android+iOS exports and an emulator smoke
+  (light → dark → increased font size); owner-held files (`_layout.js`, `SignOutIcon.jsx`)
+  byte-identical. See `docs/DESIGN_SYSTEM.md`.

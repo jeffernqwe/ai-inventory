@@ -9,7 +9,8 @@ import Input from '../../components/Input';
 import { changePassword } from '../../lib/api';
 import { ApiError } from '../../lib/client';
 import { isSessionError, useSession } from '../../lib/auth';
-import { colors, spacing } from '../../lib/theme';
+import { spacing } from '../../lib/theme';
+import { useTheme } from '../../lib/theme-context';
 
 function fieldMap(err) {
   const out = {};
@@ -27,6 +28,7 @@ function fieldMap(err) {
  * the user signs in again with the new password.
  */
 export default function ChangePasswordScreen() {
+  const { colors } = useTheme();
   const { token, signOut } = useSession();
 
   const [currentPassword, setCurrentPassword] = useState('');

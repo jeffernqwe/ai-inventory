@@ -273,6 +273,24 @@ and business-isolated (no client `businessId`). STAFF remains view-only for supp
 but can still receive stock; receiving and the claim-first flow are unchanged; no
 `PARTIALLY_RECEIVED` status was introduced.
 
+Phase 18 is an owner-directed mobile UI extension delivered in approved lettered increments (18A,
+18B, …) after Phase 17. It turns the app into a modern SaaS-style product surface WITHOUT changing
+navigation (the existing native-stack stays; a tab bar would require touching the owner-held
+`(app)/_layout.js` and is deferred) or any backend behavior. **18A — the approved foundation
+increment — is implemented**: a semantic light **and** dark theme system (`palettes` in
+`lib/theme.js` with `colors` kept as the light alias so owner-held chrome keeps working;
+`ThemeProvider`/`useTheme` in `lib/theme-context.jsx`, scheme preference persisted via
+`expo-secure-store`; `userInterfaceStyle: "automatic"`), a behavior-neutral conversion of all 41
+non-owner-held theme importers to `useTheme()` with memoized per-theme styles, `@expo/vector-icons`
+behind a semantic `components/icons.js` map, new primitives (`IconButton`, `SectionHeader`,
+`ListRow`, `StatCard`, `Sheet`, `SearchField`, `ListScreen`) plus polish (Button size/icon, Badge
+dot + 12px status text, Input/SelectField focus rings, ListState icons), and a readability pass:
+44px+ touch targets, labelled icon controls, status always text/icon + color, larger type for
+quantities/status/prices/primary actions, no `allowFontScaling` disabling, layouts verified at
+increased system font sizes, WCAG-AA contrast in both themes. Screen redesigns that adopt the new
+primitives are later increments. Owner-held files (`_layout.js`, `SignOutIcon.jsx`) are
+byte-identical after 18A. See `docs/DESIGN_SYSTEM.md`.
+
 When instructed to work on a specific phase:
 
 - Implement that phase only.

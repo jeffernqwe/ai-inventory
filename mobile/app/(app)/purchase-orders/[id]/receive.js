@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
 import { StyleSheet, Text, View } from 'react-native';
 
@@ -16,7 +16,8 @@ import { isSessionError, useSession } from '../../../../lib/auth';
 import { alert } from '../../../../lib/confirm';
 import { formatNumber } from '../../../../lib/format';
 import { canReceivePurchaseOrders } from '../../../../lib/permissions';
-import { colors, radius, spacing, type } from '../../../../lib/theme';
+import { radius, spacing, type } from '../../../../lib/theme';
+import { useTheme } from '../../../../lib/theme-context';
 
 function str(v) {
   return Array.isArray(v) ? v[0] : v;
@@ -72,6 +73,8 @@ const CODE_MESSAGES = {
 };
 
 export default function ReceiveStockScreen() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const { id } = useLocalSearchParams();
   const { user, token, signOut } = useSession();
   const poId = str(id);
@@ -282,24 +285,25 @@ export default function ReceiveStockScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md },
-  number: { ...type.h2, color: colors.text, flex: 1, fontVariant: ['tabular-nums'] },
-  metaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md, marginTop: spacing.sm },
-  meta: { ...type.caption, color: colors.textMuted },
-  divider: { height: StyleSheet.hairlineWidth, backgroundColor: colors.divider, marginVertical: spacing.lg },
-  sectionTitle: { ...type.h3, color: colors.text, marginTop: spacing.xxl, marginBottom: spacing.md },
-  lineList: { gap: spacing.md },
-  lineCard: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.lg,
-    marginBottom: spacing.md,
-  },
-  lineName: { ...type.body, color: colors.text, fontWeight: '700' },
-  lineSku: { ...type.caption, color: colors.textMuted, marginTop: 2 },
-  lineQty: { ...type.bodySmall, color: colors.textSecondary, marginTop: 6, marginBottom: spacing.md, fontVariant: ['tabular-nums'] },
-  hint: { ...type.caption, color: colors.textMuted, textAlign: 'center', marginTop: spacing.lg, lineHeight: 18 },
-});
+const createStyles = (colors) =>
+  StyleSheet.create({
+    titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md },
+    number: { ...type.h2, color: colors.text, flex: 1, fontVariant: ['tabular-nums'] },
+    metaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md, marginTop: spacing.sm },
+    meta: { ...type.caption, color: colors.textMuted },
+    divider: { height: StyleSheet.hairlineWidth, backgroundColor: colors.divider, marginVertical: spacing.lg },
+    sectionTitle: { ...type.h3, color: colors.text, marginTop: spacing.xxl, marginBottom: spacing.md },
+    lineList: { gap: spacing.md },
+    lineCard: {
+      backgroundColor: colors.surface,
+      borderRadius: radius.lg,
+      borderWidth: 1,
+      borderColor: colors.border,
+      padding: spacing.lg,
+      marginBottom: spacing.md,
+    },
+    lineName: { ...type.body, color: colors.text, fontWeight: '700' },
+    lineSku: { ...type.caption, color: colors.textMuted, marginTop: 2 },
+    lineQty: { ...type.bodySmall, color: colors.textSecondary, marginTop: 6, marginBottom: spacing.md, fontVariant: ['tabular-nums'] },
+    hint: { ...type.caption, color: colors.textMuted, textAlign: 'center', marginTop: spacing.lg, lineHeight: 18 },
+  });

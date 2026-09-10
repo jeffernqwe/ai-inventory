@@ -4,9 +4,10 @@ import AccessDenied from '../../../components/AccessDenied';
 import ProductForm from '../../../components/ProductForm';
 import { useSession } from '../../../lib/auth';
 import { canManageProducts } from '../../../lib/permissions';
-import { colors } from '../../../lib/theme';
+import { useTheme } from '../../../lib/theme-context';
 
 export default function NewProductScreen() {
+  const { colors } = useTheme();
   const { user } = useSession();
   if (!canManageProducts(user)) {
     return <AccessDenied message="Only managers and above can create products." />;

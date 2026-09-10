@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { router } from 'expo-router';
 import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 
@@ -14,7 +14,8 @@ import useDebounced from '../../../hooks/useDebounced';
 import usePagedList from '../../../hooks/usePagedList';
 import useRefetchOnFocus from '../../../hooks/useRefetchOnFocus';
 import { canViewPurchaseOrders } from '../../../lib/permissions';
-import { colors, radius, spacing, type } from '../../../lib/theme';
+import { radius, spacing, type } from '../../../lib/theme';
+import { useTheme } from '../../../lib/theme-context';
 
 const STATUS_OPTIONS = [
   { value: '', label: 'All statuses' },
@@ -25,6 +26,8 @@ const STATUS_OPTIONS = [
 ];
 
 function PoRow({ item }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const t = item.totals ?? {};
   const received = t.quantityReceived ?? 0;
   const ordered = t.quantityOrdered ?? 0;
@@ -55,6 +58,8 @@ function PoRow({ item }) {
 }
 
 export default function PurchaseOrdersScreen() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const { token, user, signOut } = useSession();
 
   if (!canViewPurchaseOrders(user)) {
@@ -121,20 +126,21 @@ export default function PurchaseOrdersScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  flex: { flex: 1 },
-  content: { padding: spacing.lg, paddingBottom: spacing.huge, flexGrow: 1 },
-  row: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.lg,
-  },
-  rowTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
-  rowNumber: { ...type.body, fontWeight: '800', color: colors.text, flexShrink: 1, fontVariant: ['tabular-nums'] },
-  metaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md, marginTop: 6 },
-  meta: { ...type.caption, color: colors.textMuted },
-  progress: { ...type.body, color: colors.textSecondary, marginTop: 8, fontVariant: ['tabular-nums'] },
-  separator: { height: spacing.md },
-});
+const createStyles = (colors) =>
+  StyleSheet.create({
+    flex: { flex: 1 },
+    content: { padding: spacing.lg, paddingBottom: spacing.huge, flexGrow: 1 },
+    row: {
+      backgroundColor: colors.surface,
+      borderRadius: radius.lg,
+      borderWidth: 1,
+      borderColor: colors.border,
+      padding: spacing.lg,
+    },
+    rowTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
+    rowNumber: { ...type.body, fontWeight: '800', color: colors.text, flexShrink: 1, fontVariant: ['tabular-nums'] },
+    metaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md, marginTop: 6 },
+    meta: { ...type.caption, color: colors.textMuted },
+    progress: { ...type.body, color: colors.textSecondary, marginTop: 8, fontVariant: ['tabular-nums'] },
+    separator: { height: spacing.md },
+  });

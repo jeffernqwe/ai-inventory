@@ -1,21 +1,32 @@
 /**
- * Design tokens for the mobile app — a single light palette + type/spacing
- * scale so every screen stays consistent without a design-system dependency.
+ * Design tokens for the mobile app.
+ *
+ * `palettes.light` / `palettes.dark` hold the two full semantic color palettes;
+ * `colors` is kept as an alias for the LIGHT palette so owner-held files that
+ * render the native header chrome (mobile/app/(app)/_layout.js,
+ * mobile/components/SignOutIcon.jsx) keep working unchanged. Everything else
+ * should read colors from `useTheme()` (lib/theme-context) so both themes
+ * resolve correctly at render time.
+ *
+ * Shared scales (spacing, radius, type, shadows, duration) do not change with
+ * the scheme and are imported directly.
  */
-export const colors = {
+
+const LIGHT = {
   // Surfaces
   background: '#F4F6FA',
   surface: '#FFFFFF',
   surfaceMuted: '#EEF1F7',
+  surfaceElevated: '#FFFFFF',
   border: '#E3E7EE',
   borderStrong: '#CBD2DD',
 
   // Text
   text: '#101828',
   textSecondary: '#5B6472',
-  textMuted: '#8A94A6',
+  textMuted: '#667085', // raised from #8A94A6 for WCAG AA (~4.98:1) on white
   textOnPrimary: '#FFFFFF',
-  placeholder: '#9AA3B2',
+  placeholder: '#8A94A6',
 
   // Brand
   primary: '#2557D6',
@@ -49,6 +60,60 @@ export const colors = {
   overlay: 'rgba(16, 24, 40, 0.45)',
 };
 
+const DARK = {
+  // Surfaces step UP from a deep neutral (never pure black).
+  background: '#12141A',
+  surface: '#1B1E26',
+  surfaceMuted: '#242834',
+  surfaceElevated: '#20242E',
+  border: '#2A2F3B',
+  borderStrong: '#3A4150',
+
+  // Text
+  text: '#F2F4F8',
+  textSecondary: '#C2C9D6',
+  textMuted: '#98A1B3',
+  // Dark-theme fills are lifted, so "on primary" flips to a dark ink for AA.
+  textOnPrimary: '#0B1220',
+  placeholder: '#7A8494',
+
+  // Brand — primary lifted so text/links hold ~AA on dark surfaces; button
+  // fills use the same lifted blue with dark ink (see textOnPrimary).
+  primary: '#6E93F0',
+  primaryDark: '#A7C0F9',
+  primarySoft: 'rgba(110, 147, 240, 0.16)',
+  link: '#6E93F0',
+
+  // Status / semantics — lightened one step, soft backgrounds become dark tints.
+  success: '#4ADE80',
+  successSoft: 'rgba(74, 222, 128, 0.14)',
+  danger: '#F87171',
+  dangerSoft: 'rgba(248, 113, 113, 0.14)',
+  warning: '#FBBF24',
+  warningSoft: 'rgba(251, 191, 36, 0.14)',
+  info: '#93B4F8',
+  infoSoft: 'rgba(147, 180, 248, 0.14)',
+
+  chipIn: 'rgba(74, 222, 128, 0.16)',
+  chipInText: '#4ADE80',
+  chipOut: 'rgba(248, 113, 113, 0.16)',
+  chipOutText: '#F87171',
+  chipAdjust: 'rgba(251, 191, 36, 0.16)',
+  chipAdjustText: '#FBBF24',
+  chipLow: 'rgba(251, 191, 36, 0.16)',
+  chipLowText: '#FBBF24',
+  chipNeutral: 'rgba(148, 163, 184, 0.16)',
+  chipNeutralText: '#C2C9D6',
+
+  divider: '#262B36',
+  overlay: 'rgba(0, 0, 0, 0.6)',
+};
+
+export const palettes = { light: LIGHT, dark: DARK };
+
+/** Light palette alias — used by owner-held chrome and as a fallback. */
+export const colors = LIGHT;
+
 export const spacing = {
   xs: 4,
   sm: 8,
@@ -76,6 +141,10 @@ export const type = {
   caption: { fontSize: 12, lineHeight: 16 },
   label: { fontSize: 13, fontWeight: '600', lineHeight: 18 },
   button: { fontSize: 15, fontWeight: '700', lineHeight: 20 },
+  // Strong numeric/stat emphasis (dashboards, key quantities).
+  stat: { fontSize: 24, fontWeight: '800', lineHeight: 30 },
+  // Primary row title inside list cards.
+  listTitle: { fontSize: 15, fontWeight: '600', lineHeight: 21 },
 };
 
 export const shadows = {
@@ -88,5 +157,10 @@ export const shadows = {
   },
 };
 
-export const theme = { colors, spacing, radius, type, shadows };
+export const duration = {
+  fast: 150,
+  standard: 250,
+};
+
+export const theme = { palettes, colors, spacing, radius, type, shadows, duration };
 export default theme;

@@ -5,9 +5,10 @@ import AccessDenied from '../../../components/AccessDenied';
 import UserForm from '../../../components/UserForm';
 import { useSession } from '../../../lib/auth';
 import { canManageUsers } from '../../../lib/permissions';
-import { colors } from '../../../lib/theme';
+import { useTheme } from '../../../lib/theme-context';
 
 export default function NewUserScreen() {
+  const { colors } = useTheme();
   const { user } = useSession();
   return (
     <>

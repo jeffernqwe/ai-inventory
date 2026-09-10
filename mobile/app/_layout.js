@@ -2,18 +2,20 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 
 import { AuthProvider } from '../lib/auth';
-import { colors } from '../lib/theme';
+import { ThemeProvider, useTheme } from '../lib/theme-context';
 
 /**
- * Root layout. Wraps the whole navigation tree in the auth session provider so
- * every screen can read { user, token, status, signIn, signUp, signOut }.
+ * Root layout. Wraps the whole navigation tree in the theme provider (light /
+ * dark palettes) and the auth session provider so every screen can read
+ * { user, token, status, signIn, signUp, signOut }.
  * Screens in the root stack manage their own chrome: the protected (app) group
  * renders its own header stack, while auth screens draw their own layout.
  */
-export default function RootLayout() {
+function RootNavigator() {
+  const { colors, isDark } = useTheme();
   return (
-    <AuthProvider>
-      <StatusBar style="auto" />
+    <>
+      <StatusBar style={isDark ? 'light' : 'dark'} />
       <Stack
         screenOptions={{
           headerShown: false,
@@ -25,6 +27,16 @@ export default function RootLayout() {
         <Stack.Screen name="register" />
         <Stack.Screen name="(app)" />
       </Stack>
-    </AuthProvider>
+    </>
+  );
+}
+
+export default function RootLayout() {
+  return (
+    <ThemeProvider>
+      <AuthProvider>
+        <RootNavigator />
+      </AuthProvider>
+    </ThemeProvider>
   );
 }

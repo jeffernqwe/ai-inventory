@@ -16,8 +16,11 @@ const createStyles = (colors) =>
  * loading / error / empty states, and infinite scroll. Encapsulates the list
  * plumbing every list screen repeats so a screen only supplies data + rows.
  *
- * Not yet adopted by existing screens (Phase 18B does that); it is the
- * primitive the redesigned list screens are built on.
+ * Adopted by the core list screens (Phase 18C: products, inventory,
+ * purchase orders).
+ *
+ * The inner `FlatList` supplies its own content padding, so the `Screen` shell
+ * is rendered with `padded={false}` — otherwise the two paddings stack.
  */
 export function ListScreen({
   items,
@@ -32,6 +35,8 @@ export function ListScreen({
   onRetry,
   emptyTitle = 'Nothing here yet',
   emptyMessage,
+  emptyAction,
+  loadingLabel = 'Loading…',
   loadingMore,
   separator = true,
   contentStyle,
@@ -58,23 +63,26 @@ export function ListScreen({
 
   if (loading && items.length === 0) {
     return (
-      <Screen>
-        <FlatList {...listProps} ListEmptyComponent={<LoadingBlock label="Loading…" />} />
+      <Screen padded={false}>
+        <FlatList {...listProps} ListEmptyComponent={<LoadingBlock label={loadingLabel} />} />
       </Screen>
     );
   }
 
   if (error && items.length === 0) {
     return (
-      <Screen>
+      <Screen padded={false}>
         <FlatList {...listProps} ListEmptyComponent={<ErrorState message={errorText(error)} onRetry={onRetry} />} />
       </Screen>
     );
   }
 
   return (
-    <Screen>
-      <FlatList {...listProps} ListEmptyComponent={<EmptyState title={emptyTitle} message={emptyMessage} />} />
+    <Screen padded={false}>
+      <FlatList
+        {...listProps}
+        ListEmptyComponent={<EmptyState title={emptyTitle} message={emptyMessage} action={emptyAction} />}
+      />
     </Screen>
   );
 }

@@ -22,6 +22,7 @@ const createStyles = (colors) =>
       color: colors.textSecondary,
       marginTop: 2,
     },
+    footer: { marginTop: spacing.xs },
     right: { flexShrink: 0 },
   });
 
@@ -30,8 +31,16 @@ const createStyles = (colors) =>
  * optional subtitle) that grows to fill, and an optional right-side element
  * (badge, value, chevron). The title intentionally avoids aggressive
  * truncation so important names stay readable at large font sizes.
+ *
+ * `footer` renders one more line beneath the subtitle for content that must NOT
+ * drop to the subtitle's small size — key quantities (available/on-hand) and
+ * progress figures are rendered by the caller at `type.body` or larger.
+ *
+ * `titleStyle` is an optional, purely presentational override merged after the
+ * base title style (used to keep an entity identifier's emphasis, e.g. the
+ * bold tabular purchase-order number).
  */
-export function ListRow({ leading, title, subtitle, right, style }) {
+export function ListRow({ leading, title, subtitle, right, footer, titleStyle, style }) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   return (
@@ -39,7 +48,7 @@ export function ListRow({ leading, title, subtitle, right, style }) {
       {leading ? <View style={styles.leading}>{leading}</View> : null}
       <View style={styles.body}>
         {title ? (
-          <Text style={styles.title} numberOfLines={2}>
+          <Text style={[styles.title, titleStyle]} numberOfLines={2}>
             {title}
           </Text>
         ) : null}
@@ -48,6 +57,7 @@ export function ListRow({ leading, title, subtitle, right, style }) {
             {subtitle}
           </Text>
         ) : null}
+        {footer ? <View style={styles.footer}>{footer}</View> : null}
       </View>
       {right ? <View style={styles.right}>{right}</View> : null}
     </View>

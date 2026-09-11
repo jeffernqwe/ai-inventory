@@ -23,14 +23,19 @@ export default function Card({ children, style }) {
   return <View style={[styles.card, style]}>{children}</View>;
 }
 
-/** Tappable card with a subtle pressed state; onPress disables it. */
-export function PressableCard({ children, onPress, style, disabled }) {
+/**
+ * Tappable card with a subtle pressed state; onPress disables it. Extra props
+ * (e.g. accessibilityRole/accessibilityLabel) are forwarded to the underlying
+ * Pressable so a tappable row stays announced as a button.
+ */
+export function PressableCard({ children, onPress, style, disabled, ...rest }) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   return (
     <Pressable
       onPress={onPress}
       disabled={disabled || !onPress}
+      {...rest}
       style={({ pressed }) => [styles.card, pressed && onPress && styles.pressed, style]}
     >
       {children}

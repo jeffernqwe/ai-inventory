@@ -1,12 +1,15 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { router } from 'expo-router';
-import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { StatusBadge } from '../../../components/Badge';
 import Button from '../../../components/Button';
+import { PressableCard } from '../../../components/Card';
 import Chip from '../../../components/Chip';
-import Input from '../../../components/Input';
-import { EmptyState, ErrorState, LoadingBlock, errorText } from '../../../components/ListState';
+import { Icon } from '../../../components/icons';
+import ListRow from '../../../components/ListRow';
+import ListScreen from '../../../components/ListScreen';
+import SearchField from '../../../components/SearchField';
 import SelectField from '../../../components/SelectField';
 import { categoriesApi, locationsApi, productsApi } from '../../../lib/api';
 import { useSession } from '../../../lib/auth';
@@ -15,12 +18,18 @@ import { useActiveRef } from '../../../hooks/useReferences';
 import usePagedList from '../../../hooks/usePagedList';
 import useRefetchOnFocus from '../../../hooks/useRefetchOnFocus';
 import { canManageProducts } from '../../../lib/permissions';
-import { radius, spacing, type } from '../../../lib/theme';
+import { spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/theme-context';
+
+/** "SKU x · Category · Barcode" — only the parts this product actually has. */
+function productMeta(item) {
+  return [item.sku ? `SKU ${item.sku}` : null, item.category?.name, item.barcode ? `Barcode ${item.barcode}` : null]
+    .filter(Boolean)
+    .join(' · ');
+}
 
 export default function ProductsScreen() {
   const { colors } = useTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
   const { token, user, signOut } = useSession();
   const manage = canManageProducts(user);
   const categories = useActiveRef(token, categoriesApi);
@@ -62,22 +71,30 @@ export default function ProductsScreen() {
   const header = (
     <View>
       <Button
-        title="📷  Scan a barcode"
+        title="Scan a barcode"
+        icon="scan"
         variant="secondary"
         full
         onPress={() => router.push('/scan')}
         style={styles.scanBtn}
       />
-      <Input value={q} onChangeText={setQ} placeholder="Search by name, SKU or barcode…" name="q" autoCapitalize="none" />
+      <SearchField
+        value={q}
+        onChangeText={setQ}
+        placeholder="Search by name, SKU or barcode…"
+        style={styles.search}
+      />
       <View style={styles.filterRow}>
         <Chip label="All" selected={status === 'ALL'} onPress={() => setStatus('ALL')} />
         <Chip label="Active" selected={status === 'ACTIVE'} onPress={() => setStatus('ACTIVE')} />
         <Chip label="Archived" selected={status === 'ARCHIVED'} onPress={() => setStatus('ARCHIVED')} />
-        <View style={styles.spacer} />
         {manage ? (
-          <Pressable style={styles.addBtn} onPress={() => router.push('/products/new')} accessibilityRole="button">
-            <Text style={styles.addBtnText}>＋ New</Text>
-          </Pressable>
+          <Button
+            title="New product"
+            icon="add"
+            onPress={() => router.push('/products/new')}
+            style={styles.newBtn}
+          />
         ) : null}
       </View>
       <View style={styles.chipRow}>
@@ -90,73 +107,41 @@ export default function ProductsScreen() {
   );
 
   const renderItem = ({ item }) => (
-    <Pressable style={styles.row} onPress={() => router.push(`/products/${item.id}`)}>
-      <View style={styles.rowTop}>
-        <Text style={styles.rowName} numberOfLines={1}>
-          {item.name}
-        </Text>
-        <StatusBadge status={item.status} />
-      </View>
-      <View style={styles.metaRow}>
-        {item.sku ? <Text style={styles.meta}>SKU {item.sku}</Text> : null}
-        {item.category?.name ? <Text style={styles.meta}>{item.category.name}</Text> : null}
-        {item.barcode ? <Text style={styles.meta}>Barcode {item.barcode}</Text> : null}
-      </View>
-    </Pressable>
+    <PressableCard onPress={() => router.push(`/products/${item.id}`)} accessibilityRole="button">
+      <ListRow
+        leading={<Icon name="pricetags" color={colors.primary} size={22} />}
+        title={item.name}
+        subtitle={productMeta(item)}
+        right={<StatusBadge status={item.status} />}
+      />
+    </PressableCard>
   );
 
   return (
-    <View style={styles.flex}>
-      {list.loading && list.items.length === 0 ? (
-        <FlatList data={[]} renderItem={null} ListHeaderComponent={header} ListEmptyComponent={<LoadingBlock label="Loading products…" />} contentContainerStyle={styles.content} />
-      ) : list.error && list.items.length === 0 ? (
-        <FlatList data={[]} renderItem={null} ListHeaderComponent={header} ListEmptyComponent={<ErrorState title="Couldn't load products" message={errorText(list.error)} onRetry={list.reload} />} contentContainerStyle={styles.content} />
-      ) : (
-        <FlatList
-          data={list.items}
-          keyExtractor={(item) => item.id}
-          renderItem={renderItem}
-          ListHeaderComponent={header}
-          ListEmptyComponent={
-            <EmptyState
-              title="No products found"
-              message={q ? `Nothing matches “${q}”.` : 'Add your first product to start tracking stock.'}
-              action={manage && !q ? <Button title="Add product" onPress={() => router.push('/products/new')} /> : null}
-            />
-          }
-          ItemSeparatorComponent={() => <View style={styles.separator} />}
-          contentContainerStyle={styles.content}
-          refreshControl={<RefreshControl refreshing={list.refreshing} onRefresh={list.refresh} tintColor={colors.primary} colors={[colors.primary]} />}
-          onEndReached={list.loadMore}
-          onEndReachedThreshold={0.4}
-          ListFooterComponent={list.loadingMore ? <LoadingBlock label="Loading more…" /> : null}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        />
-      )}
-    </View>
+    <ListScreen
+      items={list.items}
+      keyExtractor={(item) => item.id}
+      renderItem={renderItem}
+      header={header}
+      loading={list.loading}
+      error={list.error}
+      onRetry={list.reload}
+      refreshing={list.refreshing}
+      onRefresh={list.refresh}
+      onEndReached={list.loadMore}
+      loadingMore={list.loadingMore}
+      loadingLabel="Loading products…"
+      emptyTitle="No products found"
+      emptyMessage={q ? `Nothing matches “${q}”.` : 'Add your first product to start tracking stock.'}
+      emptyAction={manage && !q ? <Button title="Add product" onPress={() => router.push('/products/new')} /> : null}
+    />
   );
 }
 
-const createStyles = (colors) => StyleSheet.create({
-  flex: { flex: 1 },
-  content: { padding: spacing.lg, paddingBottom: spacing.huge, flexGrow: 1 },
-  filterRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  chipRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
-  spacer: { flex: 1 },
+const styles = StyleSheet.create({
   scanBtn: { marginBottom: spacing.lg },
-  addBtn: { backgroundColor: colors.primary, borderRadius: radius.pill, paddingHorizontal: spacing.md, paddingVertical: 8 },
-  addBtnText: { color: colors.textOnPrimary, fontWeight: '700', fontSize: 13 },
-  row: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.lg,
-  },
-  rowTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
-  rowName: { ...type.body, fontWeight: '700', color: colors.text, flexShrink: 1 },
-  metaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md, marginTop: 6 },
-  meta: { ...type.caption, color: colors.textMuted },
-  separator: { height: spacing.md },
+  search: { marginBottom: spacing.lg },
+  filterRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.sm },
+  newBtn: { marginLeft: 'auto' },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm },
 });

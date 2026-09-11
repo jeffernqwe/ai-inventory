@@ -64,7 +64,10 @@ export async function listAudit(businessId, { action, entityType, userId, from, 
 
   const total = await AuditLog.countDocuments(filter);
   const docs = await AuditLog.find(filter)
-    .sort({ createdAt: -1 })
+    // The `_id` tiebreaker matches History: rows written in the same
+    // millisecond still have a stable order, so paging cannot repeat or skip
+    // one. Without it, tied rows come back oldest-first.
+    .sort({ createdAt: -1, _id: -1 })
     .skip(skip)
     .limit(limit)
     .populate('userId', 'name');

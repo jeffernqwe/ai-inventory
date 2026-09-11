@@ -364,7 +364,7 @@ Phase 07 (testing + production hardening) and Phase 08 (owner-directed hardening
   dashboard inventory-health + "Needs restock" preview (see "Inventory intelligence & restock
   alerts"). Read-only throughout — no data-model, RBAC, or V1 status change. Verified by
   `npm run lint` (0/0), the DB-free unit run (106 passed), and the full backend suite (257/257).
-- **Phase 16 — Audit Trail Viewer:** implemented, verified, commit pending owner sign-off — the
+- **Phase 16 — Audit Trail Viewer:** implemented, verified, and committed (`ddea22e`) — the
   read side of the audit feature (the write path existed since Phase 04). `GET /api/audit` exposes
   the business-scoped governance trail newest-first with action/entityType/user/date/q filters and
   pagination, gated by a new `audit.view` permission (OWNER + ADMIN only; MANAGER/STAFF get 403). No

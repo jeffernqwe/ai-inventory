@@ -303,6 +303,50 @@ dbSuite('Phase 16 — audit trail viewer over real HTTP', dbOk, () => {
     assert.equal(new Set(seen.map((r) => r.id)).size, 6, 'all six rows accounted for, no duplicates');
   });
 
+  it('orders rows that share a createdAt deterministically, newest first', async () => {
+    // Rows written inside the same millisecond must still have a stable order,
+    // or paging could repeat or skip one. Five rows are stamped with ONE
+    // identical createdAt so only the _id tiebreaker can order them.
+    const created = [];
+    for (let i = 0; i < 5; i += 1) {
+      created.push(
+        await AuditLog.create({
+          businessId: auditor.businessId,
+          userId: null,
+          action: AUDIT_ACTIONS.CATEGORY_CREATED,
+          entityType: AUDIT_ENTITY_TYPES.CATEGORY,
+          entityId: `tie-${i}`,
+        })
+      );
+    }
+    const ids = created.map((d) => String(d._id));
+
+    // timestamps:true owns createdAt, so the tie is stamped onto the raw
+    // collection — every row ends up with the exact same instant.
+    const at = new Date();
+    await AuditLog.collection.updateMany({ _id: { $in: created.map((d) => d._id) } }, { $set: { createdAt: at } });
+
+    // A from/to pinned to that instant isolates exactly the tied rows.
+    const range = `from=${encodeURIComponent(at.toISOString())}&to=${encodeURIComponent(at.toISOString())}`;
+
+    const listed = await api('GET', `/api/audit?${range}&limit=100`, { token: auditor.token });
+    assert.equal(listed.status, 200, JSON.stringify(listed.json));
+    assert.equal(listed.json.total, 5, 'only the tied rows fall in range');
+
+    const order = listed.json.items.map((r) => r.id);
+    assert.deepEqual(order, [...ids].sort().reverse(), 'equal timestamps fall back to _id, newest first');
+
+    // The guarantee that matters: paging over the tie never repeats or drops.
+    const paged = [];
+    for (const page of [1, 2, 3]) {
+      const res = await api('GET', `/api/audit?${range}&limit=2&page=${page}`, { token: auditor.token });
+      assert.equal(res.status, 200, JSON.stringify(res.json));
+      paged.push(...res.json.items.map((r) => r.id));
+    }
+    assert.deepEqual(paged, order, 'the paged order matches the single-page order exactly');
+    assert.equal(new Set(paged).size, 5, 'every tied row appears exactly once across pages');
+  });
+
   it('returns actor null for system-initiated rows (no userId)', async () => {
     const system = await AuditLog.create({
       businessId: main.businessId,

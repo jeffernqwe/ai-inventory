@@ -1,12 +1,16 @@
 /**
  * Design tokens for the mobile app.
  *
- * `palettes.light` / `palettes.dark` hold the two full semantic color palettes;
- * `colors` is kept as an alias for the LIGHT palette so owner-held files that
+ * `palettes.light` / `palettes.dark` hold the two full semantic color palettes.
+ * `colors` is a static alias for the LIGHT palette, kept only as a reference
+ * value — do NOT import it into components. Phase 18A froze the two files that
  * render the native header chrome (mobile/app/(app)/_layout.js,
- * mobile/components/SignOutIcon.jsx) keep working unchanged. Everything else
- * should read colors from `useTheme()` (lib/theme-context) so both themes
- * resolve correctly at render time.
+ * mobile/components/SignOutIcon.jsx) and gave them this alias so they would
+ * keep working unchanged; importing it anywhere else is what made the native
+ * header render as a white bar over a dark app. That freeze has since been
+ * lifted and both files read `useTheme()`, so nothing imports `colors` today.
+ * Read colors from `useTheme()` (lib/theme-context) so both themes resolve
+ * correctly at render time.
  *
  * Shared scales (spacing, radius, type, shadows, duration) do not change with
  * the scheme and are imported directly.
@@ -111,7 +115,7 @@ const DARK = {
 
 export const palettes = { light: LIGHT, dark: DARK };
 
-/** Light palette alias — used by owner-held chrome and as a fallback. */
+/** Light palette alias. Unimported since the header chrome moved to useTheme — do not add callers. */
 export const colors = LIGHT;
 
 export const spacing = {

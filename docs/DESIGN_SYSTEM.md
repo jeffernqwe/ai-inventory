@@ -11,9 +11,10 @@ later Phase 18 increments.
 
 - `mobile/lib/theme.js` defines **tokens only**:
   - `palettes = { light, dark }` — the two semantic color palettes.
-  - `colors` — kept as an alias for the **light** palette so owner-held native-header chrome
-    (`app/(app)/_layout.js`, `components/SignOutIcon.jsx`) keeps working unchanged. New code reads
-    colors from `useTheme()`, never from `colors`.
+  - `colors` — a static alias for the **light** palette, retained as a reference value only.
+    Phase 18A froze the two files that draw the native header chrome and gave them this alias so
+    they would keep working unchanged; that freeze has been lifted and both now read `useTheme()`.
+    **Import it nowhere.** New code reads colors from `useTheme()`.
   - Shared scales: `spacing`, `radius`, `type`, `shadows`, `duration`. These are scheme-independent.
 - `mobile/lib/theme-context.jsx` provides `ThemeProvider` (wrap the root layout) and `useTheme()`
   returning `{ colors, scheme, isDark, preference, setScheme, hydrated }`.

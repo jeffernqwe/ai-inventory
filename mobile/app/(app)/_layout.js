@@ -3,15 +3,23 @@ import { Redirect, Stack } from 'expo-router';
 import { CenterLoader } from '../../components/ListState';
 import SignOutIcon from '../../components/SignOutIcon';
 import { useSession } from '../../lib/auth';
-import { colors } from '../../lib/theme';
+import { useTheme } from '../../lib/theme-context';
 
 /**
  * Authenticated group layout. Renders nothing until the session is restored,
  * then redirects signed-out/deep-linked users to /login. Every child screen
  * sits in its own header stack with a native back button.
+ *
+ * The native header chrome is themed from `useTheme()`. This file and
+ * components/SignOutIcon.jsx were frozen as owner-held through Phase 18A-18E,
+ * which is why they read the static (light) `colors` alias; that freeze was
+ * lifted by the owner so the header stops rendering as a white bar over a dark
+ * app. Screens that declare their own `<Stack.Screen options={{ title }} />`
+ * keep doing so — those set the title only and inherit these themed options.
  */
 export default function AppLayout() {
   const { status } = useSession();
+  const { colors } = useTheme();
 
   if (status === 'loading') {
     return <CenterLoader label="Restoring session…" />;
@@ -39,6 +47,7 @@ export default function AppLayout() {
       <Stack.Screen name="scan" options={{ title: 'Scan Barcode' }} />
       <Stack.Screen name="categories" options={{ title: 'Categories' }} />
       <Stack.Screen name="locations" options={{ title: 'Locations' }} />
+      <Stack.Screen name="suppliers" options={{ title: 'Suppliers' }} />
       <Stack.Screen
         name="inventory"
         options={{ title: 'Inventory', headerRight: () => <SignOutIcon /> }}

@@ -79,7 +79,11 @@ const DARK = {
   textMuted: '#98A1B3',
   // Dark-theme fills are lifted, so "on primary" flips to a dark ink for AA.
   textOnPrimary: '#0B1220',
-  placeholder: '#7A8494',
+  // Lifted from #7A8494, which measured 4.41:1 on `surface` and 3.89:1 on
+  // `surfaceMuted` — both below the 4.5:1 AA floor. #8A93A6 measures 5.40:1 /
+  // 4.76:1, clearing AA on every surface a placeholder sits on (search fields
+  // use `surfaceMuted`, the harder case) while staying dimmer than `textMuted`.
+  placeholder: '#8A93A6',
 
   // Brand — primary lifted so text/links hold ~AA on dark surfaces; button
   // fills use the same lifted blue with dark ink (see textOnPrimary).

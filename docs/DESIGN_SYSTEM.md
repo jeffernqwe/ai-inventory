@@ -69,7 +69,7 @@ Semantic, not literal: a component says `colors.danger`, never `#DC2626`.
 | `textSecondary`  | `#5B6472`                      | `#C2C9D6`                       | Secondary text                             |
 | `textMuted`      | `#667085` (≥ AA on white)      | `#98A1B3`                       | Captions, placeholders-adjacent            |
 | `textOnPrimary`  | `#FFFFFF`                      | `#0B1220`                       | Text/icons on filled primary buttons       |
-| `placeholder`    | `#8A94A6`                      | `#7A8494`                       | Input placeholder text                     |
+| `placeholder`    | `#8A94A6` (below AA — see §7)  | `#8A93A6` (lifted for AA)       | Input placeholder text                     |
 | `primary`        | `#2557D6`                      | `#6E93F0` (lifted for AA)       | Brand, links, primary buttons, focus ring  |
 | `primarySoft`    | `#E8EEFC`                      | rgba(110,147,240,0.16)          | Tinted backgrounds for primary content     |
 | `success`        | `#15803D`                      | `#4ADE80`                       | Positive states                            |
@@ -237,3 +237,24 @@ Colours come from tokens only — never a literal, and never `colors` imported f
   primitives. `RefManage`, `UserForm` and `AiChat` were modernised in place; `Chip` gains its
   semantic selected state and 44px floor, and `ListScreen` gains an additive `errorTitle` and
   `footer`. Forms/auth screens are deferred to 18F. Behavior unchanged.
+- **18F**: the forms and auth screens — `ProductForm`, `MovementForm`, `PoForm`, `AuthLayout`, and the
+  routes `login`, `register`, `app/index`, `products/new`, `products/[id]/edit`, `stock-in`,
+  `stock-out`, `adjust`, `purchase-orders/new`, `purchase-orders/[id]/edit` — adopt the same
+  primitives. The three form components now own their own `Screen` (scroll + keyboard avoidance +
+  safe-area padding) and every route renders them bare, so no route nests a second `Screen`; the
+  PO item block uses `Card` + `SectionHeader`, and `MovementForm`'s availability line becomes a
+  `StatCard`. `AuthLayout` gained a centred, reflowing brand block. `AccessDenied`'s 🔒 emoji
+  becomes the semantic `Icon name="lock"`. `lib/theme.js`'s dark `placeholder` was lifted to
+  `#8A93A6` (§2, §7). Behavior unchanged: RBAC gates, validation order, payload shapes, and
+  loading/empty/error copy are preserved.
+
+### Known issues (reported, not fixed)
+
+- **Light `placeholder` is below AA.** `#8A94A6` measures 3.06:1 on `surface` (`#FFFFFF`) and
+  2.70:1 on `surfaceMuted` (`#EEF1F7`) — both under the 4.5:1 floor. 18F's owner decision (D1)
+  covered the **dark** token only, because that is the one 18E reported; the light value was never
+  flagged. It needs an owner decision to change, since it alters every input placeholder in the
+  light theme that has shipped since 18A. Every field also carries a real label, so placeholders
+  are supplemental.
+- **Light `textMuted` on `surfaceMuted` is 4.40:1** (`#667085` on `#EEF1F7`) — marginally under AA
+  for normal text. Same class of finding; reported, not changed.

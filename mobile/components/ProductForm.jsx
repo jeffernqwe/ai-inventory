@@ -1,16 +1,17 @@
 import { useState } from 'react';
 import { router } from 'expo-router';
-import { ScrollView } from 'react-native';
+import { StyleSheet } from 'react-native';
 
 import Banner from './Banner';
 import Button from './Button';
 import Input from './Input';
+import Screen from './Screen';
 import SelectField from './SelectField';
 import { productsApi, categoriesApi } from '../lib/api';
 import { ApiError } from '../lib/client';
 import { useSession } from '../lib/auth';
 import { useActiveRef } from '../hooks/useReferences';
-import { useTheme } from '../lib/theme-context';
+import { spacing } from '../lib/theme';
 
 function fieldMap(err) {
   const out = {};
@@ -40,7 +41,6 @@ function toWhole(text) {
  * a good UX and surfaces the server's { field, message } problems on submit).
  */
 export default function ProductForm({ initial }) {
-  const { colors } = useTheme();
   const { token } = useSession();
   const isEdit = Boolean(initial);
   const categories = useActiveRef(token, categoriesApi);
@@ -113,11 +113,7 @@ export default function ProductForm({ initial }) {
   }
 
   return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: colors.background }}
-      contentContainerStyle={{ padding: 16, paddingBottom: 48 }}
-      keyboardShouldPersistTaps="handled"
-    >
+    <Screen scroll contentStyle={styles.content}>
       <Banner type="error" text={formError} />
       <Input name="name" label="Product name" value={name} onChangeText={setName} error={fieldErrors.name} required autoCapitalize="words" />
       <Input name="sku" label="SKU" value={sku} onChangeText={setSku} error={fieldErrors.sku} placeholder="Optional — unique per business" autoCapitalize="characters" />
@@ -139,6 +135,10 @@ export default function ProductForm({ initial }) {
       <Input name="minimumStock" label="Minimum stock" value={minimumStock} onChangeText={setMinimumStock} keyboardType="number-pad" error={fieldErrors.minimumStock} helper="Alert when available stock drops to this level (0 = disabled)" />
       <Input name="imageUrl" label="Image URL" value={imageUrl} onChangeText={setImageUrl} error={fieldErrors.imageUrl} placeholder="Optional https://…" autoCapitalize="none" />
       <Button title={isEdit ? 'Save changes' : 'Create product'} onPress={submit} loading={busy} full />
-    </ScrollView>
+    </Screen>
   );
 }
+
+const styles = StyleSheet.create({
+  content: { paddingBottom: spacing.huge },
+});

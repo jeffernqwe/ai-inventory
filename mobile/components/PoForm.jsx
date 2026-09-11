@@ -1,10 +1,13 @@
 import { useMemo, useState } from 'react';
 import { router } from 'expo-router';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
 import Banner from './Banner';
 import Button from './Button';
+import Card from './Card';
 import Input from './Input';
+import Screen from './Screen';
+import SectionHeader from './SectionHeader';
 import SelectField from './SelectField';
 import { CenterLoader } from './ListState';
 import { locationsApi, productsApi, purchaseOrdersApi, suppliersApi } from '../lib/api';
@@ -12,7 +15,7 @@ import { ApiError } from '../lib/client';
 import { useSession } from '../lib/auth';
 import { alert } from '../lib/confirm';
 import { useActiveRef } from '../hooks/useReferences';
-import { radius, spacing, type } from '../lib/theme';
+import { spacing, type } from '../lib/theme';
 import { useTheme } from '../lib/theme-context';
 
 const PO_ITEMS_MAX = 200;
@@ -261,7 +264,7 @@ export default function PoForm({ initial }) {
   }
 
   return (
-    <ScrollView style={styles.flex} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+    <Screen scroll contentStyle={styles.content}>
       <Banner type="error" text={formError} />
       <SelectField
         label="Supplier"
@@ -304,11 +307,11 @@ export default function PoForm({ initial }) {
         error={fieldErrors.notes}
       />
 
-      <Text style={styles.sectionTitle}>Items</Text>
+      <SectionHeader title="Items" style={styles.sectionTitle} />
       {fieldErrors.items ? <Banner type="error" text={fieldErrors.items} /> : null}
       <View style={styles.lineList}>
         {lines.map((line, idx) => (
-          <View key={line.key} style={styles.lineCard}>
+          <Card key={line.key}>
             <SelectField
               label={`Product ${idx + 1}`}
               placeholder="Choose a product…"
@@ -339,32 +342,26 @@ export default function PoForm({ initial }) {
               error={lineProblem(idx, 'unitCost')}
             />
             {lines.length > 1 ? (
-              <Button title="Remove line" variant="danger" onPress={() => removeLine(line.key)} style={styles.removeBtn} />
+              <Button title="Remove line" icon="remove" variant="danger" onPress={() => removeLine(line.key)} style={styles.removeBtn} />
             ) : null}
-          </View>
+          </Card>
         ))}
       </View>
-      <Button title="＋ Add line" variant="secondary" onPress={addLine} disabled={lines.length >= PO_ITEMS_MAX} full />
+      <Button title="Add line" icon="add" variant="secondary" onPress={addLine} disabled={lines.length >= PO_ITEMS_MAX} full />
 
       <Button title={isEdit ? 'Save changes' : 'Create draft order'} onPress={submit} loading={busy} full />
       <Text style={styles.hint}>Drafts can be edited and issued later. Issued orders are frozen — only receiving changes them.</Text>
-    </ScrollView>
+    </Screen>
   );
 }
 
 const createStyles = (colors) =>
   StyleSheet.create({
-  flex: { flex: 1, backgroundColor: colors.background },
-  content: { padding: spacing.lg, paddingBottom: 48 },
-  sectionTitle: { ...type.h3, color: colors.text, marginTop: spacing.xl, marginBottom: spacing.md },
+  content: { paddingBottom: spacing.huge },
+  sectionTitle: { marginTop: spacing.xl },
   lineList: { gap: spacing.md },
-  lineCard: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.lg,
-  },
   removeBtn: { marginBottom: spacing.lg },
-  hint: { ...type.caption, color: colors.textMuted, textAlign: 'center', marginTop: spacing.lg, lineHeight: 18 },
+  // No pinned lineHeight: the type token's proportional height is what keeps
+  // this line from clipping once the system font scale grows.
+  hint: { ...type.caption, color: colors.textMuted, textAlign: 'center', marginTop: spacing.lg },
 });

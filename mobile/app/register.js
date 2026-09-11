@@ -14,7 +14,14 @@ import { useTheme } from '../lib/theme-context';
 
 const createStyles = (colors) =>
   StyleSheet.create({
-    footerText: { ...type.bodySmall, color: colors.textMuted },
+    // alignSelf:'stretch' + centred text so the "Already have an account? <link>"
+    // line wraps cleanly instead of shrink-wrapping off-centre at large scales.
+    footerText: {
+      ...type.bodySmall,
+      color: colors.textMuted,
+      alignSelf: 'stretch',
+      textAlign: 'center',
+    },
     link: { color: colors.link, fontWeight: '700' },
   });
 

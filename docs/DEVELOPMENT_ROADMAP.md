@@ -1582,6 +1582,97 @@ the light alias so the two owner-held files kept working with zero edits, and fr
 
 ---
 
+# 18F. Phase 18F — Forms & Auth Screens on the Design System
+
+Phase 18F is the last 18x increment: the forms and authentication screens adopt the primitives
+established in 18A–18E, so the app reads as one product from the first screen a user ever sees
+(login) through to the busiest form (a multi-line purchase order). Structure and presentation only —
+no route, API, permission, validation, navigation, or business-logic change.
+
+### Phase 18F Scope
+
+The approved scope is **16 source files, 3 documentation files, and this plan document (20 files
+total)**.
+
+- Components (4): `ProductForm.jsx`, `MovementForm.jsx`, `PoForm.jsx`, `AuthLayout.jsx`.
+- Routes (10): `login.js`, `register.js`, `index.js`, `products/new.js`, `products/[id]/edit.js`,
+  `stock-in.js`, `stock-out.js`, `adjust.js`, `purchase-orders/new.js`,
+  `purchase-orders/[id]/edit.js`.
+- Owner-approved additions (2): `lib/theme.js` (D1) and `components/AccessDenied.jsx` (D2).
+
+Shape of the change:
+
+- The three form components each **own their `Screen`** (scroll, `KeyboardAvoidingView`, safe-area
+  padding) and every route renders them bare. Previously the route wrapped the form, which made the
+  shell the route's concern and left the form unusable anywhere else. No route nests a second
+  `Screen` — that would double both the safe-area insets and the keyboard offset.
+- `PoForm`'s per-line `<View style={lineCard}>` becomes `Card`, its "Items" heading becomes
+  `SectionHeader`, and "Add line" / "Remove line" gain the semantic `add` / `remove` icons.
+- `MovementForm`'s availability line becomes a `StatCard`, and its locked-product block becomes a
+  `Card`; `PoForm`'s and `MovementForm`'s pinned `lineHeight: 18` hints were removed so they reflow
+  at large font scales.
+- `AuthLayout` gained a centred brand block that reflows, with `alignSelf: 'stretch'` on the centred
+  text (the §6.1 technique) so a wrapped tagline does not shrink-wrap off-centre.
+- `AccessDenied`'s 🔒 emoji becomes the semantic `Icon name="lock"` (D2) — same meaning, same
+  accessibility semantics, no new icon implementation.
+- `lib/theme.js` dark `placeholder`: `#7A8494` → `#8A93A6` (D1).
+
+`products/[id]/edit.js` and `purchase-orders/[id]/edit.js` are in the expected file list but needed
+**no change** — both already render their form bare (the PO one only wraps `Screen` around the
+non-DRAFT `EmptyState`, which is not a form), so they were verified rather than edited. They are
+reported as deliberate no-change entries, not as dropped scope.
+
+### D1 — Dark placeholder contrast
+
+The 18E report flagged `palettes.dark.placeholder` (`#7A8494`) at 4.41:1 on `surface` and 3.89:1 on
+`surfaceMuted`, both below the 4.5:1 AA floor for normal text. The owner approved correcting it, on
+the conditions that the value be **measured rather than copied from the plan**, that it stay
+centralised in the theme system, and that no per-screen colors be introduced.
+
+Measured with the WCAG relative-luminance formula:
+
+| Value | on `surface` `#1B1E26` | on `surfaceMuted` `#242834` |
+| --- | --- | --- |
+| `#7A8494` (old) | 4.41:1 | 3.89:1 |
+| **`#8A93A6` (chosen)** | **5.40:1** | **4.76:1** |
+
+`#8A93A6` clears AA on every surface a placeholder sits on — including `surfaceMuted`, the harder
+case, which search fields use — while staying dimmer than `textMuted` (`#98A1B3`, 5.66:1) so
+placeholders remain visually subordinate to real values. Confirmed on-device: the placeholder glyphs
+sample `#8A93A6`, and `#7A8494` no longer appears as a glyph color anywhere.
+
+The **light** `placeholder` (`#8A94A6`) was measured at the same time and is also below AA (3.06:1
+on white, 2.70:1 on `surfaceMuted`). It was never flagged by 18E, D1 authorised the dark token only,
+and changing it would alter every light-theme input shipped since 18A — so it is **reported for an
+owner decision, not changed**. See `docs/DESIGN_SYSTEM.md` §7.
+
+### Explicitly Out of Scope
+
+Owner-held `_layout.js` and `SignOutIcon.jsx` (untouched); the light `placeholder` and
+`textMuted`-on-`surfaceMuted` contrast findings; the known PO-**list** 160% search-placeholder
+clipping; the hooks-after-early-return in `ai/index.js`. No backend, model, RBAC, audit, DTO, or
+server-test change. No new dependency, no route, no navigation change. No new hash-record file (D3
+declined).
+
+### Verified
+
+Android and iOS exports green. Emulator pass over the 18F routes and components across light/dark
+and 100%/160% system font scale: no clipped text, no edge overflow, no undersized touch target, no
+low-contrast text. RBAC gates re-checked for STAFF (denied) and OWNER/ADMIN/MANAGER (allowed). Forms
+were exercised through their validation states and **not submitted**; no business data was mutated.
+
+## Definition of Done
+
+- The forms and auth screens render from the shared primitives, with the same container, section,
+  and field grammar as the rest of the app.
+- Every route renders its form bare; no `Screen` is nested inside another `Screen`.
+- Behavior is preserved exactly: RBAC gates, API calls and payloads, validation order, navigation
+  targets, and loading/empty/error copy.
+- The only token change is the D1 dark `placeholder`; light values, the server, and the server tests
+  are untouched; Android + iOS exports green.
+
+---
+
 # 19. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

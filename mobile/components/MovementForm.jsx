@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import { router } from 'expo-router';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text } from 'react-native';
 
 import Banner from './Banner';
 import Button from './Button';
+import Card from './Card';
 import Input from './Input';
+import Screen from './Screen';
 import SelectField from './SelectField';
 import { CenterLoader } from './ListState';
+import { StatCard } from './StatCard';
 import { inventoryApi, locationsApi, productsApi } from '../lib/api';
 import { ApiError } from '../lib/client';
 import { useSession } from '../lib/auth';
@@ -214,7 +217,7 @@ export default function MovementForm({
   }
 
   return (
-    <ScrollView style={styles.flex} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+    <Screen scroll contentStyle={styles.content}>
       <Banner type="error" text={formError} />
 
       {availState === 'loading' ? <Banner type="info" text="Checking current stock…" /> : null}
@@ -229,12 +232,12 @@ export default function MovementForm({
       ) : null}
 
       {lockedProduct ? (
-        <View style={styles.lockedCard}>
+        <Card style={styles.lockedCard}>
           <Text style={styles.lockedHeading}>Product</Text>
           <Text style={styles.lockedName}>{initialProductName ?? 'Scanned product'}</Text>
           {initialProductSku ? <Text style={styles.lockedMeta}>SKU · {initialProductSku}</Text> : null}
           {initialProductBarcode ? <Text style={styles.lockedMeta}>Barcode · {initialProductBarcode}</Text> : null}
-        </View>
+        </Card>
       ) : (
         <SelectField
           label="Product"
@@ -259,10 +262,7 @@ export default function MovementForm({
       />
 
       {availState === 'ready' && shownValue != null ? (
-        <View style={styles.availLine}>
-          <Text style={styles.availLabel}>{cfg.availLabel}</Text>
-          <Text style={styles.availValue}>{formatNumber(shownValue)}</Text>
-        </View>
+        <StatCard label={cfg.availLabel} value={formatNumber(shownValue)} style={styles.avail} />
       ) : null}
 
       <Input
@@ -288,37 +288,19 @@ export default function MovementForm({
         full
       />
       <Text style={styles.hint}>Changes are applied atomically on the server and recorded in inventory history.</Text>
-    </ScrollView>
+    </Screen>
   );
 }
 
 const createStyles = (colors) =>
   StyleSheet.create({
-  flex: { flex: 1, backgroundColor: colors.background },
-  content: { padding: spacing.lg, paddingBottom: 48 },
-  availLine: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 10,
-    padding: spacing.md,
-    marginBottom: spacing.lg,
-  },
-  availLabel: { ...type.body, color: colors.textMuted },
-  availValue: { ...type.h3, color: colors.text },
-  lockedCard: {
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 10,
-    padding: spacing.md,
-    marginBottom: spacing.lg,
-  },
-  lockedHeading: { ...type.label, color: colors.textMuted, marginBottom: 4 },
+  content: { paddingBottom: spacing.huge },
+  avail: { marginBottom: spacing.lg },
+  lockedCard: { marginBottom: spacing.lg },
+  lockedHeading: { ...type.label, color: colors.textMuted, marginBottom: spacing.xs },
   lockedName: { ...type.body, fontWeight: '700', color: colors.text, marginBottom: 2 },
   lockedMeta: { ...type.caption, color: colors.textMuted, marginTop: 2 },
-  hint: { ...type.caption, color: colors.textMuted, textAlign: 'center', marginTop: spacing.lg, lineHeight: 18 },
+  // No pinned lineHeight: the type token's proportional height is what keeps
+  // this line from clipping once the system font scale grows.
+  hint: { ...type.caption, color: colors.textMuted, textAlign: 'center', marginTop: spacing.lg },
 });

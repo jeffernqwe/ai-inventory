@@ -276,7 +276,8 @@ but can still receive stock; receiving and the claim-first flow are unchanged; n
 Phase 18 is an owner-directed mobile UI extension delivered in approved lettered increments (18A,
 18B, …) after Phase 17. It turns the app into a modern SaaS-style product surface WITHOUT changing
 navigation (the existing native-stack stays; a tab bar would require touching the owner-held
-`(app)/_layout.js` and is deferred) or any backend behavior. **18A, 18B, 18C, 18D, and 18E are implemented**: a semantic light **and** dark theme system (`palettes` in
+`(app)/_layout.js` and is deferred) or any backend behavior.
+**18A, 18B, 18C, 18D, 18E, and 18F are implemented**: a semantic light **and** dark theme system (`palettes` in
 `lib/theme.js` with `colors` kept as the light alias so owner-held chrome keeps working;
 `ThemeProvider`/`useTheme` in `lib/theme-context.jsx`, scheme preference persisted via
 `expo-secure-store`; `userInterfaceStyle: "automatic"`), a behavior-neutral conversion of all 41
@@ -305,7 +306,21 @@ same primitives and modernises the three backing components `RefManage`, `UserFo
 place; `Chip` gains a semantic selected state and a 44px floor, and `ListScreen` gains additive
 `errorTitle`/`footer` props. Behavior is unchanged again — RBAC gates, validation order, payload
 asymmetries, and the `scan.js` rescan/`lastScanned` semantics are preserved, and `lib/theme.js` is
-untouched. Forms/auth screens are deferred to 18F.
+untouched. **18F** is the forms-and-auth pass and closes the 18x series: the three shared form
+components (`ProductForm`, `MovementForm`, `PoForm`) and `AuthLayout` move onto the same primitives,
+and the ten routes that render them (`login`, `register`, `app/index`, `products/new`,
+`products/[id]/edit`, `stock-in`, `stock-out`, `adjust`, `purchase-orders/new`,
+`purchase-orders/[id]/edit`) are reduced to a bare render. Each form component now owns a single
+`Screen` (scroll, keyboard avoidance, safe-area padding) instead of being wrapped by its route — a
+nested `Screen` would have doubled both the insets and the keyboard offset. PO item blocks use
+`Card` + `SectionHeader`; `MovementForm`'s availability line becomes a `StatCard`; `AuthLayout`'s
+brand block is centred and reflows; `AccessDenied`'s 🔒 emoji becomes the semantic
+`Icon name="lock"`. Two owner-approved scope additions rode along: the **dark** `placeholder` token
+was lifted from `#7A8494` to `#8A93A6` (4.41:1 → 5.40:1 on `surface`, 3.89:1 → 4.76:1 on
+`surfaceMuted`), fixing the AA failure 18E reported; the **light** `placeholder` (`#8A94A6`, 3.06:1)
+was left alone as out of scope and is documented as a known issue in `docs/DESIGN_SYSTEM.md`.
+Behavior is unchanged: RBAC gates, validation order, payload shapes, and loading/empty/error copy
+are preserved, and no form was submitted during verification.
 
 The `(app)/_layout.js` and `components/SignOutIcon.jsx` freeze introduced in 18A (which had pinned both
 to the static light `colors` alias, and therefore rendered the native header as a white bar over the

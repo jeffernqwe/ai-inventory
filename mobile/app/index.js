@@ -1,10 +1,9 @@
 import { Redirect } from 'expo-router';
-import { View } from 'react-native';
 
 import { CenterLoader } from '../components/ListState';
+import Screen from '../components/Screen';
 import { useSession } from '../lib/auth';
 import { defaultHomePath } from '../lib/permissions';
-import { useTheme } from '../lib/theme-context';
 
 /**
  * '/' entry — resolves once, then redirects to the right first screen:
@@ -14,13 +13,12 @@ import { useTheme } from '../lib/theme-context';
  */
 export default function IndexRoute() {
   const { status, user } = useSession();
-  const { colors } = useTheme();
 
   if (status === 'loading') {
     return (
-      <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <Screen padded={false}>
         <CenterLoader label="Loading your workspace…" />
-      </View>
+      </Screen>
     );
   }
 

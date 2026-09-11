@@ -1,7 +1,9 @@
 import { useMemo } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { radius, shadows, spacing, type } from '../lib/theme';
+import { StyleSheet, Text, View } from 'react-native';
+
+import Card from './Card';
+import Screen from './Screen';
+import { radius, spacing, type } from '../lib/theme';
 import { useTheme } from '../lib/theme-context';
 
 /**
@@ -12,61 +14,49 @@ export default function AuthLayout({ title, subtitle, children, footer }) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   return (
-    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <ScrollView
-          contentContainerStyle={styles.scroll}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
-          <View style={styles.brand}>
-            <View style={styles.logo}>
-              <Text style={styles.logoText}>IA</Text>
-            </View>
-            <Text style={styles.appName}>Inventory AI</Text>
-            <Text style={styles.tagline}>Multi-tenant inventory for small teams</Text>
-          </View>
+    <Screen scroll padded={false} contentStyle={styles.scroll}>
+      <View style={styles.brand}>
+        <View style={styles.logo}>
+          <Text style={styles.logoText}>IA</Text>
+        </View>
+        <Text style={styles.appName}>Inventory AI</Text>
+        <Text style={styles.tagline}>Multi-tenant inventory for small teams</Text>
+      </View>
 
-          <View style={styles.card}>
-            <Text style={styles.title}>{title}</Text>
-            {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
-            <View style={styles.form}>{children}</View>
-          </View>
+      <Card style={styles.card}>
+        <Text style={styles.title}>{title}</Text>
+        {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
+        <View style={styles.form}>{children}</View>
+      </Card>
 
-          {footer ? <View style={styles.footer}>{footer}</View> : null}
-        </ScrollView>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+      {footer ? <View style={styles.footer}>{footer}</View> : null}
+    </Screen>
   );
 }
 
 const createStyles = (colors) =>
   StyleSheet.create({
-    safe: { flex: 1, backgroundColor: colors.background },
-    flex: { flex: 1 },
     scroll: { flexGrow: 1, justifyContent: 'center', padding: spacing.xxl },
     brand: { alignItems: 'center', marginBottom: spacing.xxl },
+    // minWidth/minHeight (not width/height) so the mark grows with the label
+    // instead of clipping it at large system font scales.
     logo: {
-      width: 56,
-      height: 56,
+      minWidth: 56,
+      minHeight: 56,
       borderRadius: radius.lg,
       backgroundColor: colors.primary,
       alignItems: 'center',
       justifyContent: 'center',
+      paddingHorizontal: spacing.md,
       marginBottom: spacing.md,
     },
-    logoText: { color: colors.textOnPrimary, fontWeight: '800', fontSize: 22, letterSpacing: 0.5 },
-    appName: { ...type.h1, color: colors.text },
-    tagline: { ...type.body, color: colors.textMuted, marginTop: spacing.xs },
-    card: {
-      backgroundColor: colors.surface,
-      borderRadius: radius.lg,
-      borderWidth: 1,
-      borderColor: colors.border,
-      padding: spacing.xxl,
-      ...shadows.card,
-    },
-    title: { ...type.h2, color: colors.text, marginBottom: 4 },
+    logoText: { ...type.h2, color: colors.textOnPrimary, letterSpacing: 0.5 },
+    // alignSelf:'stretch' keeps the centred column's text box at the container
+    // width; without it the box shrink-wraps and a wrapped line looks off-centre.
+    appName: { ...type.h1, color: colors.text, alignSelf: 'stretch', textAlign: 'center' },
+    tagline: { ...type.body, color: colors.textMuted, alignSelf: 'stretch', textAlign: 'center', marginTop: spacing.xs },
+    card: { padding: spacing.xxl },
+    title: { ...type.h2, color: colors.text, marginBottom: spacing.xs },
     subtitle: { ...type.bodySmall, color: colors.textSecondary, marginBottom: spacing.lg },
     form: { marginTop: spacing.sm },
     footer: { alignItems: 'center', marginTop: spacing.xxl },

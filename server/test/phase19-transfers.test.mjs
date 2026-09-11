@@ -583,4 +583,254 @@ dbSuite('Phase 19 — stock transfers between locations', dbOk, () => {
     // still fully undone.
     assert.equal(await rowQuantity(owner.businessId, p, to), null, 'the destination credit is undone');
   });
+
+  // ---------------------------------------------------------------------------
+  // Dashboard Recent Activity — a transfer is ONE logical business event, even
+  // though the ledger holds TWO immutable TRANSFER rows for it. Grouping happens
+  // at presentation time, so the ledger rows and the History screen keep their
+  // per-row contract (asserted above, and again in the History case below).
+  // ---------------------------------------------------------------------------
+
+  function dashboardSummary(business) {
+    return api('GET', '/api/dashboard', { token: business.token });
+  }
+
+  /**
+   * Dashboard recent-activity entries for ONE product, optionally narrowed to a
+   * single movement type. This suite shares one business across every case, so
+   * each assertion is scoped by product — a business-wide count would carry
+   * movements in from earlier tests.
+   */
+  async function activityFor(business, productId, type) {
+    const res = await dashboardSummary(business);
+    assert.equal(res.status, 200, JSON.stringify(res.json));
+    return res.json.recentActivity.filter(
+      (a) => a.product?.id === String(productId) && (type === undefined || a.type === type)
+    );
+  }
+
+  it('dashboard: one transfer is ONE logical activity, not one per ledger leg', async () => {
+    const p = await newProduct(owner);
+    const from = await newLocation(owner);
+    const to = await newLocation(owner);
+    await stockIn(owner, p, from, 10);
+
+    assert.equal((await transfer(owner, { productId: p, fromLocationId: from, toLocationId: to, quantity: 4 })).status, 201);
+
+    assert.equal(await txnCount(owner.businessId, p, 'TRANSFER'), 2, 'the ledger keeps one row per leg');
+    assert.equal((await activityFor(owner, p, 'TRANSFER')).length, 1, 'the dashboard reports the transfer once');
+  });
+
+  it('dashboard: both ledger legs are grouped under their shared reference', async () => {
+    const p = await newProduct(owner);
+    const from = await newLocation(owner);
+    const to = await newLocation(owner);
+    await stockIn(owner, p, from, 10);
+
+    const res = await transfer(owner, { productId: p, fromLocationId: from, toLocationId: to, quantity: 4 });
+    assert.equal(res.status, 201, JSON.stringify(res.json));
+
+    const legs = await InventoryTransaction.find({ businessId: owner.businessId, productId: p, type: 'TRANSFER' });
+    assert.equal(legs.length, 2, 'two ledger rows');
+    assert.deepEqual([...new Set(legs.map((l) => l.reference))], [res.json.reference], 'both legs share one reference');
+
+    const [activity] = await activityFor(owner, p, 'TRANSFER');
+    assert.ok(activity, 'the transfer appears');
+    assert.equal(activity.reference, res.json.reference, 'the activity carries the shared reference');
+    assert.equal(activity.id, res.json.reference, 'one activity per reference');
+  });
+
+  it('dashboard: the logical activity reports the source, the destination and the quantity', async () => {
+    const p = await newProduct(owner);
+    const from = await newLocation(owner);
+    const to = await newLocation(owner);
+    await stockIn(owner, p, from, 10);
+
+    assert.equal((await transfer(owner, { productId: p, fromLocationId: from, toLocationId: to, quantity: 4 })).status, 201);
+
+    const [activity] = await activityFor(owner, p, 'TRANSFER');
+    // Source/destination are derived from the signed quantity delta rather than
+    // from row order, so the classification holds however the legs were written.
+    assert.equal(activity.from.id, String(from), 'the debited location is the source');
+    assert.equal(activity.to.id, String(to), 'the credited location is the destination');
+    assert.ok(activity.from.name && activity.to.name, 'both locations are named for display');
+    assert.equal(activity.quantity, 4, 'the moved quantity is reported as a magnitude');
+  });
+
+  it('dashboard: two transfers stay two separate logical activities', async () => {
+    const p = await newProduct(owner);
+    const a = await newLocation(owner);
+    const b = await newLocation(owner);
+    const c = await newLocation(owner);
+    await stockIn(owner, p, a, 10);
+
+    assert.equal((await transfer(owner, { productId: p, fromLocationId: a, toLocationId: b, quantity: 4 })).status, 201);
+    assert.equal((await transfer(owner, { productId: p, fromLocationId: b, toLocationId: c, quantity: 3 })).status, 201);
+    assert.equal(await txnCount(owner.businessId, p, 'TRANSFER'), 4, 'two transfers = four legs');
+
+    const activities = await activityFor(owner, p, 'TRANSFER');
+    assert.equal(activities.length, 2, 'two transfers are two activities');
+    assert.equal(new Set(activities.map((x) => x.reference)).size, 2, 'each transfer keeps its own reference');
+    assert.equal(new Set(activities.map((x) => x.id)).size, 2, 'no logical transfer is duplicated');
+    for (const activity of activities) {
+      assert.ok(activity.from && activity.to, 'every activity is a complete pair');
+    }
+    // Newest first — the second transfer is the more recent one.
+    assert.equal(activities[0].from.id, String(b));
+    assert.equal(activities[0].to.id, String(c));
+    assert.equal(activities[1].from.id, String(a));
+    assert.equal(activities[1].to.id, String(b));
+  });
+
+  it('dashboard: stock in, stock out and adjustment stay one activity per movement, unchanged', async () => {
+    const p = await newProduct(owner);
+    const loc = await newLocation(owner);
+
+    await stockIn(owner, p, loc, 10);
+    const out = await api('POST', '/api/inventory/stock-out', {
+      token: owner.token,
+      body: { productId: p, locationId: loc, quantity: 3, reason: 'sale' },
+    });
+    assert.equal(out.status, 200, JSON.stringify(out.json));
+    const adjusted = await api('POST', '/api/inventory/adjust', {
+      token: owner.token,
+      body: { productId: p, locationId: loc, quantity: 9, reason: 'count' },
+    });
+    assert.equal(adjusted.status, 200, JSON.stringify(adjusted.json));
+
+    const movement = {};
+    for (const type of ['STOCK_IN', 'STOCK_OUT', 'ADJUSTMENT']) {
+      const rows = await activityFor(owner, p, type);
+      assert.equal(rows.length, 1, `${type} must stay one activity per ledger row`);
+      movement[type] = rows[0];
+    }
+
+    // The pre-existing single-row projection is untouched: same keys, same
+    // location, same before/after quantities, and none of the transfer-only
+    // fields that would signal an accidental grouping.
+    const SHAPE = ['createdAt', 'id', 'location', 'newQuantity', 'previousQuantity', 'product', 'quantity', 'type'];
+    for (const [type, activity] of Object.entries(movement)) {
+      assert.deepEqual(Object.keys(activity).sort(), SHAPE, `${type} keeps its documented shape`);
+      assert.equal(activity.location.id, String(loc), `${type} keeps its own location`);
+      assert.equal(activity.from, undefined, `${type} must not gain a transfer source`);
+      assert.equal(activity.to, undefined, `${type} must not gain a transfer destination`);
+    }
+    assert.equal(movement.STOCK_IN.previousQuantity, 0);
+    assert.equal(movement.STOCK_IN.newQuantity, 10);
+    assert.equal(movement.STOCK_OUT.previousQuantity, 10);
+    assert.equal(movement.STOCK_OUT.newQuantity, 7);
+    assert.equal(movement.ADJUSTMENT.previousQuantity, 7);
+    assert.equal(movement.ADJUSTMENT.newQuantity, 9);
+  });
+
+  it('dashboard: the activity limit never exposes half a transfer', async () => {
+    const p = await newProduct(owner);
+    const from = await newLocation(owner);
+    const to = await newLocation(owner);
+    await stockIn(owner, p, from, 5);
+
+    // Five transfers = ten ledger rows, one row more than the dashboard window,
+    // so the oldest leg of the oldest transfer falls outside it. A newer
+    // movement for an unrelated product is what pushes it over the edge.
+    for (let i = 0; i < 5; i += 1) {
+      const res = await transfer(owner, { productId: p, fromLocationId: from, toLocationId: to, quantity: 1 });
+      assert.equal(res.status, 201, JSON.stringify(res.json));
+    }
+    const unrelated = await newProduct(owner);
+    await stockIn(owner, unrelated, from, 1);
+
+    assert.equal(await txnCount(owner.businessId, p, 'TRANSFER'), 10, 'ten ledger rows exist for the product');
+
+    const activities = await activityFor(owner, p, 'TRANSFER');
+    // The window holds the newest ten rows: the unrelated stock-in plus nine of
+    // the ten legs. The remaining four complete transfers must all survive.
+    assert.equal(activities.length, 4, 'the limit must be met with complete transfers only');
+    assert.ok(activities.every((a) => a.from && a.to), 'no activity may show half a transfer');
+    assert.ok(
+      activities.every((a) => a.from.id === String(from) && a.to.id === String(to)),
+      'source and destination stay correct at the boundary'
+    );
+    assert.equal(new Set(activities.map((a) => a.reference)).size, 4, 'no logical transfer is duplicated');
+  });
+
+  it('dashboard: a transfer reference never appears twice, across products', async () => {
+    const first = await newProduct(owner);
+    const second = await newProduct(owner);
+    const from = await newLocation(owner);
+    const to = await newLocation(owner);
+    await stockIn(owner, first, from, 4);
+    await stockIn(owner, second, from, 4);
+
+    assert.equal((await transfer(owner, { productId: first, fromLocationId: from, toLocationId: to, quantity: 2 })).status, 201);
+    assert.equal((await transfer(owner, { productId: second, fromLocationId: from, toLocationId: to, quantity: 2 })).status, 201);
+
+    const res = await dashboardSummary(owner);
+    assert.equal(res.status, 200, JSON.stringify(res.json));
+    const transfers = res.json.recentActivity.filter((a) => a.type === 'TRANSFER');
+    assert.equal(transfers.length, 2, 'two transfers across two products');
+    assert.equal(
+      new Set(transfers.map((a) => a.reference)).size,
+      transfers.length,
+      'one activity per reference, business-wide'
+    );
+    assert.ok(transfers.every((a) => a.from && a.to), 'every transfer activity is a complete pair');
+  });
+
+  it('dashboard: the transfer activity exposes exactly its documented projection', async () => {
+    const p = await newProduct(owner);
+    const from = await newLocation(owner);
+    const to = await newLocation(owner);
+    await stockIn(owner, p, from, 10);
+
+    assert.equal((await transfer(owner, { productId: p, fromLocationId: from, toLocationId: to, quantity: 4 })).status, 201);
+
+    const [activity] = await activityFor(owner, p, 'TRANSFER');
+    // The contract the mobile screen and the AI summary tool both consume.
+    assert.deepEqual(
+      Object.keys(activity).sort(),
+      ['createdAt', 'from', 'id', 'product', 'quantity', 'reference', 'to', 'type'],
+      'the documented logical-transfer projection'
+    );
+    assert.equal(activity.type, 'TRANSFER');
+    assert.equal(activity.product.id, String(p));
+    assert.ok(activity.product.name, 'the product is named for display');
+    // A two-location event has no single location, and no single before/after —
+    // `from`/`to` and the shared quantity replace them.
+    assert.equal(activity.location, undefined, 'a transfer must not report one location');
+    assert.equal(activity.previousQuantity, undefined);
+    assert.equal(activity.newQuantity, undefined);
+
+    // Ordered by the newest leg, so the activity sits where the event finished.
+    const legs = await InventoryTransaction.find({ businessId: owner.businessId, productId: p, type: 'TRANSFER' });
+    const newest = legs.reduce((a, b) => (b.createdAt > a.createdAt ? b : a));
+    assert.equal(new Date(activity.createdAt).getTime(), newest.createdAt.getTime());
+  });
+
+  it('history: the same transfer still shows BOTH ledger rows with the shared reference', async () => {
+    const p = await newProduct(owner);
+    const from = await newLocation(owner);
+    const to = await newLocation(owner);
+    await stockIn(owner, p, from, 10);
+
+    const res = await transfer(owner, { productId: p, fromLocationId: from, toLocationId: to, quantity: 4 });
+    assert.equal(res.status, 201, JSON.stringify(res.json));
+
+    const history = await api('GET', `/api/inventory/history?productId=${p}&type=TRANSFER`, { token: owner.token });
+    assert.equal(history.status, 200, JSON.stringify(history.json));
+    assert.equal(history.json.items.length, 2, 'History keeps one row per leg');
+    for (const row of history.json.items) {
+      assert.equal(row.type, 'TRANSFER');
+      assert.equal(row.reference, res.json.reference, 'both rows share the transfer reference');
+      assert.ok(row.location?.name, 'each row keeps its own location');
+      assert.equal(row.quantity, 4);
+    }
+    assert.deepEqual(
+      history.json.items.map((r) => r.location.id).sort(),
+      [String(from), String(to)].sort(),
+      'one row per location'
+    );
+
+    // The dashboard reports that same transfer exactly once.
+    assert.equal((await activityFor(owner, p, 'TRANSFER')).length, 1);
+  });
 });

@@ -229,7 +229,7 @@ const tools = [
   {
     name: 'getInventorySummary',
     description:
-      'Business-wide inventory-health counts: active products, healthy in-stock products (available above their minimum stock), total on-hand quantity, low-stock and out-of-stock product counts, and the most recent stock movements. Use for "how is my inventory doing".',
+      'Business-wide inventory-health counts: active products, healthy in-stock products (available above their minimum stock), total on-hand quantity, low-stock and out-of-stock product counts, and the most recent stock movements — one entry per logical event, so a transfer between locations appears once with its source and destination rather than as two rows. Use for "how is my inventory doing".',
     permission: PERMISSIONS.DASHBOARD_VIEW,
     parameters: { type: 'object', additionalProperties: false, properties: {} },
     async executor(ctx) {

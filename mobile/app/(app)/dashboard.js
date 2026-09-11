@@ -43,6 +43,10 @@ function greetingForHour(hour) {
 function deltaText(t) {
   if (t.type === 'STOCK_IN') return `+${t.quantity}`;
   if (t.type === 'STOCK_OUT') return `−${t.quantity}`;
+  // A transfer is neither a gain nor a loss — the same quantity leaves one
+  // location and arrives at another — so its quantity is shown unsigned, and
+  // the Transfer badge names the movement (Phase 19).
+  if (t.type === 'TRANSFER') return `${t.quantity}`;
   const d = t.newQuantity - t.previousQuantity;
   return d >= 0 ? `+${d}` : `−${Math.abs(d)}`;
 }
@@ -50,6 +54,19 @@ function deltaTone(colors, t) {
   if (t.type === 'STOCK_IN') return colors.success;
   if (t.type === 'STOCK_OUT') return colors.danger;
   return colors.textSecondary;
+}
+
+/**
+ * One transfer is ONE activity, so its row shows where the stock moved between
+ * rather than the two ledger legs underneath (Phase 19). Every other movement
+ * keeps its single location.
+ */
+function activitySubtitle(item) {
+  const when = formatDateTime(item.createdAt);
+  if (item.type === 'TRANSFER') {
+    return `${item.from?.name ?? 'Unknown location'} → ${item.to?.name ?? 'Unknown location'} · ${when}`;
+  }
+  return `${item.location?.name ?? 'No location'} · ${when}`;
 }
 
 const ACTIVITY_ICONS = { STOCK_IN: 'stockIn', STOCK_OUT: 'stockOut', ADJUSTMENT: 'adjust', TRANSFER: 'transfer' };
@@ -63,7 +80,7 @@ function ActivityRow({ item }) {
       <ListRow
         leading={<Icon name={ACTIVITY_ICONS[item.type] ?? 'time'} color={deltaTone(colors, item)} size={22} />}
         title={item.product?.name ?? 'Unknown product'}
-        subtitle={`${item.location?.name ?? 'No location'} · ${formatDateTime(item.createdAt)}`}
+        subtitle={activitySubtitle(item)}
         right={
           <View style={styles.activityRight}>
             <TypeBadge type={item.type} />

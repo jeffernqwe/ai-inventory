@@ -1539,9 +1539,36 @@ protected-file hashes for `_layout.js` and `SignOutIcon.jsx` match the pinned va
   behavior-adjacent lifecycle change.
 - `components/AccessDenied.jsx` still renders a 🔒 emoji. It is outside the approved component list
   and is shared with already-committed 18B–18D screens.
-- The native stack header (owner-held `_layout.js`) is unthemed, so it stays light in dark mode, and
-  `categories`/`locations`/`suppliers` show lowercase native titles because the owner-held
-  `<Stack.Screen>` list stops at `profile`. Both are pre-existing.
+- ~~The native stack header is unthemed, so it stays light in dark mode.~~ **Fixed — see the
+  follow-up below.**
+
+### Follow-up Fix — Themed Native Header (after the 18E commit)
+
+The white header over a dark app was traced to `(app)/_layout.js:6` importing the **static light**
+`colors` alias and binding `headerStyle.backgroundColor` to it. The alias is not reactive, so the
+bar was `#FFFFFF` in both themes. `components/SignOutIcon.jsx` had the same defect (its ⎋ chip bound
+to the light `surface`, and it mounts as `headerRight` on Inventory, so the two files are coupled).
+
+This was deliberate Phase 18A fallout, not an 18E regression: 18A added dark mode, kept `colors` as
+the light alias so the two owner-held files kept working with zero edits, and froze both. The owner
+**lifted that freeze** to fix it.
+
+- `(app)/_layout.js` — `useTheme()` replaces the static import, so `headerStyle`,
+  `headerTitleStyle`, `headerTintColor` and `contentStyle` all resolve per theme. Added the missing
+  `<Stack.Screen name="suppliers" options={{ title: 'Suppliers' }} />` (the only route with no title
+  anywhere, so it had been rendering the auto-derived lowercase "suppliers"). The six other routes
+  that self-declare `<Stack.Screen options={{ title }} />` — audit, change-password, edit-name,
+  users/index, users/new, users/[id] — were left alone: they set the title only and now inherit the
+  themed options, so adding duplicate layout entries would have created a second source of truth.
+- `components/SignOutIcon.jsx` — `useTheme()` + memoized `createStyles`. The fill moved from
+  `surface` to `surfaceMuted`, because the header background *is* `surface`: the chip would
+  otherwise be invisible in both themes.
+- `lib/theme.js` — `colors` is now unimported by the whole app. The alias and its doc comment were
+  kept (not deleted) as a reference value; the comment now warns against callers instead of
+  describing a freeze that no longer exists.
+- Verified on the emulator: dark header `#1B1E26` / light `#FFFFFF`, ⎋ chip `#242834` on dark and
+  `#EEF1F7` on light, `Suppliers` title correct, AI Assistant / Inventory / Users headers coherent.
+  Android + iOS exports green.
 
 ## Definition of Done
 
@@ -1549,8 +1576,9 @@ protected-file hashes for `_layout.js` and `SignOutIcon.jsx` match the pinned va
   headers, and key-quantity treatment as the dashboard, the 18C lists, and the 18D details.
 - Behavior is preserved exactly: API calls and payloads, RBAC gates, navigation targets, validation
   order, and loading/empty/error copy.
-- `lib/theme.js`, the owner-held files, the server, and the server tests are untouched; android +
-  iOS exports green.
+- `lib/theme.js`'s token values, the server, and the server tests are untouched; android +
+  iOS exports green. (The `(app)/_layout.js` / `SignOutIcon.jsx` freeze was lifted in the follow-up
+  fix above, which is a separate commit.)
 
 ---
 

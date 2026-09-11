@@ -306,8 +306,13 @@ place; `Chip` gains a semantic selected state and a 44px floor, and `ListScreen`
 `errorTitle`/`footer` props. Behavior is unchanged again — RBAC gates, validation order, payload
 asymmetries, and the `scan.js` rescan/`lastScanned` semantics are preserved, and `lib/theme.js` is
 untouched. Forms/auth screens are deferred to 18F.
-Owner-held files (`_layout.js`, `SignOutIcon.jsx`) are
-byte-identical after 18A. See `docs/DESIGN_SYSTEM.md`.
+
+The `(app)/_layout.js` and `components/SignOutIcon.jsx` freeze introduced in 18A (which had pinned both
+to the static light `colors` alias, and therefore rendered the native header as a white bar over the
+dark app) was **lifted by the owner** as a follow-up fix after 18E: both files now read `useTheme()`,
+so the native header themes with the rest of the app, and the missing `suppliers` title was added to
+the layout's `<Stack.Screen>` list. `colors` in `lib/theme.js` is now unimported. See
+`docs/DESIGN_SYSTEM.md`.
 
 When instructed to work on a specific phase:
 

@@ -1,8 +1,10 @@
+import { useMemo } from 'react';
 import { Pressable, StyleSheet, Text } from 'react-native';
 
 import { useSession } from '../lib/auth';
 import { confirm } from '../lib/confirm';
-import { colors, radius } from '../lib/theme';
+import { radius } from '../lib/theme';
+import { useTheme } from '../lib/theme-context';
 
 /**
  * Header sign-out affordance for protected screens that use the native stack
@@ -11,8 +13,14 @@ import { colors, radius } from '../lib/theme';
  * with no props. Same confirmation copy and signOut behavior as the Dashboard
  * and Profile controls — available to every authenticated role, never role-gated
  * (authorization stays on the backend).
+ *
+ * Colors come from `useTheme()` so the button follows the header it sits in;
+ * the fill is the recessed `surfaceMuted` token rather than `surface`, which
+ * would make it invisible against the header's own `surface` background.
  */
 export default function SignOutIcon() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const { signOut } = useSession();
 
   async function onSignOut() {
@@ -36,16 +44,17 @@ export default function SignOutIcon() {
   );
 }
 
-const styles = StyleSheet.create({
-  icon: {
-    width: 36,
-    height: 36,
-    borderRadius: radius.md,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  iconText: { color: colors.textMuted, fontSize: 17, fontWeight: '700' },
-});
+const createStyles = (colors) =>
+  StyleSheet.create({
+    icon: {
+      width: 36,
+      height: 36,
+      borderRadius: radius.md,
+      backgroundColor: colors.surfaceMuted,
+      borderWidth: 1,
+      borderColor: colors.border,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    iconText: { color: colors.textMuted, fontSize: 17, fontWeight: '700' },
+  });

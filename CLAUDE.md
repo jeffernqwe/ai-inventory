@@ -219,6 +219,7 @@ Phase 11 — Inventory Intelligence & Alerts (lettered increments)
 Phase 14A — User Management Foundation (OWNER/ADMIN users.manage API: list/create/role+status; no OWNER, no self-change, ADMIN↔ADMIN restricted)
 Phase 16 — Audit Trail Viewer (read-only GET /api/audit: OWNER/ADMIN governance trail; action/entityType/user/date/q filters; no write routes)
 Phase 17 — Mobile Supplier & Purchase Order Management (suppliers CRUD/archive + PO create/edit/issue/cancel on mobile; zero backend changes; STAFF view-only)
+Phase 19 — Stock Transfers Between Locations (POST /api/inventory/transfer: two-leg TRANSFER movement + Phase 07A compensation; existing INVENTORY_MANAGE permission; MANAGER+)
 ```
 
 Phase 08 is an owner-directed hardening extension delivered in approved lettered increments
@@ -321,6 +322,23 @@ was lifted from `#7A8494` to `#8A93A6` (4.41:1 → 5.40:1 on `surface`, 3.89:1 �
 was left alone as out of scope and is documented as a known issue in `docs/DESIGN_SYSTEM.md`.
 Behavior is unchanged: RBAC gates, validation order, payload shapes, and loading/empty/error copy
 are preserved, and no form was submitted during verification.
+
+Phase 19 is an owner-directed inventory-completeness increment delivered as a single approved
+increment after Phase 18F. It closes the last §15 gap: `TRANSFER` had been reserved since Phase 04
+but never implemented, so moving stock between locations required a manual stock-out at one location
+plus a stock-in at the other. Phase 19 makes a transfer one logical operation producing both legs
+through `POST /api/inventory/transfer`, reusing the **Phase 07A compensation architecture** rather
+than introducing MongoDB sessions or multi-document transactions: a guarded atomic source debit, a
+destination credit by upsert, two `TRANSFER` ledger rows sharing one `reference`, and a
+quantity-anchored, destination-first rollback if either leg or the ledger write fails — so the
+source never goes negative, the destination is never credited without a successful source leg, and a
+concurrent movement on the same row is never clobbered. It is gated by the **existing**
+`INVENTORY_MANAGE` permission (OWNER/ADMIN/MANAGER; STAFF 403) — no new permission and no RBAC
+matrix change. Mobile gains a `/transfer` screen with source-availability, same-location and
+over-quantity guards, reached from a role-gated dashboard entry, plus a "Transfer" history filter
+chip/badge and the `INVENTORY_TRANSFERRED` audit label; the row-lookup shared by `MovementForm` and
+`TransferForm` moved to `hooks/useInventoryRow.js` behavior-identically. No authentication, tenant
+isolation, audit DTO, pagination, ordering, or existing stock-in/out/adjust semantics were changed.
 
 The `(app)/_layout.js` and `components/SignOutIcon.jsx` freeze introduced in 18A (which had pinned both
 to the static light `colors` alias, and therefore rendered the native header as a white bar over the

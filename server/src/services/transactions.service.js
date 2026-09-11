@@ -6,7 +6,7 @@ import { transactionPublic } from './inventory.service.js';
 const { ObjectId } = mongoose.Types;
 const oid = (id) => new ObjectId(id);
 
-export const TRANSACTION_TYPES = Object.freeze(['STOCK_IN', 'STOCK_OUT', 'ADJUSTMENT']);
+export const TRANSACTION_TYPES = Object.freeze(['STOCK_IN', 'STOCK_OUT', 'ADJUSTMENT', 'TRANSFER']);
 
 function ref(obj) {
   return obj && obj._id ? { id: String(obj._id), name: obj.name } : null;

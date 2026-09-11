@@ -166,6 +166,19 @@ export const inventoryApi = {
     }),
   /** Transaction history, newest first (filters: productId, locationId, type, from, to). */
   history: (token, params) => apiFetch('/api/inventory/history', { token, params }),
+  /**
+   * Move stock between two locations (Phase 19). MANAGER+ only.
+   * 201 -> { reference, transaction, destinationTransaction, previousQuantity,
+   * newQuantity, destinationPreviousQuantity, destinationNewQuantity }.
+   * 409 TRANSFER_SAME_LOCATION / INSUFFICIENT_STOCK; 404 INVENTORY_NOT_FOUND;
+   * 400 field problems (productId, fromLocationId, toLocationId, quantity).
+   */
+  transfer: (token, { productId, fromLocationId, toLocationId, quantity, reason, reference }) =>
+    apiFetch('/api/inventory/transfer', {
+      token,
+      method: 'POST',
+      body: { productId, fromLocationId, toLocationId, quantity, reason, reference },
+    }),
 };
 
 // ---------------------------------------------------------------------------

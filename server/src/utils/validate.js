@@ -421,6 +421,51 @@ export function validateStockMovement(body, { allowZero = false } = {}) {
   };
 }
 
+/**
+ * Validates a stock-transfer body (Phase 19). A transfer is one product moving
+ * from a source location to a destination location, so both location fields are
+ * required and must differ — a same-location transfer is meaningless and is
+ * rejected here rather than silently writing two offsetting ledger rows.
+ * Quantity is always a positive integer (no allowZero: a zero transfer is a
+ * no-op, never a movement).
+ */
+export function validateTransfer(body) {
+  const problems = [];
+
+  const productId = optionalObjectId(body?.productId, 'productId');
+  problems.push(...productId.problems);
+
+  const fromLocationId = optionalObjectId(body?.fromLocationId, 'fromLocationId');
+  problems.push(...fromLocationId.problems);
+  const toLocationId = optionalObjectId(body?.toLocationId, 'toLocationId');
+  problems.push(...toLocationId.problems);
+
+  if (fromLocationId.value && toLocationId.value && fromLocationId.value === toLocationId.value) {
+    problems.push({
+      field: 'toLocationId',
+      message: 'toLocationId must differ from fromLocationId',
+    });
+  }
+
+  const quantity = requiredNumber(body?.quantity, 'quantity', { min: 1, integer: true });
+  problems.push(...quantity.problems);
+
+  const reason = optionalString(body?.reason, 'reason', REASON_MAX);
+  problems.push(...reason.problems);
+  const reference = optionalString(body?.reference, 'reference', REFERENCE_MAX);
+  problems.push(...reference.problems);
+
+  return {
+    problems,
+    productId: productId.value,
+    fromLocationId: fromLocationId.value,
+    toLocationId: toLocationId.value,
+    quantity: quantity.value,
+    reason: reason.value,
+    reference: reference.value,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Purchase orders (Phase 13B)
 // ---------------------------------------------------------------------------
@@ -651,6 +696,7 @@ export default {
   validateSupplier,
   validateProduct,
   validateStockMovement,
+  validateTransfer,
   validatePurchaseOrder,
   validateReceive,
   validateAuditList,

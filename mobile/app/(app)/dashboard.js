@@ -23,6 +23,7 @@ import {
   canManageUsers,
   canStockIn,
   canStockOut,
+  canTransferStock,
   canUseAi,
   canViewAudit,
   canViewDashboard,
@@ -51,7 +52,7 @@ function deltaTone(colors, t) {
   return colors.textSecondary;
 }
 
-const ACTIVITY_ICONS = { STOCK_IN: 'stockIn', STOCK_OUT: 'stockOut', ADJUSTMENT: 'adjust' };
+const ACTIVITY_ICONS = { STOCK_IN: 'stockIn', STOCK_OUT: 'stockOut', ADJUSTMENT: 'adjust', TRANSFER: 'transfer' };
 
 /** Latest movement row — taps into the full inventory history (G). */
 function ActivityRow({ item }) {
@@ -272,6 +273,7 @@ export default function DashboardScreen() {
     { key: 'categories', icon: 'layers', title: 'Categories', subtitle: 'Group products', route: '/categories', show: true },
     { key: 'locations', icon: 'location', title: 'Locations', subtitle: 'Where stock lives', route: '/locations', show: true },
     { key: 'adjust', icon: 'adjust', title: 'Adjust stock', subtitle: 'Set an exact quantity', route: '/adjust', show: canAdjustStock(user) },
+    { key: 'transfer', icon: 'transfer', title: 'Transfer stock', subtitle: 'Move stock between locations', route: '/transfer', show: canTransferStock(user) },
     { key: 'ai', icon: 'sparkles', title: 'AI Assistant', subtitle: 'Ask about inventory', route: '/ai', show: canUseAi(user) },
     { key: 'users', icon: 'people', title: 'Users', subtitle: 'Manage accounts', route: '/users', show: canManageUsers(user) },
     { key: 'audit', icon: 'document', title: 'Audit log', subtitle: 'Who did what', route: '/audit', show: canViewAudit(user) },
@@ -394,7 +396,7 @@ export default function DashboardScreen() {
             </View>
           ) : (
             <Card>
-              <EmptyState icon="time" title="No activity yet" message="Stock in, stock out, and adjustments will appear here." />
+              <EmptyState icon="time" title="No activity yet" message="Stock in, stock out, transfers, and adjustments will appear here." />
             </Card>
           )}
 

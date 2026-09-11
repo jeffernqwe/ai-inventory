@@ -367,7 +367,10 @@ dbSuite('Phase 04 — inventory core + dashboard', dbOk, () => {
     assert.equal(ins.json.total, 2);
     assert.ok(ins.json.items.every((i) => i.type === 'STOCK_IN'));
 
-    const badType = await api('GET', '/api/inventory/history?type=TRANSFER', { token: hist.token });
+    // An unrecognised type is rejected. TRANSFER used to serve as this example
+    // because it was reserved-but-unimplemented; Phase 19 made it a real,
+    // filterable type, so the example is now a value that is not a type at all.
+    const badType = await api('GET', '/api/inventory/history?type=NOT_A_TYPE', { token: hist.token });
     assert.equal(badType.status, 400);
     assert.ok(badType.json.fields.some((f) => f.field === 'type'));
 

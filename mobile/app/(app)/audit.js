@@ -42,6 +42,7 @@ const ACTION_LABELS = {
   INVENTORY_STOCK_IN: 'Stock in',
   INVENTORY_STOCK_OUT: 'Stock out',
   INVENTORY_ADJUSTED: 'Inventory adjusted',
+  INVENTORY_TRANSFERRED: 'Stock transferred',
   USER_CREATED: 'User created',
   USER_UPDATED: 'User updated',
 };

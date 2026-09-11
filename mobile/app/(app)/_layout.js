@@ -59,6 +59,7 @@ export default function AppLayout() {
       <Stack.Screen name="stock-in" options={{ title: 'Stock In' }} />
       <Stack.Screen name="stock-out" options={{ title: 'Stock Out' }} />
       <Stack.Screen name="adjust" options={{ title: 'Adjust Stock' }} />
+      <Stack.Screen name="transfer" options={{ title: 'Transfer Stock' }} />
       <Stack.Screen name="history" options={{ title: 'Inventory History' }} />
       <Stack.Screen name="ai/index" options={{ title: 'AI Assistant' }} />
       <Stack.Screen name="ai/new" options={{ title: 'New Chat' }} />

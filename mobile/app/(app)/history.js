@@ -26,12 +26,14 @@ const TYPE_FILTERS = [
   { value: 'STOCK_IN', label: 'Stock in' },
   { value: 'STOCK_OUT', label: 'Stock out' },
   { value: 'ADJUSTMENT', label: 'Adjust' },
+  { value: 'TRANSFER', label: 'Transfer' },
 ];
 
 const TYPE_ICONS = {
   STOCK_IN: 'stockIn',
   STOCK_OUT: 'stockOut',
   ADJUSTMENT: 'adjust',
+  TRANSFER: 'transfer',
 };
 
 function deltaText(item) {

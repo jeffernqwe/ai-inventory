@@ -2,8 +2,9 @@ import mongoose from 'mongoose';
 
 const { Schema } = mongoose;
 
-// V1 transaction types. TRANSFER is reserved for a future version.
-const transactionTypes = ['STOCK_IN', 'STOCK_OUT', 'ADJUSTMENT'];
+// Stock movement types. TRANSFER (Phase 19) moves one product between two
+// locations and is recorded as one row per leg, correlated by `reference`.
+const transactionTypes = ['STOCK_IN', 'STOCK_OUT', 'ADJUSTMENT', 'TRANSFER'];
 
 const inventoryTransactionSchema = new Schema(
   {

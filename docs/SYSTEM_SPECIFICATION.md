@@ -597,11 +597,6 @@ Supported V1 transaction types:
 STOCK_IN
 STOCK_OUT
 ADJUSTMENT
-```
-
-Future:
-
-```text
 TRANSFER
 ```
 
@@ -652,6 +647,38 @@ requested quantity > available quantity
 ```
 
 The system must never silently create negative inventory.
+
+## Stock Transfer
+
+A transfer moves quantity of one product from one location to another location
+within the same business. It is a single logical operation that produces two
+movement rows.
+
+Example:
+
+```text
+Main Warehouse: 50 → 40   (TRANSFER, -10)
+Store Front:     5 → 15   (TRANSFER, +10)
+```
+
+A transfer is subject to the same rules as any other stock movement:
+
+```text
+source and destination must be different locations
+quantity must be a positive integer
+requested quantity <= available quantity at the source
+both locations and the product must belong to the authenticated business
+```
+
+A transfer is neither a gain nor a loss — total business inventory is unchanged.
+Both legs share one `reference` so the pair can be correlated.
+
+If either leg fails, the operation is compensated so that stock is never lost or
+duplicated, the source never goes negative, and a partially applied transfer is
+not left behind.
+
+Transfer is a stock movement, not a new permission: it is gated by the existing
+`INVENTORY_MANAGE` capability (OWNER, ADMIN, MANAGER).
 
 ---
 

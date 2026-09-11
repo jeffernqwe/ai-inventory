@@ -205,6 +205,54 @@ async function rollbackCreatedRow(businessId, productId, locationId, quantity, l
 }
 
 /**
+ * Compensation for a failed transfer (Phase 19). Undoes whichever inventory legs
+ * already landed, DESTINATION FIRST and then the SOURCE — the reverse of the
+ * order they were applied — because the source debit is what the guard proved
+ * was affordable.
+ *
+ * Every rollback is anchored on the exact quantity this transfer wrote, so a
+ * concurrent movement landing in the window makes the rollback a no-op instead
+ * of clobbering a newer value (Phase 07A / H4), and a compensated debit can
+ * never drive the source negative (Phase 07A / H5). Best-effort throughout:
+ * every failure is logged, never masked, so the original error still surfaces.
+ *
+ * A leg is only touched when its post-write quantity was supplied, which is how
+ * a destination-credit failure compensates just the source.
+ */
+async function compensateTransfer({
+  businessId,
+  productId,
+  toLocationId,
+  quantity,
+  srcPrev,
+  srcNew,
+  dstPrev,
+  dstNew,
+  label,
+}) {
+  if (dstNew !== undefined) {
+    if (dstPrev == null) {
+      // This transfer created the destination row (upsert insert) — delete it
+      // rather than decrementing it to zero and leaving an orphan (L5).
+      await rollbackCreatedRow(oid(businessId), oid(productId), oid(toLocationId), dstNew, `${label} destination`);
+    } else {
+      await rollbackInventory(
+        { _id: dstPrev._id, quantity: dstNew },
+        { $inc: { quantity: -quantity } },
+        `${label} destination`
+      );
+    }
+  }
+  if (srcNew !== undefined) {
+    await rollbackInventory(
+      { _id: srcPrev._id, quantity: srcNew },
+      { $inc: { quantity } },
+      `${label} source`
+    );
+  }
+}
+
+/**
  * Inventory core service. Every operation is scoped by the server-derived
  * businessId. Quantity changes are single-document atomic updates with
  * conditional guards (no read/modify/save races, no multi-document transaction
@@ -360,6 +408,203 @@ export const inventoryService = {
       );
       throw err;
     }
+  },
+
+  /**
+   * Move stock of one product between two locations of the same business
+   * (Phase 19).
+   *
+   * A transfer is TWO inventory legs that must move together:
+   *   1. DEBIT the source with the same atomic availability guard stockOut uses,
+   *      so the source can never go negative and two concurrent transfers can
+   *      never spend the same units twice.
+   *   2. CREDIT the destination with the same upsert stockIn uses, retried once
+   *      on a duplicate-key race, creating the row on first arrival.
+   *
+   * Only once both legs have landed are the ledger rows written — one TRANSFER
+   * row per leg, correlated by `reference` — followed by a single
+   * INVENTORY_TRANSFERRED audit event. The ordering is the guarantee: the
+   * destination is never credited unless the source leg already succeeded, and
+   * any failure after the debit compensates it, so stock can be neither lost nor
+   * duplicated. Cross-business access is impossible because every filter carries
+   * the caller's businessId; no client-supplied businessId is ever read.
+   *
+   * No multi-document transaction is used: this follows the repository's
+   * single-document-guard + quantity-anchored-compensation architecture
+   * (Phase 07A), which the H3/H4/H5/L5 suites already pin down.
+   */
+  async transfer(
+    businessId,
+    userId,
+    { productId, fromLocationId, toLocationId, quantity, reason, reference }
+  ) {
+    if (String(fromLocationId) === String(toLocationId)) {
+      throw new ApiError(409, 'Source and destination must be different locations', 'TRANSFER_SAME_LOCATION');
+    }
+
+    await this.assertOperationalProduct(businessId, productId);
+    await this.assertOperationalLocation(businessId, fromLocationId);
+    await this.assertOperationalLocation(businessId, toLocationId);
+
+    const bizOid = oid(businessId);
+    const prodOid = oid(productId);
+    const fromOid = oid(fromLocationId);
+    const toOid = oid(toLocationId);
+    // Correlates the two ledger rows (and the audit) as one transfer.
+    const transferRef = reference || `TRF-${new ObjectId().toString()}`;
+
+    // Leg 1 — debit the source. The guard is evaluated atomically with the
+    // decrement, so concurrent transfers/stock-outs can never overspend.
+    const srcPrev = await Inventory.findOneAndUpdate(
+      {
+        businessId: bizOid,
+        productId: prodOid,
+        locationId: fromOid,
+        $expr: { $gte: [{ $subtract: ['$quantity', '$reservedQuantity'] }, quantity] },
+      },
+      { $inc: { quantity: -quantity } },
+      { returnDocument: 'before' }
+    );
+    if (!srcPrev) {
+      const row = await Inventory.findOne({ businessId: bizOid, productId: prodOid, locationId: fromOid });
+      if (!row) {
+        throw new ApiError(
+          404,
+          'No inventory exists for this product at the source location',
+          'INVENTORY_NOT_FOUND'
+        );
+      }
+      throw new ApiError(409, 'Insufficient available stock at the source location', 'INSUFFICIENT_STOCK');
+    }
+    const srcNew = srcPrev.quantity - quantity;
+
+    // Leg 2 — credit the destination (created on first arrival).
+    const dstFilter = { businessId: bizOid, productId: prodOid, locationId: toOid };
+    const dstInc = { $inc: { quantity } };
+    let dstPrev;
+    try {
+      dstPrev = await Inventory.findOneAndUpdate(dstFilter, dstInc, {
+        returnDocument: 'before',
+        upsert: true,
+        setDefaultsOnInsert: true,
+        runValidators: true,
+      });
+    } catch (err) {
+      if (!isDuplicateKey(err)) {
+        // The debit already landed — put it back before surfacing.
+        await compensateTransfer({
+          businessId,
+          productId,
+          toLocationId,
+          quantity,
+          srcPrev,
+          srcNew,
+          label: 'transfer (destination write failed)',
+        });
+        throw err;
+      }
+      // Another movement created the row between our read and this upsert.
+      dstPrev = await Inventory.findOneAndUpdate(dstFilter, dstInc, {
+        returnDocument: 'before',
+        runValidators: true,
+      });
+    }
+
+    const dstPrevQty = dstPrev?.quantity ?? 0;
+    const dstNew = dstPrevQty + quantity;
+
+    // Ledger — one TRANSFER row per leg, then ONE audit event for the transfer
+    // as a whole. The rows are created directly rather than through
+    // recordMovement, which writes one audit per row by design; a transfer is a
+    // single business event and must not appear as two.
+    const created = [];
+    try {
+      for (const leg of [
+        { locationId: fromOid, previousQuantity: srcPrev.quantity, newQuantity: srcNew },
+        { locationId: toOid, previousQuantity: dstPrevQty, newQuantity: dstNew },
+      ]) {
+        created.push(
+          await InventoryTransaction.create({
+            businessId: bizOid,
+            productId: prodOid,
+            locationId: leg.locationId,
+            type: 'TRANSFER',
+            quantity,
+            previousQuantity: leg.previousQuantity,
+            newQuantity: leg.newQuantity,
+            reason: reason || undefined,
+            reference: transferRef,
+            userId,
+          })
+        );
+      }
+    } catch (err) {
+      // The ledger is all-or-nothing: a transfer with one leg recorded is not a
+      // transfer. Drop any row already written (Phase 13C undo idiom), then undo
+      // both inventory legs so the attempt leaves no trace.
+      for (const row of created) {
+        try {
+          await InventoryTransaction.deleteOne({ _id: row._id, businessId: bizOid });
+        } catch (cleanupErr) {
+          console.error(
+            `[inventory] transfer: ledger cleanup failed for txn ${String(row._id)}:`,
+            cleanupErr.message
+          );
+        }
+      }
+      await compensateTransfer({
+        businessId,
+        productId,
+        toLocationId,
+        quantity,
+        srcPrev,
+        srcNew,
+        dstPrev,
+        dstNew,
+        label: 'transfer (ledger write failed)',
+      });
+      throw err;
+    }
+
+    // Once both ledger rows are durable the transfer stands, so an audit failure
+    // is logged and swallowed — never compensated away (Phase 07A / H3).
+    try {
+      await recordAudit({
+        businessId,
+        userId,
+        action: AUDIT_ACTIONS.INVENTORY_TRANSFERRED,
+        entityType: AUDIT_ENTITY_TYPES.INVENTORY_TRANSACTION,
+        entityId: created[0]._id,
+        metadata: {
+          productId: String(productId),
+          fromLocationId: String(fromLocationId),
+          toLocationId: String(toLocationId),
+          // Both ledger rows, so a future compensation can find the whole pair.
+          inventoryTransactionIds: created.map((r) => String(r._id)),
+          reference: transferRef,
+          type: 'TRANSFER',
+          quantity,
+          fromPreviousQuantity: srcPrev.quantity,
+          fromNewQuantity: srcNew,
+          toPreviousQuantity: dstPrevQty,
+          toNewQuantity: dstNew,
+        },
+      });
+    } catch (err) {
+      console.error(
+        `[inventory] audit record failed for TRANSFER ${transferRef} (movement preserved): ${err.message}`
+      );
+    }
+
+    return {
+      transaction: transactionPublic(created[0]),
+      destinationTransaction: transactionPublic(created[1]),
+      reference: transferRef,
+      previousQuantity: srcPrev.quantity,
+      newQuantity: srcNew,
+      destinationPreviousQuantity: dstPrevQty,
+      destinationNewQuantity: dstNew,
+    };
   },
 
   /**

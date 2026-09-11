@@ -1,16 +1,16 @@
 import { useState } from 'react';
 import { router, Stack } from 'expo-router';
-import { ScrollView, StyleSheet } from 'react-native';
+import { StyleSheet } from 'react-native';
 
 import Banner from '../../components/Banner';
 import Button from '../../components/Button';
 import Card from '../../components/Card';
 import Input from '../../components/Input';
+import Screen from '../../components/Screen';
 import { updateMe } from '../../lib/api';
 import { ApiError } from '../../lib/client';
 import { useSession } from '../../lib/auth';
 import { spacing } from '../../lib/theme';
-import { useTheme } from '../../lib/theme-context';
 
 function fieldMap(err) {
   const out = {};
@@ -27,7 +27,6 @@ function fieldMap(err) {
  * refreshed from /api/auth/me.
  */
 export default function EditNameScreen() {
-  const { colors } = useTheme();
   const { user, token, refresh } = useSession();
 
   const [name, setName] = useState(user?.name ?? '');
@@ -61,11 +60,7 @@ export default function EditNameScreen() {
   return (
     <>
       <Stack.Screen options={{ title: 'Edit Name' }} />
-      <ScrollView
-        style={{ flex: 1, backgroundColor: colors.background }}
-        contentContainerStyle={styles.content}
-        keyboardShouldPersistTaps="handled"
-      >
+      <Screen scroll contentStyle={styles.content}>
         <Banner type="error" text={formError} />
         <Card>
           <Input
@@ -82,11 +77,11 @@ export default function EditNameScreen() {
           />
         </Card>
         <Button title="Save changes" onPress={submit} loading={busy} full />
-      </ScrollView>
+      </Screen>
     </>
   );
 }
 
 const styles = StyleSheet.create({
-  content: { padding: spacing.lg, paddingBottom: 48 },
+  content: { paddingBottom: spacing.huge },
 });

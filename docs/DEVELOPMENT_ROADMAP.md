@@ -1472,6 +1472,88 @@ mutate inventory — so `submit()` is reported NOT EXERCISED.
 
 ---
 
+# 18E. Phase 18E — Secondary Screens on the Design System
+
+Phase 18E is the secondary-screen adoption increment, and the last 18x increment short of the
+forms/auth pass. It brings the fifteen remaining routes onto the primitives established in
+18A–18D so the app reads as one product rather than a set of independently styled screens. It is
+presentation only: no route, API, permission, validation, navigation, or business-logic change.
+
+### Phase 18E Scope
+
+- Routes: `users/index.js`, `users/new.js`, `users/[id].js`, `audit.js`, `history.js`,
+  `categories.js`, `locations.js`, `suppliers.js`, `profile.js`, `change-password.js`,
+  `edit-name.js`, `scan.js`, `ai/index.js`, `ai/new.js`, `ai/[id].js`. `ai/new.js` and `ai/[id].js`
+  already satisfied the pattern (`<Screen padded={false}><AiChat /></Screen>`) and were not touched.
+- Components: `RefManage.jsx`, `UserForm.jsx`, `AiChat.jsx` — the three backing components named in
+  the approved plan. `Chip.jsx` gained the required semantic selected state
+  (`accessibilityState={{ selected }}`) and a 44px floor; `ListScreen.jsx` gained an additive
+  `errorTitle` and `footer`. No other `mobile/components/` file changed.
+- `RefManage.jsx` was rewritten onto `ListScreen`/`Card`/`ListRow`/`SearchField`/`Button`, and its
+  edit `Modal` became a `Sheet` over the existing `SelectField` idiom. The create/update payload
+  asymmetry is preserved: create omits blank fields, update forwards `''`.
+- `AiChat.jsx` kept its optimistic append (the server `userMessage` is still ignored), gained the
+  semantic `sparkles` icon in place of the 🤖 emoji, a theme-aware timestamp colour, and unpinned
+  line heights. Its welcome title also gained `alignSelf: 'stretch'`, which repairs a pre-existing
+  truncation (`textAlign: 'center'` alone let the parent shrink-wrap the title's box to its
+  unwrapped width, clipping the line) — verified against `HEAD`, where the same defect reproduces.
+- `scan.js` keeps every functional invariant: `RESCAN_IGNORE_MS`, the `captureLocked`/`lastScanned`
+  refs, `rescan()` deliberately NOT clearing `lastScanned.current`, `lookup()`'s catch order,
+  `loadStock`'s early return, and the full `router.push` param bags. The live-camera overlay keeps
+  its fixed literals; the viewport behind the preview is pinned to `#000` instead of `colors.text`,
+  which flashed near-white in dark mode.
+- `history.js` keeps the U+2212 minus in `deltaText`, the `useActiveRef` option lists, and the
+  `usePagedList` wiring; the pinned `lineHeight: 16` on the reason line was removed so the line
+  reflows at large font scales.
+- `audit.js` keeps its hook-before-view guard (the paged list is created before the `!view` check)
+  and its exact `AccessDenied` string. `ai/index.js`'s known hooks-after-early-return was
+  deliberately left in place, per the approved plan, and is reported as a known issue rather than
+  silently restructured.
+- Docs: this roadmap section, `docs/DESIGN_SYSTEM.md` (§6 scaling/reflow, selected state, dark mode;
+  adoption status), `CLAUDE.md` phase list.
+
+### Explicitly Out of Scope
+
+Forms and auth screens (stock-in/out/adjust, `MovementForm`, `products/new`, `products/edit`,
+`ProductForm`, `purchase-orders/new`, `purchase-orders/edit`, `PoForm`, login/register,
+`AuthLayout`, `app/index.js`) are deferred to Phase 18F. Owner-held `_layout.js` and
+`SignOutIcon.jsx` are untouched. No backend, model, RBAC, audit, or server-test change. No new
+dependency. No new route. No change to `lib/theme.js` — the dark-mode placeholder contrast finding
+below is therefore reported, not fixed.
+
+### Verified
+
+Android and iOS exports green. Emulator smoke on all fifteen routes across light/dark and
+100%/160% system font scale: no clipped text, no edge overflow, no undersized touch target, no
+low-contrast text. `grep` confirms no `allowFontScaling` / `maxFontSizeMultiplier` anywhere. The
+protected-file hashes for `_layout.js` and `SignOutIcon.jsx` match the pinned values.
+
+### Known Issues (reported, not fixed)
+
+- `lib/theme.js` `palettes.dark.placeholder` (`#7A8494`) measures 3.89:1 on `surfaceMuted` and
+  4.41:1 on `surface` — below the 4.5:1 AA floor for normal text. This is a Phase 18A token that
+  reaches every screen committed since 18A, so correcting it is a cross-phase change outside this
+  increment's scope. Placeholders are supplemental here: every field also carries a real label.
+- `ai/index.js:37-39` creates hooks after an early return. Frozen by the approved plan; it is not a
+  runtime violation under the React version in use, and restructuring it would be a
+  behavior-adjacent lifecycle change.
+- `components/AccessDenied.jsx` still renders a 🔒 emoji. It is outside the approved component list
+  and is shared with already-committed 18B–18D screens.
+- The native stack header (owner-held `_layout.js`) is unthemed, so it stays light in dark mode, and
+  `categories`/`locations`/`suppliers` show lowercase native titles because the owner-held
+  `<Stack.Screen>` list stops at `profile`. Both are pre-existing.
+
+## Definition of Done
+
+- The fifteen secondary routes render from the shared primitives, with the same row grammar, section
+  headers, and key-quantity treatment as the dashboard, the 18C lists, and the 18D details.
+- Behavior is preserved exactly: API calls and payloads, RBAC gates, navigation targets, validation
+  order, and loading/empty/error copy.
+- `lib/theme.js`, the owner-held files, the server, and the server tests are untouched; android +
+  iOS exports green.
+
+---
+
 # 19. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

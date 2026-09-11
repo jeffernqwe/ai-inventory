@@ -5,6 +5,8 @@ import { FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import AccessDenied from '../../../components/AccessDenied';
 import Button from '../../../components/Button';
 import { PressableCard } from '../../../components/Card';
+import { Icon } from '../../../components/icons';
+import ListRow from '../../../components/ListRow';
 import { EmptyState, ErrorState, LoadingBlock, errorText } from '../../../components/ListState';
 import Screen from '../../../components/Screen';
 import { aiApi } from '../../../lib/api';
@@ -18,13 +20,14 @@ import { useTheme } from '../../../lib/theme-context';
 
 function ConversationRow({ item }) {
   const { colors } = useTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
   return (
-    <PressableCard style={styles.row} onPress={() => router.push(`/ai/${item.id}`)}>
-      <Text style={styles.rowTitle} numberOfLines={1}>
-        {item.title || 'New chat'}
-      </Text>
-      <Text style={styles.rowMeta}>{formatDateTime(item.updatedAt)}</Text>
+    <PressableCard accessibilityRole="button" onPress={() => router.push(`/ai/${item.id}`)}>
+      <ListRow
+        leading={<Icon name="sparkles" color={colors.primary} size={22} />}
+        title={item.title || 'New chat'}
+        subtitle={formatDateTime(item.updatedAt)}
+        right={<Icon name="chevronRight" color={colors.textMuted} size={20} />}
+      />
     </PressableCard>
   );
 }
@@ -45,7 +48,7 @@ export default function AiHubScreen() {
 
   const header = (
     <View>
-      <Button title="＋  New chat" onPress={() => router.push('/ai/new')} full style={styles.newBtn} />
+      <Button title="New chat" icon="add" onPress={() => router.push('/ai/new')} full style={styles.newBtn} />
       <View style={styles.noteCard}>
         <Text style={styles.noteText}>
           The assistant reads your catalog and stock to answer questions. It is read-only and never changes data.
@@ -100,10 +103,7 @@ const createStyles = (colors) => StyleSheet.create({
     padding: spacing.md,
     marginBottom: spacing.lg,
   },
-  noteText: { ...type.caption, color: colors.primaryDark, lineHeight: 17 },
+  noteText: { ...type.caption, color: colors.primaryDark },
   count: { ...type.caption, color: colors.textMuted, marginBottom: spacing.md },
-  row: {},
-  rowTitle: { ...type.body, color: colors.text, fontWeight: '700' },
-  rowMeta: { ...type.caption, color: colors.textMuted, marginTop: spacing.xs + 2 },
   separator: { height: spacing.md },
 });

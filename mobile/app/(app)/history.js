@@ -1,17 +1,20 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useLocalSearchParams } from 'expo-router';
-import { FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
 import { TypeBadge } from '../../components/Badge';
+import Card from '../../components/Card';
 import Chip from '../../components/Chip';
+import { Icon } from '../../components/icons';
+import ListRow from '../../components/ListRow';
+import ListScreen from '../../components/ListScreen';
 import SelectField from '../../components/SelectField';
-import { EmptyState, ErrorState, LoadingBlock, errorText } from '../../components/ListState';
 import { inventoryApi, locationsApi, productsApi } from '../../lib/api';
 import { useSession } from '../../lib/auth';
 import { formatDateTime, formatNumber } from '../../lib/format';
 import { useActiveRef } from '../../hooks/useReferences';
 import usePagedList from '../../hooks/usePagedList';
-import { radius, spacing, type } from '../../lib/theme';
+import { spacing, type } from '../../lib/theme';
 import { useTheme } from '../../lib/theme-context';
 
 function str(v) {
@@ -24,6 +27,12 @@ const TYPE_FILTERS = [
   { value: 'STOCK_OUT', label: 'Stock out' },
   { value: 'ADJUSTMENT', label: 'Adjust' },
 ];
+
+const TYPE_ICONS = {
+  STOCK_IN: 'stockIn',
+  STOCK_OUT: 'stockOut',
+  ADJUSTMENT: 'adjust',
+};
 
 function deltaText(item) {
   if (item.type === 'STOCK_IN') return `+${formatNumber(item.quantity)}`;
@@ -40,30 +49,26 @@ function deltaTone(colors, item) {
 function HistoryRow({ item }) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const tone = deltaTone(colors, item);
   return (
-    <View style={styles.row}>
-      <View style={styles.rowTop}>
-        <TypeBadge type={item.type} />
-        <Text style={[styles.delta, { color: deltaTone(colors, item) }]}>{deltaText(item)}</Text>
-      </View>
-      <Text style={styles.name} numberOfLines={2}>
-        {item.product?.name ?? 'Unknown product'}
-      </Text>
-      <Text style={styles.meta} numberOfLines={1}>
-        {item.location?.name ?? 'No location'} · {formatNumber(item.previousQuantity)} → {formatNumber(item.newQuantity)}
-      </Text>
-      <Text style={styles.time}>{formatDateTime(item.createdAt)}</Text>
-      {item.reason ? (
-        <Text style={styles.reason} numberOfLines={2}>
-          Reason: {item.reason}
-        </Text>
-      ) : null}
-      {item.reference ? (
-        <Text style={styles.reason} numberOfLines={1}>
-          Ref: {item.reference}
-        </Text>
-      ) : null}
-    </View>
+    <Card>
+      <ListRow
+        leading={<Icon name={TYPE_ICONS[item.type] ?? 'adjust'} color={tone} size={22} />}
+        title={item.product?.name ?? 'Unknown product'}
+        subtitle={`${item.location?.name ?? 'No location'} · ${formatNumber(item.previousQuantity)} → ${formatNumber(item.newQuantity)}`}
+        right={<Text style={[styles.delta, { color: tone }]}>{deltaText(item)}</Text>}
+        footer={
+          <View>
+            <View style={styles.footerTop}>
+              <TypeBadge type={item.type} />
+              <Text style={styles.time}>{formatDateTime(item.createdAt)}</Text>
+            </View>
+            {item.reason ? <Text style={styles.reason}>Reason: {item.reason}</Text> : null}
+            {item.reference ? <Text style={styles.reason}>Ref: {item.reference}</Text> : null}
+          </View>
+        }
+      />
+    </Card>
   );
 }
 
@@ -129,48 +134,38 @@ export default function HistoryScreen() {
   );
 
   return (
-    <View style={styles.flex}>
-      {list.loading && list.items.length === 0 ? (
-        <FlatList data={[]} renderItem={null} ListHeaderComponent={header} ListEmptyComponent={<LoadingBlock label="Loading history…" />} contentContainerStyle={styles.content} />
-      ) : list.error && list.items.length === 0 ? (
-        <FlatList data={[]} renderItem={null} ListHeaderComponent={header} ListEmptyComponent={<ErrorState title="Couldn't load history" message={errorText(list.error)} onRetry={list.reload} />} contentContainerStyle={styles.content} />
-      ) : (
-        <FlatList
-          data={list.items}
-          keyExtractor={(item) => item.id}
-          renderItem={({ item }) => <HistoryRow item={item} />}
-          ListHeaderComponent={header}
-          ListEmptyComponent={<EmptyState title="No movements yet" message="Stock in, stock out and adjustments will be listed here." />}
-          ItemSeparatorComponent={() => <View style={styles.separator} />}
-          contentContainerStyle={styles.content}
-          refreshControl={<RefreshControl refreshing={list.refreshing} onRefresh={list.refresh} tintColor={colors.primary} colors={[colors.primary]} />}
-          onEndReached={list.loadMore}
-          onEndReachedThreshold={0.4}
-          ListFooterComponent={list.loadingMore ? <LoadingBlock label="Loading more…" /> : null}
-          showsVerticalScrollIndicator={false}
-        />
-      )}
-    </View>
+    <ListScreen
+      items={list.items}
+      keyExtractor={(item) => item.id}
+      renderItem={({ item }) => <HistoryRow item={item} />}
+      header={header}
+      loading={list.loading}
+      error={list.error}
+      onRetry={list.reload}
+      errorTitle="Couldn't load history"
+      refreshing={list.refreshing}
+      onRefresh={list.refresh}
+      onEndReached={list.loadMore}
+      loadingMore={list.loadingMore}
+      loadingLabel="Loading history…"
+      emptyTitle="No movements yet"
+      emptyMessage="Stock in, stock out and adjustments will be listed here."
+    />
   );
 }
 
-const createStyles = (colors) => StyleSheet.create({
-  flex: { flex: 1 },
-  content: { padding: spacing.lg, paddingBottom: spacing.huge, flexGrow: 1 },
-  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.lg },
-  count: { ...type.caption, color: colors.textMuted, marginTop: spacing.xs, marginBottom: spacing.lg },
-  row: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.lg,
-  },
-  rowTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
-  delta: { ...type.button, fontSize: 16 },
-  name: { ...type.body, color: colors.text, fontWeight: '600', marginTop: spacing.sm },
-  meta: { ...type.caption, color: colors.textSecondary, marginTop: 2 },
-  time: { ...type.caption, color: colors.textMuted, marginTop: 4 },
-  reason: { ...type.caption, color: colors.textMuted, marginTop: 6, lineHeight: 16 },
-  separator: { height: spacing.md },
-});
+const createStyles = (colors) =>
+  StyleSheet.create({
+    chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.lg },
+    count: { ...type.caption, color: colors.textMuted, marginTop: spacing.xs, marginBottom: spacing.lg },
+    delta: { ...type.h3 },
+    footerTop: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: spacing.sm,
+    },
+    time: { ...type.caption, color: colors.textMuted },
+    reason: { ...type.bodySmall, color: colors.textMuted, marginTop: spacing.xs },
+  });

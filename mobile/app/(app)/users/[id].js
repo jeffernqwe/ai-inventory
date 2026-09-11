@@ -3,6 +3,7 @@ import { Stack, useLocalSearchParams } from 'expo-router';
 
 import AccessDenied from '../../../components/AccessDenied';
 import { CenterLoader, ErrorState, errorText } from '../../../components/ListState';
+import Screen from '../../../components/Screen';
 import UserForm from '../../../components/UserForm';
 import { usersApi } from '../../../lib/api';
 import { isSessionError, useSession } from '../../../lib/auth';
@@ -45,9 +46,13 @@ export default function EditUserScreen() {
       {!canManageUsers(user) ? (
         <AccessDenied message="Only the business owner and admins can manage users." />
       ) : loading && !target ? (
-        <CenterLoader label="Loading user…" />
+        <Screen>
+          <CenterLoader label="Loading user…" />
+        </Screen>
       ) : error && !target ? (
-        <ErrorState title="Couldn't load this user" message={errorText(error)} onRetry={load} />
+        <Screen>
+          <ErrorState title="Couldn't load this user" message={errorText(error)} onRetry={load} />
+        </Screen>
       ) : target ? (
         <UserForm initial={target} key={target.id} />
       ) : null}

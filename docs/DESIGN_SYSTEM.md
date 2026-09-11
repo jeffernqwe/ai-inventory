@@ -160,6 +160,62 @@ Screens never reference raw glyph names; icon swap = one edit in `icons.js`.
 - [ ] Contrast holds AA in both light and dark (dark fills are lifted, ink flips to dark).
 - [ ] `allowFontScaling` stays enabled app-wide.
 
+### 6.1 Text scaling and reflow
+
+React Native honours the OS font scale by default. **Keep it that way** — the platform setting is
+an accessibility requirement, not a preference.
+
+Banned, everywhere:
+
+- `allowFontScaling={false}`. The only defensible exception is text that is *positioned by
+  measurement* rather than by layout (e.g. drawn onto a fixed-size canvas), where scaling would
+  desynchronise the text from its container. Nothing in this app currently qualifies.
+- A global `Text.defaultProps` cap, or a blanket `maxFontSizeMultiplier` on every `Text`.
+- Solving a scaling problem by shrinking a font size. Fix the layout instead.
+- A per-component `maxFontSizeMultiplier`. A bounded multiplier is only justified for text whose
+  container genuinely cannot grow — a single-line control that would otherwise push its siblings
+  off-screen. Prefer `flexWrap`/`flexShrink` and multi-line layouts first.
+
+Techniques that keep layouts whole at 160%:
+
+- Let text wrap: no `numberOfLines` on labels, values, hints, or body copy. `ListRow`'s title and
+  subtitle keep `numberOfLines={2}` deliberately — a list row must not grow unbounded — and the
+  second line exists precisely so long names/emails survive at large scale.
+- Never pin a `lineHeight` that is smaller than the scaled font would need. The `type` tokens carry
+  proportional line heights; overriding one with a literal re-introduces clipping.
+- `flexWrap: 'wrap'` on any row of labels, badges, or chips; `flexShrink: 1` on the flexible side of
+  a label/value row; `textAlign: 'right'` only where the right column can still shrink.
+- Use `minHeight` (not `height`) on controls so they grow with their content.
+- A label/value pair that must not truncate goes label-above-value (see `profile.js` `DetailRow`),
+  not a fixed-width right column.
+- A centred `Text` inside a column container needs `alignSelf: 'stretch'`; with only
+  `textAlign: 'center'` the parent's `alignItems: 'center'` shrink-wraps the layout box to the
+  *unwrapped* width and clips the line.
+
+Verified at 100% and 160% on all Phase 18E screens (1080×1920 @ 420dpi).
+
+### 6.2 Selected state
+
+A toggle-style control (`Chip`) exposes selection semantically, so screen readers announce it
+rather than relying on fill colour:
+
+```jsx
+<Pressable accessibilityRole="button" accessibilityState={{ selected: !!selected }} … />
+```
+
+### 6.3 Dark mode
+
+Colours come from tokens only — never a literal, and never `colors` imported from `lib/theme`
+(§1). Two consequences worth stating because they are easy to get wrong:
+
+- Ink on a filled primary surface uses `colors.textOnPrimary`, which flips with the theme. A
+  hardcoded `#FFF` timestamp on a user bubble disappears in dark mode, where the primary fill is a
+  *light* blue.
+- Surfaces that are genuinely theme-independent keep an explicit literal and a comment saying so.
+  The barcode scanner's live camera overlay is the one case: its reticle and hint text sit on the
+  camera feed, so `#FFFFFF` / `rgba(255,255,255,0.85)` are deliberate, and the viewport behind the
+  preview is pinned to `#000` rather than `colors.text`.
+
 ## 7. Adoption status
 
 - **18A**: theme tokens + Provider + 41-file behavior-neutral conversion; primitives built and
@@ -175,4 +231,8 @@ Screens never reference raw glyph names; icon swap = one edit in `icons.js`.
   grammars match the lists, and definition rows keep their label/value form. No `mobile/components/`
   change was needed. Behavior unchanged — no logic, API, navigation, or permission edits, and the
   claim-first receive is presentation-only.
-- **18E (planned)**: the secondary screens.
+- **18E**: the secondary screens — users (index/new/detail), audit, history, categories, locations,
+  suppliers, profile, change-password, edit-name, scan, and the AI hub/new/chat — adopt the same
+  primitives. `RefManage`, `UserForm` and `AiChat` were modernised in place; `Chip` gains its
+  semantic selected state and 44px floor, and `ListScreen` gains an additive `errorTitle` and
+  `footer`. Forms/auth screens are deferred to 18F. Behavior unchanged.

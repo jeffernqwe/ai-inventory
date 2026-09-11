@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { router } from 'expo-router';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
 import Badge from './Badge';
 import Banner from './Banner';
@@ -8,6 +8,7 @@ import Button from './Button';
 import Card from './Card';
 import Chip from './Chip';
 import Input from './Input';
+import Screen from './Screen';
 import SelectField from './SelectField';
 import { usersApi } from '../lib/api';
 import { ApiError } from '../lib/client';
@@ -63,11 +64,7 @@ export default function UserForm({ initial }) {
   // renders read-only — the list hides Edit, this guards deep links.
   if (isEdit && !canModifyUser(actor, initial)) {
     return (
-      <ScrollView
-        style={{ flex: 1, backgroundColor: colors.background }}
-        contentContainerStyle={styles.content}
-        keyboardShouldPersistTaps="handled"
-      >
+      <Screen scroll contentStyle={styles.content}>
         <Banner type="error" text={blockReason(actor, initial)} />
         <Card>
           <TextRow label="Name" value={initial.name} />
@@ -81,7 +78,7 @@ export default function UserForm({ initial }) {
           </View>
         </Card>
         <Button title="Back to users" variant="secondary" style={styles.spaced} full onPress={() => router.back()} />
-      </ScrollView>
+      </Screen>
     );
   }
 
@@ -143,11 +140,7 @@ export default function UserForm({ initial }) {
   }
 
   return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: colors.background }}
-      contentContainerStyle={styles.content}
-      keyboardShouldPersistTaps="handled"
-    >
+    <Screen scroll contentStyle={styles.content}>
       <Banner type="error" text={formError} />
       <Input name="name" label="Name" value={name} onChangeText={setName} error={fieldErrors.name} required autoCapitalize="words" editable={!isEdit} />
       <Input name="email" label="Email" value={email} onChangeText={setEmail} error={fieldErrors.email} keyboardType="email-address" autoCapitalize="none" required editable={!isEdit} />
@@ -180,7 +173,7 @@ export default function UserForm({ initial }) {
           <Button title="Create user" onPress={submit} loading={busy} full />
         </>
       )}
-    </ScrollView>
+    </Screen>
   );
 }
 
@@ -190,22 +183,32 @@ function TextRow({ label, value }) {
   return (
     <View style={styles.row}>
       <Text style={styles.rowLabel}>{label}</Text>
-      <Text style={styles.rowValue} numberOfLines={1}>
-        {value}
-      </Text>
+      <Text style={styles.rowValue}>{value}</Text>
     </View>
   );
 }
 
 const createStyles = (colors) =>
   StyleSheet.create({
-  content: { padding: spacing.lg, paddingBottom: 48 },
-  spaced: { marginTop: spacing.lg },
-  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: spacing.sm + 2 },
-  roleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  rowLabel: { ...type.body, color: colors.textMuted },
-  rowValue: { ...type.body, color: colors.text, fontWeight: '600', marginLeft: spacing.md, flexShrink: 1 },
-  statusWrap: { marginBottom: spacing.lg },
-  statusLabel: { ...type.label, color: colors.text, marginBottom: spacing.xs + 2 },
-  statusRow: { flexDirection: 'row', gap: spacing.sm },
-});
+    content: { paddingBottom: spacing.huge },
+    spaced: { marginTop: spacing.lg },
+    row: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      alignItems: 'baseline',
+      gap: spacing.sm,
+      paddingVertical: spacing.sm + 2,
+    },
+    roleRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: spacing.sm,
+    },
+    rowLabel: { ...type.body, color: colors.textMuted },
+    rowValue: { ...type.body, color: colors.text, fontWeight: '600', flexShrink: 1 },
+    statusWrap: { marginBottom: spacing.lg },
+    statusLabel: { ...type.label, color: colors.text, marginBottom: spacing.xs + 2 },
+    statusRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  });

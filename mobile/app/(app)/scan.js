@@ -1,14 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { router, useFocusEffect } from 'expo-router';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { ActivityIndicator, Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Linking, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import Badge, { StatusBadge } from '../../components/Badge';
 import Banner from '../../components/Banner';
 import Button from '../../components/Button';
 import Card from '../../components/Card';
+import { Icon } from '../../components/icons';
+import ListRow from '../../components/ListRow';
 import { CenterLoader, LoadingBlock, errorText } from '../../components/ListState';
+import Screen from '../../components/Screen';
+import SectionHeader from '../../components/SectionHeader';
 import { inventoryApi, productsApi } from '../../lib/api';
 import { isSessionError, useSession } from '../../lib/auth';
 import { ApiError } from '../../lib/client';
@@ -57,9 +61,7 @@ function Field({ label, value, mono }) {
   return (
     <View style={styles.fieldRow}>
       <Text style={styles.fieldLabel}>{label}</Text>
-      <Text style={[styles.fieldValue, mono && styles.fieldMono]} numberOfLines={1}>
-        {value}
-      </Text>
+      <Text style={[styles.fieldValue, mono && styles.fieldMono]}>{value}</Text>
     </View>
   );
 }
@@ -146,33 +148,35 @@ export default function ScanScreen() {
 
   // --- Camera permission ---------------------------------------------------
   if (!permission) {
-    return <CenterLoader label="Preparing camera…" />;
+    return (
+      <Screen>
+        <CenterLoader label="Preparing camera…" />
+      </Screen>
+    );
   }
 
   if (!permission.granted) {
     return (
-      <SafeAreaView style={styles.safe} edges={['bottom']}>
-        <View style={styles.centerCard}>
-          <Text style={styles.bigIcon}>📷</Text>
-          <Text style={styles.title}>Camera access needed</Text>
-          <Text style={styles.message}>
-            Inventory AI uses the camera to scan product barcodes. Your photos are never stored or uploaded — only the
-            decoded barcode number is looked up.
-          </Text>
-          {permission.canAskAgain ? (
-            <Button title="Allow camera access" full onPress={requestPermission} style={styles.button} />
-          ) : (
-            <>
-              <Banner
-                type="warn"
-                text="Camera access is turned off for this app in your device settings."
-                style={styles.button}
-              />
-              <Button title="Open Settings" full variant="secondary" onPress={() => Linking.openSettings()} style={styles.button} />
-            </>
-          )}
-        </View>
-      </SafeAreaView>
+      <Screen contentStyle={styles.centerCard}>
+        <Icon name="camera" color={colors.primary} size={40} style={styles.bigIcon} />
+        <Text style={styles.title}>Camera access needed</Text>
+        <Text style={styles.message}>
+          Inventory AI uses the camera to scan product barcodes. Your photos are never stored or uploaded — only the
+          decoded barcode number is looked up.
+        </Text>
+        {permission.canAskAgain ? (
+          <Button title="Allow camera access" full onPress={requestPermission} style={styles.button} />
+        ) : (
+          <>
+            <Banner
+              type="warn"
+              text="Camera access is turned off for this app in your device settings."
+              style={styles.button}
+            />
+            <Button title="Open Settings" full variant="secondary" onPress={() => Linking.openSettings()} style={styles.button} />
+          </>
+        )}
+      </Screen>
     );
   }
 
@@ -206,45 +210,43 @@ export default function ScanScreen() {
 
   // --- Resolving / result states (camera unmounted) -------------------------
   return (
-    <SafeAreaView style={styles.safe} edges={['bottom']}>
-      <ScrollView contentContainerStyle={styles.resultContent} showsVerticalScrollIndicator={false}>
-        {view === 'looking' ? (
-          <View style={styles.looking}>
-            <LoadingBlock label="Looking up barcode…" />
-            {last ? (
-              <Text style={styles.codeChip}>
-                {codeLabel(last.type)} · {last.code}
-              </Text>
-            ) : null}
-            <Button title="Cancel" variant="secondary" onPress={rescan} style={styles.button} />
-          </View>
-        ) : view === 'found' && product ? (
-          <FoundProduct product={product} onRescan={rescan} />
-        ) : view === 'notFound' ? (
-          <View style={styles.resultBox}>
-            <Text style={styles.bigIcon}>🔍</Text>
-            <Text style={styles.title}>Product not found</Text>
-            {last ? (
-              <Text style={styles.message}>
-                No product in this business matches barcode {codeLabel(last.type)} · {last.code}.
-              </Text>
-            ) : (
-              <Text style={styles.message}>No product in this business matches the scanned barcode.</Text>
-            )}
-            <Text style={styles.message}>The barcode may not be registered yet, or it belongs to another business.</Text>
-            <Button title="Scan again" full onPress={rescan} style={styles.button} />
-          </View>
-        ) : (
-          <View style={styles.resultBox}>
-            <Text style={styles.bigIcon}>⚠️</Text>
-            <Text style={styles.title}>Couldn't look up the barcode</Text>
-            <Banner type="error" text={errorText(lookupError)} style={styles.button} />
-            <Button title="Try again" full onPress={() => last && lookup(last.code)} style={styles.button} />
-            <Button title="Scan again" full variant="secondary" onPress={rescan} style={styles.button} />
-          </View>
-        )}
-      </ScrollView>
-    </SafeAreaView>
+    <Screen scroll contentStyle={styles.resultContent}>
+      {view === 'looking' ? (
+        <View style={styles.looking}>
+          <LoadingBlock label="Looking up barcode…" />
+          {last ? (
+            <Text style={styles.codeChip}>
+              {codeLabel(last.type)} · {last.code}
+            </Text>
+          ) : null}
+          <Button title="Cancel" variant="secondary" onPress={rescan} style={styles.button} />
+        </View>
+      ) : view === 'found' && product ? (
+        <FoundProduct product={product} onRescan={rescan} />
+      ) : view === 'notFound' ? (
+        <View>
+          <Icon name="search" color={colors.textMuted} size={40} style={styles.bigIcon} />
+          <Text style={styles.title}>Product not found</Text>
+          {last ? (
+            <Text style={styles.message}>
+              No product in this business matches barcode {codeLabel(last.type)} · {last.code}.
+            </Text>
+          ) : (
+            <Text style={styles.message}>No product in this business matches the scanned barcode.</Text>
+          )}
+          <Text style={styles.message}>The barcode may not be registered yet, or it belongs to another business.</Text>
+          <Button title="Scan again" full onPress={rescan} style={styles.button} />
+        </View>
+      ) : (
+        <View>
+          <Icon name="warning" color={colors.warning} size={40} style={styles.bigIcon} />
+          <Text style={styles.title}>Couldn't look up the barcode</Text>
+          <Banner type="error" text={errorText(lookupError)} style={styles.button} />
+          <Button title="Try again" full onPress={() => last && lookup(last.code)} style={styles.button} />
+          <Button title="Scan again" full variant="secondary" onPress={rescan} style={styles.button} />
+        </View>
+      )}
+    </Screen>
   );
 }
 
@@ -252,20 +254,26 @@ function StockRow({ row }) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   return (
-    <View style={styles.stockRow}>
-      <View style={styles.stockInfo}>
-        <Text style={styles.stockLocation} numberOfLines={1}>
-          {row.location?.name ?? 'Unknown location'}
-        </Text>
-        <Text style={styles.stockQty}>
-          {formatNumber(row.availableQuantity)} available · {formatNumber(row.quantity)} on hand
-        </Text>
-      </View>
-      <View style={styles.stockBadges}>
-        {row.isLowStock ? <Badge text="Low" tone="low" /> : null}
-        {row.isOutOfStock ? <Badge text="Out" tone="danger" /> : null}
-      </View>
-    </View>
+    <Card>
+      <ListRow
+        leading={<Icon name="location" color={colors.primary} size={22} />}
+        title={row.location?.name ?? 'Unknown location'}
+        footer={
+          // Availability is a key quantity: body size, never the smaller subtitle size.
+          <Text style={styles.stockQty}>
+            {formatNumber(row.availableQuantity)} available · {formatNumber(row.quantity)} on hand
+          </Text>
+        }
+        right={
+          row.isLowStock || row.isOutOfStock ? (
+            <View style={styles.stockBadges}>
+              {row.isLowStock ? <Badge text="Low" tone="low" /> : null}
+              {row.isOutOfStock ? <Badge text="Out" tone="danger" /> : null}
+            </View>
+          ) : null
+        }
+      />
+    </Card>
   );
 }
 
@@ -313,7 +321,7 @@ function FoundProduct({ product, onRescan }) {
   }
 
   return (
-    <View style={styles.resultBox}>
+    <View>
       <Card>
         <View style={styles.titleRow}>
           <Text style={styles.productName} numberOfLines={2}>
@@ -333,17 +341,17 @@ function FoundProduct({ product, onRescan }) {
         <Field label="Minimum stock" value={product.minimumStock != null ? formatNumber(product.minimumStock) : null} mono />
       </Card>
 
-      <Text style={styles.sectionTitle}>Stock at locations</Text>
+      <SectionHeader title="Stock at locations" style={styles.section} />
       {stockLoading ? (
-        <View style={styles.stockRow}>
+        <Card>
           <View style={styles.stockEmpty}>
             <ActivityIndicator color={colors.primary} />
           </View>
-        </View>
+        </Card>
       ) : stock.length === 0 ? (
-        <View style={styles.stockRow}>
+        <Card>
           <Text style={styles.stockEmptyText}>No stock yet — use Stock In to create a record at a location.</Text>
-        </View>
+        </Card>
       ) : (
         <View style={styles.stockList}>
           {stock.map((row) => (
@@ -376,10 +384,11 @@ function FoundProduct({ product, onRescan }) {
 }
 
 const createStyles = (colors) => StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.background },
-
-  // Camera scanning
-  cameraShell: { flex: 1, backgroundColor: colors.text, justifyContent: 'flex-end' },
+  // Camera scanning. The viewport behind the live camera preview stays black in
+  // both themes (colors.text would flash near-white in dark mode); the reticle
+  // and hint text below sit ON the camera feed, so their colors are deliberately
+  // fixed literals rather than theme tokens.
+  cameraShell: { flex: 1, backgroundColor: '#000', justifyContent: 'flex-end' },
   reticle: {
     ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
@@ -405,27 +414,26 @@ const createStyles = (colors) => StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.18)',
   },
   hintTitle: { color: '#FFF', ...type.label, marginBottom: 4 },
-  hintText: { color: 'rgba(255,255,255,0.85)', ...type.bodySmall, lineHeight: 19 },
+  hintText: { color: 'rgba(255,255,255,0.85)', ...type.bodySmall },
 
   // Permission / status / result layouts
   centerCard: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
-  resultContent: { padding: spacing.lg, paddingBottom: spacing.huge, flexGrow: 1 },
+  resultContent: { paddingBottom: spacing.huge, flexGrow: 1 },
   looking: { alignItems: 'center', paddingTop: spacing.xxl },
-  resultBox: {},
   title: { ...type.h2, color: colors.text, textAlign: 'center', marginBottom: spacing.xs },
-  message: { ...type.body, color: colors.textSecondary, textAlign: 'center', lineHeight: 22, marginTop: spacing.xs },
-  bigIcon: { fontSize: 40, marginBottom: spacing.md },
+  message: { ...type.body, color: colors.textSecondary, textAlign: 'center', marginTop: spacing.xs },
+  bigIcon: { marginBottom: spacing.md },
   button: { marginTop: spacing.lg },
   codeChip: { ...type.caption, color: colors.textMuted, marginTop: spacing.md },
 
   // Found product card
   titleRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: spacing.md },
   productName: { ...type.h2, color: colors.text, flex: 1 },
-  description: { ...type.body, color: colors.textSecondary, marginTop: spacing.sm, lineHeight: 22 },
+  description: { ...type.body, color: colors.textSecondary, marginTop: spacing.sm },
   divider: { height: StyleSheet.hairlineWidth, backgroundColor: colors.divider, marginVertical: spacing.lg },
-  fieldRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 5 },
-  fieldLabel: { ...type.body, color: colors.textMuted },
-  fieldValue: { ...type.body, color: colors.text, fontWeight: '600', flexShrink: 1, marginLeft: spacing.lg },
+  fieldRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: spacing.xs + 2 },
+  fieldLabel: { ...type.body, color: colors.textMuted, flexShrink: 0 },
+  fieldValue: { ...type.body, color: colors.text, fontWeight: '600', flexShrink: 1, marginLeft: spacing.lg, textAlign: 'right' },
   fieldMono: { fontVariant: ['tabular-nums'] },
   archivedNote: {
     marginTop: spacing.lg,
@@ -435,26 +443,15 @@ const createStyles = (colors) => StyleSheet.create({
     gap: spacing.sm,
     alignItems: 'flex-start',
   },
-  archivedText: { ...type.bodySmall, color: colors.warning, fontWeight: '600', lineHeight: 19 },
+  archivedText: { ...type.bodySmall, color: colors.warning, fontWeight: '600' },
 
   // Stock availability + movement actions
-  sectionTitle: { ...type.h3, color: colors.text, marginTop: spacing.xxl, marginBottom: spacing.md },
-  stockList: { gap: spacing.sm },
-  stockRow: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.lg,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  stockInfo: { flex: 1, marginRight: spacing.md },
-  stockLocation: { ...type.body, color: colors.text, fontWeight: '600' },
-  stockQty: { ...type.caption, color: colors.textSecondary, marginTop: 2, fontVariant: ['tabular-nums'] },
+  section: { marginTop: spacing.xxl },
+  stockList: { gap: spacing.md },
+  // Availability is a key quantity: body size with tabular figures.
+  stockQty: { ...type.body, color: colors.textSecondary, marginTop: 2, fontVariant: ['tabular-nums'] },
   stockBadges: { flexDirection: 'row', gap: 6 },
-  stockEmpty: { flex: 1, alignItems: 'center' },
+  stockEmpty: { alignItems: 'center', paddingVertical: spacing.sm },
   stockEmptyText: { ...type.bodySmall, color: colors.textMuted },
   moveRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.lg },
   flexBtn: { flex: 1 },

@@ -9,6 +9,7 @@ export default function LocationsScreen() {
       canManageFn={canManageLocations}
       singular="Location"
       label="Locations"
+      icon="location"
       placeholder="Search locations by name…"
       emptyTitle="No locations yet"
       emptyMessage="Locations are where stock lives — add a warehouse or store to start tracking quantity per location."

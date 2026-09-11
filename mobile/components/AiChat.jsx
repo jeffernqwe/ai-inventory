@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import Button from './Button';
+import { Icon } from './icons';
 import { CenterLoader, ErrorState, errorText } from './ListState';
 import { aiApi } from '../lib/api';
 import { isSessionError, useSession } from '../lib/auth';
@@ -88,7 +89,9 @@ function Welcome({ onAsk }) {
   const styles = useMemo(() => createStyles(colors), [colors]);
   return (
     <View style={styles.welcome}>
-      <Text style={styles.welcomeEmoji}>🤖</Text>
+      <View style={styles.welcomeIcon}>
+        <Icon name="sparkles" color={colors.primary} size={34} />
+      </View>
       <Text style={styles.welcomeTitle}>Ask about your inventory</Text>
       <Text style={styles.welcomeBody}>
         I can read your catalog and stock to answer questions about low stock, out-of-stock items and recent
@@ -266,18 +269,23 @@ const createStyles = (colors) =>
       borderColor: colors.border,
       borderBottomLeftRadius: radius.sm,
     },
-    bubbleText: { ...type.body, color: colors.text, lineHeight: 22 },
+    bubbleText: { ...type.body, color: colors.text },
     bubbleTextUser: { color: colors.textOnPrimary },
-    tools: { ...type.caption, color: colors.textMuted, marginTop: spacing.sm, lineHeight: 16 },
+    tools: { ...type.caption, color: colors.textMuted, marginTop: spacing.sm },
     time: { ...type.caption, color: colors.textMuted, marginTop: 4, textAlign: 'right' },
-    timeUser: { color: 'rgba(255,255,255,0.75)' },
+    // On the primary-filled user bubble: readable in both themes without a
+    // hardcoded white, which would vanish against the dark theme's light blue.
+    timeUser: { color: colors.textOnPrimary, opacity: 0.75 },
     thinking: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
     thinkingText: { ...type.caption, color: colors.textMuted },
 
     welcome: { paddingVertical: spacing.xxl, alignItems: 'center' },
-    welcomeEmoji: { fontSize: 34, marginBottom: spacing.sm },
-    welcomeTitle: { ...type.h3, color: colors.text, textAlign: 'center' },
-    welcomeBody: { ...type.bodySmall, color: colors.textSecondary, textAlign: 'center', lineHeight: 20, marginTop: spacing.sm, maxWidth: 320 },
+    welcomeIcon: { marginBottom: spacing.sm },
+    // alignSelf:'stretch' keeps the title's layout box full-width: with only
+    // textAlign:'center' the parent's alignItems:'center' shrink-wraps the box
+    // to the *unwrapped* text width, which clips the title to one short line.
+    welcomeTitle: { ...type.h3, color: colors.text, textAlign: 'center', alignSelf: 'stretch' },
+    welcomeBody: { ...type.bodySmall, color: colors.textSecondary, textAlign: 'center', marginTop: spacing.sm, maxWidth: 320 },
     suggestions: { marginTop: spacing.lg, alignSelf: 'stretch', gap: spacing.sm },
     suggestion: {
       backgroundColor: colors.surface,
@@ -285,7 +293,8 @@ const createStyles = (colors) =>
       borderWidth: 1,
       borderColor: colors.borderStrong,
       paddingHorizontal: spacing.md,
-      paddingVertical: spacing.sm,
+      minHeight: 44,
+      justifyContent: 'center',
     },
     suggestionText: { ...type.bodySmall, color: colors.primary, fontWeight: '600', textAlign: 'center' },
 
@@ -295,7 +304,7 @@ const createStyles = (colors) =>
       paddingHorizontal: spacing.lg,
       paddingVertical: spacing.sm,
     },
-    errorText: { ...type.caption, color: colors.danger, lineHeight: 17, fontWeight: '600' },
+    errorText: { ...type.caption, color: colors.danger, fontWeight: '600' },
     composer: {
       flexDirection: 'row',
       alignItems: 'flex-end',
@@ -312,8 +321,7 @@ const createStyles = (colors) =>
       borderWidth: 1,
       borderColor: colors.borderStrong,
       paddingHorizontal: spacing.md,
-      paddingTop: 10,
-      paddingBottom: 10,
+      paddingVertical: spacing.sm + 2,
       minHeight: 44,
       maxHeight: 120,
     },

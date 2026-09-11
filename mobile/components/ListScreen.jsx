@@ -33,11 +33,13 @@ export function ListScreen({
   loading,
   error,
   onRetry,
+  errorTitle,
   emptyTitle = 'Nothing here yet',
   emptyMessage,
   emptyAction,
   loadingLabel = 'Loading…',
   loadingMore,
+  footer,
   separator = true,
   contentStyle,
 }) {
@@ -56,7 +58,7 @@ export function ListScreen({
     ) : undefined,
     onEndReached,
     onEndReachedThreshold: 0.4,
-    ListFooterComponent: loadingMore ? <LoadingBlock label="Loading more…" /> : null,
+    ListFooterComponent: loadingMore ? <LoadingBlock label="Loading more…" /> : footer ?? null,
     keyboardShouldPersistTaps: 'handled',
     showsVerticalScrollIndicator: false,
   };
@@ -72,7 +74,7 @@ export function ListScreen({
   if (error && items.length === 0) {
     return (
       <Screen padded={false}>
-        <FlatList {...listProps} ListEmptyComponent={<ErrorState message={errorText(error)} onRetry={onRetry} />} />
+        <FlatList {...listProps} ListEmptyComponent={<ErrorState title={errorTitle} message={errorText(error)} onRetry={onRetry} />} />
       </Screen>
     );
   }

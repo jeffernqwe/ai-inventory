@@ -61,7 +61,7 @@ const ENTITY_LABELS = {
 const ENTITY_FILTERS = [
   { label: 'All', value: '' },
   { label: 'Products', value: 'PRODUCT' },
-  { label: 'Inventory', value: 'INVENTORY' },
+  { label: 'Transactions', value: 'INVENTORY_TRANSACTION' },
   { label: 'Users', value: 'USER' },
   { label: 'POs', value: 'PURCHASE_ORDER' },
   { label: 'Suppliers', value: 'SUPPLIER' },

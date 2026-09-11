@@ -36,6 +36,7 @@ const ICONS = {
   stockIn: { family: 'ion', name: 'arrow-down-circle-outline' },
   stockOut: { family: 'ion', name: 'arrow-up-circle-outline' },
   adjust: { family: 'ion', name: 'swap-vertical' },
+  transfer: { family: 'ion', name: 'swap-horizontal' },
   // Theme
   sunny: { family: 'ion', name: 'sunny-outline' },
   moon: { family: 'ion', name: 'moon-outline' },

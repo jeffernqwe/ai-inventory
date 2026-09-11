@@ -15,6 +15,10 @@ router.get('/', requireAuth, requirePermission(PERMISSIONS.INVENTORY_VIEW), inve
 router.post('/stock-in', requireAuth, requirePermission(PERMISSIONS.INVENTORY_STOCK_IN), inventoryController.stockIn);
 router.post('/stock-out', requireAuth, requirePermission(PERMISSIONS.INVENTORY_STOCK_OUT), inventoryController.stockOut);
 router.post('/adjust', requireAuth, requirePermission(PERMISSIONS.INVENTORY_MANAGE), inventoryController.adjust);
+// Transfers reuse the inventory.manage gate (Phase 19): a transfer moves stock
+// between locations, so it needs the same managerial authority as an adjustment.
+// Deliberately NO new permission — the RBAC matrix is unchanged.
+router.post('/transfer', requireAuth, requirePermission(PERMISSIONS.INVENTORY_MANAGE), inventoryController.transfer);
 router.get('/history', requireAuth, requirePermission(PERMISSIONS.INVENTORY_HISTORY_VIEW), transactionsController.list);
 router.get('/:id', requireAuth, requirePermission(PERMISSIONS.INVENTORY_VIEW), inventoryController.get);
 

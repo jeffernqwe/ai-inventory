@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { router } from 'expo-router';
 import { StyleSheet, Text } from 'react-native';
 
@@ -16,6 +16,7 @@ import { useSession } from '../lib/auth';
 import { alert } from '../lib/confirm';
 import { formatNumber } from '../lib/format';
 import { useActiveRef } from '../hooks/useReferences';
+import useInventoryRow from '../hooks/useInventoryRow';
 import { spacing, type } from '../lib/theme';
 import { useTheme } from '../lib/theme-context';
 
@@ -57,49 +58,6 @@ const CONFIG = {
   },
 };
 
-/**
- * Loads the authoritative inventory row for a product+location so movement
- * forms can display current stock and warn before an action the server would
- * reject. The server still enforces every guard atomically — this is UX only.
- */
-function useCurrentRow(token, productId, locationId) {
-  const [row, setRow] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [loaded, setLoaded] = useState(false);
-
-  useEffect(() => {
-    let active = true;
-    if (!token || !productId || !locationId) {
-      setRow(null);
-      setLoaded(false);
-      return undefined;
-    }
-    setLoading(true);
-    setLoaded(false);
-    inventoryApi
-      .list(token, { productId, page: 1, limit: 100 })
-      .then((res) => {
-        if (!active) return;
-        const match = (res?.items ?? []).find((r) => r.location?.id === locationId);
-        setRow(match ?? null);
-      })
-      .catch(() => {
-        if (active) setRow(null);
-      })
-      .finally(() => {
-        if (active) {
-          setLoading(false);
-          setLoaded(true);
-        }
-      });
-    return () => {
-      active = false;
-    };
-  }, [token, productId, locationId]);
-
-  return { row, loading, loaded };
-}
-
 export default function MovementForm({
   kind,
   initialProductId,
@@ -133,7 +91,7 @@ export default function MovementForm({
   const [formError, setFormError] = useState(null);
   const [busy, setBusy] = useState(false);
 
-  const { row: current, loading: loadingCurrent, loaded: loadedCurrent } = useCurrentRow(
+  const { row: current, loading: loadingCurrent, loaded: loadedCurrent } = useInventoryRow(
     token,
     cfg.showAvailable ? productId : null,
     cfg.showAvailable ? locationId : null

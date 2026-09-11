@@ -108,6 +108,10 @@ export const canManageSuppliers = (u) => can(u, PERMISSIONS.SUPPLIERS_MANAGE);
 export const canViewSuppliers = (u) => can(u, PERMISSIONS.SUPPLIERS_VIEW);
 export const canViewDashboard = (u) => can(u, PERMISSIONS.DASHBOARD_VIEW);
 export const canAdjustStock = (u) => can(u, PERMISSIONS.INVENTORY_MANAGE);
+// A transfer moves stock between locations, so it needs the same managerial
+// authority as an adjustment (Phase 19). Deliberately NO new permission — the
+// mirror stays in lock-step with the server's unchanged RBAC matrix.
+export const canTransferStock = (u) => can(u, PERMISSIONS.INVENTORY_MANAGE);
 export const canStockIn = (u) => can(u, PERMISSIONS.INVENTORY_STOCK_IN);
 export const canStockOut = (u) => can(u, PERMISSIONS.INVENTORY_STOCK_OUT);
 export const canUseAi = (u) => can(u, PERMISSIONS.AI_USE);

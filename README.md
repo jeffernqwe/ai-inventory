@@ -175,6 +175,7 @@ Phase 04 — catalog, inventory, dashboard (all `Authorization: Bearer <token>`)
 | POST   | `/api/inventory/stock-in` | Stock in (STAFF+)                               |
 | POST   | `/api/inventory/stock-out` | Stock out (STAFF+)                              |
 | POST   | `/api/inventory/adjust` | Adjust to absolute quantity (MANAGER+)             |
+| POST   | `/api/inventory/transfer` | Move stock between two locations (MANAGER+)      |
 | GET    | `/api/inventory/history` | Transaction history (filters, pagination)         |
 | GET    | `/api/dashboard` | Totals, in-stock/low/out counts, recent activity (MANAGER+) |
 
@@ -225,15 +226,21 @@ and `businessId` from the database for every request (never from the client or t
 claims); `DISABLED` accounts are rejected. Phase 04 reuses that RBAC permission set:
 catalog writes need `categories.manage`/`locations.manage` (OWNER, ADMIN) or
 `products.manage` (MANAGER+); stock-in/stock-out and inventory/history reads are open
-to STAFF and up, while `adjust`, the dashboard and transaction-view permissions are
-MANAGER+.
+to STAFF and up, while `adjust`, `transfer`, the dashboard and transaction-view
+permissions are MANAGER+.
 
 Inventory semantics: availability = `quantity − reservedQuantity`
 (`reservedQuantity` stays `0` in V1). Low stock = available ≤ `minimumStock`;
 out of stock = available ≤ `0`. Mutations are atomic single-document updates with
 negative-stock guards. The Atlas free/shared tier does not support multi-document
 transactions, so when a transaction/audit write fails after a movement, the inventory
-change is compensated (rolled back) instead — there is no read-modify-write race. SKU
+change is compensated (rolled back) instead — there is no read-modify-write race. A
+**transfer** (Phase 19) is the one movement that touches two rows: the source debit is a
+guarded atomic update, the destination credit is an upsert, and the same
+quantity-anchored compensation pattern rolls the pair back if either leg or the ledger
+write fails — so the source never goes negative, the destination is never credited
+without a successful source leg, and a concurrent movement on the same row is never
+clobbered. Both legs share one `reference`. SKU
 and barcode uniqueness is enforced per business by **partial** unique indexes (a
 compound sparse index would wrongly reject a second SKU-less product).
 
@@ -264,7 +271,7 @@ npx expo start              # start Metro dev server (Expo Go / simulator)
 - **Screens (Expo Router, authenticated group):** dashboard (MANAGER+; inventory-health tiles and a "Needs restock" preview), products
   (list/new/edit/detail with search, status/category/location and low/out filters),
   categories, locations, inventory (with low/out views), stock in, stock out, adjust
-  (MANAGER+), inventory history, **AI assistant** (conversation hub, new chat and
+  (MANAGER+), **transfer between locations** (MANAGER+), inventory history, **AI assistant** (conversation hub, new chat and
   conversation threads — read-only; a configured provider is required for real answers),
   profile.
 - **Theming & design system (Phase 18A):** the app renders a semantic **light** and **dark**
@@ -385,3 +392,20 @@ Phase 07 (testing + production hardening) and Phase 08 (owner-directed hardening
   **Zero backend changes.** Verified by mobile android+iOS exports and an emulator smoke
   (light → dark → increased font size); owner-held files (`_layout.js`, `SignOutIcon.jsx`)
   byte-identical. See `docs/DESIGN_SYSTEM.md`.
+- **Phase 19 — Stock Transfers Between Locations:** implemented, verified, commit pending owner
+  sign-off — closes the last §15 gap: `TRANSFER` was reserved in Phase 04 but never implemented, so
+  moving stock between locations required a manual stock-out plus stock-in. `POST
+  /api/inventory/transfer` now performs it as one logical operation producing both legs, reusing the
+  **Phase 07A compensation architecture** — guarded atomic source debit, destination credit by
+  upsert, two `TRANSFER` ledger rows sharing one `reference`, and a quantity-anchored,
+  destination-first rollback if any leg fails. **No MongoDB sessions or multi-document transactions
+  were introduced.** Gated by the **existing** `INVENTORY_MANAGE` permission — no new permission and
+  no RBAC matrix change (OWNER/ADMIN/MANAGER allowed; STAFF 403). Mobile: a `/transfer` screen with
+  source-availability, same-location and over-quantity guards, reached from a role-gated dashboard
+  entry, plus a "Transfer" history filter chip/badge and the `INVENTORY_TRANSFERRED` audit label.
+  Verified by `npm run lint` (0/0), the new Level-2 suite `server/test/phase19-transfers.test.mjs`
+  (15/15, including failure injection, compensation, and the H4/H5 concurrent-mutation case), a
+  re-run of `phase04-inventory` + `phase07a-inventory-compensation` (24/24), and a MANAGER-only
+  emulator smoke. One pre-existing fixture in `phase04-inventory.test.mjs` was updated: it used
+  `?type=TRANSFER` as its example of an *unknown* history type, which Phase 19 makes a real
+  filterable type.

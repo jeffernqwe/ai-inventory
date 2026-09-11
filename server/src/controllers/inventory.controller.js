@@ -1,5 +1,5 @@
 import { parsePagination, pageResult } from '../utils/pagination.js';
-import { isObjectId, optionalObjectId, validateStockMovement } from '../utils/validate.js';
+import { isObjectId, optionalObjectId, validateStockMovement, validateTransfer } from '../utils/validate.js';
 import { throwValidation, invalidId } from '../utils/errors.js';
 import inventoryService from '../services/inventory.service.js';
 
@@ -70,6 +70,24 @@ function parseMovementInput(req, { allowZero = false } = {}) {
   };
 }
 
+/** Validates a transfer body and requires productId + both locations. */
+function parseTransferInput(req) {
+  const v = validateTransfer(req.body ?? {});
+  const problems = [...v.problems];
+  if (!v.productId) problems.push({ field: 'productId', message: 'productId is required' });
+  if (!v.fromLocationId) problems.push({ field: 'fromLocationId', message: 'fromLocationId is required' });
+  if (!v.toLocationId) problems.push({ field: 'toLocationId', message: 'toLocationId is required' });
+  if (problems.length) throwValidation(problems);
+  return {
+    productId: v.productId,
+    fromLocationId: v.fromLocationId,
+    toLocationId: v.toLocationId,
+    quantity: v.quantity,
+    reason: v.reason,
+    reference: v.reference,
+  };
+}
+
 const inventoryController = {
   async list(req, res) {
     const parsed = parseQueryList(req);
@@ -100,6 +118,21 @@ const inventoryController = {
       transaction: out.transaction,
       previousQuantity: out.previousQuantity,
       newQuantity: out.newQuantity,
+    });
+  },
+
+  /** Moves stock between two locations of the caller's business (Phase 19). */
+  async transfer(req, res) {
+    const input = parseTransferInput(req);
+    const out = await inventoryService.transfer(req.user.businessId, req.user.id, input);
+    res.status(201).json({
+      reference: out.reference,
+      transaction: out.transaction,
+      destinationTransaction: out.destinationTransaction,
+      previousQuantity: out.previousQuantity,
+      newQuantity: out.newQuantity,
+      destinationPreviousQuantity: out.destinationPreviousQuantity,
+      destinationNewQuantity: out.destinationNewQuantity,
     });
   },
 

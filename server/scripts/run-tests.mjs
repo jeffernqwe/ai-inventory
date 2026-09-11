@@ -46,6 +46,7 @@ const PURE_DB = [
   'phase06-ai-security.test.mjs',     // session/business isolation on AI routes
   'phase07a-inventory-compensation.test.mjs', // failure-injection hardening
   'phase07b-auth-security.test.mjs',  // business status + auth rate limiting
+  'phase19-transfers.test.mjs',       // stock transfers between locations + compensation
 ];
 const MIXED = [
   'phase06-ai-provider.test.mjs',     // unit: provider selection; db: loop + mapping

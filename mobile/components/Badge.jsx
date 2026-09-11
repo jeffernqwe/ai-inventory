@@ -49,7 +49,14 @@ export function StatusBadge({ status }) {
 
 /** Movement-type badge (history / transaction rows). */
 export function TypeBadge({ type }) {
-  const map = { STOCK_IN: { t: 'Stock in', tone: 'in' }, STOCK_OUT: { t: 'Stock out', tone: 'out' }, ADJUSTMENT: { t: 'Adjustment', tone: 'adjust' } };
+  const map = {
+    STOCK_IN: { t: 'Stock in', tone: 'in' },
+    STOCK_OUT: { t: 'Stock out', tone: 'out' },
+    ADJUSTMENT: { t: 'Adjustment', tone: 'adjust' },
+    // A transfer is neither a gain nor a loss — it moves stock between
+    // locations — so it takes the informational tone (Phase 19).
+    TRANSFER: { t: 'Transfer', tone: 'info' },
+  };
   const m = map[type] ?? { t: type, tone: 'neutral' };
   return <Badge text={m.t} tone={m.tone} />;
 }

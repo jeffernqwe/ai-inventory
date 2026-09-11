@@ -1673,6 +1673,66 @@ were exercised through their validation states and **not submitted**; no busines
 
 ---
 
+# 19. Phase 19 — Stock Transfers Between Locations
+
+## Objective
+
+Close the last gap in the §15 transaction set: `TRANSFER` was reserved from Phase 04 but never
+implemented, so stock could only move between locations by a manual stock-out at one location and a
+manual stock-in at the other. Phase 19 implements the transfer as one atomic logical operation that
+produces both legs, reusing the Phase 07A compensation architecture rather than introducing
+MongoDB sessions/multi-document transactions.
+
+## Scope
+
+Backend:
+
+- `POST /api/inventory/transfer` — `{ productId, fromLocationId, toLocationId, quantity, reason?, reference? }`,
+  returns both legs (`previousQuantity`/`newQuantity` plus `destinationPreviousQuantity`/
+  `destinationNewQuantity`) and the shared `reference`.
+- `inventoryService.transfer()`: guarded atomic source debit (conditional update that fails rather
+  than driving the source negative), destination credit by upsert, two `TRANSFER` ledger rows
+  written in a `for` loop, one `recordAudit` for `INVENTORY_TRANSFERRED`.
+- Quantity-anchored, destination-first compensation on failure (same pattern as Phase 07A): the
+  rollback is anchored to the mutation actually performed, so it can never clobber a concurrent
+  movement and can never drive a quantity negative. A failed first credit deletes the row it
+  created rather than leaving a zero-quantity orphan.
+- Audit failure never compensates a durable movement (H3).
+- `TRANSFER` added to the accepted history `type` filter; `validateTransfer` rejects a same-location
+  transfer and non-positive/non-integer quantities.
+
+Mobile:
+
+- New `/transfer` route + `TransferForm` (two location pickers, source availability `StatCard`,
+  same-location and over-quantity guards), reached from a role-gated dashboard workspace entry.
+- History gains a "Transfer" filter chip, a `TRANSFER` type badge (info tone), and the transfer icon;
+  the Audit screen gains the `INVENTORY_TRANSFERRED` action label.
+- `canTransferStock` mirrors the server gate onto the existing `INVENTORY_MANAGE` permission — **no
+  new permission and no RBAC matrix change**.
+- The row-lookup logic shared by `MovementForm` and `TransferForm` is extracted to
+  `hooks/useInventoryRow.js` (behavior-identical).
+
+## Out of Scope
+
+- No new permission (`INVENTORY_TRANSFER` was explicitly rejected); OWNER/ADMIN/MANAGER allowed,
+  STAFF 403, unauthenticated 401.
+- No MongoDB sessions or multi-document transactions.
+- No partial/quantity-split transfers, no transfer of reserved stock, no approval workflow, no
+  transfer documents or receipts.
+- No change to authentication, tenant isolation, audit DTOs, pagination, ordering, or existing
+  stock-in/out/adjust semantics.
+
+## Definition of Done
+
+- All 14 required Level-2 cases pass in `server/test/phase19-transfers.test.mjs`, including failure
+  injection, compensation, and the concurrency-sensitive source-mutation case (H4/H5).
+- `phase04-inventory.test.mjs` and `phase07a-inventory-compensation.test.mjs` re-run green.
+- Emulator smoke on a single permitted role (MANAGER) confirms entry point, guards, both legs,
+  persisted quantities, and the history badge/filter.
+- One commit: `feat: add stock transfers between locations (Phase 19)`.
+
+---
+
 # 19. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

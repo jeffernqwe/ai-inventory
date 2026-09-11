@@ -6,9 +6,12 @@ import Banner from '../../../../components/Banner';
 import { PoStatusBadge } from '../../../../components/Badge';
 import Button from '../../../../components/Button';
 import Card from '../../../../components/Card';
+import { Icon } from '../../../../components/icons';
 import Input from '../../../../components/Input';
+import ListRow from '../../../../components/ListRow';
 import { CenterLoader, EmptyState, ErrorState, errorText } from '../../../../components/ListState';
 import Screen from '../../../../components/Screen';
+import SectionHeader from '../../../../components/SectionHeader';
 import AccessDenied from '../../../../components/AccessDenied';
 import { purchaseOrdersApi } from '../../../../lib/api';
 import { ApiError } from '../../../../lib/client';
@@ -237,21 +240,22 @@ export default function ReceiveStockScreen() {
 
       {loading ? <Banner type="info" text="Refreshing the order…" /> : null}
 
-      <Text style={styles.sectionTitle}>Receive quantities</Text>
+      <SectionHeader title="Receive quantities" style={styles.section} />
       <View style={styles.lineList}>
         {entries.map((e) => (
           <View key={e.line.productId} style={styles.lineCard}>
-            <Text style={styles.lineName} numberOfLines={1}>
-              {e.line.productName ?? 'Unknown product'}
-            </Text>
-            {e.line.sku ? (
-              <Text style={styles.lineSku} numberOfLines={1}>
-                SKU · {e.line.sku}
-              </Text>
-            ) : null}
-            <Text style={styles.lineQty}>
-              Ordered {formatNumber(e.line.quantityOrdered)} · Received {formatNumber(e.line.quantityReceived)}
-            </Text>
+            <ListRow
+              style={styles.lineRow}
+              leading={<Icon name="cube" color={colors.primary} size={22} />}
+              title={e.line.productName ?? 'Unknown product'}
+              subtitle={e.line.sku ? `SKU · ${e.line.sku}` : undefined}
+              footer={
+                // Ordered/received context stays at body size (never the smaller subtitle size).
+                <Text style={styles.lineQty}>
+                  Ordered {formatNumber(e.line.quantityOrdered)} · Received {formatNumber(e.line.quantityReceived)}
+                </Text>
+              }
+            />
             <Input
               name={e.line.productId}
               label="Receive quantity"
@@ -292,7 +296,8 @@ const createStyles = (colors) =>
     metaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md, marginTop: spacing.sm },
     meta: { ...type.caption, color: colors.textMuted },
     divider: { height: StyleSheet.hairlineWidth, backgroundColor: colors.divider, marginVertical: spacing.lg },
-    sectionTitle: { ...type.h3, color: colors.text, marginTop: spacing.xxl, marginBottom: spacing.md },
+    // SectionHeader brings its own bottom margin; sections keep the top gap.
+    section: { marginTop: spacing.xxl },
     lineList: { gap: spacing.md },
     lineCard: {
       backgroundColor: colors.surface,
@@ -302,8 +307,9 @@ const createStyles = (colors) =>
       padding: spacing.lg,
       marginBottom: spacing.md,
     },
-    lineName: { ...type.body, color: colors.text, fontWeight: '700' },
-    lineSku: { ...type.caption, color: colors.textMuted, marginTop: 2 },
-    lineQty: { ...type.bodySmall, color: colors.textSecondary, marginTop: 6, marginBottom: spacing.md, fontVariant: ['tabular-nums'] },
+    // Preserves the gap between the line header and its quantity input.
+    lineRow: { marginBottom: spacing.md },
+    // Ordered/received context is a key quantity: body size with tabular figures.
+    lineQty: { ...type.body, color: colors.textSecondary, fontVariant: ['tabular-nums'] },
     hint: { ...type.caption, color: colors.textMuted, textAlign: 'center', marginTop: spacing.lg, lineHeight: 18 },
   });

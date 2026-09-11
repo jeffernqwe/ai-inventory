@@ -276,7 +276,7 @@ but can still receive stock; receiving and the claim-first flow are unchanged; n
 Phase 18 is an owner-directed mobile UI extension delivered in approved lettered increments (18A,
 18B, …) after Phase 17. It turns the app into a modern SaaS-style product surface WITHOUT changing
 navigation (the existing native-stack stays; a tab bar would require touching the owner-held
-`(app)/_layout.js` and is deferred) or any backend behavior. **18A, 18B, and 18C are implemented**: a semantic light **and** dark theme system (`palettes` in
+`(app)/_layout.js` and is deferred) or any backend behavior. **18A, 18B, 18C, and 18D are implemented**: a semantic light **and** dark theme system (`palettes` in
 `lib/theme.js` with `colors` kept as the light alias so owner-held chrome keeps working;
 `ThemeProvider`/`useTheme` in `lib/theme-context.jsx`, scheme preference persisted via
 `expo-secure-store`; `userInterfaceStyle: "automatic"`), a behavior-neutral conversion of all 41
@@ -292,8 +292,14 @@ three core list screens (products, inventory, purchase orders) onto one shared l
 `ListScreen`/`ListRow`/`SearchField`/`PressableCard`/`Icon` — adding an optional `footer` and
 `titleStyle` to `ListRow`, `emptyAction`/`loadingLabel` to `ListScreen`, prop forwarding to
 `PressableCard`, and `autoCapitalize` to `SearchField`; behavior (API calls, filters, RBAC gates,
-deep links, navigation, loading/empty/error copy) is unchanged, and no new entry points were added.
-Remaining screen redesigns are later increments (18D core detail screens, 18E secondary screens).
+deep links, navigation, loading/empty/error copy) is unchanged, and no new entry points were added. **18D** brought the four record-detail screens (product, stock
+record, purchase order, receive) onto the same primitives — `SectionHeader` for section headings,
+`StatCard` for key quantities (available/on-hand; received/remaining, with ordered preserved in the
+`sub` line), and the shared `ListRow` grammar for stock rows, PO items, receipts, and receive lines;
+the purchase-order number keeps its `h2` prominence in the same weight family as the list screen. No
+shared primitive needed changing. Behavior is unchanged: no logic, API, payload, navigation, or
+permission edits, and the claim-first receive workflow is presentation-only (every receive function
+is byte-identical). Remaining screen redesigns are a later increment (18E secondary screens).
 Owner-held files (`_layout.js`, `SignOutIcon.jsx`) are
 byte-identical after 18A. See `docs/DESIGN_SYSTEM.md`.
 

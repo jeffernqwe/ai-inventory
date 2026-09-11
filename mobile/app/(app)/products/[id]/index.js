@@ -8,8 +8,11 @@ import Badge, { StatusBadge } from '../../../../components/Badge';
 import Button from '../../../../components/Button';
 import Card from '../../../../components/Card';
 import Ean13Barcode from '../../../../components/Ean13Barcode';
+import { Icon } from '../../../../components/icons';
+import ListRow from '../../../../components/ListRow';
 import { CenterLoader, EmptyState, ErrorState, errorText } from '../../../../components/ListState';
 import Screen from '../../../../components/Screen';
+import SectionHeader from '../../../../components/SectionHeader';
 import { inventoryApi, productsApi } from '../../../../lib/api';
 import { useSession } from '../../../../lib/auth';
 import { confirm } from '../../../../lib/confirm';
@@ -39,20 +42,24 @@ function StockRow({ row }) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   return (
-    <View style={styles.stockRow}>
-      <View style={styles.stockInfo}>
-        <Text style={styles.stockLocation} numberOfLines={1}>
-          {row.location?.name ?? 'Unknown location'}
-        </Text>
-        <Text style={styles.stockQty}>
-          {formatNumber(row.availableQuantity)} available
-        </Text>
-      </View>
-      <View style={styles.stockBadges}>
-        {row.isLowStock ? <Badge text="Low" tone="low" /> : null}
-        {row.isOutOfStock ? <Badge text="Out" tone="danger" /> : null}
-      </View>
-    </View>
+    <Card>
+      <ListRow
+        leading={<Icon name="location" color={colors.primary} size={22} />}
+        title={row.location?.name ?? 'Unknown location'}
+        footer={
+          // Availability stays at body size (never the smaller subtitle size).
+          <Text style={styles.stockQty}>{formatNumber(row.availableQuantity)} available</Text>
+        }
+        right={
+          row.isLowStock || row.isOutOfStock ? (
+            <View style={styles.stockBadges}>
+              {row.isLowStock ? <Badge text="Low" tone="low" /> : null}
+              {row.isOutOfStock ? <Badge text="Out" tone="danger" /> : null}
+            </View>
+          ) : null
+        }
+      />
+    </Card>
   );
 }
 
@@ -217,10 +224,10 @@ export default function ProductDetailScreen() {
 
       {product.barcode && isEan13(product.barcode) ? (
         <Card style={styles.barcodeCard}>
-          <View style={styles.barcodeHeader}>
-            <Text style={styles.barcodeTitle}>Barcode label</Text>
-            {product.barcode.startsWith('2') ? <Badge text="Internal" tone="info" /> : null}
-          </View>
+          <SectionHeader
+            title="Barcode label"
+            action={product.barcode.startsWith('2') ? <Badge text="Internal" tone="info" /> : null}
+          />
           <Ean13Barcode code={product.barcode} />
           <Text style={styles.barcodeHint}>
             EAN-13 preview. Print it or save/share a PDF, then scan the printed code with the scanner to verify it.
@@ -256,7 +263,7 @@ export default function ProductDetailScreen() {
         </View>
       ) : null}
 
-      <Text style={styles.sectionTitle}>Stock</Text>
+      <SectionHeader title="Stock" style={styles.section} />
       {stockLoading ? (
         <Card>
           <CenterLoader label="Loading stock…" />
@@ -275,7 +282,7 @@ export default function ProductDetailScreen() {
 
       {canMove ? (
         <>
-          <Text style={styles.sectionTitle}>Move stock</Text>
+          <SectionHeader title="Move stock" style={styles.section} />
           <View style={styles.actions}>
             <Button title="Stock In" style={styles.flexBtn} onPress={() => router.push({ pathname: '/stock-in', params: moveParams })} />
             <Button title="Stock Out" variant="secondary" style={styles.flexBtn} onPress={() => router.push({ pathname: '/stock-out', params: moveParams })} />
@@ -305,7 +312,6 @@ const createStyles = (colors) => StyleSheet.create({
   description: { ...type.body, color: colors.textSecondary, marginTop: spacing.sm, lineHeight: 22 },
   divider: { height: StyleSheet.hairlineWidth, backgroundColor: colors.divider, marginVertical: spacing.lg },
   barcodeCard: { marginTop: spacing.lg },
-  barcodeHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.md },
   barcodeTitle: { ...type.h3, color: colors.text },
   barcodeHint: { ...type.bodySmall, color: colors.textSecondary, lineHeight: 19, marginTop: spacing.sm },
   barcodeActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.lg },
@@ -314,23 +320,13 @@ const createStyles = (colors) => StyleSheet.create({
   fieldLabel: { ...type.body, color: colors.textMuted },
   fieldValue: { ...type.body, color: colors.text, fontWeight: '600', flexShrink: 1, marginLeft: spacing.lg },
   fieldMono: { fontVariant: ['tabular-nums'] },
-  sectionTitle: { ...type.h3, color: colors.text, marginTop: spacing.xxl, marginBottom: spacing.md },
+  // SectionHeader brings its own bottom margin; sections keep the top gap.
+  section: { marginTop: spacing.xxl },
   actions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.lg },
   flexBtn: { flex: 1 },
   stockList: { gap: spacing.sm },
-  stockRow: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.lg,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  stockInfo: { flex: 1, marginRight: spacing.md },
-  stockLocation: { ...type.body, color: colors.text, fontWeight: '600' },
-  stockQty: { ...type.caption, color: colors.textSecondary, marginTop: 2 },
+  // Availability is a key quantity: body size with tabular figures.
+  stockQty: { ...type.body, color: colors.textSecondary, fontVariant: ['tabular-nums'] },
   stockBadges: { flexDirection: 'row', gap: 6 },
   archivedNote: {
     marginTop: spacing.xxl,

@@ -1404,6 +1404,74 @@ and 130%/160% system font scale, protected-file hashes).
 
 ---
 
+# 18D. Phase 18D — Detail Screens on the Design System
+
+Phase 18D is the detail-screen adoption increment. It brings the four record-detail screens onto the
+18B/18C primitives so a detail screen reads like the dashboard and the lists it was opened from,
+WITHOUT changing behavior: identical API calls and payloads, identical RBAC gates, identical
+navigation targets, and identical loading/error/empty copy.
+
+Note on method: unlike 18C, these screens were already converted to `useTheme()` + semantic tokens by
+18A, so 18D is not a migration — it is adoption of the newer primitives (`SectionHeader`, `StatCard`,
+the shared `ListRow` grammar) that post-date them. No shared primitive needed changing, so no file in
+`mobile/components/` was touched.
+
+### Phase 18D Scope
+
+- `mobile/app/(app)/products/[id]/index.js` — stock rows adopt `Card` + `ListRow` (location icon,
+  location title, availability in the `footer` at body size instead of the previous 12px caption);
+  the barcode card header becomes a `SectionHeader` with the Internal badge in its `action` slot;
+  "Stock"/"Move stock" become `SectionHeader`s. Product fields, the barcode/no-barcode conditionals,
+  and all four handlers (`onToggleArchive`, `onGenerateBarcode`, `onPrintLabel`, `onShareLabel`) are
+  unchanged. Stock rows deliberately remain non-tappable — no new entry point.
+- `mobile/app/(app)/inventory/[id].js` — available/on-hand lead the screen as a 2-up `StatCard` grid
+  (the dashboard's existing grid pattern), with the out-of-stock `danger` tone preserved via the
+  StatCard `tone` prop; `Reserved` and the remaining metadata stay as definition rows; "Move stock"
+  becomes a `SectionHeader`. Values and business meaning are unchanged.
+- `mobile/app/(app)/purchase-orders/[id]/index.js` — received/remaining lead as a 2-up `StatCard`
+  grid with `Ordered` preserved through the `sub` line ("of N ordered"); the PO number keeps its
+  `h2` prominence and gains the `fontWeight: 800` weight family already used by the list screen; the
+  four section headings become `SectionHeader`s; items adopt `ListRow` (product icon, SKU subtitle,
+  ordered/received/remaining progress in the `footer` at body size, existing row separators kept via
+  `style`); receipts adopt `Card` + `ListRow` with the received unit count at body size instead of
+  12px caption. The pending-claims `Banner`, `statusNote`, `canViewPurchaseOrders` gate, and
+  `onIssue`/`onCancel` are unchanged.
+- `mobile/app/(app)/purchase-orders/[id]/receive.js` — **presentation only**. The "Receive quantities"
+  heading becomes a `SectionHeader` and each line header becomes a `ListRow` (product icon, SKU
+  subtitle, ordered/received context in the `footer` at body size); the quantity `Input` and its
+  `name`/`error`/`helper` wiring are untouched. Every function is byte-identical: `str`,
+  `offeredQuantity`, `receivableLines`, `defaultQuantities`, `entry`, `CODE_MESSAGES`, `load`,
+  `onChangeQty`, `submit`, both early-return branches, and the `AccessDenied` guard. The claim-first
+  workflow, quantities, validation, status transitions, concurrency handling, and the
+  `RECEIVE_CONFLICT` partial-apply recovery are unchanged.
+- Docs: this roadmap section, `docs/DESIGN_SYSTEM.md` adoption status, `CLAUDE.md` phase list.
+
+### Explicitly Out of Scope
+
+Secondary screens (Users, Audit, History, Categories, Locations, Suppliers, Profile, scan, AI) are
+18E. No new primitive, no edit to any `mobile/components/` file, no new feature or entry point, no
+new navigation. Owner-held files (`_layout.js`, `SignOutIcon.jsx`) untouched. No backend, model,
+RBAC, audit, or server-test change. No new dependency. No `README.md` or
+`docs/SYSTEM_SPECIFICATION.md` change.
+
+### Verified
+
+See the Phase 18D QA report (static checks, android + iOS exports, emulator smoke across light/dark
+and 130%/160% system font scale, RBAC/navigation/validation branches, protected-file hashes, and the
+frozen-logic diff evidence for the receive workflow). A real receive was NOT executed — it would
+mutate inventory — so `submit()` is reported NOT EXERCISED.
+
+## Definition of Done
+
+- The four detail screens render from the shared primitives with the same row grammar, section
+  headers, and key-quantity treatment as the dashboard and the 18C lists.
+- Behavior is preserved exactly: API calls and payloads, RBAC gates, navigation targets, and
+  loading/error/empty copy; the claim-first receive logic is byte-identical.
+- No `mobile/components/` change; no backend/test change; owner-held files untouched; android + iOS
+  exports green.
+
+---
+
 # 19. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

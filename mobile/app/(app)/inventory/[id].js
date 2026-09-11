@@ -7,6 +7,8 @@ import Button from '../../../components/Button';
 import Card from '../../../components/Card';
 import { CenterLoader, ErrorState, errorText } from '../../../components/ListState';
 import Screen from '../../../components/Screen';
+import SectionHeader from '../../../components/SectionHeader';
+import StatCard from '../../../components/StatCard';
 import { inventoryApi } from '../../../lib/api';
 import { isSessionError, useSession } from '../../../lib/auth';
 import { formatDateTime, formatNumber } from '../../../lib/format';
@@ -14,14 +16,14 @@ import { canAdjustStock } from '../../../lib/permissions';
 import { radius, spacing, type } from '../../../lib/theme';
 import { useTheme } from '../../../lib/theme-context';
 
-function Row({ label, value, mono, danger }) {
+function Row({ label, value, mono }) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   if (value == null || value === '') return null;
   return (
     <View style={styles.fieldRow}>
       <Text style={styles.fieldLabel}>{label}</Text>
-      <Text style={[styles.fieldValue, mono && styles.fieldMono, danger && styles.fieldDanger]} numberOfLines={1}>
+      <Text style={[styles.fieldValue, mono && styles.fieldMono]} numberOfLines={1}>
         {value}
       </Text>
     </View>
@@ -93,15 +95,27 @@ export default function InventoryRowScreen() {
         <Row label="Product SKU" value={row.product?.sku} mono />
         <Row label="Unit" value={row.product?.unit} />
         <Row label="Minimum stock" value={row.product?.minimumStock != null ? formatNumber(row.product.minimumStock) : null} mono />
-        <Row label="On hand" value={formatNumber(row.quantity)} mono />
         <Row label="Reserved" value={formatNumber(row.reservedQuantity)} mono />
-        <Row label="Available" value={formatNumber(row.availableQuantity)} mono danger={row.isOutOfStock} />
         <Row label="Updated" value={formatDateTime(row.updatedAt)} />
       </Card>
 
+      {/* Key quantities lead the screen; Reserved stays in the definition list. */}
+      <View style={styles.statGrid}>
+        <View style={styles.statCell}>
+          <StatCard
+            label="Available"
+            value={formatNumber(row.availableQuantity)}
+            tone={row.isOutOfStock ? 'danger' : 'default'}
+          />
+        </View>
+        <View style={styles.statCell}>
+          <StatCard label="On hand" value={formatNumber(row.quantity)} />
+        </View>
+      </View>
+
       {productActive ? (
         <>
-          <Text style={styles.sectionTitle}>Move stock</Text>
+          <SectionHeader title="Move stock" style={styles.section} />
           <View style={styles.actions}>
             <Button title="Stock In" style={styles.flexBtn} onPress={() => router.push({ pathname: '/stock-in', params: moveParams })} />
             <Button title="Stock Out" variant="secondary" style={styles.flexBtn} onPress={() => router.push({ pathname: '/stock-out', params: moveParams })} />
@@ -128,8 +142,10 @@ const createStyles = (colors) => StyleSheet.create({
   fieldLabel: { ...type.body, color: colors.textMuted },
   fieldValue: { ...type.body, color: colors.text, fontWeight: '600', flexShrink: 1, marginLeft: spacing.lg },
   fieldMono: { fontVariant: ['tabular-nums'] },
-  fieldDanger: { color: colors.danger },
-  sectionTitle: { ...type.h3, color: colors.text, marginTop: spacing.xxl, marginBottom: spacing.md },
+  // SectionHeader brings its own bottom margin; sections keep the top gap.
+  section: { marginTop: spacing.xxl },
+  statGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md, marginTop: spacing.lg },
+  statCell: { flexGrow: 1, flexBasis: '46%', minWidth: '46%' },
   actions: { flexDirection: 'row', gap: spacing.sm },
   flexBtn: { flex: 1 },
   archivedNote: {

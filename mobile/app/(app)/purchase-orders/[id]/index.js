@@ -6,9 +6,13 @@ import Banner from '../../../../components/Banner';
 import { PoStatusBadge } from '../../../../components/Badge';
 import Button from '../../../../components/Button';
 import Card from '../../../../components/Card';
+import { Icon } from '../../../../components/icons';
+import ListRow from '../../../../components/ListRow';
 import { CenterLoader, EmptyState, ErrorState, errorText } from '../../../../components/ListState';
 import { poErrorMessage } from '../../../../components/PoForm';
 import Screen from '../../../../components/Screen';
+import SectionHeader from '../../../../components/SectionHeader';
+import StatCard from '../../../../components/StatCard';
 import AccessDenied from '../../../../components/AccessDenied';
 import { purchaseOrdersApi } from '../../../../lib/api';
 import { isSessionError, useSession } from '../../../../lib/auth';
@@ -147,16 +151,25 @@ export default function PurchaseOrderDetailScreen() {
         <Row label="Expected" value={po.expectedAt ? formatDate(po.expectedAt) : null} />
         <Row label="Created" value={formatDateTime(po.createdAt)} />
         {totals.estimatedCost ? <Row label="Est. cost" value={formatMoney(totals.estimatedCost)} mono /> : null}
-
-        <View style={styles.divider} />
-        <Row label="Ordered" value={formatNumber(totals.quantityOrdered)} mono />
-        <Row label="Received" value={formatNumber(totals.quantityReceived)} mono />
-        <Row label="Remaining" value={formatNumber(totals.remainingQuantity)} mono />
       </Card>
+
+      {/* Key progress figures lead; Ordered is preserved in the Received sub. */}
+      <View style={styles.statGrid}>
+        <View style={styles.statCell}>
+          <StatCard
+            label="Received"
+            value={formatNumber(totals.quantityReceived)}
+            sub={`of ${formatNumber(totals.quantityOrdered)} ordered`}
+          />
+        </View>
+        <View style={styles.statCell}>
+          <StatCard label="Remaining" value={formatNumber(totals.remainingQuantity)} />
+        </View>
+      </View>
 
       {canManage && (po.status === 'DRAFT' || po.status === 'OPEN') ? (
         <>
-          <Text style={styles.sectionTitle}>Manage</Text>
+          <SectionHeader title="Manage" style={styles.section} />
           <View style={styles.manageRow}>
             {po.status === 'DRAFT' ? (
               <Button title="Edit" variant="secondary" onPress={() => router.push(`/purchase-orders/${po.id}/edit`)} style={styles.manageBtn} />
@@ -169,33 +182,33 @@ export default function PurchaseOrderDetailScreen() {
         </>
       ) : null}
 
-      <Text style={styles.sectionTitle}>Items</Text>
+      <SectionHeader title="Items" style={styles.section} />
       <Card>
         {(po.items ?? []).length === 0 ? (
           <EmptyState title="No items" message="This order has no product lines." />
         ) : (
           <View style={styles.itemList}>
             {(po.items ?? []).map((item) => (
-              <View key={item.productId} style={styles.itemRow}>
-                <Text style={styles.itemName} numberOfLines={1}>
-                  {item.productName ?? 'Unknown product'}
-                </Text>
-                {item.sku ? (
-                  <Text style={styles.itemSku} numberOfLines={1}>
-                    SKU · {item.sku}
+              <ListRow
+                key={item.productId}
+                style={styles.itemRow}
+                leading={<Icon name="cube" color={colors.primary} size={22} />}
+                title={item.productName ?? 'Unknown product'}
+                subtitle={item.sku ? `SKU · ${item.sku}` : undefined}
+                footer={
+                  // Line progress stays at body size (never the smaller subtitle size).
+                  <Text style={styles.itemQty}>
+                    Ordered {formatNumber(item.quantityOrdered)} · Received {formatNumber(item.quantityReceived)} · Remaining{' '}
+                    {formatNumber(item.remainingQuantity)}
                   </Text>
-                ) : null}
-                <Text style={styles.itemQty}>
-                  Ordered {formatNumber(item.quantityOrdered)} · Received {formatNumber(item.quantityReceived)} · Remaining{' '}
-                  {formatNumber(item.remainingQuantity)}
-                </Text>
-              </View>
+                }
+              />
             ))}
           </View>
         )}
       </Card>
 
-      <Text style={styles.sectionTitle}>Receiving history</Text>
+      <SectionHeader title="Receiving history" style={styles.section} />
       {(po.receipts ?? []).length === 0 ? (
         <Card>
           <EmptyState title="Nothing received yet" message="Stock received against this order will appear here." />
@@ -206,10 +219,14 @@ export default function PurchaseOrderDetailScreen() {
             const units = (receipt.lines ?? []).reduce((sum, l) => sum + (l.quantity || 0), 0);
             return (
               <Card key={`${receipt.receivedAt}-${idx}`} style={styles.receiptCard}>
-                <View style={styles.receiptTop}>
-                  <Text style={styles.receiptDate}>{formatDateTime(receipt.receivedAt)}</Text>
-                  <Text style={styles.receiptUnits}>{formatNumber(units)} unit(s)</Text>
-                </View>
+                <ListRow
+                  leading={<Icon name="stockIn" color={colors.success} size={22} />}
+                  title={formatDateTime(receipt.receivedAt)}
+                  right={
+                    // Units received is a key quantity: body size, tabular figures.
+                    <Text style={styles.receiptUnits}>{formatNumber(units)} unit(s)</Text>
+                  }
+                />
                 {receipt.reference ? (
                   <Text style={styles.receiptRef} numberOfLines={1}>
                     Reference · {receipt.reference}
@@ -231,7 +248,7 @@ export default function PurchaseOrderDetailScreen() {
       {canReceive ? (
         po.status === 'OPEN' ? (
           <>
-            <Text style={styles.sectionTitle}>Receive stock</Text>
+            <SectionHeader title="Receive stock" style={styles.section} />
             <Button title="Receive Stock" full onPress={() => router.push(`/purchase-orders/${po.id}/receive`)} />
           </>
         ) : note ? (
@@ -247,7 +264,9 @@ export default function PurchaseOrderDetailScreen() {
 const createStyles = (colors) =>
   StyleSheet.create({
     titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md },
-    number: { ...type.h2, color: colors.text, flex: 1, fontVariant: ['tabular-nums'] },
+    // PO number keeps its existing emphasis (bold, tabular figures) — the same
+    // weight family the purchase-order list uses.
+    number: { ...type.h2, color: colors.text, flex: 1, fontWeight: '800', fontVariant: ['tabular-nums'] },
     notes: { ...type.body, color: colors.textSecondary, marginTop: spacing.sm, lineHeight: 22 },
     divider: { height: StyleSheet.hairlineWidth, backgroundColor: colors.divider, marginVertical: spacing.lg },
     fieldRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 5 },
@@ -257,17 +276,18 @@ const createStyles = (colors) =>
     fieldDanger: { color: colors.danger },
     manageRow: { flexDirection: 'row', gap: spacing.md },
     manageBtn: { flex: 1 },
-    sectionTitle: { ...type.h3, color: colors.text, marginTop: spacing.xxl, marginBottom: spacing.md },
+    // SectionHeader brings its own bottom margin; sections keep the top gap.
+    section: { marginTop: spacing.xxl },
+    statGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md, marginTop: spacing.lg },
+    statCell: { flexGrow: 1, flexBasis: '46%', minWidth: '46%' },
     itemList: { gap: spacing.lg },
     itemRow: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.divider, paddingBottom: spacing.lg },
-    itemName: { ...type.body, color: colors.text, fontWeight: '700' },
-    itemSku: { ...type.caption, color: colors.textMuted, marginTop: 2 },
-    itemQty: { ...type.bodySmall, color: colors.textSecondary, marginTop: 6, fontVariant: ['tabular-nums'] },
+    // Line progress is a key quantity: body size with tabular figures.
+    itemQty: { ...type.body, color: colors.textSecondary, fontVariant: ['tabular-nums'] },
     receiptList: { gap: spacing.sm },
     receiptCard: { padding: spacing.md },
-    receiptTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md },
-    receiptDate: { ...type.body, color: colors.text, fontWeight: '600', flexShrink: 1 },
-    receiptUnits: { ...type.caption, color: colors.textMuted, fontVariant: ['tabular-nums'] },
+    // Units received is a key quantity: body size with tabular figures.
+    receiptUnits: { ...type.body, color: colors.textSecondary, fontVariant: ['tabular-nums'] },
     receiptRef: { ...type.caption, color: colors.textMuted, marginTop: 4 },
     receiptLines: { marginTop: 6, gap: 2 },
     receiptLine: { ...type.caption, color: colors.textSecondary, fontVariant: ['tabular-nums'] },

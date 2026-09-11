@@ -170,4 +170,9 @@ Screens never reference raw glyph names; icon swap = one edit in `icons.js`.
   `ListScreen`/`ListRow`/`SearchField`/`PressableCard`/`Icon` on one shared row grammar; `ListRow`
   gains `footer`/`titleStyle`, `ListScreen` gains `emptyAction`/`loadingLabel`, `PressableCard`
   forwards props, `SearchField` gains `autoCapitalize`. Behavior unchanged.
-- **18D+ (planned)**: core detail screens (18D), then the secondary screens (18E).
+- **18D**: the four record-detail screens (product, stock record, purchase order, receive) adopt
+  `SectionHeader`/`StatCard`/`ListRow`: key quantities lead each screen at the `stat` token, row
+  grammars match the lists, and definition rows keep their label/value form. No `mobile/components/`
+  change was needed. Behavior unchanged — no logic, API, navigation, or permission edits, and the
+  claim-first receive is presentation-only.
+- **18E (planned)**: the secondary screens.

@@ -856,7 +856,7 @@ its scope and verified status when it completes.
 
 ### Scope
 
-Implemented (approved; commit pending owner sign-off):
+Implemented and committed (`99e26ad`):
 
 - `Business.planCode` — which catalog plan a business is on. Defaults to `FOUNDATION` (the
   unlimited V1 baseline), so existing and newly registered businesses keep current behavior;
@@ -1008,11 +1008,11 @@ no route exposed it — a business could not create ADMIN/MANAGER/STAFF accounts
 employee through the product. This phase delivers the secure, business-scoped User Management API for
 OWNER/ADMIN that closes that gap, reusing the existing permission key, `User` model (role/status
 enums + global unique email index), validation, error, audit, and bcrypt conventions. Delivered as a
-single approved increment; nothing is committed or pushed (owner sign-off pending).
+single approved increment; committed as `5b2cf66`.
 
 ## Scope
 
-Implemented (approved; commit pending owner sign-off):
+Implemented and committed (`5b2cf66`):
 
 - `/api/users` routes — `GET /` (list, paginated with `q` on name/email and `status` filter),
   `POST /` (create), `GET /:id`, `PATCH /:id` (role and/or status). Every route requires
@@ -1084,7 +1084,7 @@ OWNER/ADMIN. Read-only by design — no write routes, no model change, no new de
 
 ## Scope
 
-Implemented (approved; commit pending owner sign-off):
+Implemented and committed (`ddea22e`):
 
 - `GET /api/audit` — newest-first, paginated `{ items, page, limit, total, totalPages }`. Requires
   `requireAuth` + a new `requirePermission(audit.view)`. Filters: `action` (validated against
@@ -1150,7 +1150,7 @@ change. Read + receive behaviour is preserved exactly.
 
 ## Scope
 
-Implemented (approved; commit pending owner sign-off):
+Implemented and committed (`9249633`):
 
 - `mobile/app/(app)/suppliers.js` — Suppliers manage screen reusing the shared `RefManage` pattern
   (search, Active/Archived chips, pagination, archive/restore) with an additive `fields` prop that
@@ -1216,8 +1216,8 @@ button is a follow-up decision. Owner-held files (`_layout.js`, `SignOutIcon.jsx
 - Receiving and the claim-first flow are unchanged; no `PARTIALLY_RECEIVED` status was introduced.
 - `npm run lint` 0/0 and the full backend suite 350/350 (regression check only — no server change).
 - Mobile android + iOS exports green; emulator smoke evidence captured in `.smoke/p17-*`, untracked.
-- Docs updated (roadmap incl. renumbering, CLAUDE.md, README API table, spec §31); commit pending
-  owner sign-off; nothing pushed.
+- Docs updated (roadmap incl. renumbering, CLAUDE.md, README API table, spec §31); committed as
+  `9249633`; nothing pushed.
 
 # 18. Phase 18 — SaaS-style UI Foundation, Light/Dark Theme System & Readability
 
@@ -1237,7 +1237,7 @@ redesigns that adopt the new primitives are later increments (18B+).
 
 ### Phase 18A Scope
 
-Implemented (approved; commit pending owner sign-off):
+Implemented and committed (`263b857`):
 
 - `mobile/lib/theme.js` — semantic token set grows a full dark palette. `palettes = { light, dark }`
   with light/dark values for surfaces, text, brand, status, and stock-state chips. `colors` is kept
@@ -1300,7 +1300,107 @@ state-management dependency; `@expo/vector-icons` and `expo-system-ui` are the o
 - Layouts survive increased system font size without clipping primary actions (verified on the
   emulator).
 - No backend/test changes; owner-held files untouched; android + iOS exports green.
-- Commit pending owner review of Phase 18A; nothing pushed.
+- Committed as `263b857` after owner review of the Phase 18A QA report; nothing pushed.
+
+---
+
+# 18B. Phase 18B — Dashboard Redesign & Navigation Hierarchy
+
+Phase 18B is the first adoption increment after the 18A foundation. It re-lays-out the dashboard on
+the 18A primitives WITHOUT changing any data source, navigation target, or backend behavior: the
+summary numbers, inventory-health section, "Needs restock" preview, and every existing route are
+the same, presented with a clearer hierarchy.
+
+### Phase 18B Scope
+
+Implemented and committed (`3dd75dd`):
+
+- `mobile/app/(app)/dashboard.js` — rebuilt on `StatCard` (large `stat` value token), `SectionHeader`,
+  `ListRow`, `Icon`, `Button`, and `Card`, with a grouped navigation hierarchy so primary
+  destinations read as first-class entries instead of a flat tile grid. Every existing route and
+  permission gate is preserved; the underlying API calls are unchanged.
+- `mobile/components/icons.js` — added the semantic icon names the new dashboard hierarchy needs.
+
+### Explicitly Out of Scope
+
+No list-screen redesigns (they are 18C). No tab bar / navigation-structure change. No backend,
+model, RBAC, audit, or server-test change. No new dependency. Owner-held files (`_layout.js`,
+`SignOutIcon.jsx`) untouched.
+
+### Verified
+
+- Mobile: `npx expo export` android and iOS both green.
+- Protected owner-held files sha256-identical.
+- Android emulator visual QA (light, dark, 130% and 160% system font scale): hierarchy, readability,
+  ≥ 44px targets, status text + color, RBAC-gated entries, and navigation targets all PASS. Evidence
+  under `.smoke/` (untracked).
+
+## Definition of Done
+
+- The dashboard presents the same information and the same destinations with a clearer hierarchy,
+  built from the 18A primitives.
+- Light and dark palettes and increased system font sizes all render without clipping.
+- No backend/test changes; owner-held files untouched; android + iOS exports green.
+- Committed as `3dd75dd` after owner approval; nothing pushed.
+
+---
+
+# 18C. Phase 18C — Core List Screens on the Design System
+
+Phase 18C is the list-screen adoption increment. It migrates the three core list screens onto the
+18A primitives so list rows share one visual grammar and key quantities stay readable for older
+business users, WITHOUT changing behavior: identical API calls and query params, identical RBAC
+gates, identical deep links, identical navigation targets, and identical loading/empty/error copy.
+
+### Phase 18C Scope
+
+- `mobile/components/ListScreen.jsx` — fixed a latent double-padding defect (the internal `Screen`
+  applied its own `padded` inset on top of the `FlatList` content padding, yielding 32px instead of
+  16px) by rendering the shell with `padded={false}`; added the missing `emptyAction` passthrough
+  and an optional `loadingLabel` (defaults to the previous generic `'Loading…'`). Never rendered
+  before this phase because `ListScreen` had no adopters.
+- `mobile/components/ListRow.jsx` — added an optional `footer` slot so important quantities are not
+  forced down to the smaller subtitle size, and an optional, purely presentational `titleStyle`
+  override (used to keep the purchase-order number at its existing `fontWeight: 800` emphasis).
+  Both are backward compatible; existing dashboard callers are unaffected.
+- `mobile/components/Card.jsx` — `PressableCard` forwards extra props to the underlying `Pressable`
+  so `accessibilityRole="button"` survives adoption (without this, migrated rows would silently lose
+  their button role). Additive and backward compatible.
+- `mobile/components/SearchField.jsx` — `autoCapitalize` becomes an optional prop (default `'none'`,
+  the previous hardcoded value) so the PO-number search keeps its existing `'characters'` behavior.
+- `mobile/app/(app)/products/index.js` — first migration; adopted `ListScreen`/`ListRow`/`SearchField`
+  /`Chip`/`Button`/`PressableCard`/`Icon`. Search, status chips, stock-state chips, category/location
+  filters, debounce, pagination, pull-to-refresh, focus refetch, and the `products.manage` gate are
+  unchanged. The "New product" affordance keeps its existing right-aligned position.
+- `mobile/app/(app)/inventory.js` — adopted the same primitives; low/out availability now renders as
+  a body-size `footer` instead of being pushed into the 13px subtitle. The `?status=low|out` deep
+  links, filter semantics, empty-state copy, and `ButtonRow` scan/PO actions are unchanged.
+- `mobile/app/(app)/purchase-orders/index.js` — adopted the same primitives; the PO number keeps its
+  existing emphasis via `titleStyle` and the ordered/received progress renders at body size. The
+  `canViewPurchaseOrders` early-return gate, status filter, debounce, and empty-state copy are
+  unchanged. No new "New purchase order" entry point was added (the dashboard quick action remains
+  the entry point).
+- Docs: this roadmap section, `docs/DESIGN_SYSTEM.md` adoption status, `CLAUDE.md` phase list.
+
+### Explicitly Out of Scope
+
+Core detail screens are 18D; secondary screens (Users, Audit, History, Categories, Locations,
+Suppliers, Profile) are 18E. No new entry points or features. No backend, model, RBAC, audit, or
+server-test change. No new dependency. No navigation or tab-bar change. Owner-held files
+(`_layout.js`, `SignOutIcon.jsx`) untouched.
+
+### Verified
+
+See the Phase 18C QA report (static checks, android + iOS exports, emulator smoke across light/dark
+and 130%/160% system font scale, protected-file hashes).
+
+## Definition of Done
+
+- The three core list screens render from the shared list primitives with one consistent row
+  grammar, and key quantities/status read at body size or larger.
+- Behavior is preserved exactly: API calls, query params, RBAC gates, deep links, navigation
+  targets, retry/refresh/pagination, and loading/empty/error copy.
+- No backend/test changes; owner-held files untouched; android + iOS exports green.
 
 ---
 
@@ -1441,7 +1541,7 @@ phase 10A: commercialization foundation complete
 phase 10B: commercialization documentation close-out complete
 phase 11A: inventory intelligence + restock alerts complete
 phase 11B: inventory intelligence documentation close-out complete
-phase 14A: user management foundation complete (pending owner sign-off)
+phase 14A: user management foundation complete
 ```
 
 Before committing:

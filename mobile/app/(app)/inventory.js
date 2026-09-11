@@ -1,12 +1,15 @@
 import { useCallback, useMemo, useState } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
-import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
 import Badge from '../../components/Badge';
 import Button, { ButtonRow } from '../../components/Button';
+import { PressableCard } from '../../components/Card';
 import Chip from '../../components/Chip';
-import Input from '../../components/Input';
-import { EmptyState, ErrorState, LoadingBlock, errorText } from '../../components/ListState';
+import { Icon } from '../../components/icons';
+import ListRow from '../../components/ListRow';
+import ListScreen from '../../components/ListScreen';
+import SearchField from '../../components/SearchField';
 import SelectField from '../../components/SelectField';
 import { inventoryApi, locationsApi } from '../../lib/api';
 import { useSession } from '../../lib/auth';
@@ -15,39 +18,11 @@ import useDebounced from '../../hooks/useDebounced';
 import { useActiveRef } from '../../hooks/useReferences';
 import usePagedList from '../../hooks/usePagedList';
 import useRefetchOnFocus from '../../hooks/useRefetchOnFocus';
-import { radius, spacing, type } from '../../lib/theme';
+import { spacing, type } from '../../lib/theme';
 import { useTheme } from '../../lib/theme-context';
 
 function str(v) {
   return Array.isArray(v) ? v[0] : v;
-}
-
-function StockRow({ item }) {
-  const { colors } = useTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
-  const archived = item.product?.status === 'ARCHIVED';
-  return (
-    <Pressable style={styles.row} onPress={() => router.push(`/inventory/${item.id}`)} accessibilityRole="button">
-      <View style={styles.rowTop}>
-        <Text style={styles.rowName} numberOfLines={1}>
-          {item.product?.name ?? 'Unknown product'}
-        </Text>
-        <View style={styles.badges}>
-          {item.isLowStock ? <Badge text="Low" tone="low" /> : null}
-          {item.isOutOfStock ? <Badge text="Out" tone="danger" /> : null}
-        </View>
-      </View>
-      <View style={styles.metaRow}>
-        <Text style={styles.meta} numberOfLines={1}>
-          {item.location?.name ?? 'No location'}
-        </Text>
-        {archived ? <Text style={styles.meta}>Archived</Text> : null}
-      </View>
-      <Text style={styles.avail}>
-        {formatNumber(item.availableQuantity)} available · {formatNumber(item.quantity)} on hand
-      </Text>
-    </Pressable>
-  );
 }
 
 export default function InventoryScreen() {
@@ -87,10 +62,21 @@ export default function InventoryScreen() {
   const header = (
     <View>
       <ButtonRow style={styles.actionRow}>
-        <Button title="📷  Scan" variant="secondary" style={styles.flexBtn} onPress={() => router.push('/scan')} />
-        <Button title="Purchase Orders" variant="secondary" style={styles.flexBtn} onPress={() => router.push('/purchase-orders')} />
+        <Button title="Scan" icon="scan" variant="secondary" style={styles.flexBtn} onPress={() => router.push('/scan')} />
+        <Button
+          title="Purchase Orders"
+          icon="receipt"
+          variant="secondary"
+          style={styles.flexBtn}
+          onPress={() => router.push('/purchase-orders')}
+        />
       </ButtonRow>
-      <Input value={q} onChangeText={setQ} placeholder="Search by product name, SKU or barcode…" name="q" autoCapitalize="none" />
+      <SearchField
+        value={q}
+        onChangeText={setQ}
+        placeholder="Search by product name, SKU or barcode…"
+        style={styles.search}
+      />
       <View style={styles.chipRow}>
         <Chip label="Low stock" tone="warning" selected={low} onPress={() => setLow((v) => !v)} />
         <Chip label="Out of stock" tone="danger" selected={out} onPress={() => setOut((v) => !v)} />
@@ -106,53 +92,59 @@ export default function InventoryScreen() {
     return 'No stock records yet — stock in a product at a location to create one.';
   }
 
-  const renderItem = ({ item }) => <StockRow item={item} />;
+  const renderItem = ({ item }) => {
+    const archived = item.product?.status === 'ARCHIVED';
+    return (
+      <PressableCard onPress={() => router.push(`/inventory/${item.id}`)} accessibilityRole="button">
+        <ListRow
+          leading={<Icon name="cube" color={colors.primary} size={22} />}
+          title={item.product?.name ?? 'Unknown product'}
+          subtitle={[item.location?.name ?? 'No location', archived ? 'Archived' : null].filter(Boolean).join(' · ')}
+          footer={
+            // Key quantities stay at body size (never the smaller subtitle size).
+            <Text style={styles.quantity}>
+              {formatNumber(item.availableQuantity)} available · {formatNumber(item.quantity)} on hand
+            </Text>
+          }
+          right={
+            item.isLowStock || item.isOutOfStock ? (
+              <View style={styles.badges}>
+                {item.isLowStock ? <Badge text="Low" tone="low" /> : null}
+                {item.isOutOfStock ? <Badge text="Out" tone="danger" /> : null}
+              </View>
+            ) : null
+          }
+        />
+      </PressableCard>
+    );
+  };
 
   return (
-    <View style={styles.flex}>
-      {list.loading && list.items.length === 0 ? (
-        <FlatList data={[]} renderItem={null} ListHeaderComponent={header} ListEmptyComponent={<LoadingBlock label="Loading inventory…" />} contentContainerStyle={styles.content} />
-      ) : list.error && list.items.length === 0 ? (
-        <FlatList data={[]} renderItem={null} ListHeaderComponent={header} ListEmptyComponent={<ErrorState title="Couldn't load inventory" message={errorText(list.error)} onRetry={list.reload} />} contentContainerStyle={styles.content} />
-      ) : (
-        <FlatList
-          data={list.items}
-          keyExtractor={(item) => item.id}
-          renderItem={renderItem}
-          ListHeaderComponent={header}
-          ListEmptyComponent={<EmptyState title="Nothing to show" message={emptyMessage()} />}
-          ItemSeparatorComponent={() => <View style={styles.separator} />}
-          contentContainerStyle={styles.content}
-          refreshControl={<RefreshControl refreshing={list.refreshing} onRefresh={list.refresh} tintColor={colors.primary} colors={[colors.primary]} />}
-          onEndReached={list.loadMore}
-          onEndReachedThreshold={0.4}
-          ListFooterComponent={list.loadingMore ? <LoadingBlock label="Loading more…" /> : null}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        />
-      )}
-    </View>
+    <ListScreen
+      items={list.items}
+      keyExtractor={(item) => item.id}
+      renderItem={renderItem}
+      header={header}
+      loading={list.loading}
+      error={list.error}
+      onRetry={list.reload}
+      refreshing={list.refreshing}
+      onRefresh={list.refresh}
+      onEndReached={list.loadMore}
+      loadingMore={list.loadingMore}
+      loadingLabel="Loading inventory…"
+      emptyTitle="Nothing to show"
+      emptyMessage={emptyMessage()}
+    />
   );
 }
 
-const createStyles = (colors) => StyleSheet.create({
-  flex: { flex: 1 },
-  content: { padding: spacing.lg, paddingBottom: spacing.huge, flexGrow: 1 },
-  actionRow: { marginBottom: spacing.lg },
-  flexBtn: { flex: 1 },
-  chipRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.lg },
-  row: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.lg,
-  },
-  rowTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
-  rowName: { ...type.body, fontWeight: '700', color: colors.text, flexShrink: 1 },
-  badges: { flexDirection: 'row', gap: 6 },
-  metaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md, marginTop: 6 },
-  meta: { ...type.caption, color: colors.textMuted },
-  avail: { ...type.body, color: colors.textSecondary, marginTop: 8, fontVariant: ['tabular-nums'] },
-  separator: { height: spacing.md },
-});
+const createStyles = (colors) =>
+  StyleSheet.create({
+    actionRow: { marginBottom: spacing.lg },
+    flexBtn: { flex: 1 },
+    search: { marginBottom: spacing.lg },
+    chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.lg },
+    quantity: { ...type.body, color: colors.textSecondary, fontVariant: ['tabular-nums'] },
+    badges: { alignItems: 'flex-end', gap: spacing.xs },
+  });

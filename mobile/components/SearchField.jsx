@@ -26,8 +26,10 @@ const createStyles = (colors) =>
 /**
  * Search input used in list headers: search icon + text field on a muted
  * surface. Keeps a 44px touch target and stays readable at larger font sizes.
+ * `autoCapitalize` defaults to 'none'; callers searching codes that are shown
+ * in upper case (e.g. purchase-order numbers) can ask for 'characters'.
  */
-export function SearchField({ value, onChangeText, placeholder = 'Search…', autoFocus, style }) {
+export function SearchField({ value, onChangeText, placeholder = 'Search…', autoCapitalize = 'none', autoFocus, style }) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   return (
@@ -39,7 +41,7 @@ export function SearchField({ value, onChangeText, placeholder = 'Search…', au
         onChangeText={onChangeText}
         placeholder={placeholder}
         placeholderTextColor={colors.placeholder}
-        autoCapitalize="none"
+        autoCapitalize={autoCapitalize}
         autoCorrect={false}
         autoFocus={autoFocus}
         returnKeyType="search"

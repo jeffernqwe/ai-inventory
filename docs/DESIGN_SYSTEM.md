@@ -135,7 +135,7 @@ touch target** (48px preferred) and an accessible label.
 | `ListRow`        | Leading icon + title/subtitle + trailing element              |
 | `StatCard`       | Key-number card (large `stat` value)                          |
 | `Sheet`          | Bottom-sheet modal (title + labelled close)                   |
-| `ListScreen`     | Paged-list shell composing Screen + FlatList + states (adoption in 18B) |
+| `ListScreen`     | Paged-list shell composing Screen + FlatList + states        |
 | `AccessDenied`   | RBAC-denied screen                                            |
 | `icons.js`       | Semantic icon map over `@expo/vector-icons`                   |
 
@@ -164,5 +164,10 @@ Screens never reference raw glyph names; icon swap = one edit in `icons.js`.
 
 - **18A**: theme tokens + Provider + 41-file behavior-neutral conversion; primitives built and
   polished; `SelectField` on `Sheet`. Screens render identically in light.
-- **18B+ (planned)**: adopt `StatCard`/`SectionHeader`/`ListRow` on the dashboard and list screens;
-  adopt `ListScreen`; introduce the remaining dashboard hierarchy; then deeper screen redesigns.
+- **18B**: dashboard rebuilt on `StatCard`/`SectionHeader`/`ListRow` with a clearer navigation
+  hierarchy; same data, same destinations.
+- **18C**: the three core list screens (products, inventory, purchase orders) adopt
+  `ListScreen`/`ListRow`/`SearchField`/`PressableCard`/`Icon` on one shared row grammar; `ListRow`
+  gains `footer`/`titleStyle`, `ListScreen` gains `emptyAction`/`loadingLabel`, `PressableCard`
+  forwards props, `SearchField` gains `autoCapitalize`. Behavior unchanged.
+- **18D+ (planned)**: core detail screens (18D), then the secondary screens (18E).

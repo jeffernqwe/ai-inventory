@@ -1,16 +1,19 @@
 import { useCallback, useMemo, useState } from 'react';
 import { Stack } from 'expo-router';
-import { FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
 import AccessDenied from '../../components/AccessDenied';
 import Badge from '../../components/Badge';
+import Card from '../../components/Card';
 import Chip from '../../components/Chip';
-import Input from '../../components/Input';
-import { EmptyState, ErrorState, LoadingBlock, errorText } from '../../components/ListState';
+import { Icon } from '../../components/icons';
+import ListRow from '../../components/ListRow';
+import ListScreen from '../../components/ListScreen';
+import { SearchField } from '../../components/SearchField';
 import { auditApi } from '../../lib/api';
 import { useSession } from '../../lib/auth';
 import { canViewAudit } from '../../lib/permissions';
-import { radius, spacing, type } from '../../lib/theme';
+import { spacing, type } from '../../lib/theme';
 import { useTheme } from '../../lib/theme-context';
 import { formatDateTime } from '../../lib/format';
 import useDebounced from '../../hooks/useDebounced';
@@ -74,25 +77,30 @@ function AuditRow({ item }) {
   const actor = item.actor?.name ?? 'System';
   const metadata = item.metadata ? JSON.stringify(item.metadata) : null;
   return (
-    <View style={styles.row}>
-      <View style={styles.rowTop}>
-        <Badge text={actionLabel} tone="info" />
-        <Badge text={entityLabel} tone="neutral" />
-      </View>
-      {item.entityId ? (
-        <Text style={styles.entityId} numberOfLines={1}>
-          {item.entityId}
-        </Text>
-      ) : null}
-      <Text style={styles.meta} numberOfLines={1}>
-        {actor} · {formatDateTime(item.createdAt)}
-      </Text>
-      {metadata ? (
-        <Text style={styles.metadata} numberOfLines={1}>
-          {metadata}
-        </Text>
-      ) : null}
-    </View>
+    <Card>
+      <ListRow
+        leading={<Icon name="document" color={colors.primary} size={22} />}
+        title={actionLabel}
+        subtitle={`${actor} · ${formatDateTime(item.createdAt)}`}
+        right={<Badge text={entityLabel} tone="neutral" />}
+        footer={
+          item.entityId || metadata ? (
+            <View>
+              {item.entityId ? (
+                <Text style={styles.entityId} numberOfLines={1}>
+                  {item.entityId}
+                </Text>
+              ) : null}
+              {metadata ? (
+                <Text style={styles.metadata} numberOfLines={2}>
+                  {metadata}
+                </Text>
+              ) : null}
+            </View>
+          ) : null
+        }
+      />
+    </Card>
   );
 }
 
@@ -122,7 +130,7 @@ export default function AuditScreen() {
 
   const header = (
     <View>
-      <Input value={q} onChangeText={setQ} placeholder="Search actions or ids…" name="q" />
+      <SearchField value={q} onChangeText={setQ} placeholder="Search actions or ids…" style={styles.search} />
       <View style={styles.filterRow}>
         {ENTITY_FILTERS.map((f) => (
           <Chip
@@ -148,70 +156,35 @@ export default function AuditScreen() {
   return (
     <>
       <Stack.Screen options={{ title: 'Audit Log' }} />
-      <View style={styles.flex}>
-        {!view ? (
-          <AccessDenied message="Only the business owner and admins can view the audit log." />
-        ) : list.loading && list.items.length === 0 ? (
-          <FlatList
-            data={[]}
-            renderItem={null}
-            ListHeaderComponent={header}
-            ListEmptyComponent={<LoadingBlock label="Loading audit log…" />}
-            contentContainerStyle={styles.content}
-          />
-        ) : list.error && list.items.length === 0 ? (
-          <FlatList
-            data={[]}
-            renderItem={null}
-            ListHeaderComponent={header}
-            ListEmptyComponent={
-              <ErrorState title="Couldn't load the audit log" message={errorText(list.error)} onRetry={list.reload} />
-            }
-            contentContainerStyle={styles.content}
-          />
-        ) : (
-          <FlatList
-            data={list.items}
-            keyExtractor={(item) => item.id}
-            renderItem={({ item }) => <AuditRow item={item} />}
-            ListHeaderComponent={header}
-            ListEmptyComponent={<EmptyState title="Nothing to show" message={emptyMessage()} />}
-            ItemSeparatorComponent={() => <View style={styles.separator} />}
-            contentContainerStyle={styles.content}
-            refreshControl={
-              <RefreshControl
-                refreshing={list.refreshing}
-                onRefresh={list.refresh}
-                tintColor={colors.primary}
-                colors={[colors.primary]}
-              />
-            }
-            onEndReached={list.loadMore}
-            onEndReachedThreshold={0.4}
-            ListFooterComponent={list.loadingMore ? <LoadingBlock label="Loading more…" /> : null}
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}
-          />
-        )}
-      </View>
+      {!view ? (
+        <AccessDenied message="Only the business owner and admins can view the audit log." />
+      ) : (
+        <ListScreen
+          items={list.items}
+          keyExtractor={(item) => item.id}
+          renderItem={({ item }) => <AuditRow item={item} />}
+          header={header}
+          loading={list.loading}
+          error={list.error}
+          onRetry={list.reload}
+          errorTitle="Couldn't load the audit log"
+          refreshing={list.refreshing}
+          onRefresh={list.refresh}
+          onEndReached={list.loadMore}
+          loadingMore={list.loadingMore}
+          loadingLabel="Loading audit log…"
+          emptyTitle="Nothing to show"
+          emptyMessage={emptyMessage()}
+        />
+      )}
     </>
   );
 }
 
-const createStyles = (colors) => StyleSheet.create({
-  flex: { flex: 1 },
-  content: { padding: spacing.lg, paddingBottom: spacing.huge, flexGrow: 1 },
-  filterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.md },
-  row: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.lg,
-  },
-  rowTop: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.sm },
-  entityId: { ...type.caption, color: colors.textSecondary, marginTop: 6, fontVariant: ['tabular-nums'] },
-  meta: { ...type.caption, color: colors.textMuted, marginTop: 2 },
-  metadata: { ...type.caption, color: colors.textMuted, marginTop: 2, fontStyle: 'italic' },
-  separator: { height: spacing.md },
-});
+const createStyles = (colors) =>
+  StyleSheet.create({
+    search: { marginBottom: spacing.md },
+    filterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.md },
+    entityId: { ...type.caption, color: colors.textSecondary, fontVariant: ['tabular-nums'] },
+    metadata: { ...type.caption, color: colors.textMuted, marginTop: spacing.xs, fontStyle: 'italic' },
+  });

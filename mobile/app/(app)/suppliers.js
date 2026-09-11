@@ -9,6 +9,7 @@ export default function SuppliersScreen() {
       canManageFn={canManageSuppliers}
       singular="Supplier"
       label="Suppliers"
+      icon="storefront"
       placeholder="Search suppliers by name…"
       emptyTitle="No suppliers yet"
       emptyMessage="Suppliers are the businesses you purchase stock from."

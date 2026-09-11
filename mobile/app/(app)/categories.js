@@ -9,6 +9,7 @@ export default function CategoriesScreen() {
       canManageFn={canManageCategories}
       singular="Category"
       label="Categories"
+      icon="pricetags"
       placeholder="Search categories by name…"
       emptyTitle="No categories yet"
       emptyMessage="Categories group your products (e.g. Beverages, Electronics)."

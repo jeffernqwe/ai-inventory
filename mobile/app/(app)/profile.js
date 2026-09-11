@@ -5,7 +5,9 @@ import { StyleSheet, Text, View } from 'react-native';
 import Badge from '../../components/Badge';
 import Button from '../../components/Button';
 import Card from '../../components/Card';
+import ListRow from '../../components/ListRow';
 import Screen from '../../components/Screen';
+import SectionHeader from '../../components/SectionHeader';
 import { useSession } from '../../lib/auth';
 import { confirm } from '../../lib/confirm';
 import { formatDateTime } from '../../lib/format';
@@ -13,17 +15,22 @@ import { roleLabel, defaultHomePath } from '../../lib/permissions';
 import { spacing, type } from '../../lib/theme';
 import { useTheme } from '../../lib/theme-context';
 
-function DetailRow({ label, value }) {
+/**
+ * One label/value line. The label is the muted title and the value renders at
+ * body size beneath it (never a fixed-height right column) so long emails and
+ * long names reflow instead of truncating at large system font sizes.
+ */
+function DetailRow({ label, value, divider }) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   if (value == null || value === '') return null;
   return (
-    <View style={styles.detailRow}>
-      <Text style={styles.detailLabel}>{label}</Text>
-      <Text style={styles.detailValue} numberOfLines={1}>
-        {value}
-      </Text>
-    </View>
+    <ListRow
+      style={divider ? styles.detailRow : undefined}
+      title={label}
+      titleStyle={styles.detailLabel}
+      footer={<Text style={styles.detailValue}>{value}</Text>}
+    />
   );
 }
 
@@ -47,16 +54,22 @@ export default function ProfileScreen() {
           <Text style={styles.avatarText}>{(user?.name ?? '?').slice(0, 1).toUpperCase()}</Text>
         </View>
         <Text style={styles.name}>{user?.name}</Text>
-        <Badge text={roleLabel(user?.role)} tone={user?.role === 'OWNER' ? 'info' : 'neutral'} />
+        <Badge
+          text={roleLabel(user?.role)}
+          tone={user?.role === 'OWNER' ? 'info' : 'neutral'}
+          style={styles.headerBadge}
+        />
       </Card>
 
-      <Text style={styles.sectionTitle}>Account</Text>
-      <Card style={styles.details}>
-        <DetailRow label="Name" value={user?.name} />
-        <DetailRow label="Email" value={user?.email} />
-        <DetailRow label="Role" value={roleLabel(user?.role)} />
-        <DetailRow label="Status" value={user?.status === 'ACTIVE' ? 'Active' : user?.status} />
-        <DetailRow label="Member since" value={formatDateTime(user?.createdAt)} />
+      <SectionHeader title="Account" style={styles.section} />
+      <Card>
+        <View style={styles.detailList}>
+          <DetailRow label="Name" value={user?.name} divider />
+          <DetailRow label="Email" value={user?.email} divider />
+          <DetailRow label="Role" value={roleLabel(user?.role)} divider />
+          <DetailRow label="Status" value={user?.status === 'ACTIVE' ? 'Active' : user?.status} divider />
+          <DetailRow label="Member since" value={formatDateTime(user?.createdAt)} />
+        </View>
         <Button
           title="Edit name"
           variant="secondary"
@@ -65,7 +78,7 @@ export default function ProfileScreen() {
         />
       </Card>
 
-      <Text style={styles.sectionTitle}>Security</Text>
+      <SectionHeader title="Security" style={styles.section} />
       <Card>
         <Text style={styles.securityText}>
           Inventory AI keeps your sign-in on this device's secure storage. Permissions and business data are
@@ -97,14 +110,16 @@ const createStyles = (colors) => StyleSheet.create({
     justifyContent: 'center',
     marginBottom: spacing.md,
   },
-  avatarText: { color: colors.textOnPrimary, fontWeight: '800', fontSize: 26 },
+  avatarText: { ...type.h1, color: colors.textOnPrimary },
   name: { ...type.h2, color: colors.text, marginBottom: spacing.xs },
-  sectionTitle: { ...type.h3, color: colors.text, marginTop: spacing.xxl, marginBottom: spacing.md },
-  details: {},
-  editName: { marginTop: spacing.md },
-  detailRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: spacing.sm + 2 },
-  detailLabel: { ...type.body, color: colors.textMuted },
-  detailValue: { ...type.body, color: colors.text, fontWeight: '600', marginLeft: spacing.md, flexShrink: 1 },
-  securityText: { ...type.bodySmall, color: colors.textSecondary, lineHeight: 20 },
+  // Badge sets alignSelf:'flex-start' for list rows; centre it under the name.
+  headerBadge: { alignSelf: 'center' },
+  section: { marginTop: spacing.xxl },
+  detailList: { gap: spacing.sm },
+  detailRow: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.divider, paddingBottom: spacing.sm },
+  detailLabel: { ...type.label, color: colors.textMuted },
+  detailValue: { ...type.body, color: colors.text, fontWeight: '600' },
+  editName: { marginTop: spacing.lg },
+  securityText: { ...type.bodySmall, color: colors.textSecondary },
   spaced: { marginTop: spacing.md },
 });

@@ -1,18 +1,24 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, FlatList, Modal, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useMemo, useState } from 'react';
+import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { StatusBadge } from './Badge';
 import Banner from './Banner';
 import Button from './Button';
+import Card from './Card';
 import Chip from './Chip';
+import { Icon } from './icons';
 import Input from './Input';
-import { EmptyState, ErrorState, LoadingBlock, errorText } from './ListState';
+import ListRow from './ListRow';
+import ListScreen from './ListScreen';
+import { SearchField } from './SearchField';
+import Sheet from './Sheet';
+import { errorText } from './ListState';
 import { ApiError } from '../lib/client';
 import { useSession } from '../lib/auth';
 import { confirm } from '../lib/confirm';
 import useDebounced from '../hooks/useDebounced';
 import usePagedList from '../hooks/usePagedList';
-import { radius, spacing, type } from '../lib/theme';
+import { spacing, type } from '../lib/theme';
 import { useTheme } from '../lib/theme-context';
 
 function fieldMap(err) {
@@ -26,12 +32,14 @@ function fieldMap(err) {
 /**
  * Shared manage screen for business-scoped reference lists (Categories,
  * Locations, Suppliers): search, status filter, server-driven pagination, and —
- * for users with the manage permission — create/edit via a modal plus archive/
+ * for users with the manage permission — create/edit via a sheet plus archive/
  * restore. The backend stays the authority; this UI only gates what's shown.
  *
  * `fields` adds extra optional writable columns (e.g. supplier contactName/
- * phone/email) to the modal form and the list row. Default `[]` keeps
+ * phone/email) to the form and the list row. Default `[]` keeps
  * Categories/Locations behaviour byte-for-byte unchanged.
+ *
+ * `icon` is an optional semantic icon name used as the row's leading glyph.
  */
 export default function RefManage({
   api,
@@ -42,6 +50,7 @@ export default function RefManage({
   emptyTitle,
   emptyMessage,
   fields = [],
+  icon,
 }) {
   const { user, token, signOut } = useSession();
   const { colors } = useTheme();
@@ -68,7 +77,7 @@ export default function RefManage({
     onSessionError: signOut,
   });
 
-  // Create / edit modal state.
+  // Create / edit form state.
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [name, setName] = useState('');
@@ -154,191 +163,137 @@ export default function RefManage({
 
   const header = (
     <View>
-      <Input
-        value={q}
-        onChangeText={setQ}
-        placeholder={placeholder}
-        name="q"
-        autoCapitalize="none"
-      />
+      <SearchField value={q} onChangeText={setQ} placeholder={placeholder} style={styles.search} />
       <View style={styles.filterRow}>
         <Chip label="All" selected={statusFilter === 'ALL'} onPress={() => setStatusFilter('ALL')} />
         <Chip label="Active" selected={statusFilter === 'ACTIVE'} onPress={() => setStatusFilter('ACTIVE')} />
         <Chip label="Archived" selected={statusFilter === 'ARCHIVED'} onPress={() => setStatusFilter('ARCHIVED')} />
-        <View style={styles.filterSpacer} />
-        {manage ? (
-          <Pressable style={styles.addBtn} onPress={openCreate} accessibilityRole="button">
-            <Text style={styles.addBtnText}>＋ New {singular}</Text>
-          </Pressable>
-        ) : null}
       </View>
+      {manage ? (
+        <Button title={`New ${singular}`} icon="add" onPress={openCreate} full style={styles.newBtn} />
+      ) : null}
     </View>
   );
 
-  const renderItem = ({ item }) => (
-    <View style={styles.row}>
-      <View style={styles.rowHeader}>
-        <Text style={styles.rowTitle} numberOfLines={1}>
-          {item.name}
-        </Text>
-        <StatusBadge status={item.status} />
-      </View>
-      {item.description ? (
-        <Text style={styles.rowDesc} numberOfLines={2}>
-          {item.description}
-        </Text>
-      ) : null}
-      {fields.length > 0 ? (
-        <Text style={styles.rowMeta} numberOfLines={1}>
-          {fields.map((f) => item[f.name]).filter((v) => v != null && String(v).trim() !== '').join(' · ')}
-        </Text>
-      ) : null}
-      {manage ? (
-        <View style={styles.rowActions}>
-          <Button title="Edit" variant="secondary" onPress={() => openEdit(item)} style={styles.smallBtn} />
-          <Button
-            title={item.status === 'ARCHIVED' ? 'Restore' : 'Archive'}
-            variant={item.status === 'ARCHIVED' ? 'secondary' : 'danger'}
-            onPress={() => toggleArchive(item)}
-            style={styles.smallBtn}
-          />
-        </View>
-      ) : null}
-    </View>
-  );
+  const renderItem = ({ item }) => {
+    const meta = fields
+      .map((f) => item[f.name])
+      .filter((v) => v != null && String(v).trim() !== '')
+      .join(' · ');
+    return (
+      <Card>
+        <ListRow
+          leading={icon ? <Icon name={icon} color={colors.primary} size={22} /> : null}
+          title={item.name}
+          subtitle={item.description || undefined}
+          right={<StatusBadge status={item.status} />}
+          footer={meta ? <Text style={styles.rowMeta}>{meta}</Text> : null}
+        />
+        {manage ? (
+          <View style={styles.rowActions}>
+            <Button title="Edit" variant="secondary" onPress={() => openEdit(item)} style={styles.smallBtn} />
+            <Button
+              title={item.status === 'ARCHIVED' ? 'Restore' : 'Archive'}
+              variant={item.status === 'ARCHIVED' ? 'secondary' : 'danger'}
+              onPress={() => toggleArchive(item)}
+              style={styles.smallBtn}
+            />
+          </View>
+        ) : null}
+      </Card>
+    );
+  };
 
   return (
     <View style={styles.flex}>
-      {list.loading && list.items.length === 0 ? (
-        <FlatList
-          data={[]}
-          renderItem={null}
-          ListHeaderComponent={header}
-          ListEmptyComponent={<LoadingBlock label="Loading…" />}
-          contentContainerStyle={styles.content}
-        />
-      ) : list.error && list.items.length === 0 ? (
-        <FlatList
-          data={[]}
-          renderItem={null}
-          ListHeaderComponent={header}
-          ListEmptyComponent={<ErrorState title="Couldn't load items" message={errorText(list.error)} onRetry={list.reload} />}
-          contentContainerStyle={styles.content}
-        />
-      ) : (
-        <FlatList
-          data={list.items}
-          keyExtractor={(item) => item.id}
-          renderItem={renderItem}
-          ListHeaderComponent={header}
-          ListEmptyComponent={
-            <EmptyState
-              title={emptyTitle}
-              message={debouncedQ ? `No ${label.toLowerCase()} match “${debouncedQ}”.` : emptyMessage}
-              action={
-                manage && !debouncedQ ? (
-                  <Button title={`Add your first ${singular.toLowerCase()}`} onPress={openCreate} />
-                ) : null
-              }
-            />
-          }
-          ItemSeparatorComponent={() => <View style={styles.separator} />}
-          contentContainerStyle={styles.content}
-          refreshControl={
-            <RefreshControl refreshing={list.refreshing} onRefresh={list.refresh} tintColor={colors.primary} colors={[colors.primary]} />
-          }
-          onEndReached={list.loadMore}
-          onEndReachedThreshold={0.4}
-          ListFooterComponent={
-            list.loadingMore ? <LoadingBlock label="Loading more…" /> : list.items.length >= 20 ? <Text style={styles.count}>{list.total} total</Text> : null
-          }
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        />
-      )}
+      <ListScreen
+        items={list.items}
+        keyExtractor={(item) => item.id}
+        renderItem={renderItem}
+        header={header}
+        loading={list.loading}
+        error={list.error}
+        onRetry={list.reload}
+        errorTitle="Couldn't load items"
+        refreshing={list.refreshing}
+        onRefresh={list.refresh}
+        onEndReached={list.loadMore}
+        loadingMore={list.loadingMore}
+        emptyTitle={emptyTitle}
+        emptyMessage={debouncedQ ? `No ${label.toLowerCase()} match “${debouncedQ}”.` : emptyMessage}
+        emptyAction={
+          manage && !debouncedQ ? (
+            <Button title={`Add your first ${singular.toLowerCase()}`} onPress={openCreate} />
+          ) : null
+        }
+        footer={
+          list.items.length >= 20 ? <Text style={styles.count}>{list.total} total</Text> : null
+        }
+      />
 
       {/* Create / edit */}
-      <Modal visible={formOpen} animationType="slide" transparent onRequestClose={closeForm}>
-        <View style={styles.backdrop}>
-          <Pressable style={styles.backdropTouch} onPress={closeForm} />
-          <View style={styles.sheet}>
-            <Text style={styles.sheetTitle}>{editing ? `Edit ${singular.toLowerCase()}` : `New ${singular.toLowerCase()}`}</Text>
-            <Banner type="error" text={formError} />
+      <Sheet
+        visible={formOpen}
+        onClose={closeForm}
+        title={editing ? `Edit ${singular.toLowerCase()}` : `New ${singular.toLowerCase()}`}
+      >
+        <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheetBody} keyboardShouldPersistTaps="handled">
+          <Banner type="error" text={formError} />
+          <Input
+            name="name"
+            label="Name"
+            value={name}
+            onChangeText={setName}
+            error={fieldErrors.name}
+            required
+            autoCapitalize="words"
+          />
+          <Input
+            name="description"
+            label="Description (optional)"
+            value={description}
+            onChangeText={setDescription}
+            multiline
+            error={fieldErrors.description}
+          />
+          {fields.map((f) => (
             <Input
-              name="name"
-              label="Name"
-              value={name}
-              onChangeText={setName}
-              error={fieldErrors.name}
-              required
-              autoCapitalize="words"
+              key={f.name}
+              name={f.name}
+              label={f.label}
+              value={extras[f.name] ?? ''}
+              onChangeText={(v) => setExtras((prev) => ({ ...prev, [f.name]: v }))}
+              error={fieldErrors[f.name]}
+              maxLength={f.maxLength}
+              keyboardType={f.keyboardType}
+              autoCapitalize={f.autoCapitalize ?? 'none'}
             />
-            <Input
-              name="description"
-              label="Description (optional)"
-              value={description}
-              onChangeText={setDescription}
-              multiline
-              error={fieldErrors.description}
-            />
-            {fields.map((f) => (
-              <Input
-                key={f.name}
-                name={f.name}
-                label={f.label}
-                value={extras[f.name] ?? ''}
-                onChangeText={(v) => setExtras((prev) => ({ ...prev, [f.name]: v }))}
-                error={fieldErrors[f.name]}
-                maxLength={f.maxLength}
-                keyboardType={f.keyboardType}
-                autoCapitalize={f.autoCapitalize ?? 'none'}
-              />
-            ))}
-            <Button title={editing ? 'Save changes' : `Create ${singular.toLowerCase()}`} onPress={save} loading={saving} full />
-            <Button title="Cancel" variant="secondary" onPress={closeForm} style={styles.cancelBtn} full />
-          </View>
-        </View>
-      </Modal>
+          ))}
+          <Button title={editing ? 'Save changes' : `Create ${singular.toLowerCase()}`} onPress={save} loading={saving} full />
+          <Button title="Cancel" variant="secondary" onPress={closeForm} style={styles.cancelBtn} full />
+        </ScrollView>
+      </Sheet>
     </View>
   );
 }
 
-const createStyles = (colors) => StyleSheet.create({
-  flex: { flex: 1 },
-  content: { padding: spacing.lg, paddingBottom: spacing.huge, flexGrow: 1 },
-  filterRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.md },
-  filterSpacer: { flex: 1 },
-  addBtn: {
-    backgroundColor: colors.primary,
-    borderRadius: radius.pill,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 8,
-  },
-  addBtnText: { color: colors.textOnPrimary, fontWeight: '700', fontSize: 13 },
-  row: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.lg,
-  },
-  rowHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
-  rowTitle: { ...type.body, fontWeight: '700', color: colors.text, flexShrink: 1 },
-  rowDesc: { ...type.bodySmall, color: colors.textSecondary, marginTop: 4 },
-  rowMeta: { ...type.caption, color: colors.textMuted, marginTop: 4 },
-  rowActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
-  smallBtn: { flex: 1, minHeight: 38 },
-  separator: { height: spacing.md },
-  count: { ...type.caption, color: colors.textMuted, textAlign: 'center', marginTop: spacing.md },
-  backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: colors.overlay },
-  backdropTouch: { flex: 1 },
-  sheet: {
-    backgroundColor: colors.surface,
-    borderTopLeftRadius: radius.xl,
-    borderTopRightRadius: radius.xl,
-    padding: spacing.xl,
-    paddingBottom: spacing.huge,
-  },
-  sheetTitle: { ...type.h2, color: colors.text, marginBottom: spacing.lg },
-  cancelBtn: { marginTop: spacing.md },
-});
+const createStyles = (colors) =>
+  StyleSheet.create({
+    flex: { flex: 1 },
+    search: { marginBottom: spacing.md },
+    filterRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      alignItems: 'center',
+      gap: spacing.sm,
+      marginBottom: spacing.md,
+    },
+    newBtn: { marginBottom: spacing.md },
+    rowMeta: { ...type.bodySmall, color: colors.textMuted },
+    rowActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
+    smallBtn: { flex: 1 },
+    count: { ...type.caption, color: colors.textMuted, textAlign: 'center', marginTop: spacing.md },
+    sheetScroll: { flexShrink: 1 },
+    sheetBody: { paddingHorizontal: spacing.xl, paddingTop: spacing.lg, paddingBottom: spacing.xl },
+    cancelBtn: { marginTop: spacing.md },
+  });

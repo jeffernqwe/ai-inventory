@@ -1,16 +1,16 @@
 import { useState } from 'react';
 import { Stack } from 'expo-router';
-import { ScrollView, StyleSheet } from 'react-native';
+import { StyleSheet } from 'react-native';
 
 import Banner from '../../components/Banner';
 import Button from '../../components/Button';
 import Card from '../../components/Card';
 import Input from '../../components/Input';
+import Screen from '../../components/Screen';
 import { changePassword } from '../../lib/api';
 import { ApiError } from '../../lib/client';
 import { isSessionError, useSession } from '../../lib/auth';
 import { spacing } from '../../lib/theme';
-import { useTheme } from '../../lib/theme-context';
 
 function fieldMap(err) {
   const out = {};
@@ -28,7 +28,6 @@ function fieldMap(err) {
  * the user signs in again with the new password.
  */
 export default function ChangePasswordScreen() {
-  const { colors } = useTheme();
   const { token, signOut } = useSession();
 
   const [currentPassword, setCurrentPassword] = useState('');
@@ -75,11 +74,7 @@ export default function ChangePasswordScreen() {
   return (
     <>
       <Stack.Screen options={{ title: 'Change Password' }} />
-      <ScrollView
-        style={{ flex: 1, backgroundColor: colors.background }}
-        contentContainerStyle={styles.content}
-        keyboardShouldPersistTaps="handled"
-      >
+      <Screen scroll contentStyle={styles.content}>
         <Banner type="error" text={formError} />
         <Card>
           <Input
@@ -120,11 +115,11 @@ export default function ChangePasswordScreen() {
           />
         </Card>
         <Button title="Change password" onPress={submit} loading={busy} full />
-      </ScrollView>
+      </Screen>
     </>
   );
 }
 
 const styles = StyleSheet.create({
-  content: { padding: spacing.lg, paddingBottom: 48 },
+  content: { paddingBottom: spacing.huge },
 });

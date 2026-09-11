@@ -276,7 +276,7 @@ but can still receive stock; receiving and the claim-first flow are unchanged; n
 Phase 18 is an owner-directed mobile UI extension delivered in approved lettered increments (18A,
 18B, …) after Phase 17. It turns the app into a modern SaaS-style product surface WITHOUT changing
 navigation (the existing native-stack stays; a tab bar would require touching the owner-held
-`(app)/_layout.js` and is deferred) or any backend behavior. **18A, 18B, 18C, and 18D are implemented**: a semantic light **and** dark theme system (`palettes` in
+`(app)/_layout.js` and is deferred) or any backend behavior. **18A, 18B, 18C, 18D, and 18E are implemented**: a semantic light **and** dark theme system (`palettes` in
 `lib/theme.js` with `colors` kept as the light alias so owner-held chrome keeps working;
 `ThemeProvider`/`useTheme` in `lib/theme-context.jsx`, scheme preference persisted via
 `expo-secure-store`; `userInterfaceStyle: "automatic"`), a behavior-neutral conversion of all 41
@@ -299,7 +299,13 @@ record, purchase order, receive) onto the same primitives — `SectionHeader` fo
 the purchase-order number keeps its `h2` prominence in the same weight family as the list screen. No
 shared primitive needed changing. Behavior is unchanged: no logic, API, payload, navigation, or
 permission edits, and the claim-first receive workflow is presentation-only (every receive function
-is byte-identical). Remaining screen redesigns are a later increment (18E secondary screens).
+is byte-identical). **18E** brings the fifteen secondary routes (users index/new/detail, audit, history,
+categories, locations, suppliers, profile, change-password, edit-name, scan, AI hub/new/chat) onto the
+same primitives and modernises the three backing components `RefManage`, `UserForm`, and `AiChat` in
+place; `Chip` gains a semantic selected state and a 44px floor, and `ListScreen` gains additive
+`errorTitle`/`footer` props. Behavior is unchanged again — RBAC gates, validation order, payload
+asymmetries, and the `scan.js` rescan/`lastScanned` semantics are preserved, and `lib/theme.js` is
+untouched. Forms/auth screens are deferred to 18F.
 Owner-held files (`_layout.js`, `SignOutIcon.jsx`) are
 byte-identical after 18A. See `docs/DESIGN_SYSTEM.md`.
 

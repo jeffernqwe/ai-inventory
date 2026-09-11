@@ -1,17 +1,20 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { router, Stack } from 'expo-router';
-import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import AccessDenied from '../../../components/AccessDenied';
 import Badge from '../../../components/Badge';
 import Button from '../../../components/Button';
+import Card from '../../../components/Card';
 import Chip from '../../../components/Chip';
-import Input from '../../../components/Input';
-import { EmptyState, ErrorState, LoadingBlock, errorText } from '../../../components/ListState';
+import { Icon } from '../../../components/icons';
+import ListRow from '../../../components/ListRow';
+import ListScreen from '../../../components/ListScreen';
+import { SearchField } from '../../../components/SearchField';
 import { usersApi } from '../../../lib/api';
 import { useSession } from '../../../lib/auth';
 import { ROLES, canManageUsers, canModifyUser, roleLabel } from '../../../lib/permissions';
-import { radius, spacing, type } from '../../../lib/theme';
+import { spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/theme-context';
 import useDebounced from '../../../hooks/useDebounced';
 import usePagedList from '../../../hooks/usePagedList';
@@ -22,23 +25,20 @@ const STATUS_DISABLED = 'DISABLED';
 
 function UserRow({ item, actor }) {
   const { colors } = useTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
   const isSelf = String(actor?.id) === String(item.id);
   const editable = canModifyUser(actor, item);
+  const active = item.status === STATUS_ACTIVE;
   return (
-    <View style={styles.row}>
-      <View style={styles.rowTop}>
-        <Text style={styles.rowName} numberOfLines={1}>
-          {item.name}
-        </Text>
+    <Card>
+      <ListRow
+        leading={<Icon name="person" color={colors.primary} size={22} />}
+        title={item.name}
+        subtitle={item.email}
+        right={<Badge text={active ? 'Active' : 'Disabled'} tone={active ? 'success' : 'neutral'} />}
+      />
+      <View style={styles.badges}>
         {isSelf ? <Badge text="You" tone="neutral" /> : null}
         <Badge text={roleLabel(item.role)} tone={item.role === ROLES.OWNER ? 'info' : 'neutral'} />
-      </View>
-      <View style={styles.metaRow}>
-        <Text style={styles.meta} numberOfLines={1}>
-          {item.email}
-        </Text>
-        <Badge text={item.status === STATUS_ACTIVE ? 'Active' : 'Disabled'} tone={item.status === STATUS_ACTIVE ? 'success' : 'neutral'} />
       </View>
       {editable ? (
         <View style={styles.rowActions}>
@@ -50,13 +50,11 @@ function UserRow({ item, actor }) {
           />
         </View>
       ) : null}
-    </View>
+    </Card>
   );
 }
 
 export default function UsersScreen() {
-  const { colors } = useTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
   const { user, token, signOut } = useSession();
   const manage = canManageUsers(user);
 
@@ -80,18 +78,15 @@ export default function UsersScreen() {
 
   const header = (
     <View>
-      <Input value={q} onChangeText={setQ} placeholder="Search by name or email…" name="q" />
+      <SearchField value={q} onChangeText={setQ} placeholder="Search by name or email…" style={styles.search} />
       <View style={styles.filterRow}>
         <Chip label="All" selected={status === ''} onPress={() => setStatus('')} />
         <Chip label="Active" selected={status === STATUS_ACTIVE} onPress={() => setStatus(STATUS_ACTIVE)} />
         <Chip label="Disabled" selected={status === STATUS_DISABLED} onPress={() => setStatus(STATUS_DISABLED)} />
-        <View style={styles.filterSpacer} />
-        {manage ? (
-          <Pressable style={styles.addBtn} onPress={() => router.push('/users/new')} accessibilityRole="button">
-            <Text style={styles.addBtnText}>＋ New User</Text>
-          </Pressable>
-        ) : null}
       </View>
+      {manage ? (
+        <Button title="New User" icon="add" onPress={() => router.push('/users/new')} full style={styles.newBtn} />
+      ) : null}
     </View>
   );
 
@@ -105,60 +100,48 @@ export default function UsersScreen() {
   return (
     <>
       <Stack.Screen options={{ title: 'Users' }} />
-      <View style={styles.flex}>
-        {!manage ? (
-          <AccessDenied message="Only the business owner and admins can manage users." />
-        ) : list.loading && list.items.length === 0 ? (
-          <FlatList data={[]} renderItem={null} ListHeaderComponent={header} ListEmptyComponent={<LoadingBlock label="Loading users…" />} contentContainerStyle={styles.content} />
-        ) : list.error && list.items.length === 0 ? (
-          <FlatList data={[]} renderItem={null} ListHeaderComponent={header} ListEmptyComponent={<ErrorState title="Couldn't load users" message={errorText(list.error)} onRetry={list.reload} />} contentContainerStyle={styles.content} />
-        ) : (
-          <FlatList
-            data={list.items}
-            keyExtractor={(item) => item.id}
-            renderItem={({ item }) => <UserRow item={item} actor={user} />}
-            ListHeaderComponent={header}
-            ListEmptyComponent={<EmptyState title="Nothing to show" message={emptyMessage()} />}
-            ItemSeparatorComponent={() => <View style={styles.separator} />}
-            contentContainerStyle={styles.content}
-            refreshControl={<RefreshControl refreshing={list.refreshing} onRefresh={list.refresh} tintColor={colors.primary} colors={[colors.primary]} />}
-            onEndReached={list.loadMore}
-            onEndReachedThreshold={0.4}
-            ListFooterComponent={list.loadingMore ? <LoadingBlock label="Loading more…" /> : null}
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}
-          />
-        )}
-      </View>
+      {!manage ? (
+        <AccessDenied message="Only the business owner and admins can manage users." />
+      ) : (
+        <ListScreen
+          items={list.items}
+          keyExtractor={(item) => item.id}
+          renderItem={({ item }) => <UserRow item={item} actor={user} />}
+          header={header}
+          loading={list.loading}
+          error={list.error}
+          onRetry={list.reload}
+          errorTitle="Couldn't load users"
+          refreshing={list.refreshing}
+          onRefresh={list.refresh}
+          onEndReached={list.loadMore}
+          loadingMore={list.loadingMore}
+          loadingLabel="Loading users…"
+          emptyTitle="Nothing to show"
+          emptyMessage={emptyMessage()}
+        />
+      )}
     </>
   );
 }
 
-const createStyles = (colors) =>
-  StyleSheet.create({
-    flex: { flex: 1 },
-    content: { padding: spacing.lg, paddingBottom: spacing.huge, flexGrow: 1 },
-    filterRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.md },
-    filterSpacer: { flex: 1 },
-    addBtn: {
-      backgroundColor: colors.primary,
-      borderRadius: radius.pill,
-      paddingHorizontal: spacing.md,
-      paddingVertical: 8,
-    },
-    addBtnText: { color: colors.textOnPrimary, fontWeight: '700', fontSize: 13 },
-    row: {
-      backgroundColor: colors.surface,
-      borderRadius: radius.lg,
-      borderWidth: 1,
-      borderColor: colors.border,
-      padding: spacing.lg,
-    },
-    rowTop: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-    rowName: { ...type.body, fontWeight: '700', color: colors.text, flexShrink: 1 },
-    metaRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.md, marginTop: 6 },
-    meta: { ...type.caption, color: colors.textMuted, flexShrink: 1 },
-    rowActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
-    editBtn: { flex: 1, minHeight: 38 },
-    separator: { height: spacing.md },
-  });
+const styles = StyleSheet.create({
+  search: { marginBottom: spacing.md },
+  filterRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  newBtn: { marginBottom: spacing.md },
+  badges: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  rowActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
+  editBtn: { flex: 1 },
+});

@@ -1164,6 +1164,88 @@ rejected and every user signs in once more; and **there is no refresh-token
 rotation** — a session ends when it is revoked or when its token expires, and a
 new token is obtained by signing in again.
 
+## Password Recovery
+
+A user who has forgotten their password recovers access through an emailed, single-use reset link.
+Two routes, both **public and unauthenticated** — the caller cannot authenticate, which is the whole
+point — and both POST-only:
+
+```text
+POST /api/auth/forgot-password   202, always
+POST /api/auth/reset-password    200 on success
+```
+
+Both are rate-limited. They are the only unauthenticated write surface besides register and login.
+
+### `POST /api/auth/forgot-password`
+
+**The response is identical for every caller.** Requesting a link for an address with no account, for
+a disabled account, for an account whose business is not active, and for an address that exists and is
+deliverable all answer the same `202` with the same message body, so the route cannot be used to
+discover which addresses have accounts. This is an invariant, not a UI convention, and it is enforced
+structurally: the service returns no value on any non-error path, so the route has nothing it could
+reflect.
+
+The one exception is **server configuration, not account state**: when mail delivery is not configured
+the route answers `503` with a fixed message that names no variable, provider or transport detail.
+That answer is safe because it is decided **before** the account is looked up — every caller receives
+it identically, so it distinguishes nothing about any account — and it is a `503` so an operator can
+see that recovery is broken. A message that *could* be sent but fails in transit is handled the
+opposite way: the failure is recorded server-side and the caller still receives the same `202`, because
+by then the account is already known to exist and any distinguishable answer would be an
+account-existence oracle.
+
+A reset link is valid for 30 minutes and can be used once.
+
+### `POST /api/auth/reset-password`
+
+Accepts the emailed token and the new password. On success it answers `200` with a message body and
+nothing else — no token, no user, no password — and every session belonging to that user is ended, so
+a reset also evicts anyone already signed in with the old password. The user's `passwordChangedAt` is
+updated, which independently invalidates every access token issued before the reset.
+
+The new password is held to the same policy as `POST /api/auth/change-password`; the two routes share
+one validator and cannot drift apart. A `confirmPassword` field is accepted and checked **before** the
+token is presented, and takes no part in the reset itself — so a mistyped confirmation is rejected
+without touching the token, and a valid link cannot be spent by a typo.
+
+The token is consumed the instant it is claimed, and consumption is **fail-closed**: a token is never
+returned to circulation by a later failure, and no failure path releases it. A second use of the same
+link — concurrently, or after any subsequent failure — is rejected. Only one link is live per user at
+a time, so requesting a new one invalidates the previous one, and a token is stored only as a hash, so
+the database itself yields nothing that can be replayed.
+
+### Errors
+
+Both routes answer with an error `code` and a message:
+
+- An invalid, unknown, expired, already-used or no-longer-valid token →
+  `400 INVALID_RESET_TOKEN`. One code and one message cover every one of those cases, so a caller
+  cannot tell them apart.
+- A new password that fails policy, or a malformed request → `400 VALIDATION_ERROR` with a `fields`
+  list.
+- Too many attempts → `429 PASSWORD_RESET_RATE_LIMITED`. **Every** attempt counts, including
+  successful ones and including requests for addresses that have no account: there is no failure to
+  exempt, because those two paths are deliberately indistinguishable.
+- Mail not configured on the server → `503`.
+
+Error responses never carry a stack trace, a database or provider detail, an environment-variable
+name, or any part of the message that was sent (§33).
+
+### Known limits
+
+Two properties of this surface are documented, accepted and **not** fixed, because both need an owner
+decision and both were out of the scope that introduced them. They are recorded in
+`docs/DEVELOPMENT_ROADMAP.md` §27B "Accepted / Deferred Security Risks" and are open:
+
+- `forgot-password` is a **practical timing oracle**: an unknown address costs one indexed lookup,
+  while a known one additionally costs writes, an audit row and an outbound mail request, so the two
+  are separable by latency even though the responses are identical. The responses are uniform; the
+  time taken is not.
+- **Distributed flooding of one address is not bounded.** The per-address limit is keyed by source
+  address *and* email, and the per-source limit never sees a rotating attacker, so mail volume to a
+  single victim is not capped across sources.
+
 Future authentication may include:
 
 - Google OAuth
@@ -1263,8 +1345,11 @@ route reachable from `server/src/app.js` therefore falls into exactly one declar
   involved) and for the categories/locations reads, which have no view capability in the catalogue.
   Each is listed explicitly, with its reason, so that the deferral is visible and cannot be extended
   by accident.
-- **Public** — no authentication at all. The health probes must answer before a token can exist, and
-  login/register are how a token is obtained; all are rate-limited.
+- **Public** — no authentication at all. The health probes must answer before a token can exist,
+  login/register are how a token is obtained, and password recovery
+  (`POST /api/auth/forgot-password`, `POST /api/auth/reset-password`) is how a locked-out user gets a
+  new password without one; all are rate-limited, and no public route writes business data except
+  through the recovery flow described in §29.
 - **Role-gated** — a gate naming roles directly rather than a capability. **There are none**, and
   adding one requires an explicit decision: a role-name gate bypasses the permission catalogue, so a
   route using it would be invisible to any scan that looks only for capability keys.
@@ -1527,6 +1612,47 @@ AI_PROVIDER
 ANTHROPIC_API_KEY
 GEMINI_API_KEY
 ```
+
+## Password Recovery and Mail Delivery
+
+Password recovery is disabled unless mail delivery is configured. It requires:
+
+```text
+MAIL_PROVIDER               the provider that sends mail; empty disables recovery entirely
+MAIL_FROM                   a sender address the provider has verified
+RESEND_API_KEY              provider credential — server-side only
+MAIL_APP_NAME               optional; product name shown in the email (default "Inventory AI")
+MAIL_REQUEST_TIMEOUT_MS     optional; abort a provider request slower than this (default 10000)
+PASSWORD_RESET_URL          the reset page an emailed link points at
+```
+
+The provider, its credential and `PASSWORD_RESET_URL` must all be set before a reset token is created
+or a link is sent; while any is missing, `POST /api/auth/forgot-password` answers its fixed `503` and no
+token is written. A provider credential is never returned in a response, written to a log, or sent to
+the mobile application.
+
+`PASSWORD_RESET_URL` is the **only** source of the reset URL. It is never built from the `Host`,
+`Origin` or `Referer` headers or from anything a client sends, so a hostile request cannot redirect a
+victim's reset link to another domain. It must point at a real screen that reads the token from its
+query string and submits it to `POST /api/auth/reset-password`; a value pointing nowhere leaves the
+feature configured but unusable.
+
+Recovery is rate-limited per source address and per account, separately from login:
+
+```text
+AUTH_PASSWORD_RESET_RATE_LIMIT_WINDOW_MS          default 3600000  (1 hour)
+AUTH_PASSWORD_RESET_RATE_LIMIT_MAX                default 5        per source + email
+AUTH_PASSWORD_RESET_IP_RATE_LIMIT_WINDOW_MS       default 3600000  (1 hour)
+AUTH_PASSWORD_RESET_IP_RATE_LIMIT_MAX             default 20       per source
+AUTH_PASSWORD_RESET_CONFIRM_RATE_LIMIT_WINDOW_MS  default 900000   (15 minutes)
+AUTH_PASSWORD_RESET_CONFIRM_RATE_LIMIT_MAX        default 20       reset attempts per source
+```
+
+Every attempt counts against these budgets, including successful ones and requests for addresses that
+have no account (§29 Password Recovery). The rate-limit values are read when the server builds its
+routes, so **changing any of them requires a restart**; the mail values above are read per request and
+take effect without one. Limit budgets are held in process memory, so a deployment with more than one
+application instance multiplies each of them.
 
 Secrets must never be hardcoded.
 

@@ -4,6 +4,8 @@
 
 import 'dotenv/config';
 
+import assert from 'node:assert/strict';
+
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 
@@ -63,6 +65,33 @@ export function makeApi(baseUrl) {
     }
     return { status: res.status, json };
   };
+}
+
+/**
+ * Writes ONE value onto a raw column of the given rows (Phase 20A / 20C).
+ *
+ * `timestamps: true` owns createdAt / updatedAt, so a deliberate tie — several
+ * rows sharing one sort value — has to be stamped onto the collection directly.
+ *
+ * The write is then read back and asserted. This is not belt-and-braces: the raw
+ * collection API does NOT cast, so a string `_id` would match nothing and leave
+ * the rows with their natural, already-distinct timestamps. A pagination suite
+ * would then "pass" against unfixed code because there was never a tie to page
+ * over.
+ */
+export async function stampField(model, ids, field, value) {
+  const oids = ids.map((id) => new ObjectId(id));
+  await model.collection.updateMany({ _id: { $in: oids } }, { $set: { [field]: value } });
+
+  const stamped = await model.find({ _id: { $in: oids } }).select(field).lean();
+  assert.equal(stamped.length, ids.length, `stamp: expected ${ids.length} rows to exist`);
+  for (const doc of stamped) {
+    assert.equal(
+      new Date(doc[field]).getTime(),
+      value.getTime(),
+      `stamp: ${field} did not take effect on ${doc._id}`
+    );
+  }
 }
 
 /**

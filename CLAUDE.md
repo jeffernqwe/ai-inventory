@@ -237,6 +237,7 @@ Phase 23 — Authorization Contract Completion: Route Classification & RBAC Mirr
 Phase 24 — Runtime Authorization Matrix & Tenant-Isolation Verification (runtime role × real-route matrix derived from `ROLE_PERMISSIONS`; role-change effect proven on an existing JWT in both directions; empty OWNER-only runtime tier asserted; no production behavior change)
 Phase 25 — Design-Token Contrast Close-Out & Mobile Known-Issue Reconciliation (two light-theme tokens raised to WCAG AA on every surface they are used on; measured, not eyeballed; no production behavior change)
 Phase 26A — Session Hardening & Real Logout (server-side session records named by a mandatory `jti`; real server-side sign-out, per-session revocation and sign-out-everywhere; no new permission, no refresh-token rotation; every pre-26A token is rejected once)
+Phase 26B — Password Recovery (email reset link: provider-agnostic mail layer with a Resend transport, single-use hashed reset tokens; `POST /api/auth/forgot-password` and `POST /api/auth/reset-password` added as two PUBLIC routes; no new permission, no new dependency, no mobile change; the request path answers one identical 202 to every caller)
 ```
 
 Phase 08 is an owner-directed hardening extension delivered in approved lettered increments
@@ -528,6 +529,87 @@ which also closes a real gap, since `MovementForm` used to surface a dead sessio
 could not resolve. `phase16-audit-viewer.test.mjs` is the one file outside the owner's approved list
 that had to change: it pins that fixture business's exact audit row counts, and the required
 session-created event shifts them.
+
+Phase 26B is an owner-directed account-recovery increment delivered in three approved sub-phases
+(26B-1, 26B-2, 26B-3) after Phase 26A, and it is the first phase to give a user a way back into an
+account without an operator. It ships as **two** commits: 26B-1 alone (`5a46781` — "feat: add password
+recovery email delivery (Phase 26B-1)", 10 files, +1388), then **26B-2 and 26B-3 together in one
+commit** (`9900e9a` — "feat: add password recovery and its HTTP surface (Phase 26B-2, 26B-3)", 14
+files, +3527/−5), because the service 26B-2 builds and the two routes that expose it land as one
+observable unit. No dependency was added (the transport is a global-`fetch` call), no permission or
+role grant changed, and no mobile file was touched.
+
+**26B-1 — the mail service.** `server/src/services/mail/` is a provider-agnostic boundary the rest of
+the application reaches through three functions — `isMailConfigured()`, `mailProviderName()` and
+`sendPasswordResetEmail({ to, resetUrl, expiresInMinutes })` — and it is the only mail module anything
+imports. `mailConfig.js` reads `MAIL_PROVIDER`, `MAIL_FROM`, `PASSWORD_RESET_URL`, `MAIL_APP_NAME` and
+`MAIL_REQUEST_TIMEOUT_MS` lazily at call time, so tests can switch providers between files and a
+misconfiguration can never stop the server booting — password recovery simply answers a clean 503
+until an operator fixes it. The Resend API key is deliberately **not** a field of that object:
+`mailConfig()` is the value most likely to be spread into a log line, so `resendProvider.js` reads the
+key itself. `providers/index.js` holds the registry (`resend` is the only builtin, requiring
+`RESEND_API_KEY` + `MAIL_FROM`) and `selectProvider()` throws `MailNotConfigured` for an empty,
+unknown or under-configured provider. Provider failures become `MailDeliveryError` carrying safe facts
+only — an HTTP status and, when the provider names one, an error name matching `^[a-z0-9_]{1,64}$` —
+and Resend's free-text `message` is read and **discarded** rather than relayed: it can echo submitted
+field values, and one of those fields is the reset URL, which is a live credential. `MAIL_NOT_CONFIGURED`
+and `MAIL_UNAVAILABLE` are the only two codes, so a delivery failure can never be mistaken for an
+authentication one, and the layer logs nothing at all. The template is a pure function with no
+password parameter, and every request is bounded by an `AbortController` timeout
+(`MAIL_REQUEST_TIMEOUT_MS`, default 10000).
+
+**26B-2 — the token store and recovery service.** A new `password_reset_tokens` collection stores
+`userId`, `tokenHash`, `expiresAt` and `usedAt` and nothing else — no business id, no email, no role,
+no IP, no user agent. The raw token is returned to the caller and **never persisted**: a 32-byte
+`randomBytes` value is emailed, and only its SHA-256 digest is stored, so the database cannot be read
+back into a working reset link. Tokens expire after 30 minutes, and `expiresAt` is enforced in the
+claim query rather than left to the TTL sweep, which is eventual. Single use is one conditional
+`findOneAndUpdate` on `{ tokenHash, usedAt: null, expiresAt: { $gt: now } }`, so two concurrent
+submissions of the same link cannot both succeed, and **no branch ever unsets `usedAt`** — the token
+is spent the moment it is claimed, fail-closed, even if everything after it fails. Only one token is
+live per user: a new request deletes earlier unused ones with `{ userId, usedAt: null, _id: { $lt:
+token._id } }`. `$lt` rather than `$ne` is what makes two concurrent requests converge instead of
+cancelling each other out; this is convergence, not a transaction, and cross-process it can settle at
+zero live tokens but never two. The service rejects an unknown, expired, already-used or
+no-longer-valid token with a single `INVALID_RESET_TOKEN` code and one message, so the six rejection
+reasons are indistinguishable to a caller; an account that is DISABLED, or whose business is not
+ACTIVE, is treated exactly like an unknown one and no mail is sent. The new password is held to the
+same policy as `change-password` (via the shared validator), hashed with bcrypt, and `passwordChangedAt`
+is stamped — which is what revokes every token the user holds, the same Phase 15 mechanism 26A relies
+on — with `revokeAllSessions` called as well, because `passwordChangedAt` has integer-second
+granularity and `change-password` deliberately does not revoke sessions (26A pins that
+non-revocation). Two audit events, `PASSWORD_RESET_REQUESTED` and `PASSWORD_RESET_COMPLETED`, are
+written through the existing best-effort path and carry **no metadata**, so a token can never reach
+the audit trail.
+
+**26B-3 — the HTTP surface.** Two **public** (unauthenticated), POST-only routes under `/api/auth`,
+both rate-limited: `forgot-password` and `reset-password`. `passwordReset.controller.js` is the only
+place a recovery domain failure becomes an HTTP status — 26B-2's errors carry a stable `code` and no
+status, mirroring `mapAiFailure` in the AI layer. **The request path is an enumeration-resistant
+invariant**: `requestPasswordReset` returns `undefined` on every non-error path, so the controller has
+no field it could reflect, and one module-level constant is returned as a 202 from every non-error
+exit. A **mail delivery failure is answered with that same 202**, logged server-side and swallowed:
+the service can only reach the send after it has found a live, ACTIVE account, so a 503 there would be
+reachable only for addresses that exist and would be an account-existence oracle. `MAIL_NOT_CONFIGURED`
+**does** remain a 503, because that check happens *before* any account lookup and therefore
+distinguishes nothing — this is an ordering argument, not a status choice, and a new post-lookup error
+class is the one thing that could silently reopen the oracle. Its client-facing copy is fixed in the
+controller rather than relayed, so no environment-variable name, provider name or transport detail
+reaches an unauthenticated caller. `confirmPassword` is checked by the validator before the service is
+called and is not returned by it, so a mistyped confirmation can never spend a valid token. The three
+recovery limiters deliberately **omit** `skipSuccessfulRequests` (the success path and the silent
+no-op are both 202, so skipping 2xx would disable the limiter entirely); that option is present only
+on the two Phase 07B login limiters, and both facts are guarded. A spent token, an expired token and a
+reused token all answer 400 `INVALID_RESET_TOKEN`; a too-weak password answers 400 `VALIDATION_ERROR`
+with `fields`; a limiter answers 429 `PASSWORD_RESET_RATE_LIMITED`.
+
+Two risks were identified by the pre-commit audit and **accepted and deferred, not fixed**: the
+request path is a practical timing oracle (an unknown address costs one indexed query; a known one
+costs writes, an audit insert and an outbound HTTPS request), and distributed reset-mail flooding of a
+single victim is unbounded, because the per-account bucket keys on `ip|email` while a rotating
+attacker never trips the per-IP bucket. Both are recorded in `docs/DEVELOPMENT_ROADMAP.md` §27B as
+open items for a future owner decision. No new route was added anywhere else, and the Phase 23
+classifier's `PUBLIC` bucket declares both routes with their reasons.
 
 Phase 18 is an owner-directed mobile UI extension delivered in approved lettered increments (18A,
 18B, …) after Phase 17. It turns the app into a modern SaaS-style product surface WITHOUT changing

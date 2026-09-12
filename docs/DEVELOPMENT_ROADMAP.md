@@ -132,6 +132,9 @@ Design-Token Contrast Close-Out & Mobile Known-Issue Reconciliation
         ↓
 Phase 26A
 Session Hardening & Real Logout
+        ↓
+Phase 26B
+Password Recovery (Email Reset)
 ```
 
 ---
@@ -2401,6 +2404,343 @@ relaxed — recorded here because it is a deviation from the approved file list.
 - The change surface is the approved Phase 26A files plus the seven objectively-required fixture
   updates and `phase16-audit-viewer.test.mjs` (recorded above).
 - Nothing committed or pushed without explicit owner approval.
+
+---
+
+# 27B. Phase 26B — Password Recovery (Email Reset)
+
+**Status: implemented, verified and committed (2026-09-13); not pushed.**
+**Commits: `5a46781` — "feat: add password recovery email delivery (Phase 26B-1)", then `9900e9a` —
+"feat: add password recovery and its HTTP surface (Phase 26B-2, 26B-3)". Phase 26B-2 and Phase 26B-3
+share the second commit: the token store and the service that uses it have no caller and no observable
+behaviour until the two routes exist, so they are one unit of work.**
+
+## Objective
+
+Give a user a way back into their own account without an operator. Until this phase the only route to
+a changed password was `POST /api/auth/change-password`, which requires already being signed in — so a
+forgotten password meant a locked-out account and a manual database edit. Delivered in three approved
+sub-phases (26B-1, 26B-2, 26B-3) after Phase 26A.
+
+The owner's scope is explicitly limited: **no OAuth, no MFA, no refresh-token rotation, no new
+dependency, no new permission, no role-grant change and no mobile change.** Recovery is server-side
+and email-based only. Nothing here changes what a session is, and nothing here is reachable by an
+authenticated API consumer that does not already hold the reset token.
+
+## Scope
+
+### 26B-1 — Mail service (`5a46781`)
+
+`server/src/services/mail/` is a provider-agnostic boundary that the rest of the application reaches
+through exactly three functions — `isMailConfigured()`, `mailProviderName()` and
+`sendPasswordResetEmail({ to, resetUrl, expiresInMinutes })` — and it is the only mail module anything
+imports. Callers never learn which provider is configured; only `resendProvider.js` knows that Resend
+exists.
+
+- **Configuration** (`mailConfig.js`) reads `MAIL_PROVIDER`, `MAIL_FROM`, `PASSWORD_RESET_URL`,
+  `MAIL_APP_NAME` and `MAIL_REQUEST_TIMEOUT_MS` **lazily at call time**, the same pattern as
+  `services/ai/aiConfig.js`: a missing key or an unknown provider name can never prevent the server
+  from booting, and password recovery simply answers a clean 503 until an operator fixes it. The
+  `RESEND_API_KEY` is deliberately **not** a field of that object — `mailConfig()` is the value most
+  likely to be spread into a log line, so the provider that needs the key reads it itself.
+- **Provider registry** (`providers/index.js`) holds a registry plus a `resend` builtin requiring
+  `RESEND_API_KEY` and `MAIL_FROM`; `selectProvider()` throws `MailNotConfigured` for an empty
+  provider name, an unregistered name, or a builtin missing required configuration.
+- **Safe provider error handling** (`providers/resendProvider.js`). A non-2xx response becomes a
+  `MailDeliveryError` carrying an HTTP status and, when the provider names one, an error name matching
+  `^[a-z0-9_]{1,64}$`. Resend's free-text `message` is read and **discarded** rather than relayed: it
+  can echo submitted field values, and one of those fields is the reset URL — a live credential. The
+  provider response body never travels with the error, and the module logs nothing.
+- **Timeout behaviour.** Every request is bounded by an `AbortController`
+  (`MAIL_REQUEST_TIMEOUT_MS`, default `10000`), so a slow provider cannot hold a request open
+  indefinitely; a timeout surfaces as a `MailDeliveryError` like any other transport failure.
+- **Template** (`templates/passwordReset.js`) is a pure function returning `{ subject, text, html }`.
+  It takes no password parameter — there is nothing in the signature to misuse — and it refuses to
+  render without a reset URL.
+- **Error separation.** `MAIL_NOT_CONFIGURED` and `MAIL_UNAVAILABLE` are the only two codes in this
+  layer, so a delivery failure can never be mistaken for an authentication or session failure. The
+  fetch logic is deliberately **not** shared with the AI layer's `services/ai/providers/http.js`: the
+  two layers must raise different error types, and sharing it would make the mail path able to throw
+  an `AiProviderError` — exactly the coupling this boundary exists to prevent.
+- **No dependency was added.** The transport is a global-`fetch` call, so `package.json` and the
+  lockfile are untouched; the Resend SDK is deliberately not installed. Because the endpoint is a
+  module constant rather than injectable configuration, the wire-format tests stub `globalThis.fetch`
+  instead of standing up a local server.
+- **Test coverage:** `server/test/phase26b-mail-service.test.mjs` (37 tests, DB-free) plus the shared
+  fake at `server/test/fakes/mailProvider.mjs`.
+
+### 26B-2 — Reset-token store and recovery service (`9900e9a`)
+
+A new `password_reset_tokens` collection (`server/src/models/passwordResetToken.model.js`) stores
+`userId`, `tokenHash`, `expiresAt` and `usedAt` and **nothing else** — no business id, no email, no
+role, no status, no IP address, no user agent. It carries a unique index on `tokenHash`, an index on
+`{ userId, usedAt }` for the listing and cleanup queries, and a TTL index on `expiresAt`.
+
+`server/src/services/passwordReset.service.js` owns the flow:
+
+- **Cryptographically secure token generation.** A 32-byte `randomBytes` value, not a counter, a
+  timestamp or a UUID-shaped guess.
+- **The raw token is never persisted.** Only its SHA-256 digest is stored, so the database cannot be
+  read back into a working reset link — a leaked dump or a database reader yields no usable token.
+- **Token expiration.** Links are valid for 30 minutes (`PASSWORD_RESET_TTL_MINUTES`), and `expiresAt`
+  is enforced **in the claim query** rather than left to the TTL sweep, which is eventual (~60 s) and
+  must never be the correctness mechanism.
+- **Atomic single-use claim.** One conditional
+  `findOneAndUpdate({ tokenHash, usedAt: null, expiresAt: { $gt: now } }, { $set: { usedAt: now } })`,
+  so two concurrent submissions of the same link cannot both succeed.
+- **Replay protection and fail-closed behaviour.** No branch anywhere ever unsets `usedAt`: the token
+  is spent the moment it is claimed, and a later failure (a rejected user, a failed save, a failed
+  session revocation) leaves it spent rather than returning it to circulation. One code,
+  `INVALID_RESET_TOKEN`, and one message cover all six rejection reasons — unknown, expired, already
+  used, no such user, DISABLED user, and a SUSPENDED or missing business — so a caller cannot tell
+  them apart.
+- **One live token per user, by convergence not by transaction.** A new request deletes earlier unused
+  tokens with `{ userId, usedAt: null, _id: { $lt: token._id } }`. `$lt` rather than `$ne` is what makes
+  two concurrent requests converge instead of cancelling each other out. Cross-process this can settle
+  at **zero** live tokens (both links dead; the user simply asks again) but never two. See **E2** below.
+- **Inactive account and business rejection.** A DISABLED user, or a user whose business is not ACTIVE,
+  is treated exactly like an unknown address: no token is created and no mail is sent.
+- **Password policy parity.** The new password is held to the same policy as `change-password`, through
+  the same validator, so the two routes cannot drift apart.
+- **bcrypt hashing**, at the project's existing cost, into `User.passwordHash`.
+- **`passwordChangedAt` is updated**, which is the Phase 15 mechanism that invalidates every token
+  issued before it — and **`revokeAllSessions` is called as well**. That second call is not redundant:
+  `passwordChangedAt` has integer-second granularity and the comparison is strict, so a session issued
+  in the same second as the reset would otherwise survive. `change-password` deliberately does *not*
+  revoke sessions and `phase26a:443-472` pins that, so the two flows are intentionally different here.
+- **Audit behaviour.** Two events, `PASSWORD_RESET_REQUESTED` and `PASSWORD_RESET_COMPLETED`, are
+  written through the existing best-effort `recordAudit` path. They carry **no metadata at all**, so a
+  reset token can never reach the audit trail. The requested event is written after the token row
+  exists and **before** the send, which is why there is no `delivered` flag — under this layer's
+  throw-based contract such a flag would be a constant.
+- **Mail preconditions are checked before any write.** `isMailConfigured()` and the reset-URL check run
+  *before* the account lookup, which is what makes "mail unconfigured → no token row" true.
+
+### 26B-3 — Password-recovery HTTP surface (`9900e9a`)
+
+Two **public, unauthenticated, POST-only** routes, both rate-limited:
+
+```text
+POST /api/auth/forgot-password   → 202, always
+POST /api/auth/reset-password    → 200 on success
+```
+
+- **Route classification.** Both are declared in the Phase 23 classifier's `PUBLIC` bucket, with a
+  written reason. They are the first new unauthenticated write surface since Phase 07B.
+- **Middleware and validation ordering.** Rate limiter → validator → controller. A request that fails
+  validation never reaches the service, and on the reset path it never touches a token.
+- **`confirmPassword` is validation-only.** It is checked by the validator *before* the service is
+  called and is **not returned** by it, so a mistyped confirmation can never spend a valid reset token,
+  and the controller has no variable to pass by mistake: the service receives `{ token, newPassword }`
+  and nothing else. A structural test reads the controller source and requires exactly those two
+  properties at the call site.
+- **Generic `forgot-password` response.** One module-level constant is returned as a 202 from every
+  non-error exit, so "we sent you a link" and "no such account" are byte-identical. Enumeration
+  resistance here is **structural, not a rule a caller must remember**: `requestPasswordReset` returns
+  `undefined` on every non-error path, so the controller has no field it could reflect.
+- **Error mapping** lives in `server/src/controllers/passwordReset.controller.js` and nowhere else. The
+  26B-2 service is a domain layer: its `PasswordResetError` carries a stable `code` and **no HTTP
+  status**, mirroring `mapAiFailure` in the AI layer, and this one small file does the translation
+  rather than teaching `auth.controller.js` a second convention. `INVALID_RESET_TOKEN` → 400 with the
+  service's own message; `VALIDATION_ERROR` → 400 with `fields`; anything unrecognised propagates
+  unchanged to the global handler and becomes a generic 500 whose message is never echoed to a client.
+- **No token or password leakage.** Neither route returns a token, a hash, a user id or a password; the
+  success responses carry a `message` and nothing else. The account a mail failure concerned is not
+  logged either — a log naming it would be the oracle the response refuses to be, and logs travel
+  further than responses do.
+- **429 contract.** All three recovery limiters answer `429` with code `PASSWORD_RESET_RATE_LIMITED`.
+  They deliberately **omit** `skipSuccessfulRequests`: the success path and the silent no-op are both
+  202, so skipping 2xx would disable the limiter entirely and never spend a budget. That option is
+  present only on the two Phase 07B login limiters, and both facts are guarded by tests.
+
+## The `forgot-password` invariant
+
+> **`POST /api/auth/forgot-password` answers an identical 202 to every caller** — whether the address
+> belongs to an active account, belongs to a disabled one, belongs to no account at all, or could not
+> be mailed.
+
+There is one deliberate exception, and it is an **ordering** property rather than a status choice:
+`MAIL_NOT_CONFIGURED` returns a 503. It is safe precisely because the service checks mail
+configuration *before* it looks the account up, so every caller gets it identically and it
+distinguishes nothing about any account.
+
+## `MAIL_NOT_CONFIGURED` (503) vs `MailDeliveryError` (swallowed to 202)
+
+This is the single subtlest rule in the phase and the one most likely to be broken by a well-meaning
+change:
+
+- **`MailNotConfigured` is thrown before `User.findOne`.** Its 503 is therefore reachable for an
+  unknown address exactly as for a known one — it is a statement about the *server*, not about the
+  account — and it stays a 503 so an operator can see that recovery is broken.
+- **`MailDeliveryError` can only be thrown after the lookup**, because it comes from the send. A 503
+  there would be reachable *only* for an address that exists, making it an account-existence oracle.
+  `forgotPassword` therefore intercepts it, logs the operational reason server-side, and answers the
+  identical 202. The log record is the whole point of swallowing it: the operator still learns, the
+  attacker learns nothing.
+- The `MailDeliveryError → 503 MAIL_UNAVAILABLE` row remains in `mapPasswordResetFailure` as
+  documented, presently-unreachable **forward defence**, so that if the reset path ever gains a mail
+  step a `MAIL_*` code becomes a namespaced 503 rather than an unhandled 500. It is not a defect and
+  must not be reported as one; the branch is deliberate and its intent is recorded in the controller.
+- **What would break this:** a *new* error class thrown after the lookup that the mapper maps to
+  anything other than 202. Nothing in the code enforces the ordering — no type, no guard, no lint rule.
+  The current design is fail-safe in the dangerous direction (every pre-lookup error yields a uniform
+  503, and `MailDeliveryError` is caught at the call site), but this is the one change that could
+  silently reopen the oracle.
+
+## Rate Limits and Their Purpose
+
+Three limiters, all with `standardHeaders: 'draft-7'`, all answering `429 PASSWORD_RESET_RATE_LIMITED`,
+and all keyed with an explicit `ipKeyGenerator(request.ip)` rather than a library default — the default
+throws on a spoofed `X-Forwarded-For` when trust proxy is off, which would turn a hostile header into
+a 500.
+
+| Limiter | Key | Window | Max | Purpose |
+|---|---|---|---|---|
+| `forgot-password` account bucket | `ip` + normalized email | 1 h | 5 | Bounds mail sent to any one inbox from one source |
+| `forgot-password` IP bucket | `ip` | 1 h | 20 | Backstop against address rotation from a single source |
+| `reset-password` | `ip` | 15 min | 20 | Every accepted attempt costs a bcrypt hash |
+
+The windows are deliberately longer than login's: a recovery link is valid for 30 minutes and a user
+who needs one needs it once, so there is no legitimate burst to protect. **Every** attempt counts on
+all three — there is no failure to skip, because the success and no-such-account paths are
+indistinguishable by design.
+
+Two known limits of this arrangement are recorded below as **B2** and **E3**: the buckets are
+per-process in-memory stores, so N app instances multiply every budget, and the per-account bucket
+keys on `ip|email`, so it bounds mail per source-and-address rather than mail to a victim overall.
+
+## Configuration
+
+Documented operator-facing in `server/.env.example` (§ the Phase 26B-1/26B-3 blocks) and in
+`docs/SYSTEM_SPECIFICATION.md` §35. Password recovery is **disabled unless `MAIL_PROVIDER` names a
+configured provider and `PASSWORD_RESET_URL` is set**; while either is missing, `forgot-password`
+answers its fixed 503 and no reset token is ever created. Nothing in this configuration is ever sent
+to the mobile application.
+
+```text
+MAIL_PROVIDER               which provider sends mail; empty disables recovery entirely
+MAIL_FROM                   verified sender, `Name <address@your-domain>`
+RESEND_API_KEY              server-side only; never returned in a response or written to a log
+MAIL_APP_NAME               default "Inventory AI"
+MAIL_REQUEST_TIMEOUT_MS     default 10000
+PASSWORD_RESET_URL          the trusted reset page the emailed link points at
+```
+
+- **`PASSWORD_RESET_URL` is the only source of the reset URL.** It is never built from the `Host`,
+  `Origin` or `Referer` headers or from anything a client sends, so a hostile request cannot redirect
+  a victim's reset link to an attacker's domain. It must point at a real reset screen that reads the
+  `token` query parameter and POSTs it back to `/api/auth/reset-password`; if it points nowhere, the
+  feature is configured but unusable, which is why the §F deployment step below matters.
+- **Restart behaviour.** The six `AUTH_PASSWORD_RESET_*` values are read when the auth router is
+  constructed — at module import — so **changing any of them requires a process restart**, even though
+  `.env.example` presents them as tunable. This is identical to the pre-existing login/register
+  behaviour and is honest rather than a defect, but it is worth an operator knowing. The mail values
+  are read per request and need no restart; they are re-validated per send instead, which is why a
+  misconfiguration degrades to a 503 rather than to a boot failure.
+
+## Accepted / Deferred Security Risks
+
+Recorded here, in writing, so they are owner-visible rather than merely in-code. **Both of the
+following were identified by the pre-commit READ-ONLY security and integration audit, reviewed by the
+owner, and explicitly deferred — they are open, not closed, and neither has an in-scope fix.**
+
+### B1 — `forgot-password` is a practical timing oracle on account existence
+
+**Status: accepted / deferred. Not fixed. Requires an owner decision.**
+
+For an **unknown** address the request costs one indexed `User.findOne` and returns. For a **known,
+active** address the same request additionally performs a business existence check, a token insert, a
+`deleteMany`, an **audit insert**, and a synchronous outbound HTTPS `POST` to Resend with up to a 10 s
+timeout. That is a sub-millisecond path versus a typically 100 ms+ path — trivially separable by
+latency measurement over a modest sample. The HTTP surface is uniform; **the clock is not**.
+
+Enumeration resistance is the governing invariant of this phase and the uniform 202 does not protect
+against this. It is not a defect in what was built — timing-attack mitigation was explicitly excluded
+from the approved scope — but it is the single largest gap between the stated invariant and the
+delivered guarantee, and it must not be forgotten. A future increment could close it most cheaply by
+making the send fire-and-forget after the 202 is written.
+
+### B2 — Distributed reset-mail flooding of one address is not bounded
+
+**Status: accepted / deferred. Not fixed. Requires an owner decision.**
+
+The account bucket keys on `ip|email`, so its 5/hour cap applies per (source, address). The IP bucket
+keys purely on IP, so it bounds total recovery traffic per source but **not** mail volume to any single
+victim. An attacker with a rotating IP pool sends 5 × N mails/hour to one inbox; the per-IP backstop
+never fires because each source stays under 20. The in-memory stores mean N app instances multiply the
+budget as well.
+
+The endpoint is public, unauthenticated, and causes outbound mail and provider-quota consumption;
+mail-flooding a third party is the primary abuse vector for a feature of this shape. This is inherent
+to the approved design — no Redis, no shared store, both explicitly out of V1 scope, so no in-scope fix
+exists. Closing it needs a shared store and therefore a new owner decision.
+
+**Neither B1 nor B2 is closed by the Phase 26B-4 documentation close-out.** This phase records them; it
+does not address them.
+
+## Residual Risks (accepted)
+
+Also from the audit, all accepted as inherent or as the deliberate price of a chosen trade-off.
+
+- **E2 — Cross-process same-second interleaving can settle at zero live tokens.** Two concurrent
+  requests can leave both links dead and neither usable. The property that matters — never two live
+  tokens for one user — holds. A partial unique index would make it absolute and was deliberately not
+  added; the user simply asks again.
+- **E3 — The limiter stores are in-memory and therefore per-process.** A multi-instance deployment
+  multiplies every budget. A shared store (Redis) is out of V1 scope by decision; this is the same
+  underlying limit as B2.
+- **E4 — A delivery failure leaves a live, unused token row** for an account whose owner never received
+  the link. Nobody holds the raw token, so it is unusable; the next request's `deleteMany` removes it,
+  and the TTL index removes it eventually. The alternative — deleting the row on delivery failure —
+  would make the row's existence conditional on an external service and would complicate the audit
+  story, so it was rejected deliberately.
+- **E5 — A swallowed delivery failure gives the client no retry signal.** This is the price of the
+  enumeration invariant, paid knowingly: the operator learns from the log, and the user simply asks
+  again.
+- **E6 — The `PASSWORD_RESET_REQUESTED` audit row exists only for real accounts**, so an ADMIN reading
+  the trail can infer that an account exists. Necessary for the trail to be useful, and the audience is
+  OWNER/ADMIN inside the tenant, not an anonymous caller.
+- **E8 — A `revokeAllSessions` failure after `user.save()` leaves the password changed but sessions
+  live.** Fail-closed for the token, not for the sessions. The password is already changed and
+  `passwordChangedAt` rejects strictly-earlier tokens, so the residual window is the same second.
+- **E9 — The `expireAfterSeconds: 0` sweep is eventual (~60 s).** Correctness does not depend on it:
+  the claim query filters `expiresAt` directly.
+
+## Verified
+
+- **`npm run test:unit` — 209 pass, 20 skipped, 0 fail.**
+- **`npm run test:db` — 394 pass, 15 skipped, 0 fail.**
+- **`npm run lint` — exit 0**, 0 errors and 0 warnings.
+- **Full arithmetic: 603 passing tests** (209 + 394), with 35 skipped across the two runs.
+- **Phase 26B HTTP suite — 36/36** (`server/test/phase26b-password-recovery-http.test.mjs`; 12 DB-free
+  + 24 DB-backed cases).
+- **Phase 26B password-recovery suite — 39/39** (`server/test/phase26b-password-recovery.test.mjs`).
+- **Phase 26B mail suite — 37 tests** (`server/test/phase26b-mail-service.test.mjs`, DB-free).
+- **Phase 23 authorization contract — 19/19** (both new routes classified `PUBLIC` with reasons).
+- **Phase 24 runtime authorization matrix — 10/10.**
+- **Phase 07B auth security — 16/16** (the login limiters' `skipSuccessfulRequests` still present).
+- **Every new security assertion was proven able to fail before it was trusted.** The recovery service's
+  three mutations each produced a *named* assertion failure and were then reverted (service hash
+  restored byte-identical): leaking the raw token into audit metadata; adding a `$unset: { usedAt }`
+  release path; dropping `usedAt: null` from the claim filter. The controller's call-site guard was
+  written because passing `confirmPassword` through produced **no** observable failure — it is caught
+  structurally instead.
+- **Route inventory, independently measured** by a source-level walk of `app.js`'s mounts and each
+  router's declarations: **65 routes = 47 permission-gated + 10 authenticated + 8 public + 0
+  role-gated**. Phase 26B added exactly two, both public; the gated tier is unchanged at 47.
+- `mobile/**` is untouched by both commits, and no dependency was added to either `package.json`.
+
+## Definition of Done
+
+- A user who has forgotten their password can complete a reset by email, without an operator.
+- `forgot-password` is indistinguishable across the unknown-address, disabled-account, delivered and
+  delivery-failed cases — with `MAIL_NOT_CONFIGURED` as the one documented, ordering-justified
+  exception.
+- A reset token is single-use, expires, is stored only as a hash, and can never be replayed or
+  released once claimed.
+- No new permission, role grant, session semantic or mobile change; no new dependency.
+- The two accepted High risks (**B1**, **B2**) are recorded in writing here and remain open.
+- Nothing pushed without explicit owner approval.
 
 ---
 

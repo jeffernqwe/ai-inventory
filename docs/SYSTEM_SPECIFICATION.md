@@ -1252,6 +1252,72 @@ any client-branched error code the server cannot emit. Its comparisons are facto
 functions and exercised against deliberately perturbed in-memory clones, so the guard is
 demonstrably capable of failing rather than merely being green.
 
+`server/test/phase24-runtime-authorization-matrix.test.mjs` is the DB-backed counterpart: the runtime
+matrix over real routes, the four role-mutation tests, and the explicit assertion that no runtime route
+is reserved to OWNER alone. Its expectations come from `hasPermission`, so it too cannot drift from the
+catalogue.
+
+## Runtime Authorization Matrix
+
+The three contracts above are **structural**: they prove that a route *declares* a gate, not that the
+shipped server *applies* it to a real request. A separate DB-backed suite pins the runtime behaviour
+over real endpoints, role by role.
+
+The matrix is **derived, never transcribed**. The tier a route belongs to is computed by asking the
+shipped `hasPermission(role, permission)` who holds the route's capability, so the suite holds no
+second copy of the role matrix and cannot silently disagree with `src/constants/roles.js`; a grant
+change flows straight through to the cells. The matrix resolves to three invoked tiers:
+
+| Tier | Holders | Representative capabilities |
+|---|---|---|
+| A | OWNER, ADMIN | `users.manage`, `audit.view`, `categories.manage`, `locations.manage` |
+| B | OWNER, ADMIN, MANAGER | `products.manage`, `suppliers.manage`, `purchase-orders.manage`, `inventory.manage`, `dashboard.view` |
+| C | every role | every `*.view`, `inventory.stock-in`/`stock-out`, `inventory.history.view`, `purchase-orders.receive`, `ai.use` |
+
+There is deliberately **no OWNER-only runtime tier**. The two OWNER-exclusive capabilities
+(`business.manage`, `roles.manage`) are catalogue-only per Phase 22, so no shipped endpoint
+distinguishes OWNER from ADMIN. The suite asserts that emptiness explicitly rather than leaving a hole
+that would read as coverage, and no route is added to make the tier testable.
+
+Two properties keep the matrix honest and cheap to maintain:
+
+* **An admitted cell depends on nothing but the gate.** A permission gate is the second handler, so it
+  decides before validation, lookup or provider access. An admitted cell therefore asserts only "not
+  401, not 403, and not the code-less global 404" — no request body, no seeded resource, no provider
+  availability, no success payload — which keeps the suite immune to unrelated validation changes. The
+  distinction between the two 404 shapes is what catches a mistyped path: the global handler
+  (`middlewares/notFound.js`) answers `{error, message}` with **no `code`**, while every `ApiError` 404
+  carries one.
+* **Denial is asserted exactly.** A refused cell asserts HTTP 403 with `code: 'FORBIDDEN'`; an
+  unauthenticated request to a gated route asserts 401 with `code: 'AUTH_REQUIRED'`, sampled per tier
+  rather than repeated per route because the structural suite already proves `requireAuth` is the first
+  handler on every gated route.
+
+## Role Mutation Takes Effect Immediately
+
+Authorization is decided per request from current database state, never from token contents. An access
+token carries only `sub` plus the standard `iat`/`exp` — no role and no `businessId` claim — and
+`middlewares/authenticate.js` reloads the user (and therefore the role and business) from the database
+on every request. A hand-forged `role` claim therefore neither grants a capability nor escalates one.
+
+The runtime consequence is specified and tested: changing a user's role takes effect on the
+**already-issued token**, with no new login. Promotion grants the new capability and demotion revokes
+the old one immediately, in both directions, including across tiers. This mirrors the long-standing
+account-status rule, where disabling a user revokes an existing JWT instantly.
+
+## Tenant Isolation Mechanism
+
+Tenant isolation is enforced by **query scoping**, not by a rejection middleware: every business-owned
+read and write is filtered by the `businessId` taken from the authenticated session, so a reference to
+another tenant's resource resolves to nothing and surfaces as an ordinary 404 `NOT_FOUND`. Client
+supplied `businessId` values are never trusted and never influence a query.
+
+`src/utils/businessAccess.js` (`assertBusinessAccess`, which emits the `FORBIDDEN_BUSINESS` code) has
+**no production call site** — it is referenced only by tests, one of which exercises it inside a
+test-only router. It is retained unmodified, wired to nothing, and no client behaviour depends on it;
+the `FORBIDDEN_BUSINESS` code is consequently not reachable at runtime in production. The presence of
+that utility must not be read as the isolation mechanism.
+
 ---
 
 # 31. API Structure

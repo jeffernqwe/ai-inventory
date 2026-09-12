@@ -55,6 +55,7 @@ const PURE_DB = [
   'phase20-pagination-order.test.mjs', // offset-pagination ordering determinism across the nine list paths
   'phase20-pagination-contract.test.mjs', // offset-pagination coercion contract (page/limit defaults, cap, empty past-end page)
   'phase20-filter-contract.test.mjs', // list filter contract (invalid status/supplierId/blank q rejected, valid filters still narrow)
+  'phase24-runtime-authorization-matrix.test.mjs', // runtime role x real-route matrix + role-change effect on an existing JWT
 ];
 const MIXED = [
   'phase06-ai-provider.test.mjs',     // unit: provider selection; db: loop + mapping

@@ -234,6 +234,7 @@ Phase 19 — Stock Transfers Between Locations (POST /api/inventory/transfer: tw
 Phase 21 — Product Archive-Only Lifecycle & Inventory Invariant (documentation + regression guards only; no production behavior change)
 Phase 22 — Authorization Contract Enforcement & RBAC Coverage Guards (read routes bound to their view permissions; `CATALOGUE_ONLY_PERMISSIONS` declared; no role grant changed)
 Phase 23 — Authorization Contract Completion: Route Classification & RBAC Mirror Guards (every route classified into a declared authorization bucket; mobile RBAC mirror pinned to the server matrix; `requireRole` inertness and client error-code contract; no production behavior change)
+Phase 24 — Runtime Authorization Matrix & Tenant-Isolation Verification (runtime role × real-route matrix derived from `ROLE_PERMISSIONS`; role-change effect proven on an existing JWT in both directions; empty OWNER-only runtime tier asserted; no production behavior change)
 ```
 
 Phase 08 is an owner-directed hardening extension delivered in approved lettered increments
@@ -390,6 +391,64 @@ pass-through assignments that resolve to nothing are skipped rather than treated
 guard. Reporting the discovery honestly: it classifies **60 routes — 47 permission-gated, 7
 authenticated (self-service plus the four categories/locations reads), 6 public, 0 role-gated**; that
 distribution is observed, not asserted, and only the bucket *membership* is pinned.
+
+Phase 24 is an owner-directed authorization-verification increment delivered as a single approved
+increment after Phase 23. It adds the missing **runtime** half of the authorization contract and
+changes **no production behavior**: no permission was added, renamed or removed, no role grant
+changed, and no route, controller, service, model, middleware or mobile file was modified. The
+change surface is one new DB-backed suite plus documentation.
+
+The premise that runtime authorization was largely unproven turned out to be **only partly true**, and
+the investigation said so: tenant isolation is covered by roughly fifteen behavioral tests across ten
+files, horizontal ownership is complete (AI conversations are the only user-owned resource, and
+same-business cross-user access is already pinned), and AI authorization is complete for its declared
+matrix because the only denial cell that exists — `dashboard.view × STAFF` — is already covered both
+directly and inside a live chat. Two real gaps remained, and Phase 24 closes exactly those.
+
+**A consolidated matrix over real routes.** Vertical coverage existed per feature but only ever
+against the boundary that feature cares about, and the suite's one four-role matrix ran against the
+**test-only `/guard` router inside `phase03-auth.test.mjs`** — synthetic routes exercising the
+middleware, not shipped endpoints. `server/test/phase24-runtime-authorization-matrix.test.mjs`
+(DB-backed, registered in `PURE_DB`) walks a representative real route per capability and asserts the
+outcome for all four roles. Its expectations are **derived, never transcribed**: the tier a route
+belongs to is computed by asking the shipped `hasPermission(role, permission)` who holds its
+capability, so the file contains no second copy of the role matrix and cannot silently disagree with
+`constants/roles.js` — a grant change flows straight through to the cells. Admitted cells deliberately
+depend on nothing else: a gate is the second handler, so it decides before validation or lookup runs,
+and an admitted cell asserts only "not 401, not 403, and not the code-less global 404", which means no
+request body, no seeded resource, no provider availability and no success payload. The typo guard works
+because the global handler (`middlewares/notFound.js`) answers `{error, message}` with **no `code`**
+while every `ApiError` 404 carries one. Denied cells assert 403 `FORBIDDEN`; unauthenticated requests
+are sampled per tier rather than repeated per route, since Phase 23 already proves structurally that
+`requireAuth` is `handlers[0]` on all 47 gated routes.
+
+**Role mutation now has an authorization-effect proof.** Phase 14A asserted only the response payload
+of a role change, although `authenticate.js` reloads the user — and therefore the role — from the
+database on every request. Four tests close that, always using the **same pre-existing token**: STAFF →
+MANAGER grants a MANAGER-gated capability; MANAGER → STAFF revokes it (de-escalation being the sharper
+security property); STAFF → ADMIN → STAFF crosses tiers and grants then revokes `users.manage`; and a
+promotion reaches the AI tool permission gate, flipping a `getInventorySummary` soft `TOOL_FORBIDDEN`
+into a real run. This is safe by construction rather than merely asserted: an access token carries only
+`sub`/`iat`/`exp`, so there is no role claim that can go stale, and a hand-forged `role` claim neither
+grants nor escalates anything.
+
+**Accurate tenant-isolation documentation.** `assertBusinessAccess` (`src/utils/businessAccess.js`,
+emitting `FORBIDDEN_BUSINESS`) has no `src/` importer — its only callers are tests, one of them inside
+the `/guard` router. It is therefore **production-dead and was left byte-identical**, neither wired,
+modified nor deleted. Real tenant isolation is enforced by `businessId` query scoping and surfaces as a
+plain 404 `NOT_FOUND`, not a 403; the mobile client does not compare against `FORBIDDEN_BUSINESS`, so no
+client contract depends on the dead path.
+
+**The empty OWNER-only runtime tier is asserted, not left implicit.** `business.manage` and
+`roles.manage` are catalogue-only (Phase 22), so no real route distinguishes OWNER from ADMIN, and a
+"complete" matrix has structurally empty top-tier cells. The suite asserts this directly instead of
+leaving a hole that reads like coverage, and deliberately does **not** add a route to make it testable.
+
+Every assertion was proven able to fail before being trusted: inverted assertions on the *stale* role
+outcome (still 403 after promotion, still 200 after demotion) were confirmed to throw, a wrong expected
+matrix cell was confirmed to throw, and the typo guard was confirmed to distinguish the global 404 from
+an `ApiError` 404. Suite 459 → 469, `test:db` 320 → 330, `test:unit` unchanged at 170; `npm run lint`
+0/0.
 
 Phase 18 is an owner-directed mobile UI extension delivered in approved lettered increments (18A,
 18B, …) after Phase 17. It turns the app into a modern SaaS-style product surface WITHOUT changing

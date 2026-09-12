@@ -39,6 +39,11 @@ const aiMessageSchema = new Schema(
 );
 
 aiMessageSchema.index({ conversationId: 1, createdAt: 1 });
+// Phase 20C (H-1): conversation messages are read oldest-first with a deterministic
+// tiebreaker — `sort({ createdAt: 1, _id: 1 })` (ai.controller.js). The index above
+// matches the equality + `createdAt` prefix but not the `_id` key, so the sort was
+// executed in memory. Declaring the full key shape makes it index-ordered.
+aiMessageSchema.index({ conversationId: 1, createdAt: 1, _id: 1 });
 
 const AIMessage = mongoose.model('AIMessage', aiMessageSchema);
 

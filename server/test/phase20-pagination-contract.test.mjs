@@ -9,7 +9,9 @@
 //
 // Two of the Phase 20B findings are intentionally NOT covered here, because
 // Phase 20C was scoped to pin current behavior rather than to change it:
-//   * M-1 — an invalid `status`/`type` filter is coerced rather than rejected;
+//   * M-1 — an invalid `status`/`type` filter is coerced rather than rejected.
+//     Phase 20D has since normalized that: see phase20-filter-contract.test.mjs
+//     for the rejected-filter contract.
 //   * M-4 — exponent notation (`limit=1e3`) is parsed by `Number.parseInt` as
 //     `1`. It behaves the same as `abc` here, so it adds no new contract, and it
 //     is explicitly deferred rather than asserted as intended behavior.

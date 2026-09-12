@@ -36,6 +36,7 @@ const PURE_UNIT = [
   'phase03-rbac.test.mjs',            // middleware/constants unit tests
   'phase06-ai-wire.test.mjs',         // AgentRouter/Anthropic wire mapping
   'phase07d-production-config.test.mjs', // env validation, health, shutdown
+  'phase20f-ai-conversation-index.test.mjs', // schema-declaration guard for the ai_conversations list index (M-5)
 ];
 const PURE_DB = [
   'phase03-auth.test.mjs',            // auth + RBAC over real routes + Mongo

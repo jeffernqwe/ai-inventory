@@ -271,6 +271,98 @@ dbSuite('Phase 04 — inventory core + dashboard', dbOk, () => {
     assert.equal(locArch.json.code, 'LOCATION_ARCHIVED');
   });
 
+  // ---------------------------------------------------------------------------
+  // Phase 21 — the archive-only lifecycle, seen from the inventory side.
+  // Archiving is the terminal product state: it retires a product from new
+  // movements WITHOUT touching the stock and the history it already has. The
+  // declaration half of this (no delete route, no delete service method, no
+  // deleted status) is pinned DB-free in phase21-product-archive-invariant.
+  // ---------------------------------------------------------------------------
+
+  it('rejects every movement type against an archived product', async () => {
+    const p = await newProduct(owner);
+    const l = await newLocation(owner);
+    const l2 = await newLocation(owner);
+    await stockIn(owner, p, l, 10);
+    await api('POST', `/api/products/${p}/archive`, { token: owner.token });
+
+    // assertOperationalProduct runs before any row is read (inventory.service.js
+    // stock-out :361, transfer :445, adjust :617 — stock-in :288), so all four
+    // paths answer 409 regardless of how much stock happens to exist. stock-out
+    // and adjust are included precisely because they never create a row, and so
+    // are not covered by the stock-in case above.
+    const attempts = {
+      'stock-in': await stockIn(owner, p, l, 1),
+      'stock-out': await stockOut(owner, p, l, 1),
+      adjust: await adjust(owner, p, l, 5),
+      transfer: await api('POST', '/api/inventory/transfer', {
+        token: owner.token,
+        body: { productId: p, fromLocationId: l, toLocationId: l2, quantity: 1 },
+      }),
+    };
+    for (const [name, res] of Object.entries(attempts)) {
+      assert.equal(res.status, 409, `${name} should reject an archived product: ${JSON.stringify(res.json)}`);
+      assert.equal(res.json.code, 'PRODUCT_ARCHIVED', `${name} should report PRODUCT_ARCHIVED`);
+    }
+
+    // The refusals moved nothing: the archived product's stock is intact.
+    assert.equal((await row(p, l, owner.businessId)).quantity, 10);
+  });
+
+  it('archiving a product retains its inventory row, quantity and history', async () => {
+    const p = await newProduct(owner);
+    const l = await newLocation(owner);
+    await stockIn(owner, p, l, 8);
+    await stockOut(owner, p, l, 3);
+
+    const before = await row(p, l, owner.businessId);
+    assert.equal(before.quantity, 5);
+
+    const arch = await api('POST', `/api/products/${p}/archive`, { token: owner.token });
+    assert.equal(arch.status, 200);
+    assert.equal(arch.json.status, 'ARCHIVED');
+
+    // The row survives archival, unchanged, on the same product and location.
+    const after = await row(p, l, owner.businessId);
+    assert.ok(after, 'archiving removed the inventory row');
+    assert.equal(String(after._id), String(before._id));
+    assert.equal(after.quantity, 5);
+
+    // ...and it is still listed, still attributed to the archived product.
+    const listed = await api('GET', `/api/inventory?productId=${p}`, { token: owner.token });
+    assert.equal(listed.status, 200);
+    assert.equal(listed.json.total, 1);
+    assert.equal(listed.json.items[0].quantity, 5);
+    assert.equal(listed.json.items[0].product.id, p);
+    assert.equal(listed.json.items[0].product.status, 'ARCHIVED');
+
+    // The ledger is retained too, and still resolves the product's name.
+    const hist = await api('GET', `/api/inventory/history?productId=${p}`, { token: owner.token });
+    assert.equal(hist.status, 200);
+    assert.equal(hist.json.total, 2);
+    assert.equal(await txnCount(owner.businessId, p, l, 'STOCK_IN'), 1);
+    assert.equal(await txnCount(owner.businessId, p, l, 'STOCK_OUT'), 1);
+    assert.ok(hist.json.items.every((i) => i.product?.id === p && i.product?.name));
+  });
+
+  it('restoring an archived product makes it operational again', async () => {
+    const p = await newProduct(owner);
+    const l = await newLocation(owner);
+    await stockIn(owner, p, l, 4);
+
+    await api('POST', `/api/products/${p}/archive`, { token: owner.token });
+    assert.equal((await stockIn(owner, p, l, 1)).status, 409);
+
+    const rest = await api('POST', `/api/products/${p}/restore`, { token: owner.token });
+    assert.equal(rest.status, 200);
+    assert.equal(rest.json.status, 'ACTIVE');
+
+    // The archived stock was never touched, so the movement resumes from it.
+    const back = await stockIn(owner, p, l, 2);
+    assert.equal(back.status, 201);
+    assert.equal((await row(p, l, owner.businessId)).quantity, 6);
+  });
+
   it('isolation: foreign product/location ids never match another business', async () => {
     const bp = await newProduct(other);
     const bl = await newLocation(other);

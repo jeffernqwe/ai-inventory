@@ -1815,7 +1815,76 @@ Mobile:
 
 ---
 
-# 21. Phase Gate System
+# 21. Phase 21 — Product Archive-Only Lifecycle & Inventory Invariant
+
+## Objective
+
+Make explicit, and prevent from drifting, two properties the system already had: products follow an
+archive-only lifecycle (`ACTIVE` <-> `ARCHIVED`, with `ARCHIVED` terminal — no hard delete exists or
+may be added), and an inventory record is dependent on a live product in the same business, with the
+dependency maintained by application lifecycle rules and write-path validation rather than by any
+database-level foreign key.
+
+This is a documentation-and-guard increment. It changes **no production behavior**.
+
+## Scope
+
+Documentation:
+
+- `docs/SYSTEM_SPECIFICATION.md` gains `## Product Lifecycle` (§13, stating that deletion is
+  prohibited and `ARCHIVED` is terminal), `## Inventory and Product Integrity` (§14, stating that
+  archiving retains inventory records and history and that integrity comes from lifecycle rules plus
+  write-path validation, **not** from MongoDB — and that read-path filters are defensive query
+  hygiene, not enforcement), a transaction-permanence note (§15), and a clarification in §31 that
+  the endpoint list is illustrative and that product deletion is not part of the contract. The
+  previously illustrative `DELETE /api/products/:id` line is replaced with the implemented
+  `POST /api/products/:id/archive` and `POST /api/products/:id/restore`.
+- `CLAUDE.md` §4 (Mandatory Architecture Rules) carries the archive-only product rule and the
+  referential-integrity statement; §7 lists Phase 21.
+- This section.
+
+Tests:
+
+- New `server/test/phase21-product-archive-invariant.test.mjs` — DB-free declaration guards
+  registered in `PURE_UNIT`: the product status enum has exactly `ACTIVE`/`ARCHIVED` and no
+  deletion-like state; the products router registers no `DELETE` route and does expose
+  archive/restore; `productService` exposes no delete-like operation; the audit vocabulary declares
+  no product-deletion action; `productId` is required and references `Product` on both `Inventory`
+  and `InventoryTransaction`; `businessId` is required on `Product`. Runs in both `npm test` and
+  `npm run test:unit`, so "nobody added a delete route" stays checkable even with MongoDB down.
+- `server/test/phase04-inventory.test.mjs` — three DB-backed cases: every movement type (stock-in,
+  stock-out, adjust, transfer) is rejected against an archived product with `PRODUCT_ARCHIVED` and
+  moves nothing; archiving retains the inventory row, its quantity and its full history, and the row
+  is still listed and attributed to the archived product; restoring makes the product operational
+  again from the stock it kept.
+- `server/test/phase04-catalog.test.mjs` — `DELETE /api/products/:id` returns 404 and leaves the
+  product untouched, while archive/restore remain the terminal transitions.
+
+## Out of Scope
+
+- No `DELETE /api/products/:id`, no purge, no cascade delete, no soft delete, no `deletedAt`, no
+  `PRODUCT_DELETED` audit action, no delete hook, no MongoDB foreign-key emulation.
+- No change to any model, route, index, migration, controller, service, or AI tool. No new index.
+- No change to `inventory.service.js` — including the `{'product.0': {$exists: true}}` list guard,
+  which stays byte-identical. That guard is defensive read-path filtering and is redundant with the
+  following `$unwind` for filtering purposes; it is **not** referential-integrity enforcement, and
+  Phase 21 neither removes nor "fixes" it.
+- No orphan-repair behavior, no logging/metrics/counters for the guard, no test that manufactures
+  orphan inventory documents.
+- No mobile change, no API response change. Phase 20C–20H performance work stays closed.
+
+## Definition of Done
+
+- `node --test server/test/phase21-product-archive-invariant.test.mjs` passes 6/6 with no database
+  involvement.
+- `npm run test:unit`, `npm run test:db`, `npm test` and `npm run lint` are green.
+- `git diff` shows `server/src/**` and `mobile/**` unchanged, and `server/src/services/inventory.service.js`
+  byte-identical.
+- Nothing committed, nothing pushed.
+
+---
+
+# 22. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.
 
@@ -1856,7 +1925,7 @@ The project owner decides whether to proceed.
 
 ---
 
-# 22. Change Control
+# 23. Change Control
 
 If Claude discovers that the current specification is incomplete or incorrect:
 
@@ -1874,7 +1943,7 @@ Minor implementation improvements that do not alter architectural decisions may 
 
 ---
 
-# 23. Bug Handling
+# 24. Bug Handling
 
 If a bug is discovered during a phase:
 
@@ -1899,7 +1968,7 @@ Only fix it immediately if it blocks the current phase.
 
 ---
 
-# 24. Refactoring Rules
+# 25. Refactoring Rules
 
 Refactoring is allowed when it:
 
@@ -1917,7 +1986,7 @@ Keep changes focused.
 
 ---
 
-# 25. Dependency Rules
+# 26. Dependency Rules
 
 Before adding a dependency:
 
@@ -1931,7 +2000,7 @@ Do not add dependencies simply for convenience.
 
 ---
 
-# 26. Git Checkpoints
+# 27. Git Checkpoints
 
 A Git commit should be created after a stable phase.
 
@@ -1964,7 +2033,7 @@ Before committing:
 
 ---
 
-# 27. V1 Completion
+# 28. V1 Completion
 
 V1 is complete only when all major requirements in:
 
@@ -2006,7 +2075,7 @@ AI Inventory Questions
 
 ---
 
-# 28. Future Development
+# 29. Future Development
 
 After V1, future features must be planned separately.
 
@@ -2041,7 +2110,7 @@ Future functionality must not be implemented during V1 unless explicitly approve
 
 ---
 
-# 29. Final Development Rule
+# 30. Final Development Rule
 
 The goal is not to produce the largest amount of code as quickly as possible.
 

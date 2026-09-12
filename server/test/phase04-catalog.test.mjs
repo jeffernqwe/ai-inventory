@@ -322,6 +322,32 @@ dbSuite('Phase 04 — catalog: categories, locations, products', dbOk, () => {
       assert.equal(staffArchive.status, 403);
     });
 
+    // Phase 21 — the lifecycle is archive-only. There is no product delete
+    // endpoint, and this is the end-to-end proof of it: the request falls
+    // through the products router to the shared 404 handler
+    // (src/middlewares/notFound.js), which is all that happens to an
+    // unimplemented method. Authentication never runs, so no token is implied.
+    it('exposes no product delete endpoint — the lifecycle is archive-only', async () => {
+      const id = await productId();
+
+      const del = await api('DELETE', `/api/products/${id}`, { token: owner.token });
+      assert.equal(del.status, 404);
+      assert.equal(del.json.error, 'Not Found');
+
+      // The product is untouched by the refused delete.
+      const still = await api('GET', `/api/products/${id}`, { token: owner.token });
+      assert.equal(still.status, 200);
+
+      // The two transitions that DO exist are the terminal lifecycle surface.
+      const arch = await api('POST', `/api/products/${id}/archive`, { token: owner.token });
+      assert.equal(arch.status, 200);
+      assert.equal(arch.json.status, 'ARCHIVED');
+
+      const rest = await api('POST', `/api/products/${id}/restore`, { token: owner.token });
+      assert.equal(rest.status, 200);
+      assert.equal(rest.json.status, 'ACTIVE');
+    });
+
     it('isolation: foreign product id is a 404 and list never leaks across businesses', async () => {
       const foreignProduct = await productId({}, other.token);
       const got = await api('GET', `/api/products/${foreignProduct}`, { token: owner.token });

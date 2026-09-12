@@ -149,6 +149,8 @@ Endpoints:
 | POST   | `/api/auth/register` | Register a Business + OWNER user (`201`, no token)  |
 | POST   | `/api/auth/login`    | Log in, returns `{ token, tokenType, expiresIn, user }` |
 | GET    | `/api/auth/me`  | Current user (requires `Authorization: Bearer <token>`) |
+| PATCH  | `/api/auth/me`  | Update the caller's own name (`name` only; any other field is `400 VALIDATION_ERROR`) |
+| POST   | `/api/auth/change-password` | Change own password — verifies the current password first, then revokes every previously issued JWT (`401 SESSION_INVALIDATED`) |
 
 Phase 04 — catalog, inventory, dashboard (all `Authorization: Bearer <token>`):
 
@@ -273,7 +275,8 @@ npx expo start              # start Metro dev server (Expo Go / simulator)
   categories, locations, inventory (with low/out views), stock in, stock out, adjust
   (MANAGER+), **transfer between locations** (MANAGER+), inventory history, **AI assistant** (conversation hub, new chat and
   conversation threads — read-only; a configured provider is required for real answers),
-  profile.
+  profile (with **edit name** and **change password** — changing the password revokes every
+  existing session).
 - **Theming & design system (Phase 18A):** the app renders a semantic **light** and **dark**
   palette from `lib/theme.js` tokens via `ThemeProvider`/`useTheme`
   (`lib/theme-context.jsx`); the scheme follows the OS automatically
@@ -364,6 +367,20 @@ Phase 07 (testing + production hardening) and Phase 08 (owner-directed hardening
   dashboard inventory-health + "Needs restock" preview (see "Inventory intelligence & restock
   alerts"). Read-only throughout — no data-model, RBAC, or V1 status change. Verified by
   `npm run lint` (0/0), the DB-free unit run (106 passed), and the full backend suite (257/257).
+- **Phase 15 — Account Security & Profile Management:** implemented, verified, and committed
+  (`1124834`) — self-service account security on top of the Phase 03 auth layer. `POST
+  /api/auth/change-password` verifies the current password **first** (nothing changes on a wrong
+  one), replaces the bcrypt hash, and stamps `User.passwordChangedAt`; `requireAuth` then rejects
+  every token whose `iat` second is strictly older than that stamp with `401 SESSION_INVALIDATED` —
+  so changing a password revokes all existing sessions with **no server-side session store**. A
+  token minted in the same second as the change (the fresh login) stays valid. `PATCH /api/auth/me`
+  updates the caller's **name only**: identity comes exclusively from the authenticated session, and
+  every other field (email, role, status, businessId, password) is rejected with
+  `400 VALIDATION_ERROR` rather than silently ignored. Mobile: an edit-name screen and a
+  change-password screen reached from Profile. No new dependency, and no change to register/login,
+  RBAC, or tenant isolation. Verified by `npm run lint` (0/0),
+  `server/test/phase15-account-security.test.mjs` (7 cases, including the second-granularity
+  revocation boundary), and the full backend suite (339/339).
 - **Phase 16 — Audit Trail Viewer:** implemented, verified, and committed (`ddea22e`) — the
   read side of the audit feature (the write path existed since Phase 04). `GET /api/audit` exposes
   the business-scoped governance trail newest-first with action/entityType/user/date/q filters and
@@ -371,8 +388,8 @@ Phase 07 (testing + production hardening) and Phase 08 (owner-directed hardening
   model change, no new dependency, no write routes. Mobile: an Audit Log screen + dashboard tile for
   OWNER/ADMIN. Verified by `npm run lint` (0/0), the DB-free unit run (107 passed), the full backend
   suite (350/350), and mobile android+iOS exports.
-- **Phase 17 — Mobile Supplier & Purchase Order Management:** implemented, verified, commit pending
-  owner sign-off — the mobile management half of the Phase 13 supplier/PO backend, with **ZERO
+- **Phase 17 — Mobile Supplier & Purchase Order Management:** implemented, verified, and committed
+  (`9249633`) — the mobile management half of the Phase 13 supplier/PO backend, with **ZERO
   backend changes**. A Suppliers screen (create/edit/archive/restore incl. contact fields) via an
   additive `fields` prop on the shared `RefManage` (Categories/Locations unchanged), and the full PO
   lifecycle on mobile — create DRAFT, edit DRAFT, issue, cancel — using the exact existing backend
@@ -381,7 +398,7 @@ Phase 07 (testing + production hardening) and Phase 08 (owner-directed hardening
   Verified by `npm run lint` (0/0), the full backend suite (350/350 — regression check only, no
   server file changed), and mobile android+iOS exports.
 - **Phase 18A — SaaS-style UI Foundation, Light/Dark Theme System & Readability:** implemented,
-  verified, commit pending owner sign-off — a semantic **light + dark** theme system
+  verified, and committed (`263b857`) — a semantic **light + dark** theme system
   (`lib/theme.js` palettes + `ThemeProvider`/`useTheme` in `lib/theme-context.jsx`, preference
   persisted via expo-secure-store, `userInterfaceStyle: "automatic"`), the behavior-neutral
   conversion of all 41 non-owner-held theme importers to `useTheme()`, `@expo/vector-icons` behind a
@@ -392,8 +409,43 @@ Phase 07 (testing + production hardening) and Phase 08 (owner-directed hardening
   **Zero backend changes.** Verified by mobile android+iOS exports and an emulator smoke
   (light → dark → increased font size); owner-held files (`_layout.js`, `SignOutIcon.jsx`)
   byte-identical. See `docs/DESIGN_SYSTEM.md`.
-- **Phase 19 — Stock Transfers Between Locations:** implemented, verified, commit pending owner
-  sign-off — closes the last §15 gap: `TRANSFER` was reserved in Phase 04 but never implemented, so
+- **Phase 18B — Dashboard Redesign & Navigation Hierarchy:** implemented, verified, and committed
+  (`3dd75dd`) — the first adoption increment on the 18A foundation. The dashboard is rebuilt on
+  `StatCard`, `SectionHeader`, `ListRow`, `Icon`, `Button`, and `Card`, with a grouped navigation
+  hierarchy so primary destinations read as first-class entries instead of a flat tile grid. Same
+  data, same destinations, same permission gates — presentation only.
+- **Phase 18C — Core List Screens:** implemented, verified, and committed (`dac15c7`) — the three
+  core list screens (products, inventory, purchase orders) move onto one shared list grammar
+  (`ListScreen`/`ListRow`/`SearchField`/`PressableCard`/`Icon`), with an additive `footer` and
+  `titleStyle` on `ListRow`, `emptyAction`/`loadingLabel` on `ListScreen`, prop forwarding on
+  `PressableCard`, and `autoCapitalize` on `SearchField`. Behavior is unchanged — API calls, filters,
+  RBAC gates, deep links, navigation, and loading/empty/error copy — and no new entry points were
+  added.
+- **Phase 18D — Detail Screens:** implemented, verified, and committed (`d3592fb`) — the four
+  record-detail screens (product, stock record, purchase order, receive) adopt `SectionHeader`,
+  `StatCard` for the key quantities (available/on-hand; received/remaining, with ordered preserved in
+  the `sub` line), and the shared `ListRow` grammar for stock rows, PO items, receipts, and receive
+  lines. No shared primitive needed changing. Presentation only — the claim-first receive workflow is
+  unchanged.
+- **Phase 18E — Secondary Screens:** implemented, verified, and committed (`979968a`; the themed
+  native-header follow-up landed separately as `04a2b3d`) — the fifteen secondary routes (users
+  index/new/detail, audit, history, categories, locations, suppliers, profile, change-password,
+  edit-name, scan, AI hub/new/chat) adopt the same primitives, and the three backing components
+  `RefManage`, `UserForm`, and `AiChat` are modernised in place. `Chip` gains a semantic selected
+  state and a 44px floor; `ListScreen` gains additive `errorTitle`/`footer` props. RBAC gates,
+  validation order, payload asymmetries, and the `scan.js` rescan semantics are preserved.
+- **Phase 18F — Forms & Auth Screens:** implemented, verified, and committed (`311e558`) — the last
+  18x increment. The three shared form components (`ProductForm`, `MovementForm`, `PoForm`) and
+  `AuthLayout` move onto the same primitives, and the ten routes that render them are reduced to a
+  bare render: each form component now owns a single `Screen` instead of being wrapped by its route,
+  which would have doubled both the safe-area insets and the keyboard offset. Two owner-approved
+  scope additions rode along — the **dark** `placeholder` token was lifted from `#7A8494` to
+  `#8A93A6` (4.41:1 → 5.40:1 on `surface`), fixing the AA failure 18E reported, while the **light**
+  `placeholder` (3.06:1) was left unchanged as out of scope and is documented as a known issue in
+  `docs/DESIGN_SYSTEM.md`. RBAC gates, validation order, payload shapes, and loading/empty/error copy
+  are preserved, and no form was submitted during verification.
+- **Phase 19 — Stock Transfers Between Locations:** implemented, verified, and committed
+  (`6bc9a70`) — closes the last §15 gap: `TRANSFER` was reserved in Phase 04 but never implemented, so
   moving stock between locations required a manual stock-out plus stock-in. `POST
   /api/inventory/transfer` now performs it as one logical operation producing both legs, reusing the
   **Phase 07A compensation architecture** — guarded atomic source debit, destination credit by
@@ -404,7 +456,7 @@ Phase 07 (testing + production hardening) and Phase 08 (owner-directed hardening
   source-availability, same-location and over-quantity guards, reached from a role-gated dashboard
   entry, plus a "Transfer" history filter chip/badge and the `INVENTORY_TRANSFERRED` audit label.
   Verified by `npm run lint` (0/0), the new Level-2 suite `server/test/phase19-transfers.test.mjs`
-  (15/15, including failure injection, compensation, and the H4/H5 concurrent-mutation case), a
+  (24/24, including failure injection, compensation, and the H4/H5 concurrent-mutation case), a
   re-run of `phase04-inventory` + `phase07a-inventory-compensation` (24/24), and a MANAGER-only
   emulator smoke. One pre-existing fixture in `phase04-inventory.test.mjs` was updated: it used
   `?type=TRANSFER` as its example of an *unknown* history type, which Phase 19 makes a real

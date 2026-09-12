@@ -7,14 +7,19 @@
 // so a future change to it has to be deliberate — it documents what the code
 // does today and deliberately does not assert what it "ought" to do.
 //
-// Two of the Phase 20B findings are intentionally NOT covered here, because
-// Phase 20C was scoped to pin current behavior rather than to change it:
+// One Phase 20B finding is still not this file's subject:
 //   * M-1 — an invalid `status`/`type` filter is coerced rather than rejected.
 //     Phase 20D has since normalized that: see phase20-filter-contract.test.mjs
 //     for the rejected-filter contract.
-//   * M-4 — exponent notation (`limit=1e3`) is parsed by `Number.parseInt` as
-//     `1`. It behaves the same as `abc` here, so it adds no new contract, and it
-//     is explicitly deferred rather than asserted as intended behavior.
+//
+// M-4 (integer parsing) IS covered here now. `Number.parseInt` is a PREFIX
+// parser: it read the longest leading integer and discarded the rest, so
+// `limit=1e3` arrived as `1` — which passed both the `>= 1` guard and the cap,
+// was echoed back as a legitimate `limit: 1`, and answered a client that asked
+// for a thousand rows with exactly one. A page/limit is now usable only when the
+// WHOLE value is an integer; every other spelling takes the same default `abc`
+// always took. The coercion contract above is unchanged — still 200, still
+// coerced, still never rejected.
 //
 // One representative list route is enough: `parsePagination` is shared by every
 // paginated endpoint, and the Phase 20A suite already exercises the ordering of
@@ -143,5 +148,79 @@ dbSuite('Phase 20C — offset pagination coercion contract', dbOk, () => {
     assert.equal(body.page, 2);
     assert.equal(body.limit, 2);
     assert.equal(body.items.length, SEEDED - 2, 'page 2 at limit 2 is the one-row remainder');
+  });
+
+  // -- M-4: an integer is the WHOLE value, not its leading digits -------------
+
+  it('treats a non-integer spelling as unusable instead of parsing its prefix', async () => {
+    // Every one of these used to parse as the digits preceding the offending
+    // character: 1e3 -> 1, 10.5 -> 10, 10abc -> 10. Asserting the `limit` echo
+    // alone would not have caught that, so the window is asserted too — at
+    // limit 1 the old parser answered with a one-row page.
+    for (const [label, query] of [
+      ['limit=1e3', '?limit=1e3'],
+      ['limit=1e2', '?limit=1e2'],
+      ['limit=10.5', '?limit=10.5'],
+      ['limit=10abc', '?limit=10abc'],
+      ['limit=0x10', '?limit=0x10'],
+      ['limit with a literal plus', '?limit=%2B10'],
+    ]) {
+      const body = await listPage(query);
+      assert.equal(body.limit, 20, `${label} -> limit 20`);
+      assert.equal(body.total, SEEDED, `${label}: total is unaffected`);
+      assert.equal(body.items.length, SEEDED, `${label}: the default limit still fits every row`);
+      assert.equal(body.totalPages, 1, `${label}: totalPages follows the default limit`);
+    }
+  });
+
+  it('applies the same integer contract to the page number', async () => {
+    // `page=2e0` is the sharp one: it silently meant page 2, and with three rows
+    // at the default limit page 2 is empty — so the request looked successful
+    // and returned nothing.
+    for (const [label, query] of [
+      ['page=2e0', '?page=2e0'],
+      ['page=1e3', '?page=1e3'],
+      ['page=10.5', '?page=10.5'],
+    ]) {
+      const body = await listPage(query);
+      assert.equal(body.page, 1, `${label} -> page 1`);
+      assert.equal(body.items.length, SEEDED, `${label}: page 1 holds every row`);
+    }
+
+    // A whole-value integer page still works, and still moves the window.
+    const second = await listPage('?page=2&limit=2');
+    assert.equal(second.page, 2, 'page=2 is still page 2');
+    assert.equal(second.items.length, SEEDED - 2, 'page 2 is still the remainder');
+  });
+
+  it('keeps the integer spellings that were always valid', async () => {
+    // These parsed as integers before the fix and must keep doing so. The
+    // coercion cases (abc, 0, -1, blank) and the cap (101) are already pinned
+    // above and are deliberately not restated here.
+    const padded = await listPage('?limit=0010');
+    assert.equal(padded.limit, 10, 'leading zeros are still an integer');
+    assert.equal(padded.items.length, SEEDED, 'and the window follows it');
+
+    const fifty = await listPage('?limit=50');
+    assert.equal(fifty.limit, 50, 'an ordinary integer is unchanged');
+
+    // A literal `+` in a query string decodes to a space and surrounding
+    // whitespace is trimmed, so the common `?limit=+10` spelling keeps working.
+    const plussed = await listPage('?limit=+10');
+    assert.equal(plussed.limit, 10, 'a decoded +10 still reads as 10');
+  });
+
+  it('answers the default when a page or limit is sent twice', async () => {
+    // A repeated parameter arrives as an array. It used to be String()-coerced
+    // into '2,3' and parsed as 2 — silently honouring the first value of a
+    // contradicted pair. An array is not a page/limit value, so it takes the
+    // default like any other unusable input.
+    const twice = await listPage('?limit=2&limit=3');
+    assert.equal(twice.limit, 20, 'a repeated limit falls back to the default');
+    assert.equal(twice.items.length, SEEDED, 'and the full page is returned');
+
+    const paged = await listPage('?page=2&page=3');
+    assert.equal(paged.page, 1, 'a repeated page falls back to page 1');
+    assert.equal(paged.items.length, SEEDED, 'and page 1 holds every row');
   });
 });

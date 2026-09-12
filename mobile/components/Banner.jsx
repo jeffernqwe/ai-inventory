@@ -7,6 +7,7 @@ const createTones = (colors) => ({
   error: { bg: colors.dangerSoft, fg: colors.danger, border: colors.danger },
   warn: { bg: colors.warningSoft, fg: colors.warning, border: colors.warning },
   info: { bg: colors.infoSoft, fg: colors.info, border: colors.info },
+  success: { bg: colors.successSoft, fg: colors.success, border: colors.success },
 });
 
 /** Full-width alert strip for form/API errors above or below content. */

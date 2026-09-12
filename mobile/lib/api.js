@@ -87,6 +87,36 @@ export function revokeSession(token, id) {
   return apiFetch(`/api/auth/sessions/${id}`, { token, method: 'DELETE' });
 }
 
+/**
+ * POST /api/auth/forgot-password -> { message } (202). PUBLIC — the caller is
+ * signed out by definition, so no session token is sent (and a tokenless call
+ * can never trip the session-lost handler).
+ *
+ * The endpoint answers one identical 202 whether or not the address exists, so
+ * nothing here is worth reading: callers must render their success state from a
+ * fixed string rather than from this payload.
+ */
+export function forgotPassword(email) {
+  return apiFetch('/api/auth/forgot-password', { method: 'POST', body: { email } });
+}
+
+/**
+ * POST /api/auth/reset-password -> { message } (200). PUBLIC — no session token.
+ *
+ * The opaque reset token travels in the BODY, never in a URL, so it cannot reach
+ * an access log or a Referer header; `token` here is that reset token, not a JWT.
+ * `confirmPassword` is checked server-side before the token is spent, so the
+ * field name must match the server's exactly or a mismatch could cost the user
+ * their link. 400 INVALID_RESET_TOKEN for an unknown, expired or used token;
+ * 400 VALIDATION_ERROR with `fields` when the password breaks the policy.
+ */
+export function resetPassword({ token, newPassword, confirmPassword }) {
+  return apiFetch('/api/auth/reset-password', {
+    method: 'POST',
+    body: { token, newPassword, confirmPassword },
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Users (Phase 14A backend / 14B mobile)
 // ---------------------------------------------------------------------------
@@ -312,6 +342,8 @@ export default {
   login,
   me,
   changePassword,
+  forgotPassword,
+  resetPassword,
   updateMe,
   logout,
   sessions,

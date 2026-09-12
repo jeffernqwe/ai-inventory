@@ -461,3 +461,70 @@ Phase 07 (testing + production hardening) and Phase 08 (owner-directed hardening
   emulator smoke. One pre-existing fixture in `phase04-inventory.test.mjs` was updated: it used
   `?type=TRANSFER` as its example of an *unknown* history type, which Phase 19 makes a real
   filterable type.
+- **Phase 20 — Performance, Pagination & Filter Contract Hardening (20A–20H):** implemented, verified,
+  and committed — an owner-directed cascade of ten increments after Phase 19, all on the shared list
+  read path and none changing what a well-formed request returns. **20A** (`bf84a6a`) made offset
+  pagination ordering deterministic by adding an `_id` tiebreaker to the list sorts, so a page
+  boundary can no longer repeat or skip a row when two documents share a sort key. **20B** was the
+  read-path audit that identified the remaining findings. **20C** (`23a3673`, `45afd75`) restored
+  index-backed pagination sorts with three compound indexes matching the `_id`-augmented sorts.
+  **20D** (`4c04248`, `821b469`) normalised list filter validation so a malformed `q`/`status`/
+  `supplierId` is rejected with `400 VALIDATION_ERROR` rather than silently ignored. **20E**
+  (`7369796`) replaced prefix integer parsing with an exact whole-value parse for `page`/`limit`,
+  closing the case where `?limit=1e3` was read as `limit: 1` and answered with a single row while
+  passing both the minimum and the cap. **20F** (`b96c805`) added the `{businessId, userId, updatedAt,
+  _id}` index to `ai_conversations`, whose list sort had been covered only by a `createdAt` index.
+  **20G** (`3d06c91`) added the matching list-sort indexes for products, purchase orders and users,
+  each with a DB-free schema-declaration guard. **20H** (`0bd289f`) hoisted the product list sort
+  above its first `$lookup` so the 20G index can serve it. Pagination values COERCE to the documented
+  default while filters REJECT — a deliberate asymmetry, and Phase 20C's coercion contract is
+  unchanged. Deferred at the time and left deferred: nothing beyond these two behaviours.
+- **Phase 21 — Product Archive-Only Lifecycle & Inventory Invariant:** implemented, verified, and
+  committed (`bd10b12`) — a documentation-and-guard increment that changes **no production behavior**.
+  It makes explicit, and prevents from drifting, two properties the system already had: products
+  follow an archive-only lifecycle (`ACTIVE` ↔ `ARCHIVED`, with `ARCHIVED` terminal and no hard delete
+  existing or permitted), and an inventory record depends on a live product in the same business, with
+  that dependency held by application lifecycle rules and write-path validation rather than by any
+  database-level foreign key — Mongoose `ref` enforces nothing, and read-path filters such as
+  `inventory.service.js`'s `{'product.0': {$exists: true}}` guard are defensive query hygiene, not
+  integrity enforcement. `docs/SYSTEM_SPECIFICATION.md` gains `## Product Lifecycle`, `## Inventory
+  and Product Integrity` and a transaction-permanence note, and the previously illustrative
+  `DELETE /api/products/:id` is replaced by the implemented archive/restore endpoints. The new DB-free
+  `server/test/phase21-product-archive-invariant.test.mjs` pins the invariant by declaration (no
+  deleted product status, no delete route, no delete service method, no product-deletion audit action,
+  `productId` required on both inventory and the ledger), and three DB-backed cases in
+  `phase04-inventory.test.mjs` prove an archived product keeps its inventory row, quantity and full
+  transaction history while all four movement paths reject it with `PRODUCT_ARCHIVED`. No model, route,
+  index, migration or AI tool changed, and `inventory.service.js` is byte-identical. Suite 419 → 429.
+- **Phase 22 — Authorization Contract Enforcement & RBAC Coverage Guards:** implemented, verified, and
+  committed (`dc341dd`) — hardens the **route→capability binding** without changing who may do what.
+  The read routes for products, suppliers and purchase orders had been protected by authentication
+  alone; they now name the capability they require (`PRODUCTS_VIEW`, `SUPPLIERS_VIEW`,
+  `PURCHASE_ORDERS_VIEW`), so the requirement is stated rather than implied by "any authenticated
+  member". This is behaviour-neutral by construction — all four roles hold all three view permissions
+  — and **no role grant was added, removed or changed**. The catalogue also becomes self-checking:
+  `roles.js` gains `CATALOGUE_ONLY_PERMISSIONS` (`business.manage`, `roles.manage`,
+  `transactions.view`), which is **metadata for the guard only** and takes no part in any runtime
+  authorization decision. The ledger read deliberately stays on `inventory.history.view` rather than
+  `transactions.view`, because only three roles hold the latter while all four hold the former, so the
+  switch would have silently revoked STAFF history access. Categories and locations reads were left on
+  `requireAuth` because no `categories.view`/`locations.view` key exists. Verified by `npm run lint`
+  (0/0) and the new DB-free `server/test/phase22-authorization-contract.test.mjs`, which proves each
+  binding structurally, behaviourally and by declaration; suite 429 → 440.
+- **Phase 23 — Authorization Contract Completion: Route Classification & RBAC Mirror Guards:**
+  implemented and verified — **authorization contract guards and cross-layer RBAC consistency; no
+  production behavior change.** Closes the three authorization surfaces Phase 22 left held by
+  convention, entirely as one DB-free guard suite plus documentation: no permission key added, no role
+  grant changed, and no route, controller, service, model, middleware or mobile file modified. It
+  classifies every route reachable from `app.js` into exactly one declared authorization bucket
+  (`PERMISSION_GATED`, `AUTHENTICATED`, `PUBLIC`, `ROLE_GATED`), so a route added without a gate now
+  fails instead of passing unnoticed — with **no route-count assertion**, so a future phase adds a
+  route by declaring it rather than by editing a number. It pins `mobile/lib/permissions.js` to
+  `server/src/constants/roles.js` (roles, the 21 catalogue keys *and values*, and every role's grant
+  set), which had been kept in step by hand since Phase 13A. It recognises `requireRole(` as a gate so
+  a role-name route cannot silently bypass the contract, and pins `requireRole`'s **inertness** —
+  retained, still exported, referenced by no route module. And it requires every error code the mobile
+  client branches on to be one the server can actually emit, across all three emission shapes
+  (`new ApiError` third argument, `this.code =`, and direct response-body `code:`). Every comparison is
+  a pure function exercised against deliberately perturbed in-memory clones, so the guard is
+  demonstrably able to fail rather than merely green. Suite 440 → 459; `npm run lint` 0/0.

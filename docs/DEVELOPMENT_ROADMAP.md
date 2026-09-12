@@ -111,6 +111,18 @@ SaaS-style UI Foundation & Adoption (18A–18F)
         ↓
 Phase 19
 Stock Transfers Between Locations
+        ↓
+Phase 20
+Performance, Pagination & Filter Contract Hardening (20A–20H)
+        ↓
+Phase 21
+Product Archive-Only Lifecycle & Inventory Invariant
+        ↓
+Phase 22
+Authorization Contract Enforcement & RBAC Coverage Guards
+        ↓
+Phase 23
+Authorization Contract Completion: Route Classification & RBAC Mirror Guards
 ```
 
 ---
@@ -1815,7 +1827,53 @@ Mobile:
 
 ---
 
-# 21. Phase 21 — Product Archive-Only Lifecycle & Inventory Invariant
+# 21. Phase 20 — Performance, Pagination & Filter Contract Hardening (20A–20H)
+
+## Objective
+
+Make the shared list read path deterministic, index-backed and explicit about how it treats input it
+cannot parse — without changing what any well-formed request returns. Delivered as eight owner-approved
+increments (20A–20H) after Phase 19, all confined to list ordering, pagination and filter validation.
+
+## Scope
+
+- **20A** (`bf84a6a`) — offset pagination ordering was non-deterministic whenever two documents shared a
+  sort key, so a page boundary could repeat or skip a row. Every list sort gains an `_id` tiebreaker.
+- **20B** — the read-path audit that identified the remaining findings (M-1…M-5, C1–C2) and fixed
+  nothing itself.
+- **20C** (`23a3673`, `45afd75`) — restore index-backed pagination sorts with three compound indexes
+  matching the `_id`-augmented sorts, and harden the pinned pagination contract.
+- **20D** (`4c04248`, `821b469`) — a malformed `q`/`status`/`supplierId` was silently ignored and the
+  unfiltered list returned; it is now rejected with `400 VALIDATION_ERROR`.
+- **20E** (`7369796`) — `page`/`limit` were parsed with `Number.parseInt`, a *prefix* parser, so
+  `?limit=1e3` yielded `limit: 1`: it passed both the `>= 1` guard and the cap and was answered with a
+  single row. A value is now usable only when the whole value is an integer.
+- **20F** (`b96c805`) — `ai_conversations` list pagination was covered only by a `createdAt` index
+  while sorting on `updatedAt`; the matching index is added and the old one kept.
+- **20G** (`3d06c91`) — the same gap for the products, purchase-orders and users list sorts, each with a
+  DB-free schema-declaration guard.
+- **20H** (`0bd289f`) — the product list sort sat after its first `$lookup`, where no index can serve it;
+  it is hoisted above it. A sort inside `$facet` or after a `$lookup` is invisible to `explain`, so a
+  missing sort in the plan is not evidence that no sort occurs.
+
+## Out of Scope
+
+- No keyset/cursor pagination, no change to page numbering, `skip`, `DEFAULT_LIMIT`, `MAX_LIMIT` or the
+  response envelope.
+- Malformed pagination values continue to **coerce** to the documented default; only filters **reject**.
+  This asymmetry is deliberate and both halves are pinned by tests.
+- No model, route, controller, service or AI-tool change beyond the indexes and the two parse/validate
+  fixes above. No mobile change.
+
+## Definition of Done
+
+`npm run lint` clean; the pagination, ordering and filter-contract suites green (`393/393`, `406/406`,
+`410/410`, `412/412`, `419/419` at the relevant increments, `440/440` after Phase 22); the changed set at
+each increment confined to the files named above. No V2/V4 feature, no new dependency.
+
+---
+
+# 22. Phase 21 — Product Archive-Only Lifecycle & Inventory Invariant
 
 ## Objective
 
@@ -1884,7 +1942,122 @@ Tests:
 
 ---
 
-# 22. Phase Gate System
+# 23. Phase 22 — Authorization Contract Enforcement & RBAC Coverage Guards
+
+## Objective
+
+Harden the **route→capability binding** without changing who may do what, and make the permission
+catalogue self-checking. A route's authorization requirement must be *stated*, not implied by "any
+authenticated member of the business".
+
+## Scope
+
+- The read routes for products, suppliers and purchase orders had been protected by `requireAuth`
+  alone. They now name the capability they require —
+  `requirePermission(PERMISSIONS.PRODUCTS_VIEW)`, `SUPPLIERS_VIEW` and `PURCHASE_ORDERS_VIEW`.
+- `server/src/constants/roles.js` gains `CATALOGUE_ONLY_PERMISSIONS` naming the capabilities granted to
+  roles but implemented by no endpoint: `business.manage`, `roles.manage`, `transactions.view`. This is
+  **metadata for the regression guard only** — it is not imported by `middlewares/authorize.js` and
+  takes no part in any runtime authorization decision.
+- New DB-free `server/test/phase22-authorization-contract.test.mjs`, registered in `PURE_UNIT`, is the
+  guard: it proves each read route's binding structurally (by walking the router stack), behaviourally
+  (by invoking the gate and requiring a 403 for an ungranted role while admitting STAFF) and by
+  declaration (the route names the expected catalogue key); it requires every catalogue entry to be
+  either enforced or listed as catalogue-only, with the two sets disjoint; it rejects any permission a
+  route references that is not in the catalogue; and it pins that `CATALOGUE_ONLY_PERMISSIONS` never
+  reaches the runtime authorization path.
+
+## Out of Scope
+
+- **No role grant was added, removed or changed** for OWNER, ADMIN, MANAGER or STAFF. The change is
+  behaviour-neutral by construction: all four roles hold all three view permissions, so the only
+  requests whose outcome changes are those from a role that holds no capability at all.
+- Categories and locations read routes were deliberately left on `requireAuth`, because no
+  `categories.view`/`locations.view` key exists and inventing one was out of scope.
+- The ledger read was **not** moved from `inventory.history.view` to `transactions.view`: only
+  OWNER/ADMIN/MANAGER hold the latter while every role holds the former, so the switch would have
+  silently revoked STAFF history access.
+- No model, service, controller, index, migration or mobile file changed, and no mutation route's gate
+  was altered.
+
+## Definition of Done
+
+`npm run lint` clean (`0/0`); the new DB-free suite green; the full backend suite `440/440`. No new
+permission key and no grant change, verified by diff.
+
+---
+
+# 24. Phase 23 — Authorization Contract Completion: Route Classification & RBAC Mirror Guards
+
+## Objective
+
+**Authorization contract guards and cross-layer RBAC consistency; no production behavior change.**
+
+Phase 22 bound eight named read routes to their view permissions and made the catalogue
+self-checking. It left three authorization surfaces held by convention, each of which could drift
+silently:
+
+1. **The complement of the gated routes was unpinned.** Phase 22 proved eight routes *are* gated; it
+   did not pin which routes are deliberately *not* gated, so a route added without a gate would pass
+   every test in the suite — the exact failure Phase 22 existed to prevent.
+2. **The mobile RBAC mirror was kept in step by hand.** `mobile/lib/permissions.js` re-declares the
+   whole catalogue and all four role grants so the UI knows what to show. Nothing tied it to
+   `server/src/constants/roles.js`; Phases 13A, 17 and 19 each had to update both by hand.
+3. **`requireRole` was a blind spot.** A route gated by role name carries no permission, so any scan
+   looking only for `requirePermission` would not see it, and the client's dependence on specific
+   server error codes had no guard at all.
+
+## Scope
+
+All of it is one DB-free guard suite plus documentation. **No production behavior changes: no
+permission key added, no role grant changed, no change to any server route, controller, service,
+model or middleware, and no change to any mobile source file.**
+
+- **Route authorization classification.** The guard discovers every route reachable from `app.js` —
+  reading the mount table out of `app.js` source, so a newly mounted router is covered automatically
+  and cannot be mounted and forgotten — plus the routes registered directly on the app, and requires
+  each to land in exactly one declared bucket: `PERMISSION_GATED` (the default), `AUTHENTICATED`,
+  `PUBLIC`, `ROLE_GATED`. `AUTHENTICATED` and `PUBLIC` are explicit lists with a written reason: the
+  three self-service account routes, the four categories/locations reads (making Phase 22's deferral
+  visible so it cannot be extended by accident), and health/login/register. A route in no bucket
+  fails, and a declared exemption that has stopped being true also fails. There is deliberately **no
+  route-count assertion** — a future phase adds a route by declaring it, never by editing a number.
+- **Cross-layer RBAC mirror.** The guard dynamically imports `mobile/lib/permissions.js` and compares
+  roles, the 21 catalogue keys *and values*, and every role's grant set against the authoritative
+  server matrix. No mobile test runner was added and no mobile file was modified.
+- **`requireRole` inertness.** The classifier recognises `requireRole(` and routes it to `ROLE_GATED`,
+  which is empty by design. The guard also pins that `requireRole` is still exported from
+  `middlewares/authorize.js` and referenced by no module under `src/routes/`. It was deliberately
+  **not deleted or modified** — its inertness is pinned, not its removal.
+- **Client error-code contract.** Every `code` literal the mobile client branches on must be a code
+  the server can emit, across all three emission shapes: the third argument of `new ApiError(...)`, a
+  `this.code = ...` assignment, and a `code:` property written directly into a response body (the rate
+  limiters answer without going through `ApiError`). Identifier arguments are resolved through the
+  module-level string constants; pass-through assignments that resolve to nothing are skipped rather
+  than counted as emissions.
+- New `server/test/phase23-authorization-contract.test.mjs`, registered in `PURE_UNIT`. `CLAUDE.md`,
+  `docs/SYSTEM_SPECIFICATION.md` and this roadmap document the contracts.
+- **`assertBusinessAccess` is untouched** and out of scope, as is `entitlement.service.js`.
+
+## Out of Scope
+
+- No new permission key, no role-grant change, no route, controller, service, model or middleware
+  change, no mobile source change, no mobile test runner or dependency, no CI.
+- No deletion of `requireRole`, `assertBusinessAccess` or `entitlement.service.js`.
+- No route-count snapshot, and no change to the Phase 22 suites other than running them unchanged.
+- No V2/V4 feature. DB-free guards only.
+
+## Definition of Done
+
+`npm run lint` clean (`0/0`); the new suite green; `npm run test:unit`, `npm run test:db` and
+`npm test` green with the DB-mode counts unchanged and the full suite `459/459`; the Phase 22,
+phase03-auth and phase03-rbac suites unchanged and green; `git diff --name-only -- server/src mobile`
+empty; and a deliberate negative test proving the mirror guard can actually detect divergence.
+Nothing committed, nothing pushed.
+
+---
+
+# 25. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.
 
@@ -1925,7 +2098,7 @@ The project owner decides whether to proceed.
 
 ---
 
-# 23. Change Control
+# 26. Change Control
 
 If Claude discovers that the current specification is incomplete or incorrect:
 
@@ -1943,7 +2116,7 @@ Minor implementation improvements that do not alter architectural decisions may 
 
 ---
 
-# 24. Bug Handling
+# 27. Bug Handling
 
 If a bug is discovered during a phase:
 
@@ -1968,7 +2141,7 @@ Only fix it immediately if it blocks the current phase.
 
 ---
 
-# 25. Refactoring Rules
+# 28. Refactoring Rules
 
 Refactoring is allowed when it:
 
@@ -1986,7 +2159,7 @@ Keep changes focused.
 
 ---
 
-# 26. Dependency Rules
+# 29. Dependency Rules
 
 Before adding a dependency:
 
@@ -2000,7 +2173,7 @@ Do not add dependencies simply for convenience.
 
 ---
 
-# 27. Git Checkpoints
+# 30. Git Checkpoints
 
 A Git commit should be created after a stable phase.
 
@@ -2033,7 +2206,7 @@ Before committing:
 
 ---
 
-# 28. V1 Completion
+# 31. V1 Completion
 
 V1 is complete only when all major requirements in:
 
@@ -2075,7 +2248,7 @@ AI Inventory Questions
 
 ---
 
-# 29. Future Development
+# 32. Future Development
 
 After V1, future features must be planned separately.
 
@@ -2110,7 +2283,7 @@ Future functionality must not be implemented during V1 unless explicitly approve
 
 ---
 
-# 30. Final Development Rule
+# 33. Final Development Rule
 
 The goal is not to produce the largest amount of code as quickly as possible.
 

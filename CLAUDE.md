@@ -233,6 +233,7 @@ Phase 17 — Mobile Supplier & Purchase Order Management (suppliers CRUD/archive
 Phase 19 — Stock Transfers Between Locations (POST /api/inventory/transfer: two-leg TRANSFER movement + Phase 07A compensation; existing INVENTORY_MANAGE permission; MANAGER+)
 Phase 21 — Product Archive-Only Lifecycle & Inventory Invariant (documentation + regression guards only; no production behavior change)
 Phase 22 — Authorization Contract Enforcement & RBAC Coverage Guards (read routes bound to their view permissions; `CATALOGUE_ONLY_PERMISSIONS` declared; no role grant changed)
+Phase 23 — Authorization Contract Completion: Route Classification & RBAC Mirror Guards (every route classified into a declared authorization bucket; mobile RBAC mirror pinned to the server matrix; `requireRole` inertness and client error-code contract; no production behavior change)
 ```
 
 Phase 08 is an owner-directed hardening extension delivered in approved lettered increments
@@ -333,6 +334,62 @@ catalogue-only, with the two sets disjoint; it rejects any permission a route re
 not in the catalogue; and it pins that `CATALOGUE_ONLY_PERMISSIONS` never reaches the runtime
 authorization path. No model, service, controller, index, migration or mobile file changed, and no
 mutation route's gate was altered.
+
+Phase 23 is an owner-directed authorization-contract completion delivered as a single approved
+increment after Phase 22. It closes the three authorization surfaces Phase 22 left held by
+convention, and changes **no production behavior**: no permission key was added, no role grant was
+changed, and no route, controller, service, model, middleware or mobile file was modified. All work
+is one DB-free guard suite plus documentation.
+
+The core addition is **route authorization classification**. Phase 22 proved that eight named read
+routes carry their view permission; it did not pin the complement — which routes are deliberately
+*not* gated — so a route added without a gate would have passed every test in the suite. The guard
+now discovers every route reachable from `app.js` (reading the mount table out of `app.js` source,
+so a newly mounted router is covered automatically and cannot be mounted and forgotten), plus the
+routes registered directly on the app, and requires each to land in exactly one declared bucket:
+`PERMISSION_GATED` (the default — a gate as the second handler, with the declaration naming the
+catalogue key), `AUTHENTICATED` (requireAuth + controller only), `PUBLIC` (no authentication), or
+`ROLE_GATED`. `AUTHENTICATED` and `PUBLIC` are explicit lists carrying a written reason — the three
+self-service account routes, the four categories/locations reads whose Phase 22 deferral is thereby
+made visible, and the health/login/register routes. A route in no bucket **fails**, and a declared
+exemption that has stopped being true also fails. There is deliberately **no route-count assertion**,
+so a future phase adds a route by declaring it, never by editing a number.
+
+**Cross-layer RBAC mirror.** `mobile/lib/permissions.js` re-declares the whole catalogue and all four
+role grants, because the UI needs to know what to show. Nothing tied the two copies together, so they
+were kept in step by hand (Phases 13A, 17 and 19 each did so) — and drift is silent in both
+directions: a grant removed server-side makes the app offer an action the server 403s, and one added
+makes a role never see an action it may perform. The guard dynamically imports the mirror and
+compares roles, the 21 catalogue keys *and values*, and every role's grant set against
+`server/src/constants/roles.js`, which stays authoritative. The comparison is factored into a pure
+function so it can be negative-tested in memory: perturbed clones prove a removed grant, an added
+grant, a renamed key, a changed value and a missing role are each detected, and a further case proves
+the guard's own `assert.deepEqual(drift, [])` shape throws on a diverged mirror. No mobile file was
+modified and no mobile test runner was added.
+
+**`requireRole` inertness.** `middlewares/authorize.js` exports `requireRole(...roles)`, a role-name
+allowlist that bypasses the permission catalogue. It has **no production call site** and is exercised
+only by the Phase 03 suites, but it was also a blind spot: a route written `requireAuth,
+requireRole('OWNER'), controller` carries no permission, so a scan looking only for `requirePermission`
+would not see it. The classifier therefore recognises `requireRole(` explicitly and routes it to the
+`ROLE_GATED` bucket — which is **empty by design**, and adding a route to it requires an owner
+decision. The guard also pins that `requireRole` is still exported and that no module under
+`src/routes/` references it. `requireRole` was deliberately **not deleted or modified**: its
+inertness is pinned, not its removal.
+
+**Client error-code contract.** The mobile client branches on server error codes
+(`ACCOUNT_DISABLED`, `AI_RATE_LIMITED`, `RECEIVE_CONFLICT`, …), and renaming one server-side would
+silently downgrade a specific, friendly client message to a generic failure. Every `code` literal the
+client compares against must be a code the server can actually emit. The guard harvests emitting
+positions of all three real shapes — the third argument of `new ApiError`, a `this.code =`
+assignment, and a `code:` response-body property (the rate limiters answer directly rather than
+through `ApiError`) — resolving identifier arguments through the module-level string constants;
+pass-through assignments that resolve to nothing are skipped rather than treated as emissions.
+
+`server/test/phase23-authorization-contract.test.mjs` (DB-free, registered in `PURE_UNIT`) is the
+guard. Reporting the discovery honestly: it classifies **60 routes — 47 permission-gated, 7
+authenticated (self-service plus the four categories/locations reads), 6 public, 0 role-gated**; that
+distribution is observed, not asserted, and only the bucket *membership* is pinned.
 
 Phase 18 is an owner-directed mobile UI extension delivered in approved lettered increments (18A,
 18B, …) after Phase 17. It turns the app into a modern SaaS-style product surface WITHOUT changing

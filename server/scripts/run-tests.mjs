@@ -49,6 +49,7 @@ const PURE_DB = [
   'phase19-transfers.test.mjs',       // stock transfers between locations + compensation
   'phase20-pagination-order.test.mjs', // offset-pagination ordering determinism across the nine list paths
   'phase20-pagination-contract.test.mjs', // offset-pagination coercion contract (page/limit defaults, cap, empty past-end page)
+  'phase20-filter-contract.test.mjs', // list filter contract (invalid status/supplierId/blank q rejected, valid filters still narrow)
 ];
 const MIXED = [
   'phase06-ai-provider.test.mjs',     // unit: provider selection; db: loop + mapping

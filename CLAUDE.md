@@ -140,6 +140,17 @@ Inventory changes must create appropriate inventory transactions.
 
 Do not allow negative inventory unless explicitly specified.
 
+Products follow an archive-only lifecycle: `ACTIVE` <-> `ARCHIVED`, with `ARCHIVED`
+terminal. Products are never hard-deleted by the application — no delete route,
+service method, or cascade exists, and none may be added without explicit
+specification. Archiving retains the product's inventory records and its full
+transaction history.
+
+Referential integrity between inventory and products is a responsibility of
+application lifecycle rules and write-path validation, not of MongoDB. Mongoose
+`ref` does not enforce anything; read-path filters are defensive query hygiene,
+not integrity enforcement.
+
 ### AI V1
 
 The AI assistant is READ-ONLY.
@@ -220,6 +231,7 @@ Phase 14A — User Management Foundation (OWNER/ADMIN users.manage API: list/cre
 Phase 16 — Audit Trail Viewer (read-only GET /api/audit: OWNER/ADMIN governance trail; action/entityType/user/date/q filters; no write routes)
 Phase 17 — Mobile Supplier & Purchase Order Management (suppliers CRUD/archive + PO create/edit/issue/cancel on mobile; zero backend changes; STAFF view-only)
 Phase 19 — Stock Transfers Between Locations (POST /api/inventory/transfer: two-leg TRANSFER movement + Phase 07A compensation; existing INVENTORY_MANAGE permission; MANAGER+)
+Phase 21 — Product Archive-Only Lifecycle & Inventory Invariant (documentation + regression guards only; no production behavior change)
 ```
 
 Phase 08 is an owner-directed hardening extension delivered in approved lettered increments
@@ -273,6 +285,23 @@ with the server matrix (ADMIN + MANAGER manage, every role views); the backend s
 and business-isolated (no client `businessId`). STAFF remains view-only for supplier/PO management
 but can still receive stock; receiving and the claim-first flow are unchanged; no
 `PARTIALLY_RECEIVED` status was introduced.
+
+Phase 21 is an owner-directed documentation-and-guard increment delivered as a single
+approved increment after the Phase 20C–20H performance cascade. It changes **no production
+behavior**: the archive-only product lifecycle and the inventory↔product dependency already
+held, and the phase makes them explicit and prevents them from drifting silently. It states
+the invariant in `docs/SYSTEM_SPECIFICATION.md` (§13 Product Lifecycle, §14 Inventory and
+Product Integrity, §15 transaction permanence, §31 API Structure) and in this file, replaces
+the previously illustrative `DELETE /api/products/:id` example with the implemented
+archive/restore endpoints, and adds regression guards: a DB-free declaration suite
+(`test/phase21-product-archive-invariant.test.mjs`) pinning that no deleted product status,
+delete route, delete service method or product-deletion audit action exists and that
+`productId` is required on both inventory and the ledger, plus DB-backed cases proving an
+archived product keeps its inventory row, quantity and transaction history while all four
+movement paths (stock-in, stock-out, adjust, transfer) reject it with `PRODUCT_ARCHIVED`.
+No delete/purge/cascade/`deletedAt`/`PRODUCT_DELETED`/soft-delete was introduced, no model,
+route, index, migration or AI tool changed, and `inventory.service.js` — including the
+`{'product.0': {$exists: true}}` list guard — is byte-identical.
 
 Phase 18 is an owner-directed mobile UI extension delivered in approved lettered increments (18A,
 18B, …) after Phase 17. It turns the app into a modern SaaS-style product surface WITHOUT changing

@@ -528,6 +528,22 @@ ARCHIVED
 - Prices must use appropriate numeric handling.
 - `minimumStock` determines the low-stock threshold.
 
+## Product Lifecycle
+
+A product is created `ACTIVE` and moves only between `ACTIVE` and `ARCHIVED`:
+
+```text
+ACTIVE  <->  ARCHIVED
+```
+
+`ARCHIVED` is the terminal lifecycle state. **Deletion of a product is prohibited by
+the application architecture.** No delete, purge, cascade-delete, or soft-delete
+operation exists, and none is part of the API contract. Archiving is the supported
+way to retire a product, and it is reversible through restore.
+
+A product's `businessId` is not writable after creation, so a product can never be
+moved out of the business that owns its inventory.
+
 ---
 
 # 14. Inventory Model
@@ -574,6 +590,26 @@ Quantity: 100
 
 These are separate inventory records.
 
+## Inventory and Product Integrity
+
+An inventory record is conceptually dependent on its product: a quantity only has
+meaning as "this product, at this location".
+
+Archiving a product does not affect its inventory. The inventory records and the
+full transaction history of an archived product are retained unchanged, and archived
+stock continues to be counted in business-wide quantity totals. Archived products
+cannot be used in new stock movements.
+
+Referential integrity between inventory and products is maintained by **application
+lifecycle rules and write-path validation** — a movement requires that the product
+exists in the authenticated business and is not archived — and **not** by any
+database-level foreign key. MongoDB has no cross-collection foreign keys, and
+Mongoose `ref` only enables `populate()`; it constrains nothing.
+
+Read-path filters that skip inventory rows whose product cannot be resolved are
+defensive query hygiene. They are **not** the mechanism that enforces referential
+integrity, and they must not be described or relied upon as such.
+
 ## Quantity Rules
 
 ```text
@@ -590,6 +626,10 @@ Negative inventory is not allowed by default.
 # 15. Inventory Transactions
 
 Inventory changes must be represented as transactions.
+
+Transaction history is permanent. It is retained when a product is archived, and it
+continues to reference that product by `productId`. Records are not rewritten or
+removed when a product's status changes.
 
 Supported V1 transaction types:
 
@@ -1140,7 +1180,8 @@ GET    /api/products
 POST   /api/products
 GET    /api/products/:id
 PATCH  /api/products/:id
-DELETE /api/products/:id
+POST   /api/products/:id/archive
+POST   /api/products/:id/restore
 
 GET    /api/suppliers
 POST   /api/suppliers
@@ -1173,6 +1214,8 @@ GET    /api/audit
 ```
 
 Exact endpoint design may be refined during implementation while preserving the architecture and security requirements.
+
+These are illustrative examples, not an exhaustive or guaranteed contract. The implemented product surface is archive/restore: product deletion is not implemented and is not part of the contract (see §13 Product Lifecycle).
 
 ---
 

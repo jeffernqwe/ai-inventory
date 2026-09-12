@@ -38,6 +38,7 @@ const PURE_UNIT = [
   'phase07d-production-config.test.mjs', // env validation, health, shutdown
   'phase20f-ai-conversation-index.test.mjs', // schema-declaration guard for the ai_conversations list index (M-5)
   'phase20g-list-sort-indexes.test.mjs', // schema-declaration guards for the products/purchase_orders/users list-sort indexes
+  'phase21-product-archive-invariant.test.mjs', // declaration guards for the archive-only product lifecycle + inventory↔product dependency
 ];
 const PURE_DB = [
   'phase03-auth.test.mjs',            // auth + RBAC over real routes + Mongo

@@ -151,6 +151,9 @@ Endpoints:
 | GET    | `/api/auth/me`  | Current user (requires `Authorization: Bearer <token>`) |
 | PATCH  | `/api/auth/me`  | Update the caller's own name (`name` only; any other field is `400 VALIDATION_ERROR`) |
 | POST   | `/api/auth/change-password` | Change own password — verifies the current password first, then revokes every previously issued JWT (`401 SESSION_INVALIDATED`) |
+| POST   | `/api/auth/logout` | Sign out — revokes the session this token belongs to, identified from the token's own `jti`. `{ "all": true }` signs out everywhere |
+| GET    | `/api/auth/sessions` | The caller's own open sessions; `current` marks this one. No token and no `jti` is ever returned |
+| DELETE | `/api/auth/sessions/:id` | Sign out one of the caller's own sessions (`404` for an unknown id and for another user's session alike) |
 
 Phase 04 — catalog, inventory, dashboard (all `Authorization: Bearer <token>`):
 
@@ -257,7 +260,9 @@ Expo app with Expo Router (file-based routing), written in JavaScript. It is a *
 only** — the backend is the security boundary. The app never connects to MongoDB and
 never holds MongoDB or AI credentials. The JWT is the only thing persisted (Expo
 SecureStore); the user profile is re-fetched from `/api/auth/me` on every launch so
-role/status always reflect the server.
+role/status always reflect the server. Since Phase 26A the token names a server-side
+session, so signing out revokes it for real and a session ended on another device stops
+working here at the next request.
 
 ```sh
 cd mobile
@@ -275,8 +280,9 @@ npx expo start              # start Metro dev server (Expo Go / simulator)
   categories, locations, inventory (with low/out views), stock in, stock out, adjust
   (MANAGER+), **transfer between locations** (MANAGER+), inventory history, **AI assistant** (conversation hub, new chat and
   conversation threads — read-only; a configured provider is required for real answers),
-  profile (with **edit name** and **change password** — changing the password revokes every
-  existing session).
+  profile (with **edit name**, **change password** — changing the password revokes every
+  existing session — and **active sessions**, which lists the devices signed in and can end one of
+  them or sign out everywhere).
 - **Theming & design system (Phase 18A):** the app renders a semantic **light** and **dark**
   palette from `lib/theme.js` tokens via `ThemeProvider`/`useTheme`
   (`lib/theme-context.jsx`); the scheme follows the OS automatically
@@ -372,7 +378,9 @@ Phase 07 (testing + production hardening) and Phase 08 (owner-directed hardening
   /api/auth/change-password` verifies the current password **first** (nothing changes on a wrong
   one), replaces the bcrypt hash, and stamps `User.passwordChangedAt`; `requireAuth` then rejects
   every token whose `iat` second is strictly older than that stamp with `401 SESSION_INVALIDATED` —
-  so changing a password revokes all existing sessions with **no server-side session store**. A
+  so changing a password revokes all existing sessions with **no server-side session store** (Phase
+  26A later added one; the `iat` comparison remains the password-change mechanism and is unchanged).
+  A
   token minted in the same second as the change (the fresh login) stays valid. `PATCH /api/auth/me`
   updates the caller's **name only**: identity comes exclusively from the authenticated session, and
   every other field (email, role, status, businessId, password) is rejected with
@@ -570,3 +578,23 @@ Phase 07 (testing + production hardening) and Phase 08 (owner-directed hardening
   diff is two lines in `mobile/lib/theme.js` but reaches four placeholder-emitting components across
   five sites, plus 44 `textMuted` sites; `server/**` is untouched. Contrast re-verified
   programmatically from the edited file.
+- **Phase 26A — Session Hardening & Real Logout:** implemented and verified — an access token is no
+  longer the whole session. Signing a token now also creates a server-side session record whose id is
+  the token's `jti` claim (`sub`/`jti`/`iat`/`exp` and nothing else — no role, no `businessId`, and
+  the session record holds no authorization data either). `requireAuth` remains the single
+  authentication choke point and now additionally refuses a token whose `jti` names no session, or one
+  that is revoked or expired, so **sign-out is real**, **one device can be revoked without touching
+  the others**, and **sign out everywhere** ends every session at once. Three self-service
+  authenticated routes were added — `POST /api/auth/logout` (`{ "all": true }` for sign out
+  everywhere), `GET /api/auth/sessions` (the caller's own sessions, `current` marked; never a token or
+  a `jti`) and `DELETE /api/auth/sessions/:id` (the owner is part of the lookup, so another user's
+  session answers the same `404` as an unknown id). **No new permission** was added and no existing
+  role grant changed: these are the caller's own sessions, so they are authenticated routes, not
+  capability-gated ones. Mobile gains an Active Sessions screen (reached from Profile) that lists
+  devices, marks the current one, and can end one or all of them; sign-out now tells the server before
+  clearing local state (and still clears when offline), and a refused token is handled centrally in
+  the API client so a screen that never thinks about sessions can no longer strand a user on an
+  authentication error it cannot resolve. Audit gains four session events, written through the
+  existing best-effort `recordAudit` path. One consequence is deliberate and was accepted: tokens
+  issued before this change carry no `jti` and are rejected, so every user signs in once more. No
+  refresh-token rotation was added.

@@ -162,6 +162,9 @@ dbSuite('Phase 16 — audit trail viewer over real HTTP', dbOk, () => {
   // ---------------------------------------------------------------------------
   // Filter/pagination counts run in a dedicated business so totals are exact.
   // Seeding below creates 6 rows: 3 USER_CREATED + 1 USER_UPDATED + 2 CATEGORY_CREATED.
+  // Phase 26A adds one more row this business always has: SESSION_CREATED, written
+  // when the auditor OWNER logged in during before(). So every whole-business
+  // total below is 7, and the by-action / by-type totals are unchanged.
   // ---------------------------------------------------------------------------
 
   it('seeds the auditor business and filters by action and entityType', async () => {
@@ -211,7 +214,7 @@ dbSuite('Phase 16 — audit trail viewer over real HTTP', dbOk, () => {
   it('filters by actor userId and rejects an invalid one (400)', async () => {
     const mine = await api('GET', `/api/audit?userId=${auditor.userId}`, { token: auditor.token });
     assert.equal(mine.status, 200);
-    assert.equal(mine.json.total, 6, JSON.stringify(mine.json));
+    assert.equal(mine.json.total, 7, JSON.stringify(mine.json));
 
     const nobody = await api('GET', `/api/audit?userId=${other.userId}`, { token: auditor.token });
     assert.equal(nobody.status, 200);
@@ -236,7 +239,7 @@ dbSuite('Phase 16 — audit trail viewer over real HTTP', dbOk, () => {
 
     const all = await api('GET', '/api/audit?from=2020-01-01T00%3A00%3A00.000Z', { token: auditor.token });
     assert.equal(all.status, 200);
-    assert.equal(all.json.total, 6);
+    assert.equal(all.json.total, 7);
 
     const flipped = await api(
       'GET',
@@ -282,9 +285,9 @@ dbSuite('Phase 16 — audit trail viewer over real HTTP', dbOk, () => {
   it('paginates newest-first with the standard envelope', async () => {
     const page1 = await api('GET', '/api/audit?limit=2&page=1', { token: auditor.token });
     assert.equal(page1.status, 200, JSON.stringify(page1.json));
-    assert.equal(page1.json.total, 6);
+    assert.equal(page1.json.total, 7);
     assert.equal(page1.json.items.length, 2);
-    assert.equal(page1.json.totalPages, 3);
+    assert.equal(page1.json.totalPages, 4);
     assert.equal(page1.json.page, 1);
 
     const page2 = await api('GET', '/api/audit?limit=2&page=2', { token: auditor.token });
@@ -295,12 +298,17 @@ dbSuite('Phase 16 — audit trail viewer over real HTTP', dbOk, () => {
     assert.equal(page3.json.items.length, 2);
     assert.equal(page3.json.page, 3);
 
-    const seen = [...page1.json.items, ...page2.json.items, ...page3.json.items];
+    // The final, short page: 7 rows over pages of 2 leaves exactly one.
+    const page4 = await api('GET', '/api/audit?limit=2&page=4', { token: auditor.token });
+    assert.equal(page4.json.items.length, 1);
+    assert.equal(page4.json.page, 4);
+
+    const seen = [...page1.json.items, ...page2.json.items, ...page3.json.items, ...page4.json.items];
     const created = seen.map((r) => new Date(r.createdAt).getTime());
     for (let i = 1; i < created.length; i++) {
       assert.ok(created[i - 1] >= created[i], 'rows are ordered newest-first');
     }
-    assert.equal(new Set(seen.map((r) => r.id)).size, 6, 'all six rows accounted for, no duplicates');
+    assert.equal(new Set(seen.map((r) => r.id)).size, 7, 'all seven rows accounted for, no duplicates');
   });
 
   it('orders rows that share a createdAt deterministically, newest first', async () => {

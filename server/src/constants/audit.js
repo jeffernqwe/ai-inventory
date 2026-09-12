@@ -28,6 +28,13 @@ export const AUDIT_ACTIONS = Object.freeze({
   INVENTORY_TRANSFERRED: 'INVENTORY_TRANSFERRED',
   USER_CREATED: 'USER_CREATED',
   USER_UPDATED: 'USER_UPDATED',
+  // Phase 26A — session lifecycle. Four distinct events rather than one, so the
+  // trail distinguishes "signed in", "signed out on this device", "ended another
+  // device" and "signed out everywhere".
+  SESSION_CREATED: 'SESSION_CREATED',
+  SESSION_LOGGED_OUT: 'SESSION_LOGGED_OUT',
+  SESSION_REVOKED: 'SESSION_REVOKED',
+  SESSIONS_REVOKED_ALL: 'SESSIONS_REVOKED_ALL',
 });
 
 export const AUDIT_ENTITY_TYPES = Object.freeze({
@@ -39,6 +46,7 @@ export const AUDIT_ENTITY_TYPES = Object.freeze({
   INVENTORY: 'INVENTORY',
   INVENTORY_TRANSACTION: 'INVENTORY_TRANSACTION',
   USER: 'USER',
+  SESSION: 'SESSION',
 });
 
 export default { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES };

@@ -129,6 +129,9 @@ Runtime Authorization Matrix & Tenant-Isolation Verification
         ↓
 Phase 25
 Design-Token Contrast Close-Out & Mobile Known-Issue Reconciliation
+        ↓
+Phase 26A
+Session Hardening & Real Logout
 ```
 
 ---
@@ -1162,6 +1165,15 @@ in the Phase 14A section) and are not backfilled here.
   same-second-safe and is covered by a dedicated boundary test.
 - Profile updates are name-only, session-identified, and strict-allowlist validated.
 - Committed as `1124834`; nothing pushed.
+
+### Superseded in part by Phase 26A
+
+Two statements above describe the system as it stood before Phase 26A and no longer hold: there **is**
+now a server-side session store, and per-device session revocation now exists (see §27). What Phase 15
+established is unchanged and still in force — a password change still revokes every session of that
+user, by the same `iat`-versus-`passwordChangedAt` comparison at the same second granularity — and the
+`SESSION_INVALIDATED` path is deliberately kept distinct from the `SESSION_REVOKED` one so the two
+causes remain tellable apart.
 
 ---
 
@@ -2264,7 +2276,135 @@ outside `mobile/lib/theme.js`, and that **no server test imports `mobile/lib/the
 
 ---
 
-# 27. Phase Gate System
+# 27. Phase 26A — Session Hardening & Real Logout
+
+**Status: implemented and verified (2026-09-12); not committed pending owner approval.**
+
+## Objective
+
+Make sign-out real. Until this phase a JWT *was* the session: it could be verified but not withdrawn,
+so "Sign out" only cleared the client's copy of the token, a stolen token stayed valid until it
+expired, and the only server-side revocation that existed was the blunt Phase 15 password change
+(every token, everywhere). One device could not be signed out without signing out all of them.
+
+Delivered as a single approved increment (26A) after Phase 25. The owner's scope for 26A is
+explicitly limited: **no refresh-token rotation**, no password reset, no email, no OAuth, no MFA, no
+new roles or permissions, and no new dependency.
+
+## Scope
+
+**Session model.** A new `server/src/models/session.model.js` records `userId`, `jti`, `deviceLabel`,
+`lastUsedAt`, `revokedAt` and `expiresAt`, with a unique index on `{jti}`, a `{userId, revokedAt}`
+index for the listing and revocation queries, and a TTL index on `{expiresAt}` so expired rows are
+removed by MongoDB. It carries **no authorization data** — no role, no `businessId` — so a session
+grants continued authentication and nothing else.
+
+**Token shape.** `server/src/config/jwt.js` signs `sub`, a fresh `jti` and the standard `iat`/`exp`,
+and still nothing more: no role, no `businessId`, no status. HS256, the existing secret handling and
+the existing expiry behaviour are unchanged. The `expiresAt` stored on the row is read back from the
+token's own `exp` claim, so the row and the token expire at the same instant by construction rather
+than by a second implementation of the duration format.
+
+**The choke point.** `server/src/middlewares/authenticate.js` gains exactly one new requirement: the
+token's `jti` must name a session that exists, has not been revoked and has not expired. A token with
+no `jti` is rejected outright, before any lookup. Every pre-existing guarantee is preserved and still
+enforced in the same order: ObjectId validation, the ACTIVE user requirement, the Phase 15
+`passwordChangedAt` comparison (still `401 SESSION_INVALIDATED`), the Phase 07B active-business check,
+and the HS256 algorithm restriction. The session context is exposed as `req.auth = { sessionId, jti }`,
+kept separate from `req.user` so the `/api/auth/me` payload is unchanged by this phase.
+
+**Routes.** Three self-service, authenticated routes — `POST /api/auth/logout`,
+`GET /api/auth/sessions` and `DELETE /api/auth/sessions/:id`. There is deliberately no fourth route
+for "sign out everywhere": it is the same logout route with `{ "all": true }`.
+
+- Logout identifies the session from the token's own `jti`. The client never names a session, a user
+  or a business, and `validateLogout` rejects every body field except `all` with `400`.
+- `GET /api/auth/sessions` queries by `req.user.id` alone and returns a strict allowlist
+  (`id`, `current`, `deviceLabel`, `createdAt`, `lastUsedAt`, `expiresAt`). **A token or a `jti` is
+  never returned**, and the `current` flag is how a client identifies its own row without ever
+  seeing a session id it did not already hold. `lastUsedAt` is refreshed opportunistically at most
+  once per session per five minutes, so the liveness check does not add a write to every request.
+- `DELETE /api/auth/sessions/:id` puts the owner inside the query filter rather than checking
+  ownership after the write, so revoking another user's session is impossible by construction and
+  answers the same `404` as an unknown id — which also means the response cannot reveal that someone
+  else's session exists.
+
+**No new permission.** These are the caller's own sessions, so they are authenticated routes rather
+than capability-gated ones; nothing was added to the catalogue and no role grant changed. The Phase 23
+route-classification guard declares the three new routes in its `AUTHENTICATED` bucket, which is the
+only authorization-artifact edit the phase makes.
+
+**Audit.** Four events — `SESSION_CREATED` (issued at login), `SESSION_LOGGED_OUT`,
+`SESSION_REVOKED` (a session ended remotely) and `SESSIONS_REVOKED_ALL` — written through the existing
+`recordAudit` path from `session.service.js`, the best-effort idiom the inventory ledger also uses:
+the session change is already durable and cannot be un-done by an audit failure. No `jti` is ever
+written to the trail, because the Phase 16 viewer is readable by every ADMIN of the business and a
+`jti` is the one value that could be replayed with a stolen token; the session `_id` and the device
+label are recorded instead.
+
+**Mobile.** `lib/api.js` gains `logout`/`sessions`/`revokeSession` and a cosmetic `deviceLabel` on
+login; `lib/auth.jsx` derives that label without a new dependency (`Android · <model>` from
+`Platform.constants`, otherwise the OS name) and `signOut` now tells the server **before** clearing
+local state, clearing anyway when the server is unreachable so an offline user is still signed out.
+A new `app/(app)/sessions.js` lists the signed-in devices, marks the current one, shows when each was
+signed in and last active, ends one of them, and offers "Sign out everywhere". A refused token is now
+handled centrally in `lib/client.js` (a listener registered by the auth context) instead of being
+re-derived per screen, which also closes a real gap: `MovementForm` used to surface a dead session as
+a form error it could not resolve.
+
+## Consequences Accepted
+
+- **Every previously issued token is invalid.** Pre-26A tokens carry no `jti`, and a token with no
+  `jti` can never name a session, so it is rejected rather than trusted. Every user signs in once
+  more. This was reviewed and accepted by the owner before implementation.
+- **No refresh-token rotation in 26A.** A session ends when it is revoked or when its token expires.
+- The `passwordChangedAt` mechanism is unchanged and still revokes every session of a user; session
+  revocation is an additional, finer-grained control, not a replacement.
+
+## Blast Radius (enumerated, not assumed)
+
+Seven existing test files needed a token fixture that satisfies the new mandatory-`jti` contract
+(`support.mjs`, `phase03`, `phase07b`, `phase07c`, `phase07d-db-reliability`,
+`phase07d-production-config`, `phase08a`); `phase23` declares the three new routes. One further file
+was **not** on the owner's approved list and had to change: `phase16-audit-viewer.test.mjs` pins that
+fixture business's exact audit row counts, and the specification's own requirement that a login
+records a session-created event shifts those counts. It was updated to match the new reality, not
+relaxed — recorded here because it is a deviation from the approved file list.
+
+## Verified
+
+- `server/test/phase26a-session-lifecycle.test.mjs` (DB-backed, 22 cases) covers the 15 mandatory
+  cases — session created at login; `jti` present in the token; a token without `jti` rejected; a
+  valid `jti` accepted; logout revoking the current session; a revoked session's token rejected; one
+  revocation leaving another session working; sign out everywhere ending all sessions; one user's
+  session not revocable by another; an expired session rejected; a disabled user still rejected;
+  inactive/suspended/archived business behaviour unchanged; `passwordChangedAt` still invalidating;
+  forged role/business claims still granting nothing; the authorization contracts intact — plus
+  DTO-shape, body-validation, audit-row, device-label and re-login cases.
+- **Every new security assertion was proven able to fail before it was trusted.** Six mutations were
+  applied and reverted one at a time: disabling the session-liveness check (tests 3, 5, 6 fail);
+  dropping `userId` from the revoke-by-id filter (test 9 fails); logout ignoring `all` (tests 7, 8,
+  19, 21 fail); `toPublicSession` exposing `jti` (test 16 fails); skipping label normalization (test
+  20 fails); a lenient `validateLogout` (test 17 fails).
+- `npm run lint`: 0 errors / 0 warnings. Full backend suite: **491/491** (469 before this phase),
+  78 suites, 0 failures — the Phase 22/23/24 authorization suites included and unchanged.
+- Expo export green for Android and iOS (both exit 0) with a **positive control**: the new session UI
+  strings and the `/api/auth/sessions` path are present in both bundles, while the JWT secret, the
+  string `jti` and `SESSION_REVOKED` are absent from both.
+
+## Definition of Done
+
+- Sign-out revokes the session server-side; a single session is revocable; "sign out everywhere"
+  exists. A token without `jti` is rejected.
+- No authorization data was added to any token or session record, and no permission, role grant or
+  Phase 22/24 authorization behaviour changed.
+- The change surface is the approved Phase 26A files plus the seven objectively-required fixture
+  updates and `phase16-audit-viewer.test.mjs` (recorded above).
+- Nothing committed or pushed without explicit owner approval.
+
+---
+
+# 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.
 
@@ -2305,7 +2445,7 @@ The project owner decides whether to proceed.
 
 ---
 
-# 28. Change Control
+# 29. Change Control
 
 If Claude discovers that the current specification is incomplete or incorrect:
 
@@ -2323,7 +2463,7 @@ Minor implementation improvements that do not alter architectural decisions may 
 
 ---
 
-# 29. Bug Handling
+# 30. Bug Handling
 
 If a bug is discovered during a phase:
 
@@ -2348,7 +2488,7 @@ Only fix it immediately if it blocks the current phase.
 
 ---
 
-# 30. Refactoring Rules
+# 31. Refactoring Rules
 
 Refactoring is allowed when it:
 
@@ -2366,7 +2506,7 @@ Keep changes focused.
 
 ---
 
-# 31. Dependency Rules
+# 32. Dependency Rules
 
 Before adding a dependency:
 
@@ -2380,7 +2520,7 @@ Do not add dependencies simply for convenience.
 
 ---
 
-# 32. Git Checkpoints
+# 33. Git Checkpoints
 
 A Git commit should be created after a stable phase.
 
@@ -2413,7 +2553,7 @@ Before committing:
 
 ---
 
-# 33. V1 Completion
+# 34. V1 Completion
 
 V1 is complete only when all major requirements in:
 
@@ -2455,7 +2595,7 @@ AI Inventory Questions
 
 ---
 
-# 34. Future Development
+# 35. Future Development
 
 After V1, future features must be planned separately.
 
@@ -2490,7 +2630,7 @@ Future functionality must not be implemented during V1 unless explicitly approve
 
 ---
 
-# 35. Final Development Rule
+# 36. Final Development Rule
 
 The goal is not to produce the largest amount of code as quickly as possible.
 

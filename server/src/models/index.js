@@ -1,5 +1,6 @@
 import Business from './business.model.js';
 import User from './user.model.js';
+import Session from './session.model.js';
 import Location from './location.model.js';
 import Category from './category.model.js';
 import Supplier from './supplier.model.js';
@@ -14,6 +15,7 @@ import AIMessage from './aiMessage.model.js';
 export {
   Business,
   User,
+  Session,
   Location,
   Category,
   Supplier,
@@ -30,6 +32,7 @@ export {
 export const models = [
   Business,
   User,
+  Session,
   Location,
   Category,
   Supplier,

@@ -25,10 +25,11 @@ import assert from 'node:assert/strict';
 import bcrypt from 'bcryptjs';
 
 import { ensureDb, disconnectDb } from './helpers.mjs';
+import { issueSessionToken } from './support.mjs';
 import { dbSuite, unitSuite } from './testEnv.mjs';
 import Business from '../src/models/business.model.js';
 import User from '../src/models/user.model.js';
-import { signAccessToken } from '../src/config/jwt.js';
+import Session from '../src/models/session.model.js';
 import { createApp } from '../src/app.js';
 
 const dbOk = await ensureDb();
@@ -386,7 +387,7 @@ async function seedOwner() {
   trackUser(user._id);
   return {
     userId: String(user._id),
-    token: signAccessToken(user._id),
+    token: await issueSessionToken(user._id),
   };
 }
 
@@ -396,6 +397,8 @@ after(async () => {
       await Business.deleteMany({ _id: { $in: createdBusinessIds } }).catch(() => {});
     }
     if (createdUserIds.length) {
+      // Phase 26A: sessions carry no businessId, so they are cleared by userId.
+      await Session.deleteMany({ userId: { $in: createdUserIds } }).catch(() => {});
       await User.deleteMany({ _id: { $in: createdUserIds } }).catch(() => {});
     }
   }

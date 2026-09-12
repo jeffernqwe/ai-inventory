@@ -13,11 +13,12 @@ import errorHandler from '../src/middlewares/errorHandler.js';
 import requireAuth from '../src/middlewares/authenticate.js';
 import { requireRole, requirePermission } from '../src/middlewares/authorize.js';
 import assertBusinessAccess from '../src/utils/businessAccess.js';
-import { signAccessToken } from '../src/config/jwt.js';
 import env from '../src/config/env.js';
 import User from '../src/models/user.model.js';
 import Business from '../src/models/business.model.js';
+import Session from '../src/models/session.model.js';
 import { ensureDb, disconnectDb } from './helpers.mjs';
+import { issueSessionToken } from './support.mjs';
 import { dbSuite } from './testEnv.mjs';
 
 // ---------------------------------------------------------------------------
@@ -119,12 +120,17 @@ async function makeDirectUser(role) {
     status: 'ACTIVE',
   });
   createdUserIds.push(String(user._id));
-  return { business, user, token: signAccessToken(user._id) };
+  // Phase 26A: a token is only usable while it names a live session row.
+  return { business, user, token: await issueSessionToken(user._id) };
 }
 
 after(async () => {
   if (dbOk) {
     if (createdUserIds.length) {
+      // Phase 26A: sessions are user-owned, so they go with the users. They are
+      // removed first — a session row left behind would outlive its user until
+      // the TTL index expired it.
+      await Session.deleteMany({ userId: { $in: createdUserIds } }).catch(() => {});
       await User.deleteMany({ _id: { $in: createdUserIds } }).catch(() => {});
     }
     if (createdBusinessIds.length) {

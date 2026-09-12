@@ -12,7 +12,9 @@ import bcrypt from 'bcryptjs';
 import app from '../src/app.js';
 import Business from '../src/models/business.model.js';
 import User from '../src/models/user.model.js';
-import { signAccessToken } from '../src/config/jwt.js';
+import Session from '../src/models/session.model.js';
+import { signAccessToken, decodeAccessToken } from '../src/config/jwt.js';
+import { newSessionId } from '../src/services/session.service.js';
 import { ensureDb, disconnectDb } from './helpers.mjs';
 
 const { ObjectId } = mongoose.Types;
@@ -152,6 +154,14 @@ export function createTracker(dbOk) {
       await deleteByBusiness('businesses');
       if (users.length) {
         try {
+          // Phase 26A: sessions belong to a user, not a business, so they are
+          // removed by userId alongside the users themselves. Without this the
+          // rows would linger until their TTL index expires.
+          await db.collection('sessions').deleteMany({ userId: { $in: users } });
+        } catch {
+          /* best effort */
+        }
+        try {
           await db.collection('users').deleteMany({ _id: { $in: users } });
         } catch {
           /* best effort */
@@ -188,6 +198,29 @@ export async function registerOwner(api, tracker) {
 }
 
 /**
+ * Mints a usable access token for a user that already exists in the database:
+ * a fresh session id is signed into the token AND written as a session row, so
+ * the token passes requireAuth's Phase 26A session check.
+ *
+ * Since 26A a token without a live session is rejected, so any fixture that used
+ * to call signAccessToken(user._id) directly must go through here instead. The
+ * row is tracked for cleanup by userId (sessions carry no businessId).
+ */
+export async function issueSessionToken(userId, { deviceLabel } = {}) {
+  const jti = newSessionId();
+  const token = signAccessToken(userId, jti);
+  const { exp } = decodeAccessToken(token);
+  await Session.create({
+    userId: new ObjectId(userId),
+    jti,
+    ...(deviceLabel ? { deviceLabel } : {}),
+    // Mirrors the real login path: the row expires when the token does.
+    expiresAt: new Date(exp * 1000),
+  });
+  return token;
+}
+
+/**
  * Creates a user directly in the database with the given role so role-guarded
  * endpoints can be exercised as ADMIN/MANAGER/STAFF. Reuses an existing business
  * when businessId is given. (Phase 14A added the /api/users management routes;
@@ -213,7 +246,7 @@ export async function makeRoleUser({ role, businessId }, tracker) {
   return {
     userId: String(user._id),
     businessId: bid,
-    token: signAccessToken(user._id),
+    token: await issueSessionToken(user._id),
   };
 }
 

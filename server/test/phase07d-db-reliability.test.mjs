@@ -196,7 +196,10 @@ dbSuite('H8 readiness + DB-unavailable over the real app (Phase 07D)', dbOk, () 
   it('while MongoDB is down: protected requests return a fixed 503 and readiness is 503, liveness 200', async () => {
     await startApp();
     try {
-      const token = signAccessToken(new mongoose.Types.ObjectId()); // no such user
+      // A token naming a session that does not exist AND a user that does not
+      // exist: the session check cannot even run while the database is down, so
+      // this stays a database-availability probe rather than a 401.
+      const token = signAccessToken(new mongoose.Types.ObjectId(), 'no-such-session');
 
       // Sanity: with the DB up, an unknown user is a clean 401 (not a DB error).
       const before = await get('/api/auth/me', token);

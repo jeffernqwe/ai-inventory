@@ -19,11 +19,16 @@ export function register({ businessName, name, email, password }) {
   });
 }
 
-/** POST /api/auth/login -> { token, tokenType, expiresIn, user }. */
-export function login({ email, password }) {
+/**
+ * POST /api/auth/login -> { token, tokenType, expiresIn, user }.
+ * `deviceLabel` is an optional, cosmetic hint ("Android · Pixel 7") the server
+ * stores on the new session so the user can tell their devices apart; it is
+ * coerced server-side and can never fail a login.
+ */
+export function login({ email, password, deviceLabel }) {
   return apiFetch('/api/auth/login', {
     method: 'POST',
-    body: { email, password },
+    body: { email, password, deviceLabel },
   });
 }
 
@@ -44,6 +49,42 @@ export function changePassword(token, { currentPassword, newPassword }) {
 /** PATCH /api/auth/me -> { user }. Updates ONLY the caller's name. 400 VALIDATION_ERROR for any other field. */
 export function updateMe(token, { name }) {
   return apiFetch('/api/auth/me', { token, method: 'PATCH', body: { name } });
+}
+
+/**
+ * POST /api/auth/logout -> { message } (Phase 26A). Ends the session this token
+ * belongs to — the server identifies it from the token itself, so no session,
+ * user or business is ever named by the client. Pass `{ all: true }` to sign out
+ * everywhere: every session the user has open, this one included, in one call
+ * (`-> { message, sessionsRevoked }`).
+ *
+ * Idempotent: ending an already-ended session still answers 200.
+ */
+export function logout(token, { all = false } = {}) {
+  return apiFetch('/api/auth/logout', {
+    token,
+    method: 'POST',
+    body: all ? { all: true } : {},
+  });
+}
+
+/**
+ * GET /api/auth/sessions -> { sessions } (Phase 26A). Only the caller's own open
+ * sessions, newest first. Each is
+ * `{ id, current, deviceLabel, createdAt, lastUsedAt, expiresAt }` — a session id
+ * the client can act on and nothing more: no token and no jti is ever sent.
+ */
+export function sessions(token) {
+  return apiFetch('/api/auth/sessions', { token });
+}
+
+/**
+ * DELETE /api/auth/sessions/:id -> { message, id } (Phase 26A). Ends one of the
+ * caller's own sessions. 404 for an unknown id and for another user's session
+ * alike, so the response never reveals that someone else's session exists.
+ */
+export function revokeSession(token, id) {
+  return apiFetch(`/api/auth/sessions/${id}`, { token, method: 'DELETE' });
 }
 
 // ---------------------------------------------------------------------------
@@ -270,6 +311,11 @@ export default {
   register,
   login,
   me,
+  changePassword,
+  updateMe,
+  logout,
+  sessions,
+  revokeSession,
   categoriesApi,
   locationsApi,
   suppliersApi,

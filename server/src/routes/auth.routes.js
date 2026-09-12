@@ -1,6 +1,6 @@
 import { Router } from 'express';
 
-import { register, login, me, changePassword, updateMe } from '../controllers/auth.controller.js';
+import { register, login, me, changePassword, updateMe, logout, listSessions, revokeSession } from '../controllers/auth.controller.js';
 import requireAuth from '../middlewares/authenticate.js';
 import {
   createLoginAccountLimiter,
@@ -28,6 +28,12 @@ export function createAuthRouter({ limits } = {}) {
   // Phase 15: self-service account security + profile.
   router.patch('/me', requireAuth, updateMe);
   router.post('/change-password', requireAuth, changePassword);
+  // Phase 26A: session lifecycle. Authenticated routes only — no new permission
+  // is involved, because a user manages nothing but their own sessions, and the
+  // owning userId comes from req.user, never from the request.
+  router.post('/logout', requireAuth, logout);
+  router.get('/sessions', requireAuth, listSessions);
+  router.delete('/sessions/:id', requireAuth, revokeSession);
 
   return router;
 }

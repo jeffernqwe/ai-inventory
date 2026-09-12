@@ -228,6 +228,19 @@ purchaseOrderSchema.index({ businessId: 1, status: 1 });
 purchaseOrderSchema.index({ businessId: 1, supplierId: 1 });
 purchaseOrderSchema.index({ businessId: 1, locationId: 1 });
 
+// Phase 20G: the purchase-order list is read newest-first with a deterministic
+// tiebreaker — `sort({ createdAt: -1, _id: -1 })` over `{ businessId }` plus
+// optional status/supplierId filters (purchase-orders.service.js list). The
+// indexes above serve those equality matches but none can supply the order, so
+// the winning plan was `SORT -> FETCH -> IXSCAN`, a blocking in-memory sort over
+// the whole tenant partition. Declaring the sort keys after the equality key makes
+// the order index-provided. `_id` is last because it is the tiebreaker in every
+// sort clause and must share `createdAt`'s direction. status/supplierId stay OUT
+// of the key for the same reason as products: both are optional, and an index led
+// by an optional field cannot serve the request that omits it. Every index above
+// is kept unchanged.
+purchaseOrderSchema.index({ businessId: 1, createdAt: -1, _id: -1 });
+
 const PurchaseOrder = mongoose.model('PurchaseOrder', purchaseOrderSchema);
 
 export default PurchaseOrder;

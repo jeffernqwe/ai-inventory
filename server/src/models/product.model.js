@@ -85,6 +85,19 @@ productSchema.index({ businessId: 1, name: 1 });
 productSchema.index({ businessId: 1, categoryId: 1 });
 productSchema.index({ businessId: 1, status: 1 });
 
+// Phase 20G: the product catalog list is read newest-first with a deterministic
+// tiebreaker — `sort({ createdAt: -1, _id: -1 })` over `{ businessId }` plus
+// optional status/categoryId/q filters (product.service.js listSimple, which also
+// backs the AI searchProducts/getProducts tools). The indexes above each carry a
+// `businessId` prefix, so they serve the equality match but none can supply the
+// order: the winning plan was `SORT -> FETCH -> IXSCAN`, a blocking in-memory sort
+// over the whole tenant partition. Declaring the sort keys after the equality key
+// makes the order index-provided. `_id` is last because it is the tiebreaker in
+// every sort clause and must share `createdAt`'s direction. status/categoryId stay
+// OUT of the key: both are optional, and an index led by an optional field cannot
+// serve the request that omits it. Every index above is kept unchanged.
+productSchema.index({ businessId: 1, createdAt: -1, _id: -1 });
+
 const Product = mongoose.model('Product', productSchema);
 
 export default Product;

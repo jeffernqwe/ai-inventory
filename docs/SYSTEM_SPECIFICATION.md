@@ -1196,6 +1196,62 @@ permission a route references that is not in the catalogue, the fact that
 `CATALOGUE_ONLY_PERMISSIONS` is never consumed by the runtime authorization path,
 and that all four roles still hold every capability a route now requires.
 
+## Route Authorization Classification
+
+Authorization is a property of **every** route, not only of the routes that happen to be gated. Each
+route reachable from `server/src/app.js` therefore falls into exactly one declared class:
+
+- **Permission-gated** — the route carries a capability gate as its first handler after
+  `requireAuth`, and its declaration names the catalogue key. This is the default and the expectation
+  for every route that reads or writes a business resource.
+- **Authenticated** — `requireAuth` plus a controller, with no capability gate. Reserved for the
+  caller's own account (`GET`/`PATCH /api/auth/me`, `POST /api/auth/change-password`) and for the
+  categories/locations reads, which have no view capability in the catalogue. Each is listed
+  explicitly, with its reason, so that the deferral is visible and cannot be extended by accident.
+- **Public** — no authentication at all. The health probes must answer before a token can exist, and
+  login/register are how a token is obtained; all are rate-limited.
+- **Role-gated** — a gate naming roles directly rather than a capability. **There are none**, and
+  adding one requires an explicit decision: a role-name gate bypasses the permission catalogue, so a
+  route using it would be invisible to any scan that looks only for capability keys.
+
+A route in no class is a defect. Declaring a route in a class it no longer belongs to is also a
+defect. Nothing in this section is a route inventory: no count is fixed, so a later phase adds a
+route by classifying it, never by amending a number.
+
+`requireRole(...roles)` in `server/src/middlewares/authorize.js` is the role-name allowlist behind
+the fourth class. It is retained and tested but has **no production call site**; its inertness is
+pinned by the guard rather than being removed by it.
+
+## Client Error-Code Contract
+
+An error `code` is part of the client-facing contract. The mobile application branches on specific
+codes to produce specific messages, so a code the server renames or stops emitting silently degrades
+a precise client message into a generic failure. Every code the client compares against must be a
+code the server can emit. The server emits codes in three ways — the third argument of
+`new ApiError(...)`, a `this.code = ...` assignment on a custom error class, and a `code:` property
+written directly into a response body (the rate limiters answer without going through `ApiError`) —
+and all three are in scope.
+
+## Cross-Layer RBAC Mirror
+
+`mobile/lib/permissions.js` mirrors the catalogue and the role grants in
+`server/src/constants/roles.js` because the UI needs to know what to show. The mirror is **not** an
+authorization boundary — the backend remains the sole authority, and every request is decided
+server-side. The two copies are required to agree exactly: a grant present only on the server makes
+the app offer an action the server refuses, and a grant present only in the mirror makes a role never
+see an action it is permitted to perform. The server matrix is authoritative, and the mirror is
+updated to match it.
+
+## Enforcement Guard
+
+`server/test/phase23-authorization-contract.test.mjs` is the database-free suite that pins the three
+contracts above: the classification of every route with the exemption lists and their reasons, the
+mirror's equality with the server matrix (roles, catalogue keys and values, and every role's grant
+set), `requireRole`'s inertness together with its recognition by the classifier, and the absence of
+any client-branched error code the server cannot emit. Its comparisons are factored into pure
+functions and exercised against deliberately perturbed in-memory clones, so the guard is
+demonstrably capable of failing rather than merely being green.
+
 ---
 
 # 31. API Structure

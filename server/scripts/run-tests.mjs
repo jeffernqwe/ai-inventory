@@ -40,6 +40,7 @@ const PURE_UNIT = [
   'phase20g-list-sort-indexes.test.mjs', // schema-declaration guards for the products/purchase_orders/users list-sort indexes
   'phase21-product-archive-invariant.test.mjs', // declaration guards for the archive-only product lifecycle + inventory↔product dependency
   'phase22-authorization-contract.test.mjs', // route↔permission bindings, catalogue coverage, CATALOGUE_ONLY declaration
+  'phase23-authorization-contract.test.mjs', // route authorization classification, mobile RBAC mirror, requireRole inertness, client error-code contract
 ];
 const PURE_DB = [
   'phase03-auth.test.mjs',            // auth + RBAC over real routes + Mongo

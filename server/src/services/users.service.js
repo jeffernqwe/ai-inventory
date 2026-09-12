@@ -41,7 +41,12 @@ export const usersService = {
       ];
     }
     const total = await User.countDocuments(filter);
-    const docs = await User.find(filter).sort({ createdAt: 1 }).skip(skip).limit(limit);
+    const docs = await User.find(filter)
+      // Oldest first — this list is ASCENDING, so the `_id` tiebreaker ascends
+      // too, keeping the direction and making paged ties stable.
+      .sort({ createdAt: 1, _id: 1 })
+      .skip(skip)
+      .limit(limit);
     return { items: docs.map(toPublicUser), total };
   },
 

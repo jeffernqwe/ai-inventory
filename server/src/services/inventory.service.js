@@ -739,7 +739,10 @@ export const inventoryService = {
     pipeline.push({
       $facet: {
         metadata: [{ $count: 'total' }],
-        data: [{ $sort: { updatedAt: -1 } }, { $skip: skip }, { $limit: limit }],
+        // Most-recently-changed first. A transfer updates its two rows in the
+        // same millisecond, so `_id` is what keeps an offset page boundary
+        // inside that tie stable.
+        data: [{ $sort: { updatedAt: -1, _id: -1 } }, { $skip: skip }, { $limit: limit }],
       },
     });
 

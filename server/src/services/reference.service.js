@@ -73,7 +73,12 @@ export function createReferenceService({
         ];
       }
       const total = await Model.countDocuments(filter);
-      const docs = await Model.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit);
+      const docs = await Model.find(filter)
+        // `_id` breaks createdAt ties in the same direction as the primary sort
+        // so paging cannot repeat or skip a row.
+        .sort({ createdAt: -1, _id: -1 })
+        .skip(skip)
+        .limit(limit);
       return { items: docs.map(toPublic), total };
     },
 

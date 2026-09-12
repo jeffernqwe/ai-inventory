@@ -35,6 +35,14 @@ export const AUDIT_ACTIONS = Object.freeze({
   SESSION_LOGGED_OUT: 'SESSION_LOGGED_OUT',
   SESSION_REVOKED: 'SESSION_REVOKED',
   SESSIONS_REVOKED_ALL: 'SESSIONS_REVOKED_ALL',
+  // Phase 26B-2 — password recovery. Two events, not one: a link was issued,
+  // and a password was actually replaced through one. They are different facts
+  // about the account and an investigator needs to tell them apart (a request
+  // that was never completed is the shape of a probe; a completion with no
+  // request is impossible). Both use AUDIT_ENTITY_TYPES.USER, so no entity type
+  // was added.
+  PASSWORD_RESET_REQUESTED: 'PASSWORD_RESET_REQUESTED',
+  PASSWORD_RESET_COMPLETED: 'PASSWORD_RESET_COMPLETED',
 });
 
 export const AUDIT_ENTITY_TYPES = Object.freeze({

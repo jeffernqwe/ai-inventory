@@ -196,7 +196,9 @@ const CLASS = {
  *
  * PUBLIC (no authentication at all):
  *   health probes must answer before a token can exist; login/register are how
- *   a token is obtained. All are rate-limited.
+ *   a token is obtained; the two password-recovery routes are how a token is
+ *   regained after the password is lost, so by definition the caller holds none.
+ *   All are rate-limited.
  * AUTHENTICATED (requireAuth + controller, no permission):
  *   the six self-service account routes operate only on the caller's own
  *   account (Phase 26A added the three session-lifecycle routes: they manage
@@ -215,6 +217,14 @@ const PUBLIC_ROUTES = [
   { route: 'GET /api/health/ready', why: 'readiness probe' },
   { route: 'POST /api/auth/login', why: 'how a token is obtained; rate-limited' },
   { route: 'POST /api/auth/register', why: 'how a business is created; rate-limited' },
+  {
+    route: 'POST /api/auth/forgot-password',
+    why: 'Phase 26B-3: how a reset link is requested — the caller is locked out and cannot hold a session; rate-limited per IP + account',
+  },
+  {
+    route: 'POST /api/auth/reset-password',
+    why: 'Phase 26B-3: spends a reset link — reachable only by a caller with no working password; rate-limited per IP',
+  },
 ];
 
 const AUTHENTICATED_ROUTES = [

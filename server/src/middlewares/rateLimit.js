@@ -1,10 +1,11 @@
 /**
- * Public auth-endpoint rate limiting (Phase 07B / H1).
+ * Public auth-endpoint rate limiting (Phase 07B / H1, extended by Phase 26B-3).
  *
- * POST /api/auth/login and /api/auth/register are the only unauthenticated
+ * login, register and the two password-recovery routes are the unauthenticated
  * write endpoints, so they are the vectors for credential stuffing, password
- * spraying, brute force, and mass account creation. They get dedicated
- * limiters (stricter than the rest of the API, which has none).
+ * spraying, brute force, mass account creation, reset-mail flooding and
+ * reset-token guessing. They get dedicated limiters (stricter than the rest of
+ * the API, which has none).
  *
  *   login   -> two stacked limiters:
  *               1) per IP + normalized-email bucket, strict (targeted brute
@@ -46,6 +47,24 @@ export function authRateConfig(overrides = {}) {
     loginIpMax: positiveInt(process.env.AUTH_LOGIN_IP_RATE_LIMIT_MAX, 60),
     registerWindowMs: positiveInt(process.env.AUTH_REGISTER_RATE_LIMIT_WINDOW_MS, 60 * 60 * 1000),
     registerMax: positiveInt(process.env.AUTH_REGISTER_RATE_LIMIT_MAX, 30),
+    // Password recovery (Phase 26B-3). Longer windows than login: a recovery
+    // link is valid for 30 minutes and a user who needs one needs it once, so
+    // there is no legitimate burst to protect.
+    passwordResetWindowMs: positiveInt(
+      process.env.AUTH_PASSWORD_RESET_RATE_LIMIT_WINDOW_MS,
+      60 * 60 * 1000
+    ),
+    passwordResetMax: positiveInt(process.env.AUTH_PASSWORD_RESET_RATE_LIMIT_MAX, 5),
+    passwordResetIpWindowMs: positiveInt(
+      process.env.AUTH_PASSWORD_RESET_IP_RATE_LIMIT_WINDOW_MS,
+      60 * 60 * 1000
+    ),
+    passwordResetIpMax: positiveInt(process.env.AUTH_PASSWORD_RESET_IP_RATE_LIMIT_MAX, 20),
+    passwordResetConfirmWindowMs: positiveInt(
+      process.env.AUTH_PASSWORD_RESET_CONFIRM_RATE_LIMIT_WINDOW_MS,
+      15 * 60 * 1000
+    ),
+    passwordResetConfirmMax: positiveInt(process.env.AUTH_PASSWORD_RESET_CONFIRM_RATE_LIMIT_MAX, 20),
     ...overrides,
   };
 }
@@ -135,9 +154,105 @@ export function createRegisterLimiter(overrides = {}) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Password recovery (Phase 26B-3)
+// ---------------------------------------------------------------------------
+//
+// OWASP treats password-recovery endpoints as authentication endpoints, so these
+// follow the login/register pattern rather than inventing anything.
+//
+// THE ONE DELIBERATE DIVERGENCE from createLoginAccountLimiter:
+// `skipSuccessfulRequests` is OMITTED — every attempt counts. On login that
+// option is what stops legitimate users locking themselves out with their own
+// correct passwords. Here it would silently DISABLE the limiter: the success
+// path and the silent no-op are deliberately indistinguishable (both answer the
+// same 202), so there is no failure to count and the budget would never be spent.
+// Counting every attempt is also what makes the limiter enumeration-neutral —
+// a known address and an unknown one consume it identically.
+//
+// SHARED CODE: all three answer PASSWORD_RESET_RATE_LIMITED, the way
+// LOGIN_RATE_LIMITED already spans the two login limiters. A client needs to
+// know "you are being throttled on recovery", not which bucket caught it.
+const PASSWORD_RESET_RATE_LIMITED = 'PASSWORD_RESET_RATE_LIMITED';
+
+/**
+ * Recovery limiter #1 — per IP + normalized email (strict). Bounds how often one
+ * account can be mailed, so the endpoint cannot be used to flood a victim's inbox
+ * or to burn this server's provider quota against a single address.
+ *
+ * The key is a CLIENT-SUPPLIED EMAIL, exactly as createLoginAccountLimiter
+ * already keys. That is not the forbidden "trust a client identity" case: a
+ * userId/businessId is an AUTHORIZATION identity and must never be taken from a
+ * request, whereas the address here is the SUBJECT of the request. Keying on it
+ * grants nothing — a forged address only spends that address's own budget, and a
+ * correct-but-unknown address spends it identically.
+ */
+export function createPasswordResetRequestAccountLimiter(overrides = {}) {
+  const { passwordResetWindowMs, passwordResetMax } = authRateConfig(overrides);
+  return rateLimit({
+    windowMs: passwordResetWindowMs,
+    limit: passwordResetMax,
+    keyGenerator(request) {
+      const ip = ipKeyGenerator(request.ip);
+      const email = normalizeEmail(request.body?.email);
+      return `${ip}|${email || '(no-email)'}`;
+    },
+    ...limitResponse(
+      PASSWORD_RESET_RATE_LIMITED,
+      'Too many password reset requests. Please wait and try again.'
+    ),
+  });
+}
+
+/**
+ * Recovery limiter #2 — per IP, higher cap. The backstop for the account bucket:
+ * an attacker rotating addresses would otherwise get a fresh budget per address,
+ * while a legitimate user sharing an office NAT is unaffected at this cap.
+ * Same explicit request.ip keying rationale as createLoginIpLimiter — never the
+ * library default, which turns a spoofed X-Forwarded-For into a 500.
+ */
+export function createPasswordResetRequestIpLimiter(overrides = {}) {
+  const { passwordResetIpWindowMs, passwordResetIpMax } = authRateConfig(overrides);
+  return rateLimit({
+    windowMs: passwordResetIpWindowMs,
+    limit: passwordResetIpMax,
+    keyGenerator(request) {
+      return ipKeyGenerator(request.ip);
+    },
+    ...limitResponse(
+      PASSWORD_RESET_RATE_LIMITED,
+      'Too many password reset requests. Please wait and try again.'
+    ),
+  });
+}
+
+/**
+ * Confirmation limiter — per IP. reset-password carries no address to key on,
+ * and keying on the token would be pointless (an attacker simply rotates it), so
+ * the cap is per source. It matters because each accepted attempt costs a SHA-256
+ * lookup, an atomic claim and a bcrypt hash on an unauthenticated endpoint.
+ */
+export function createPasswordResetConfirmLimiter(overrides = {}) {
+  const { passwordResetConfirmWindowMs, passwordResetConfirmMax } = authRateConfig(overrides);
+  return rateLimit({
+    windowMs: passwordResetConfirmWindowMs,
+    limit: passwordResetConfirmMax,
+    keyGenerator(request) {
+      return ipKeyGenerator(request.ip);
+    },
+    ...limitResponse(
+      PASSWORD_RESET_RATE_LIMITED,
+      'Too many password reset attempts. Please wait and try again.'
+    ),
+  });
+}
+
 export default {
   authRateConfig,
   createLoginAccountLimiter,
   createLoginIpLimiter,
   createRegisterLimiter,
+  createPasswordResetRequestAccountLimiter,
+  createPasswordResetRequestIpLimiter,
+  createPasswordResetConfirmLimiter,
 };

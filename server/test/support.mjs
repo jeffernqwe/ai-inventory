@@ -162,6 +162,14 @@ export function createTracker(dbOk) {
           /* best effort */
         }
         try {
+          // Phase 26B-2: password-reset tokens belong to a user, not a business,
+          // so they are removed by userId alongside the sessions and the user
+          // itself. Without this the rows would linger until their TTL expires.
+          await db.collection('password_reset_tokens').deleteMany({ userId: { $in: users } });
+        } catch {
+          /* best effort */
+        }
+        try {
           await db.collection('users').deleteMany({ _id: { $in: users } });
         } catch {
           /* best effort */

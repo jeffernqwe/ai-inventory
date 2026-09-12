@@ -1,5 +1,5 @@
 import { parsePagination, pageResult } from '../utils/pagination.js';
-import { isObjectId, optionalObjectId, validateStockMovement, validateTransfer } from '../utils/validate.js';
+import { isObjectId, optionalObjectId, optionalSearch, optionalEnum, validateStockMovement, validateTransfer, ACTIVE_ARCHIVED_STATUSES } from '../utils/validate.js';
 import { throwValidation, invalidId } from '../utils/errors.js';
 import inventoryService from '../services/inventory.service.js';
 
@@ -19,18 +19,13 @@ function parseQueryList(req) {
   const { page, limit, skip } = parsePagination(req.query);
   const problems = [];
 
-  let q;
-  if (req.query.q !== undefined) {
-    const trimmed = typeof req.query.q === 'string' ? req.query.q.trim() : '';
-    if (!trimmed) problems.push({ field: 'q', message: 'q must not be empty' });
-    else q = trimmed;
-  }
+  const search = optionalSearch(req.query.q, 'q');
+  problems.push(...search.problems);
 
-  let status;
-  if (req.query.status !== undefined) {
-    if (req.query.status === 'ACTIVE' || req.query.status === 'ARCHIVED') status = req.query.status;
-    else problems.push({ field: 'status', message: 'status must be ACTIVE or ARCHIVED' });
-  }
+  const status = optionalEnum(req.query.status, 'status', ACTIVE_ARCHIVED_STATUSES, {
+    message: 'status must be ACTIVE or ARCHIVED',
+  });
+  problems.push(...status.problems);
 
   const productId = optionalObjectId(req.query.productId, 'productId');
   problems.push(...productId.problems);
@@ -41,8 +36,8 @@ function parseQueryList(req) {
   const outOfStock = parseFlag(req.query.outOfStock);
 
   return {
-    q,
-    status,
+    q: search.value,
+    status: status.value,
     productId: productId.value,
     locationId: locationId.value,
     lowStock,

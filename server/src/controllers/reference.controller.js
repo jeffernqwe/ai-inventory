@@ -1,5 +1,5 @@
 import { parsePagination, pageResult } from '../utils/pagination.js';
-import { isObjectId } from '../utils/validate.js';
+import { isObjectId, validateReferenceList } from '../utils/validate.js';
 import { throwValidation, invalidId } from '../utils/errors.js';
 
 /**
@@ -15,9 +15,13 @@ export function createReferenceController(service, validateFn) {
   return {
     async list(req, res) {
       const { page, limit, skip } = parsePagination(req.query);
-      const q = typeof req.query.q === 'string' && req.query.q.trim() ? req.query.q.trim() : undefined;
-      const status = req.query.status;
-      const { items, total } = await service.list(req.user.businessId, { q, status, skip, limit });
+      const v = validateReferenceList(req.query);
+      if (v.problems.length) throwValidation(v.problems);
+      const { items, total } = await service.list(req.user.businessId, {
+        ...v.filters,
+        skip,
+        limit,
+      });
       res.json(pageResult(items, total, page, limit));
     },
 

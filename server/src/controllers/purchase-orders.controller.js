@@ -1,6 +1,7 @@
 import { parsePagination, pageResult } from '../utils/pagination.js';
-import { isObjectId, validatePurchaseOrder, validateReceive } from '../utils/validate.js';
+import { isObjectId, validatePurchaseOrder, validateReceive, validatePurchaseOrderList } from '../utils/validate.js';
 import { throwValidation, invalidId } from '../utils/errors.js';
+import { PURCHASE_ORDER_STATUSES } from '../models/purchaseOrder.model.js';
 import { purchaseOrderService } from '../services/purchase-orders.service.js';
 
 /**
@@ -16,13 +17,10 @@ const paramId = (req) => {
 export const purchaseOrdersController = {
   async list(req, res) {
     const { page, limit, skip } = parsePagination(req.query);
-    const q = typeof req.query.q === 'string' && req.query.q.trim() ? req.query.q.trim() : undefined;
-    const status = typeof req.query.status === 'string' ? req.query.status : undefined;
-    const supplierId = typeof req.query.supplierId === 'string' ? req.query.supplierId : undefined;
+    const v = validatePurchaseOrderList(req.query, PURCHASE_ORDER_STATUSES);
+    if (v.problems.length) throwValidation(v.problems);
     const { items, total } = await purchaseOrderService.list(req.user.businessId, {
-      status,
-      supplierId,
-      q,
+      ...v.filters,
       skip,
       limit,
     });

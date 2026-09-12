@@ -229,6 +229,40 @@ export function requiredString(value, field, max) {
   return optionalString(value, field, max);
 }
 
+/**
+ * `q` for a list endpoint (Phase 20D). A `q` that is PRESENT but blank
+ * (`?q=`, `?q=%20%20`) is a malformed filter, not an absent one: it is rejected
+ * rather than dropped, because quietly answering with the unfiltered collection
+ * is exactly the failure this guards. An ABSENT `q` still means "no search" and
+ * stays valid — the client omits it rather than sending it empty.
+ *
+ * The non-string branch (a repeated `?q=a&q=b` arrives as an array) yields the
+ * same problem, which is what the product/inventory list parsers did before
+ * this was consolidated.
+ */
+export function optionalSearch(value, field = 'q', max) {
+  if (value === undefined || value === null) return { value: undefined, problems: [] };
+  const trimmed = typeof value === 'string' ? value.trim() : '';
+  if (trimmed === '') {
+    return { value: undefined, problems: [{ field, message: `${field} must not be empty` }] };
+  }
+  return optionalString(trimmed, field, max);
+}
+
+/**
+ * Enum-valued list filter (Phase 20D). An unknown value is a client error, never
+ * a filter to quietly ignore. `message` lets an endpoint keep the wording it
+ * already used for this field.
+ */
+export function optionalEnum(value, field, allowed, { message } = {}) {
+  if (value === undefined || value === null) return { value: undefined, problems: [] };
+  if (allowed.includes(value)) return { value, problems: [] };
+  return {
+    value: undefined,
+    problems: [{ field, message: message ?? `${field} must be one of ${allowed.join(', ')}` }],
+  };
+}
+
 function toNumber(value) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value))) {
@@ -660,7 +694,7 @@ export function validateAuditList(query) {
     problems.push({ field: 'to', message: 'to must be on or after from' });
   }
 
-  const text = optionalString(q.q, 'q', AUDIT_Q_MAX);
+  const text = optionalSearch(q.q, 'q', AUDIT_Q_MAX);
   problems.push(...text.problems);
 
   return {
@@ -676,6 +710,89 @@ export function validateAuditList(query) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// List query filters (Phase 20D)
+//
+// Every list endpoint that accepts `q`, `status` or `supplierId` uses these, so
+// the contract is defined once: a filter that is PRESENT and malformed is a
+// field problem (the caller throws 400 VALIDATION_ERROR), never a quietly
+// dropped predicate that answers with a wider list than the client asked for.
+// ---------------------------------------------------------------------------
+
+/**
+ * The ACTIVE/ARCHIVED enum shared by products, inventory rows, categories,
+ * locations and suppliers — the archived/restored lifecycle every one of them
+ * uses. Exported so each list parser validates against one definition.
+ */
+export const ACTIVE_ARCHIVED_STATUSES = Object.freeze(['ACTIVE', 'ARCHIVED']);
+
+/**
+ * GET /api/users query filters. `status` is validated rather than coerced: an
+ * unknown value must not silently widen the list to every user.
+ */
+export function validateUserList(query) {
+  const problems = [];
+  const q = query ?? {};
+
+  const search = optionalSearch(q.q, 'q');
+  problems.push(...search.problems);
+
+  const status = optionalEnum(q.status, 'status', USER_STATUSES);
+  problems.push(...status.problems);
+
+  return { problems, filters: { q: search.value, status: status.value } };
+}
+
+/**
+ * GET /api/purchase-orders query filters. `statuses` is REQUIRED and supplied by
+ * the caller (the model's PURCHASE_ORDER_STATUSES) so this module keeps its
+ * existing dependency on `constants/` only and never reaches into `models/`.
+ *
+ * `supplierId` follows the shared ObjectId convention: blank/absent means "no
+ * supplier filter", a MALFORMED id is a problem. It must never be silently
+ * removed from the match — doing so returns every purchase order in the
+ * business while appearing to be filtered to one supplier.
+ */
+export function validatePurchaseOrderList(query, statuses) {
+  const problems = [];
+  const q = query ?? {};
+
+  const search = optionalSearch(q.q, 'q');
+  problems.push(...search.problems);
+
+  const status = optionalEnum(q.status, 'status', statuses);
+  problems.push(...status.problems);
+
+  const supplierId = optionalObjectId(q.supplierId, 'supplierId');
+  problems.push(...supplierId.problems);
+
+  return {
+    problems,
+    filters: { q: search.value, status: status.value, supplierId: supplierId.value },
+  };
+}
+
+/**
+ * GET /api/categories | /api/locations | /api/suppliers query filters. All three
+ * are served by the reference controller factory, so they share one contract.
+ * The status wording matches the product endpoints, which validate the same
+ * ACTIVE/ARCHIVED enum.
+ */
+export function validateReferenceList(query) {
+  const problems = [];
+  const q = query ?? {};
+
+  const search = optionalSearch(q.q, 'q');
+  problems.push(...search.problems);
+
+  const status = optionalEnum(q.status, 'status', ACTIVE_ARCHIVED_STATUSES, {
+    message: 'status must be ACTIVE or ARCHIVED',
+  });
+  problems.push(...status.problems);
+
+  return { problems, filters: { q: search.value, status: status.value } };
+}
+
 export default {
   normalizeEmail,
   validateRegister,
@@ -685,10 +802,13 @@ export default {
   validateUserCreate,
   validateUserUpdate,
   USER_STATUSES,
+  ACTIVE_ARCHIVED_STATUSES,
   isObjectId,
   optionalObjectId,
   optionalString,
   requiredString,
+  optionalSearch,
+  optionalEnum,
   requiredNumber,
   optionalNumber,
   validateCategory,
@@ -700,5 +820,8 @@ export default {
   validatePurchaseOrder,
   validateReceive,
   validateAuditList,
+  validateUserList,
+  validatePurchaseOrderList,
+  validateReferenceList,
   CODE_MAX,
 };

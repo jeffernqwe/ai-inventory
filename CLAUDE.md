@@ -238,6 +238,7 @@ Phase 24 — Runtime Authorization Matrix & Tenant-Isolation Verification (runti
 Phase 25 — Design-Token Contrast Close-Out & Mobile Known-Issue Reconciliation (two light-theme tokens raised to WCAG AA on every surface they are used on; measured, not eyeballed; no production behavior change)
 Phase 26A — Session Hardening & Real Logout (server-side session records named by a mandatory `jti`; real server-side sign-out, per-session revocation and sign-out-everywhere; no new permission, no refresh-token rotation; every pre-26A token is rejected once)
 Phase 26B — Password Recovery (email reset link: provider-agnostic mail layer with a Resend transport, single-use hashed reset tokens; `POST /api/auth/forgot-password` and `POST /api/auth/reset-password` added as two PUBLIC routes; no new permission, no new dependency, no mobile change; the request path answers one identical 202 to every caller)
+Phase 27 — Mobile Password Recovery (`/forgot-password` and `/reset-password` public screens consuming the existing Phase 26B endpoints; custom-scheme reset link `inventoryai://reset-password`; a successful reset clears the client session before returning to Login; ZERO backend changes and no new dependency; Universal Links / Android App Links deferred; iOS verification export-only)
 ```
 
 Phase 08 is an owner-directed hardening extension delivered in approved lettered increments
@@ -610,6 +611,52 @@ single victim is unbounded, because the per-account bucket keys on `ip|email` wh
 attacker never trips the per-IP bucket. Both are recorded in `docs/DEVELOPMENT_ROADMAP.md` §27B as
 open items for a future owner decision. No new route was added anywhere else, and the Phase 23
 classifier's `PUBLIC` bucket declares both routes with their reasons.
+
+Phase 27 is an owner-directed mobile password-recovery increment delivered as a single approved
+increment after Phase 26B, and it is the half Phase 26B deliberately left out: mobile password
+recovery is now implemented, consuming the **existing** backend endpoints unchanged. Two screens are
+added — `/forgot-password` and `/reset-password` — together with a "Forgot password?" entry point on
+login, two tokenless wrappers in `lib/api.js` (`forgotPassword`, `resetPassword`), and one additive
+`success` tone on `Banner`. **No backend file changed**: `PASSWORD_RESET_URL` already accepted a
+custom scheme, so `mailConfig.js` needed no edit, and **no dependency was added**.
+
+Both routes are **public** and deliberately sit outside the `(app)` group, whose layout redirects
+anyone who is not signed in and would discard the incoming token before the screen could read it.
+The token comes from `useLocalSearchParams()` and from nowhere else: a missing param is `undefined`
+and a link carrying the key twice yields an array, and neither reaches the network. Its shape is
+deliberately not validated client-side beyond a trim — the value is opaque base64url, so any
+client-side rule could only ever reject a valid link. The token is never rendered, never logged by
+application code, never persisted, and never copied into another navigation; it leaves the app in
+exactly one place, the body of the reset POST. Neither wrapper sends an `Authorization` header, so a
+refused public call cannot trip the client's central session-loss handler. `confirmPassword` keeps
+the server's own field name so a server field error lands on it, and a field error naming `token` —
+which has no input of its own — is promoted to form level rather than dropped silently. The
+forgot-password success state is a fixed client constant that does **not** read the response, so the
+client cannot undo the server's enumeration resistance. A new deep-link token arriving while the
+screen is mounted resets the form, the errors and the success state.
+
+**After a successful reset the client calls `clearSession()` before `router.replace('/login')`.**
+That ordering is load-bearing, not cosmetic: `login.js` redirects a `signedIn` status into `(app)`,
+so navigating to Login while the client still believed it was signed in would have landed the user
+inside the app. `clearSession` is the right call rather than `signOut` because the reset already
+ended every server-side session, so a logout would be a guaranteed-401 request for nothing.
+
+Custom-scheme deep linking uses **`inventoryai://reset-password`**. Universal Links and Android App
+Links remain **intentionally deferred**, so a reset link opened on a device without the app
+installed has no web fallback yet.
+
+Two verification limits are stated rather than glossed over. Runtime QA was performed in **Expo Go**
+via `exp://<host>:8081/--/reset-password?token=…`, which resolves through the same `fromDeepLink()`
+path a custom scheme does — Expo Go cannot be launched by a custom scheme, so the literal
+`inventoryai://` target is **configuration-verified only** (by inspection of `app.json`'s `scheme`)
+and a real custom-scheme run would need a development build, which this repository does not produce.
+And **iOS runtime was not verified**: iOS verification was export/bundle-only.
+
+One development-environment caveat is recorded so it is not mistaken for a defect: Expo Go's dev
+runtime writes the launching URL — including a reset token — to logcat as `initialUri`. A control
+launch on a token-free route shows it logs `initialUri` on **every** launch, which identifies it as
+the Expo Go shell rather than application logging — the app contains no `console.*` calls at all. It
+is a development-environment limitation, not an application logging defect.
 
 Phase 18 is an owner-directed mobile UI extension delivered in approved lettered increments (18A,
 18B, …) after Phase 17. It turns the app into a modern SaaS-style product surface WITHOUT changing

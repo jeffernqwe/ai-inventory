@@ -1232,6 +1232,28 @@ Both routes answer with an error `code` and a message:
 Error responses never carry a stack trace, a database or provider detail, an environment-variable
 name, or any part of the message that was sent (§33).
 
+### Mobile client
+
+The mobile application implements the user-facing half of this surface, on `/forgot-password` and
+`/reset-password`. Both are public screens, so they render whether or not a session exists and never
+wait on authentication.
+
+- **A password-reset email link targets the mobile app's custom scheme**, not a web page: the reset
+  URL is `inventoryai://reset-password?token=<token>`, which is the value `PASSWORD_RESET_URL` carries
+  (§35). Universal Links and Android App Links are deferred, so a link opened on a device without the
+  app installed has no web fallback.
+- **The reset screen reads the token from the incoming URL parameter** and from nowhere else. A link
+  with no token, an empty token or a malformed one is rejected locally and no request is made. The
+  client imposes no rule on the token's shape beyond that.
+- **The token is submitted only in the body of `POST /api/auth/reset-password`.** It is never
+  displayed on screen, never written to a log by application code, never persisted to device storage,
+  and never copied into another navigation. It leaves the app in exactly one place.
+- **A successful reset clears the client session and returns the user to Login.** Clearing is required
+  before navigating, because the Sign In screen redirects an authenticated client into the app — so a
+  user whose reset succeeded would otherwise be sent straight back into the app instead of being asked
+  to sign in with the new password. No client session survives a reset, matching the server, which ends
+  every session the account held.
+
 ### Known limits
 
 Two properties of this surface are documented, accepted and **not** fixed, because both need an owner

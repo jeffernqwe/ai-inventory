@@ -1143,6 +1143,59 @@ The mobile application may hide unauthorized UI elements, but this is only a UX 
 
 The backend remains the authority.
 
+## Permission Catalogue and Route Bindings
+
+`server/src/constants/roles.js` is the single source of truth for capabilities.
+It holds the permission catalogue (`PERMISSIONS`), the grants per role
+(`ROLE_PERMISSIONS`), and `hasPermission(role, permission)`. The role and the
+grant are derived from the authenticated `req.user`, which is loaded from the
+database — never from a client-supplied role or token claim.
+
+Every protected endpoint binds to an **explicit** capability key through
+`requirePermission(PERMISSIONS.<KEY>)`. Authentication alone is not an
+authorization decision: a route that reads or writes a resource with a
+corresponding capability must name that capability, so the endpoint's
+authorization requirement is stated in the route declaration rather than
+implied by "any authenticated member of the business".
+
+A capability in the catalogue that no endpoint implements is declared in
+`CATALOGUE_ONLY_PERMISSIONS`, beside the catalogue, with the reason it is
+unimplemented. That list is **metadata for the regression guard only**: it is
+not consumed by `middlewares/authorize.js` and takes no part in any runtime
+authorization decision. It exists so the catalogue cannot silently accumulate
+capabilities that are granted to roles but attached to nothing. As of Phase 22
+it contains:
+
+- `business.manage` — business-level settings are reserved for OWNER; no
+  business-settings endpoint exists.
+- `roles.manage` — role administration is reserved for OWNER; roles are fixed in
+  code, so there is nothing to administer.
+- `transactions.view` — the ledger read is served by
+  `GET /api/inventory/history`, which is protected by `inventory.history.view`.
+  See below.
+
+Adding an endpoint that enforces a catalogue-only capability moves it out of
+that list; the guard fails until it does.
+
+## Inventory History Authorization
+
+`GET /api/inventory/history` is protected by `inventory.history.view`, not by
+`transactions.view`. All four roles hold `inventory.history.view`, whereas only
+OWNER, ADMIN and MANAGER hold `transactions.view` — so gating the route on the
+latter would silently revoke STAFF's inventory-history access. The two keys are
+deliberately not interchangeable, and the binding is pinned by a test.
+
+## Enforcement Guard
+
+`server/test/phase22-authorization-contract.test.mjs` is a database-free suite
+that pins the contract above: the route→capability binding for each protected
+read route (structurally, by walking the router stack; behaviourally, by invoking
+the gate; and by asserting the declaration names the expected catalogue key), the
+partition of the catalogue into enforced and catalogue-only, the rejection of any
+permission a route references that is not in the catalogue, the fact that
+`CATALOGUE_ONLY_PERMISSIONS` is never consumed by the runtime authorization path,
+and that all four roles still hold every capability a route now requires.
+
 ---
 
 # 31. API Structure
@@ -1215,7 +1268,7 @@ GET    /api/audit
 
 Exact endpoint design may be refined during implementation while preserving the architecture and security requirements.
 
-These are illustrative examples, not an exhaustive or guaranteed contract. The implemented product surface is archive/restore: product deletion is not implemented and is not part of the contract (see §13 Product Lifecycle).
+These are illustrative examples, not an exhaustive or guaranteed contract. The implemented product surface is archive/restore: product deletion is not implemented and is not part of the contract (see §13 Product Lifecycle). There is likewise no `/api/transactions` module — the ledger is read through `GET /api/inventory/history`, protected by `inventory.history.view` (see §30 Inventory History Authorization).
 
 ---
 

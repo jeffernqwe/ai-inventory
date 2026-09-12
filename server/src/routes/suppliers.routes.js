@@ -10,9 +10,12 @@ import { PERMISSIONS } from '../constants/roles.js';
 const router = Router();
 const c = createReferenceController(supplierService, validateSupplier);
 
-router.get('/', requireAuth, c.list);
+// Reads: suppliers.view, which every role holds (Phase 22 — the binding is now
+// explicit and guarded rather than implied by requireAuth alone). Mutations:
+// suppliers.manage (OWNER, ADMIN, MANAGER).
+router.get('/', requireAuth, requirePermission(PERMISSIONS.SUPPLIERS_VIEW), c.list);
 router.post('/', requireAuth, requirePermission(PERMISSIONS.SUPPLIERS_MANAGE), c.create);
-router.get('/:id', requireAuth, c.get);
+router.get('/:id', requireAuth, requirePermission(PERMISSIONS.SUPPLIERS_VIEW), c.get);
 router.patch('/:id', requireAuth, requirePermission(PERMISSIONS.SUPPLIERS_MANAGE), c.update);
 router.post('/:id/archive', requireAuth, requirePermission(PERMISSIONS.SUPPLIERS_MANAGE), c.archive);
 router.post('/:id/restore', requireAuth, requirePermission(PERMISSIONS.SUPPLIERS_MANAGE), c.restore);

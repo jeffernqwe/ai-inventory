@@ -6,7 +6,6 @@ import { recordAudit } from './audit.service.js';
 import { notFound } from '../utils/errors.js';
 import { toPublicUser } from './auth.service.js';
 import { ROLES, NON_OWNER_ROLES } from '../constants/roles.js';
-import { USER_STATUSES } from '../utils/validate.js';
 import {
   AUDIT_ACTIONS,
   AUDIT_ENTITY_TYPES,
@@ -33,7 +32,7 @@ function isDuplicateKey(err) {
 export const usersService = {
   async list(businessId, { q, status, skip, limit }) {
     const filter = { businessId };
-    if (USER_STATUSES.includes(status)) filter.status = status;
+    if (status) filter.status = status;
     if (q) {
       filter.$or = [
         { name: { $regex: escapeRegExp(q), $options: 'i' } },

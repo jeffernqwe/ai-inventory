@@ -1,5 +1,5 @@
 import { parsePagination, pageResult } from '../utils/pagination.js';
-import { isObjectId, validateUserCreate, validateUserUpdate } from '../utils/validate.js';
+import { isObjectId, validateUserCreate, validateUserUpdate, validateUserList } from '../utils/validate.js';
 import { throwValidation, invalidId } from '../utils/errors.js';
 import { usersService } from '../services/users.service.js';
 
@@ -18,9 +18,13 @@ const paramId = (req) => {
 export const usersController = {
   async list(req, res) {
     const { page, limit, skip } = parsePagination(req.query);
-    const q = typeof req.query.q === 'string' && req.query.q.trim() ? req.query.q.trim() : undefined;
-    const status = typeof req.query.status === 'string' ? req.query.status : undefined;
-    const { items, total } = await usersService.list(req.user.businessId, { q, status, skip, limit });
+    const v = validateUserList(req.query);
+    if (v.problems.length) throwValidation(v.problems);
+    const { items, total } = await usersService.list(req.user.businessId, {
+      ...v.filters,
+      skip,
+      limit,
+    });
     res.json(pageResult(items, total, page, limit));
   },
 

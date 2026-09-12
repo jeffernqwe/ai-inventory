@@ -1,13 +1,12 @@
 import mongoose from 'mongoose';
 
-import PurchaseOrder, { PURCHASE_ORDER_STATUSES } from '../models/purchaseOrder.model.js';
+import PurchaseOrder from '../models/purchaseOrder.model.js';
 import Supplier from '../models/supplier.model.js';
 import Inventory from '../models/inventory.model.js';
 import InventoryTransaction from '../models/inventoryTransaction.model.js';
 import AuditLog from '../models/auditLog.model.js';
 import { inventoryService } from './inventory.service.js';
 import ApiError from '../utils/ApiError.js';
-import { isObjectId } from '../utils/validate.js';
 import { recordAudit } from './audit.service.js';
 import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../constants/audit.js';
 
@@ -251,8 +250,13 @@ async function create(businessId, userId, payload) {
 /** List PO headers with optional status / supplier / number (q) filters. */
 async function list(businessId, { status, supplierId, q, skip, limit }) {
   const match = { businessId: oid(businessId) };
-  if (PURCHASE_ORDER_STATUSES.includes(status)) match.status = status;
-  if (supplierId && isObjectId(supplierId)) match.supplierId = oid(supplierId);
+  // Phase 20D: both filters are validated at the controller, so whatever arrives
+  // here is valid by construction. The guards are deliberately unconditional —
+  // the old `PURCHASE_ORDER_STATUSES.includes(status)` / `isObjectId(supplierId)`
+  // checks silently DROPPED an unrecognized filter, which answered with every
+  // purchase order in the business while appearing to be filtered.
+  if (status) match.status = status;
+  if (supplierId) match.supplierId = oid(supplierId);
   if (q) match.number = { $regex: escapeRegExp(q), $options: 'i' };
 
   const [total, rows] = await Promise.all([

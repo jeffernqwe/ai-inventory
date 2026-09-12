@@ -65,7 +65,11 @@ export function createReferenceService({
 
     async list(businessId, { q, status, skip, limit }) {
       const filter = { businessId };
-      if (status === 'ACTIVE' || status === 'ARCHIVED') filter.status = status;
+      // Phase 20D: the controller validates `status` against the ACTIVE/ARCHIVED
+      // enum, so an unrecognized value can no longer reach here. The guard is
+      // unconditional because the old inline enum comparison silently DROPPED the
+      // filter, answering with every row while appearing to be filtered.
+      if (status) filter.status = status;
       if (q) {
         filter.$or = [
           { name: { $regex: escapeRegExp(q), $options: 'i' } },

@@ -85,9 +85,15 @@ export default function ProfileScreen() {
           always enforced by the server — the app never stores your password.
         </Text>
         <Button
-          title="Change password"
+          title="Active sessions"
           variant="secondary"
           style={styles.editName}
+          onPress={() => router.push('/sessions')}
+        />
+        <Button
+          title="Change password"
+          variant="secondary"
+          style={styles.spaced}
           onPress={() => router.push('/change-password')}
         />
       </Card>

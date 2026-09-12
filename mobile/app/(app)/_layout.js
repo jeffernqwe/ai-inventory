@@ -65,6 +65,7 @@ export default function AppLayout() {
       <Stack.Screen name="ai/new" options={{ title: 'New Chat' }} />
       <Stack.Screen name="ai/[id]" options={{ title: 'AI Assistant' }} />
       <Stack.Screen name="profile" options={{ title: 'Profile' }} />
+      <Stack.Screen name="sessions" options={{ title: 'Active Sessions' }} />
     </Stack>
   );
 }

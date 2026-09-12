@@ -1112,6 +1112,58 @@ JWT
 
 The backend must validate authentication on protected routes.
 
+## Server-Side Sessions
+
+An access token is **not** the whole session. Signing a token creates a session
+record, and the token's `jti` claim names it. An access token therefore carries:
+
+```text
+sub   the user id
+jti   the id of the session record
+iat   issued-at
+exp   expiry
+```
+
+It carries nothing else. Role, status and `businessId` remain database-derived on
+every request (§30), and a session record holds no authorization data either — a
+session grants nothing except continued authentication, so a stolen or forged one
+cannot escalate anything.
+
+`middlewares/authenticate.js` is the single authentication choke point and
+requires all of the following before a request proceeds: a valid HS256 signature,
+an unexpired token, a `sub` that is a real user, a **`jti` that names a session
+which exists, belongs to that user, is not revoked and has not expired**, an
+ACTIVE user, and an ACTIVE business. A token with no `jti` is rejected outright.
+
+The session record (`server/src/models/session.model.js`) stores the user, the
+`jti`, a cosmetic device label, `createdAt`, `lastUsedAt`, `revokedAt` and
+`expiresAt`, and is removed by a TTL index once it expires. Because the record is
+consulted on every authenticated request, a session can be ended server-side:
+
+- **Sign out** ends the session the request was authenticated with. The client
+  never names a session, a user or a business — the server takes it from the
+  token's own `jti`. This is what makes logout real rather than a client-side
+  state change.
+- **Per-session revocation** ends one session belonging to the caller, so a single
+  device can be signed out while every other session keeps working. The owner is
+  part of the lookup, so another user's session is unreachable and answers the
+  same `404` as an unknown id.
+- **Sign out everywhere** ends every open session for the caller, the current one
+  included.
+
+Both are self-service operations on the caller's own sessions and require no new
+permission: they are authenticated routes, not capability-gated ones. The three
+routes are `POST /api/auth/logout` (with `{ "all": true }` for sign out
+everywhere), `GET /api/auth/sessions` and `DELETE /api/auth/sessions/:id`. The
+session listing never exposes a token or a `jti` — it names the current session
+with a `current` flag instead, which is all a client needs to identify itself.
+
+Two consequences are deliberate and were accepted when this was introduced:
+tokens issued before server-side sessions existed carry no `jti`, so they are
+rejected and every user signs in once more; and **there is no refresh-token
+rotation** — a session ends when it is revoked or when its token expires, and a
+new token is obtained by signing in again.
+
 Future authentication may include:
 
 - Google OAuth
@@ -1205,9 +1257,12 @@ route reachable from `server/src/app.js` therefore falls into exactly one declar
   `requireAuth`, and its declaration names the catalogue key. This is the default and the expectation
   for every route that reads or writes a business resource.
 - **Authenticated** — `requireAuth` plus a controller, with no capability gate. Reserved for the
-  caller's own account (`GET`/`PATCH /api/auth/me`, `POST /api/auth/change-password`) and for the
-  categories/locations reads, which have no view capability in the catalogue. Each is listed
-  explicitly, with its reason, so that the deferral is visible and cannot be extended by accident.
+  caller's own account (`GET`/`PATCH /api/auth/me`, `POST /api/auth/change-password`, and the
+  session-lifecycle routes `POST /api/auth/logout`, `GET /api/auth/sessions`,
+  `DELETE /api/auth/sessions/:id` — a user's own sessions are self-service, so no capability is
+  involved) and for the categories/locations reads, which have no view capability in the catalogue.
+  Each is listed explicitly, with its reason, so that the deferral is visible and cannot be extended
+  by accident.
 - **Public** — no authentication at all. The health probes must answer before a token can exist, and
   login/register are how a token is obtained; all are rate-limited.
 - **Role-gated** — a gate naming roles directly rather than a capability. **There are none**, and
@@ -1296,9 +1351,10 @@ Two properties keep the matrix honest and cheap to maintain:
 ## Role Mutation Takes Effect Immediately
 
 Authorization is decided per request from current database state, never from token contents. An access
-token carries only `sub` plus the standard `iat`/`exp` — no role and no `businessId` claim — and
-`middlewares/authenticate.js` reloads the user (and therefore the role and business) from the database
-on every request. A hand-forged `role` claim therefore neither grants a capability nor escalates one.
+token carries only `sub`, `jti` plus the standard `iat`/`exp` — no role and no `businessId` claim —
+and `middlewares/authenticate.js` reloads the user (and therefore the role and business) from the
+database on every request. A hand-forged `role` claim therefore neither grants a capability nor
+escalates one.
 
 The runtime consequence is specified and tested: changing a user's role takes effect on the
 **already-issued token**, with no new login. Promotion grants the new capability and demotion revokes

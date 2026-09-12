@@ -241,9 +241,12 @@ describe('JWT algorithm pinning (Phase 07G)', () => {
   });
 
   it('verifyAccessToken accepts a token signed by signAccessToken (HS256)', () => {
-    const token = signAccessToken('507f1f77bcf86cd799439011');
+    const token = signAccessToken('507f1f77bcf86cd799439011', 'session-abc');
     const payload = verifyAccessToken(token);
     assert.equal(payload.sub, '507f1f77bcf86cd799439011');
+    // Phase 26A: the session id is mandatory and must survive the round trip —
+    // it is the only thing that ties a token to a revocable session.
+    assert.equal(payload.jti, 'session-abc');
   });
 
   it('verifyAccessToken rejects a token signed with a different HMAC algorithm (HS384)', () => {

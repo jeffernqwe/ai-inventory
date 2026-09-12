@@ -198,8 +198,11 @@ const CLASS = {
  *   health probes must answer before a token can exist; login/register are how
  *   a token is obtained. All are rate-limited.
  * AUTHENTICATED (requireAuth + controller, no permission):
- *   the three self-service account routes operate only on the caller's own
- *   account, and every other account route is permission-gated.
+ *   the six self-service account routes operate only on the caller's own
+ *   account (Phase 26A added the three session-lifecycle routes: they manage
+ *   nothing but the caller's own sessions, and the owning userId comes from
+ *   req.user, never from the request — so no permission applies), and every
+ *   other account route is permission-gated.
  *   The four categories/locations reads are Phase 22's explicit deferral: no
  *   categories.view / locations.view key exists in the catalogue, and inventing
  *   one was out of Phase 22 scope. They are pinned here so the deferral is
@@ -218,6 +221,9 @@ const AUTHENTICATED_ROUTES = [
   { route: 'GET /api/auth/me', why: 'reads only the caller’s own account' },
   { route: 'PATCH /api/auth/me', why: 'writes only the caller’s own name' },
   { route: 'POST /api/auth/change-password', why: 'changes only the caller’s own password' },
+  { route: 'POST /api/auth/logout', why: 'Phase 26A: ends only the caller’s own session' },
+  { route: 'GET /api/auth/sessions', why: 'Phase 26A: lists only the caller’s own sessions' },
+  { route: 'DELETE /api/auth/sessions/:id', why: 'Phase 26A: ends only a session the caller owns' },
   { route: 'GET /api/categories', why: 'Phase 22 deferral: no categories.view key exists' },
   { route: 'GET /api/categories/:id', why: 'Phase 22 deferral: no categories.view key exists' },
   { route: 'GET /api/locations', why: 'Phase 22 deferral: no locations.view key exists' },

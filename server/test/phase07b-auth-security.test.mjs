@@ -26,11 +26,12 @@ import express from 'express';
 import mongoose from 'mongoose';
 
 import { ensureDb, disconnectDb } from './helpers.mjs';
+import { issueSessionToken } from './support.mjs';
 import { dbSuite } from './testEnv.mjs';
 import Business from '../src/models/business.model.js';
 import User from '../src/models/user.model.js';
 import Product from '../src/models/product.model.js';
-import { signAccessToken } from '../src/config/jwt.js';
+import Session from '../src/models/session.model.js';
 
 import { createAuthRouter } from '../src/routes/auth.routes.js';
 import categoryRoutes from '../src/routes/categories.routes.js';
@@ -126,7 +127,7 @@ async function seedBusinessUser({ role = 'OWNER' } = {}) {
     userId: String(user._id),
     email,
     password: PASSWORD,
-    token: signAccessToken(user._id),
+    token: await issueSessionToken(user._id),
   };
 }
 
@@ -206,6 +207,11 @@ after(async () => {
       await Business.deleteMany({ _id: { $in: bizIds } }).catch(() => {});
     }
     if (createdUserIds.length) {
+      // Phase 26A: sessions are user-owned (no businessId), so they are cleared
+      // by userId alongside the users.
+      await Session.deleteMany({
+        userId: { $in: createdUserIds.map((x) => new ObjectId(x)) },
+      }).catch(() => {});
       await User.deleteMany({
         _id: { $in: createdUserIds.map((x) => new ObjectId(x)) },
       }).catch(() => {});

@@ -236,6 +236,7 @@ Phase 22 — Authorization Contract Enforcement & RBAC Coverage Guards (read rou
 Phase 23 — Authorization Contract Completion: Route Classification & RBAC Mirror Guards (every route classified into a declared authorization bucket; mobile RBAC mirror pinned to the server matrix; `requireRole` inertness and client error-code contract; no production behavior change)
 Phase 24 — Runtime Authorization Matrix & Tenant-Isolation Verification (runtime role × real-route matrix derived from `ROLE_PERMISSIONS`; role-change effect proven on an existing JWT in both directions; empty OWNER-only runtime tier asserted; no production behavior change)
 Phase 25 — Design-Token Contrast Close-Out & Mobile Known-Issue Reconciliation (two light-theme tokens raised to WCAG AA on every surface they are used on; measured, not eyeballed; no production behavior change)
+Phase 26A — Session Hardening & Real Logout (server-side session records named by a mandatory `jti`; real server-side sign-out, per-session revocation and sign-out-everywhere; no new permission, no refresh-token rotation; every pre-26A token is rejected once)
 ```
 
 Phase 08 is an owner-directed hardening extension delivered in approved lettered increments
@@ -489,6 +490,44 @@ The change reaches the whole app visually — five components emit `colors.place
 hooks-after-early-return is not restructured, and no mobile test runner was added. Contrast was
 re-verified programmatically from the edited file, and the palette carries no hardcoded duplicate
 of either hex outside it.
+
+Phase 26A is an owner-directed session-hardening increment delivered as a single approved increment
+after Phase 25, and it is the first phase to change what a session *is*. Until it, a JWT was the whole
+session: verifiable but not withdrawable, so "Sign out" cleared only the client's copy, a stolen token
+stayed valid until it expired, and the only server-side revocation was the blunt Phase 15 password
+change. An access token now carries `sub`, a `jti` and the standard `iat`/`exp` — **and still nothing
+else** — where the `jti` names a row in a new `sessions` collection; `requireAuth` refuses a token
+whose session row is missing, revoked or expired, and refuses a token with **no `jti` at all**.
+`requireAuth` remains the single authentication choke point, and every pre-existing guarantee is
+intact and still enforced in the same order: ObjectId validation, the ACTIVE user requirement, the
+`passwordChangedAt` comparison (`401 SESSION_INVALIDATED`, deliberately distinct from
+`SESSION_REVOKED` so the two causes stay tellable apart), the active-business check and the HS256
+restriction.
+
+The session record stores only `userId`, `jti`, a cosmetic device label, `lastUsedAt`, `revokedAt` and
+`expiresAt` — **no role and no `businessId`**, because authorization stays database-derived per
+request (Phase 03/24). Three self-service **authenticated** routes were added —
+`POST /api/auth/logout`, `GET /api/auth/sessions`, `DELETE /api/auth/sessions/:id` — and
+**no permission, role grant or Phase 22/24 authorization behaviour changed**; the caller's own
+sessions need no capability. Sign-out-everywhere is deliberately the logout route with
+`{ "all": true }`, not a fourth route. The session listing is a strict allowlist that **never returns
+a token or a `jti`** (the `current` flag identifies the caller's own row instead), and
+`DELETE /api/auth/sessions/:id` puts `req.user.id` inside the query filter rather than checking
+ownership afterwards, so another user's session is unreachable and answers the same `404` as an
+unknown id. Four audit events are written through the existing best-effort `recordAudit` path from
+`session.service.js`; no `jti` is ever written to the trail, since that viewer is readable by every
+ADMIN and a `jti` is the one value that could be replayed with a stolen token.
+
+Two consequences were reviewed and accepted by the owner before implementation: **every pre-26A token
+is rejected** (it carries no `jti`, so it can never name a session), meaning each user signs in once
+more; and **there is no refresh-token rotation** — a session ends when revoked or when its token
+expires. Mobile gains an Active Sessions screen reached from Profile, sign-out that tells the server
+before clearing local state (and still clears when offline), a device label derived without a new
+dependency, and one central place in `lib/client.js`/`lib/auth.jsx` where a refused token is handled —
+which also closes a real gap, since `MovementForm` used to surface a dead session as a form error it
+could not resolve. `phase16-audit-viewer.test.mjs` is the one file outside the owner's approved list
+that had to change: it pins that fixture business's exact audit row counts, and the required
+session-created event shifts them.
 
 Phase 18 is an owner-directed mobile UI extension delivered in approved lettered increments (18A,
 18B, …) after Phase 17. It turns the app into a modern SaaS-style product surface WITHOUT changing

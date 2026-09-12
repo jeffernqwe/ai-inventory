@@ -6,6 +6,7 @@ import ApiError from '../utils/ApiError.js';
 import { signAccessToken } from '../config/jwt.js';
 import { normalizeEmail } from '../utils/validate.js';
 import { assertActiveBusiness } from './business.service.js';
+import { createSessionForToken, newSessionId } from './session.service.js';
 
 const BCRYPT_ROUNDS = 10;
 const OWNER_ROLE = 'OWNER';
@@ -74,9 +75,15 @@ export async function registerBusinessOwner({ businessName, name, email, passwor
 /**
  * Login. Generic 401 for unknown email / wrong password (never reveals which);
  * DISABLED accounts are rejected with 403. On success returns a signed access
- * token plus the public user.
+ * token, the public user, and the session row the token names.
+ *
+ * Phase 26A: the token is no longer the whole session. A login opens a
+ * server-side session first and embeds its id as the token's `jti`, so the
+ * token can be withdrawn. The session is written BEFORE the token is returned —
+ * if the write fails the login fails, because a token naming no session would be
+ * unusable anyway, and handing one out would be a silent half-login.
  */
-export async function loginWithPassword({ email, password }) {
+export async function loginWithPassword({ email, password, deviceLabel }) {
   const normEmail = normalizeEmail(email);
   const user = await User.findOne({ email: normEmail }).select('+passwordHash');
 
@@ -97,8 +104,15 @@ export async function loginWithPassword({ email, password }) {
   // email merely exists in an inactive business.
   await assertActiveBusiness(user.businessId);
 
-  const token = signAccessToken(user._id);
-  return { token, user };
+  const jti = newSessionId();
+  const token = signAccessToken(user._id, jti);
+  const session = await createSessionForToken({
+    userId: user._id,
+    businessId: user.businessId,
+    token,
+    deviceLabel,
+  });
+  return { token, user, session };
 }
 
 /**

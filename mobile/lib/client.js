@@ -26,6 +26,24 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Phase 26A: notified whenever a request that CARRIED a token was refused on
+ * authentication grounds (401, or 403 for a disabled account). The listener
+ * decides what that means — this module holds no policy — and `lib/auth.jsx`
+ * registers one so a dead session is handled in a single place instead of every
+ * screen re-deriving it. A screen that never thinks about sessions (a form
+ * mid-submit, a background fetch) therefore still returns the app to login
+ * rather than showing an authentication error it cannot resolve.
+ *
+ * A request with no token is never reported: a 401 from /api/auth/login is bad
+ * credentials, not a dead session.
+ */
+let sessionLostHandler = null;
+
+export function setSessionLostHandler(handler) {
+  sessionLostHandler = typeof handler === 'function' ? handler : null;
+}
+
 function toQuery(params) {
   if (!params) return '';
   const parts = [];
@@ -77,7 +95,9 @@ export async function apiFetch(path, { method = 'GET', token, body, params } = {
 
   const data = await readJson(res);
   if (res.status >= 200 && res.status < 300) return data;
-  throw new ApiError(res.status, data?.code, data?.error || `Request failed (${res.status})`, data?.fields || [], data?.applied);
+  const error = new ApiError(res.status, data?.code, data?.error || `Request failed (${res.status})`, data?.fields || [], data?.applied);
+  if (token && (res.status === 401 || res.status === 403)) sessionLostHandler?.(error);
+  throw error;
 }
 
 export default apiFetch;

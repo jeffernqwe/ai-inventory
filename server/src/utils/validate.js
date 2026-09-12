@@ -124,6 +124,36 @@ export function validateMeUpdate(body) {
 }
 
 // ---------------------------------------------------------------------------
+// Session lifecycle (Phase 26A)
+// ---------------------------------------------------------------------------
+
+const LOGOUT_FIELDS = new Set(['all']);
+
+/**
+ * Sign-out payload. The endpoint takes no identity input at all — which session
+ * ends comes from the caller's own token, and whose sessions are ended comes
+ * from the authenticated user — so the only accepted key is the `all` flag that
+ * turns this into "sign out everywhere". A strict allowlist, matching the other
+ * self-service payloads: a client that tries to name a `userId`, a `sessionId`
+ * or a `businessId` is refused outright rather than silently ignored, so the
+ * attempt is visible instead of looking like it worked.
+ */
+export function validateLogout(body) {
+  const problems = [];
+  const bodyObj = body && typeof body === 'object' ? body : {};
+  for (const key of Object.keys(bodyObj)) {
+    if (!LOGOUT_FIELDS.has(key)) {
+      problems.push({ field: key, message: `field '${key}' is not allowed` });
+    }
+  }
+  const all = bodyObj.all === undefined ? false : bodyObj.all;
+  if (typeof all !== 'boolean') {
+    problems.push({ field: 'all', message: 'all must be true or false' });
+  }
+  return { problems, all: all === true };
+}
+
+// ---------------------------------------------------------------------------
 // User management (Phase 14A)
 // ---------------------------------------------------------------------------
 
@@ -799,6 +829,7 @@ export default {
   validateLogin,
   validateChangePassword,
   validateMeUpdate,
+  validateLogout,
   validateUserCreate,
   validateUserUpdate,
   USER_STATUSES,

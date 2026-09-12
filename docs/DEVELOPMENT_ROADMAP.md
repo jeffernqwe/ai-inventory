@@ -123,6 +123,9 @@ Authorization Contract Enforcement & RBAC Coverage Guards
         ↓
 Phase 23
 Authorization Contract Completion: Route Classification & RBAC Mirror Guards
+        ↓
+Phase 24
+Runtime Authorization Matrix & Tenant-Isolation Verification
 ```
 
 ---
@@ -2057,7 +2060,90 @@ Nothing committed, nothing pushed.
 
 ---
 
-# 25. Phase Gate System
+# 25. Phase 24 — Runtime Authorization Matrix & Tenant-Isolation Verification
+
+**Status: implemented and verified (2026-09-12); not committed pending owner approval.**
+
+## Goal
+
+Add the **runtime** half of the authorization contract that Phases 22 and 23 left structural, and
+close the one authorization property nothing in the suite verified. No production behavior change.
+
+## What the investigation found
+
+The premise that runtime authorization was largely unproven turned out to be only partly true, and
+the phase was reduced accordingly rather than expanded to match the premise:
+
+- **Tenant isolation was already well covered** — roughly fifteen behavioral tests across ten files,
+  including the mutation paths and five proofs that a client-supplied `businessId` is ignored.
+- **Horizontal authorization was already complete.** AI conversations are the *only* user-owned
+  resource in the system (`userId` on audit logs, inventory transactions and purchase orders is actor
+  provenance, not an access scope), and same-business cross-user access was already pinned.
+- **AI authorization was already complete for its declared matrix.** Because all four roles hold
+  `ai.use`, `products.view`, `inventory.view` and `inventory.history.view`, the only denial cell that
+  exists is `dashboard.view × STAFF` — already covered directly and inside a live chat.
+- **Two real gaps remained:** vertical coverage was scattered per feature (each file pinning only its
+  own boundary) with the suite's single four-role matrix running against the **test-only `/guard`
+  router** in `phase03-auth.test.mjs` — synthetic routes, not shipped endpoints; and **role mutation
+  had no authorization-effect proof**, `phase14-users` having asserted only the response payload while
+  the status test beside it did verify its effect.
+
+## Implemented
+
+`server/test/phase24-runtime-authorization-matrix.test.mjs` (DB-backed, registered in `PURE_DB`):
+
+- **A consolidated matrix over real routes**, walking a representative endpoint per capability and
+  asserting the outcome for all four roles. Expectations are **derived from `hasPermission`**, so the
+  suite holds no second copy of the role matrix and cannot drift from `constants/roles.js`.
+- **Admitted cells depend on nothing but the gate** — a gate is the second handler, so it decides
+  before validation, and an admitted cell asserts only "not 401, not 403, and not the code-less global
+  404". No bodies, no seeded resources, no provider availability, no success payloads. A mistyped path
+  is caught because the global 404 carries no `code` while every `ApiError` 404 does.
+- **Denied cells** assert 403 `FORBIDDEN`; **unauthenticated** requests assert 401 `AUTH_REQUIRED`,
+  sampled per tier rather than per route.
+- **Four role-mutation tests**, each reusing the **same pre-existing JWT**: STAFF → MANAGER grants a
+  MANAGER-gated capability, MANAGER → STAFF revokes it, STAFF → ADMIN → STAFF grants then revokes
+  `users.manage`, and a promotion reaches the AI tool permission gate (flipping a
+  `getInventorySummary` soft `TOOL_FORBIDDEN` into a real run). These prove `authenticate.js` re-reads
+  the role from the database per request; an access token carries only `sub`/`iat`/`exp`, so there is
+  no role claim that can go stale and a forged one can neither grant nor escalate.
+- **The empty OWNER-only runtime tier is asserted explicitly.** `business.manage` and `roles.manage`
+  are catalogue-only, so no shipped endpoint distinguishes OWNER from ADMIN; the suite asserts that
+  rather than leaving a hole that would read as coverage, and adds no route to make it testable.
+
+## Documented
+
+Tenant isolation is documented accurately as **404-scoped queries**, not a 403 middleware.
+`assertBusinessAccess` has no `src/` importer (its only callers are tests, one inside the `/guard`
+router), so it is production-dead and was left **byte-identical** — not wired, not modified, not
+deleted — and the `FORBIDDEN_BUSINESS` code is not reachable at runtime in production.
+
+## Out of Scope
+
+- No permission added, renamed or removed; no role grant changed.
+- No route, controller, service, model, middleware or mobile file modified.
+- No change to `requireAuth`, `requirePermission`, `requireRole`, `assertBusinessAccess` or
+  `businessId` resolution.
+- No modification, consolidation or refactor of any existing test file.
+- No wiring or deletion of the production-dead `assertBusinessAccess`.
+- No new route for `business.manage` / `roles.manage`; no reversal of the Phase 22 decision.
+- No static query-scoping audit, no runtime Express route enumeration, no CI or dependency change, and
+  no `run-tests.mjs` change beyond registering the new `PURE_DB` file.
+
+## Verification
+
+`npm run lint` 0 errors / 0 warnings; new suite 10/10; `npm run test:db` 320 → 330; `npm run test:unit`
+unchanged at 170; `npm test` 459 → 469, 0 fail / 0 skipped. Phase 22 (11/11) and Phase 23 (19/19)
+re-run green and byte-unmodified. Both new proofs were shown able to fail before being trusted:
+inverted assertions on the *stale* role outcome (still 403 after promotion, still 200 after demotion)
+were confirmed to throw, a wrong expected matrix cell was confirmed to throw, and the typo guard was
+confirmed to distinguish the two 404 shapes. `git diff --name-only -- server/src mobile` empty. Change
+surface is exactly six paths: the new test file, one `PURE_DB` line in `server/scripts/run-tests.mjs`,
+and `CLAUDE.md`, `docs/SYSTEM_SPECIFICATION.md`, `README.md`, `docs/DEVELOPMENT_ROADMAP.md`.
+
+---
+
+# 26. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.
 
@@ -2098,7 +2184,7 @@ The project owner decides whether to proceed.
 
 ---
 
-# 26. Change Control
+# 27. Change Control
 
 If Claude discovers that the current specification is incomplete or incorrect:
 
@@ -2116,7 +2202,7 @@ Minor implementation improvements that do not alter architectural decisions may 
 
 ---
 
-# 27. Bug Handling
+# 28. Bug Handling
 
 If a bug is discovered during a phase:
 
@@ -2141,7 +2227,7 @@ Only fix it immediately if it blocks the current phase.
 
 ---
 
-# 28. Refactoring Rules
+# 29. Refactoring Rules
 
 Refactoring is allowed when it:
 
@@ -2159,7 +2245,7 @@ Keep changes focused.
 
 ---
 
-# 29. Dependency Rules
+# 30. Dependency Rules
 
 Before adding a dependency:
 
@@ -2173,7 +2259,7 @@ Do not add dependencies simply for convenience.
 
 ---
 
-# 30. Git Checkpoints
+# 31. Git Checkpoints
 
 A Git commit should be created after a stable phase.
 
@@ -2206,7 +2292,7 @@ Before committing:
 
 ---
 
-# 31. V1 Completion
+# 32. V1 Completion
 
 V1 is complete only when all major requirements in:
 
@@ -2248,7 +2334,7 @@ AI Inventory Questions
 
 ---
 
-# 32. Future Development
+# 33. Future Development
 
 After V1, future features must be planned separately.
 
@@ -2283,7 +2369,7 @@ Future functionality must not be implemented during V1 unless explicitly approve
 
 ---
 
-# 33. Final Development Rule
+# 34. Final Development Rule
 
 The goal is not to produce the largest amount of code as quickly as possible.
 

@@ -528,3 +528,27 @@ Phase 07 (testing + production hardening) and Phase 08 (owner-directed hardening
   (`new ApiError` third argument, `this.code =`, and direct response-body `code:`). Every comparison is
   a pure function exercised against deliberately perturbed in-memory clones, so the guard is
   demonstrably able to fail rather than merely green. Suite 440 → 459; `npm run lint` 0/0.
+- **Phase 24 — Runtime Authorization Matrix & Tenant-Isolation Verification:** implemented and verified
+  — **runtime authorization matrix and tenant-isolation verification; no production behavior
+  change.** The vertical RBAC axis was already exercised per feature, but only ever against the
+  boundary each feature cares about, and the one four-role matrix in the suite ran against the
+  **test-only `/guard` router** inside `phase03-auth.test.mjs` — synthetic routes, not shipped
+  endpoints. Phase 24 adds `server/test/phase24-runtime-authorization-matrix.test.mjs` (DB-backed), a
+  consolidated matrix over **real** routes. Its expectations are **derived, never transcribed**: the
+  tier a route belongs to is computed by asking the shipped `hasPermission(role, permission)` who
+  holds its capability, so the file holds no second copy of the role matrix and cannot silently
+  disagree with `constants/roles.js`. Admitted cells deliberately depend on nothing else — a gate is
+  the second handler, so it decides before validation runs, and an admitted cell asserts only "not
+  401, not 403, and not the code-less global 404" (the global handler answers with no `code`, every
+  `ApiError` 404 with one, so a mistyped path cannot pass as admitted). It also closes the one
+  authorization property nothing verified: **a role change takes effect immediately on an
+  already-issued JWT**, proven in both directions — STAFF → MANAGER grants a MANAGER-gated capability,
+  MANAGER → STAFF revokes it, STAFF → ADMIN → STAFF crosses tiers, and a promotion reaches the AI tool
+  permission gate — always using the *same pre-existing token*. That is now safe by construction
+  rather than by assertion: an access token carries only `sub`/`iat`/`exp`, so there is no role claim
+  to go stale, and a hand-forged `role` claim neither grants nor escalates anything. Tenant isolation
+  is documented accurately as **404-scoped queries**, not a 403 middleware: `assertBusinessAccess` is
+  production-dead (its only callers are tests) and is left byte-identical. The structurally empty
+  OWNER-only runtime tier is asserted explicitly rather than left implicit — the two OWNER-exclusive
+  capabilities are catalogue-only, so no real route distinguishes OWNER from ADMIN. Suite 459 → 469,
+  `test:db` 320 → 330, `test:unit` unchanged at 170; `npm run lint` 0/0.

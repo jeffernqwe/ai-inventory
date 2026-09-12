@@ -97,11 +97,20 @@ Inventory Intelligence & Alerts (11A, 11B)
 Phase 14A
 User Management Foundation
         ↓
+Phase 15
+Account Security & Profile Management
+        ↓
 Phase 16
 Audit Trail Viewer
         ↓
 Phase 17
 Mobile Supplier & Purchase Order Management
+        ↓
+Phase 18
+SaaS-style UI Foundation & Adoption (18A–18F)
+        ↓
+Phase 19
+Stock Transfers Between Locations
 ```
 
 ---
@@ -1066,11 +1075,79 @@ without changing its scope. The roadmap's earlier Phase 12/13 entries were never
 - User management is OWNER/ADMIN-only, business-scoped, and server-enforced; the cross-role
   protections (no OWNER, no self-change, no ADMIN-to-ADMIN) are covered by tests.
 - `npm run lint`, `npm run test:unit`, and `npm test` all pass.
-- No commit and no push — the working tree keeps the change uncommitted for owner review.
+- Committed as `5b2cf66`; nothing pushed.
 
 ---
 
-# 16. Phase 16 — Audit Trail Viewer (read-only governance)
+# 16. Phase 15 — Account Security & Profile Management
+
+## Objective
+
+Phase 15 is an owner-directed account-security increment approved after Phase 14B (the current V1
+feature baseline), beyond the original Phase 00–07 plan. Authentication (Phase 03) could create an
+account but never let a user maintain it: there was no way to change a compromised or forgotten
+password, and no way to correct a display name. Phase 15 closes that gap with two self-service
+endpoints plus the minimum mechanism that makes a password change actually mean something — a
+server-side invalidation of every token issued before it — WITHOUT introducing a session store.
+Delivered as a single approved increment; committed as `1124834`.
+
+## Scope
+
+Implemented and committed (`1124834`):
+
+- `POST /api/auth/change-password` — `{ currentPassword, newPassword }`, `requireAuth`. The current
+  password is verified against the stored bcrypt hash **before** anything changes (`400
+  INVALID_CURRENT_PASSWORD` on a wrong one, with no mutation); on success the hash is replaced at the
+  same cost as registration and `User.passwordChangedAt` is stamped with `now`. No new token is
+  issued — the client signs in again with the new password.
+- `PATCH /api/auth/me` — `{ name }`, `requireAuth`. Updates **only** the caller's name. The user id
+  comes exclusively from `req.user.id`, never from the payload; every field outside `name` is
+  rejected with `400 VALIDATION_ERROR` rather than silently ignored; the response reuses
+  `toPublicUser` (never a password hash).
+- `User.passwordChangedAt` (new field, `default: null`). `requireAuth` compares the token's `iat` —
+  integer Unix **seconds**, the granularity `jsonwebtoken` signs at — against
+  `Math.floor(passwordChangedAt / 1000)` with a strict `<`, and rejects strictly older-second tokens
+  with `401 SESSION_INVALIDATED`. A token minted in the **same** second as the change stays valid,
+  which is exactly the fresh login that follows a change. `null` means never changed, so every
+  pre-existing user is unaffected and no migration is needed.
+- That is the entire invalidation mechanism: **no session store, no token denylist, no new
+  dependency**. It composes with — and does not replace — the Phase 07B business-status revocation,
+  which is unchanged.
+- `validateChangePassword` / `validateMeUpdate` in `validate.js` (the latter a strict allowlist).
+  Mobile gains a change-password screen and an edit-name screen reached from Profile, plus the
+  `changePassword` / `updateMe` API wrappers.
+
+### Explicitly Out of Scope
+
+No password reset or "forgot password" flow, no email or invitation sending, no session listing or
+per-device revocation, no refresh tokens, no email/role/status editing through `/me`, no multi-factor
+authentication, and no change to register/login, RBAC, or tenant isolation. Owner-held `_layout.js`
+and `SignOutIcon.jsx` untouched. Phase 12/13/14B roadmap sections remain a pre-existing gap (as noted
+in the Phase 14A section) and are not backfilled here.
+
+### Verified
+
+- New `server/test/phase15-account-security.test.mjs` (classified MIXED; DB-backed, 7 cases) over the
+  real HTTP app covers the authentication requirement on both endpoints, change-password payload
+  validation, a wrong current password (`INVALID_CURRENT_PASSWORD`, nothing changed), the full
+  invalidation lifecycle (old JWT dead, old password dead, new password + new JWT work), the
+  deterministic second-granularity boundary (only strictly older-second tokens are revoked), the
+  `/me` name update, and rejection of every non-`name` field.
+- `npm run lint`: 0 errors / 0 warnings.
+- Full backend suite: 339/339 passing — the figure the Phase 16 section records as its own starting
+  point.
+
+## Definition of Done
+
+- The Phase 15 increment is recorded in this roadmap and in the README API table + Phase Status.
+- A password change revokes every previously issued JWT without a session store; the comparison is
+  same-second-safe and is covered by a dedicated boundary test.
+- Profile updates are name-only, session-identified, and strict-allowlist validated.
+- Committed as `1124834`; nothing pushed.
+
+---
+
+# 17. Phase 16 — Audit Trail Viewer (read-only governance)
 
 ## Objective
 
@@ -1108,7 +1185,7 @@ Implemented and committed (`ddea22e`):
 No write/delete of audit rows, no audit detail screen, no password reset, no invitations, no
 `/api/businesses`, no mobile supplier/PO management, no reports/analytics, no stock transfers, no
 entitlement enforcement, no `api/transactions` standalone route. No new dependencies. Owner-held
-files untouched. Phases 12/13/14B/15 roadmap sections remain a pre-existing gap (as noted in the
+files untouched. Phases 12/13/14B roadmap sections remain a pre-existing gap (as noted in the
 Phase 14A section) and are not backfilled here.
 
 ### Verified
@@ -1131,11 +1208,11 @@ Phase 14A section) and are not backfilled here.
 - The trail is OWNER/ADMIN-only, business-isolated, read-only, and server-enforced; filters and the
   DTO whitelist are covered by tests.
 - `npm run lint`, `npm run test:unit`, and `npm test` all pass.
-- No commit and no push — the working tree keeps the change uncommitted for owner review.
+- Committed as `ddea22e`; nothing pushed.
 
 ---
 
-# 17. Phase 17 — Mobile Supplier & Purchase Order Management
+# 18. Phase 17 — Mobile Supplier & Purchase Order Management
 
 ## Objective
 
@@ -1219,7 +1296,7 @@ button is a follow-up decision. Owner-held files (`_layout.js`, `SignOutIcon.jsx
 - Docs updated (roadmap incl. renumbering, CLAUDE.md, README API table, spec §31); committed as
   `9249633`; nothing pushed.
 
-# 18. Phase 18 — SaaS-style UI Foundation, Light/Dark Theme System & Readability
+# 19. Phase 18 — SaaS-style UI Foundation, Light/Dark Theme System & Readability
 
 ## Objective
 
@@ -1401,6 +1478,7 @@ and 130%/160% system font scale, protected-file hashes).
 - Behavior is preserved exactly: API calls, query params, RBAC gates, deep links, navigation
   targets, retry/refresh/pagination, and loading/empty/error copy.
 - No backend/test changes; owner-held files untouched; android + iOS exports green.
+- Committed as `dac15c7`; nothing pushed.
 
 ---
 
@@ -1469,6 +1547,7 @@ mutate inventory — so `submit()` is reported NOT EXERCISED.
   loading/error/empty copy; the claim-first receive logic is byte-identical.
 - No `mobile/components/` change; no backend/test change; owner-held files untouched; android + iOS
   exports green.
+- Committed as `d3592fb`; nothing pushed.
 
 ---
 
@@ -1579,6 +1658,7 @@ the light alias so the two owner-held files kept working with zero edits, and fr
 - `lib/theme.js`'s token values, the server, and the server tests are untouched; android +
   iOS exports green. (The `(app)/_layout.js` / `SignOutIcon.jsx` freeze was lifted in the follow-up
   fix above, which is a separate commit.)
+- Committed as `979968a`; the themed-native-header follow-up is `04a2b3d`. Nothing pushed.
 
 ---
 
@@ -1670,10 +1750,11 @@ were exercised through their validation states and **not submitted**; no busines
   targets, and loading/empty/error copy.
 - The only token change is the D1 dark `placeholder`; light values, the server, and the server tests
   are untouched; Android + iOS exports green.
+- Committed as `311e558`; nothing pushed.
 
 ---
 
-# 19. Phase 19 — Stock Transfers Between Locations
+# 20. Phase 19 — Stock Transfers Between Locations
 
 ## Objective
 
@@ -1724,16 +1805,17 @@ Mobile:
 
 ## Definition of Done
 
-- All 14 required Level-2 cases pass in `server/test/phase19-transfers.test.mjs`, including failure
-  injection, compensation, and the concurrency-sensitive source-mutation case (H4/H5).
+- All 24 cases in `server/test/phase19-transfers.test.mjs` pass, including failure injection,
+  compensation, and the concurrency-sensitive source-mutation case (H4/H5).
 - `phase04-inventory.test.mjs` and `phase07a-inventory-compensation.test.mjs` re-run green.
 - Emulator smoke on a single permitted role (MANAGER) confirms entry point, guards, both legs,
   persisted quantities, and the history badge/filter.
-- One commit: `feat: add stock transfers between locations (Phase 19)`.
+- Committed as `6bc9a70` (`feat: add stock transfers between locations (Phase 19)`); the dashboard
+  recent-activity grouping fix that followed is `294a8f6`. Nothing pushed.
 
 ---
 
-# 19. Phase Gate System
+# 21. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.
 
@@ -1774,7 +1856,7 @@ The project owner decides whether to proceed.
 
 ---
 
-# 20. Change Control
+# 22. Change Control
 
 If Claude discovers that the current specification is incomplete or incorrect:
 
@@ -1792,7 +1874,7 @@ Minor implementation improvements that do not alter architectural decisions may 
 
 ---
 
-# 21. Bug Handling
+# 23. Bug Handling
 
 If a bug is discovered during a phase:
 
@@ -1817,7 +1899,7 @@ Only fix it immediately if it blocks the current phase.
 
 ---
 
-# 22. Refactoring Rules
+# 24. Refactoring Rules
 
 Refactoring is allowed when it:
 
@@ -1835,7 +1917,7 @@ Keep changes focused.
 
 ---
 
-# 23. Dependency Rules
+# 25. Dependency Rules
 
 Before adding a dependency:
 
@@ -1849,7 +1931,7 @@ Do not add dependencies simply for convenience.
 
 ---
 
-# 24. Git Checkpoints
+# 26. Git Checkpoints
 
 A Git commit should be created after a stable phase.
 
@@ -1882,7 +1964,7 @@ Before committing:
 
 ---
 
-# 25. V1 Completion
+# 27. V1 Completion
 
 V1 is complete only when all major requirements in:
 
@@ -1924,20 +2006,20 @@ AI Inventory Questions
 
 ---
 
-# 26. Future Development
+# 28. Future Development
 
 After V1, future features must be planned separately.
 
 Potential V2:
 
-- Barcode/QR scanner
 - Push notifications
-- Supplier management
-- Stock transfers
 - Advanced reports
 - Document upload
 - RAG
 - MongoDB Vector Search
+
+Shipped since this list was written, and no longer future work: the barcode/QR scanner (Phase 12B–12D),
+supplier management (Phase 13A, Phase 17), and stock transfers (Phase 19) — see their sections above.
 
 Potential V3:
 
@@ -1959,7 +2041,7 @@ Future functionality must not be implemented during V1 unless explicitly approve
 
 ---
 
-# 27. Final Development Rule
+# 29. Final Development Rule
 
 The goal is not to produce the largest amount of code as quickly as possible.
 

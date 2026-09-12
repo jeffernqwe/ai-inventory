@@ -53,6 +53,37 @@ export const PERMISSIONS = Object.freeze({
 
 const ALL = Object.freeze(Object.values(PERMISSIONS));
 
+/**
+ * Phase 22 — permission values that are declared in the catalogue above but
+ * have NO enforcement point yet: no route, and no AI tool, references them.
+ *
+ * This is METADATA ONLY. It exists so the authorization-contract regression
+ * guard (test/phase22-authorization-contract.test.mjs) can require every
+ * catalogue entry to be either enforced or listed here, instead of letting an
+ * unwired capability sit in the matrix unnoticed. Nothing at runtime reads it:
+ * it is not imported by middlewares/authorize.js and it does NOT participate in
+ * any authorization decision. Listing a permission here does not grant it,
+ * revoke it, or weaken it.
+ *
+ * The grants in ROLE_PERMISSIONS are deliberately unchanged — these keys are
+ * still held by the roles that hold them today. A future phase that wires one
+ * up moves it out of this list, and the guard fails until it does.
+ *
+ * - business.manage  — spec §7 reserves business-level settings for OWNER; no
+ *                      business-settings endpoint exists.
+ * - roles.manage     — spec §7 reserves role administration for OWNER; roles
+ *                      are fixed in code, so there is nothing to administer.
+ * - transactions.view — the ledger read is served by GET /api/inventory/history
+ *                      under inventory.history.view (all four roles hold it,
+ *                      while only three hold transactions.view — wiring this
+ *                      key there would silently revoke STAFF history access).
+ */
+export const CATALOGUE_ONLY_PERMISSIONS = Object.freeze([
+  PERMISSIONS.BUSINESS_MANAGE,
+  PERMISSIONS.ROLES_MANAGE,
+  PERMISSIONS.TRANSACTIONS_VIEW,
+]);
+
 /** Capabilities granted to each role, per SYSTEM_SPECIFICATION.md §7. */
 export const ROLE_PERMISSIONS = Object.freeze({
   OWNER: ALL,
@@ -113,4 +144,12 @@ export function hasPermission(role, permission) {
   return Array.isArray(granted) && granted.includes(permission);
 }
 
-export default { ROLES, ROLE_VALUES, NON_OWNER_ROLES, PERMISSIONS, ROLE_PERMISSIONS, hasPermission };
+export default {
+  ROLES,
+  ROLE_VALUES,
+  NON_OWNER_ROLES,
+  PERMISSIONS,
+  CATALOGUE_ONLY_PERMISSIONS,
+  ROLE_PERMISSIONS,
+  hasPermission,
+};

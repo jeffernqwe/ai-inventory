@@ -232,6 +232,7 @@ Phase 16 — Audit Trail Viewer (read-only GET /api/audit: OWNER/ADMIN governanc
 Phase 17 — Mobile Supplier & Purchase Order Management (suppliers CRUD/archive + PO create/edit/issue/cancel on mobile; zero backend changes; STAFF view-only)
 Phase 19 — Stock Transfers Between Locations (POST /api/inventory/transfer: two-leg TRANSFER movement + Phase 07A compensation; existing INVENTORY_MANAGE permission; MANAGER+)
 Phase 21 — Product Archive-Only Lifecycle & Inventory Invariant (documentation + regression guards only; no production behavior change)
+Phase 22 — Authorization Contract Enforcement & RBAC Coverage Guards (read routes bound to their view permissions; `CATALOGUE_ONLY_PERMISSIONS` declared; no role grant changed)
 ```
 
 Phase 08 is an owner-directed hardening extension delivered in approved lettered increments
@@ -302,6 +303,36 @@ movement paths (stock-in, stock-out, adjust, transfer) reject it with `PRODUCT_A
 No delete/purge/cascade/`deletedAt`/`PRODUCT_DELETED`/soft-delete was introduced, no model,
 route, index, migration or AI tool changed, and `inventory.service.js` — including the
 `{'product.0': {$exists: true}}` list guard — is byte-identical.
+
+Phase 22 is an owner-directed authorization-contract increment delivered as a single approved
+increment after Phase 21. It hardens the **route→capability binding** without changing who may do
+what. The read routes for products, suppliers and purchase orders had been protected by
+authentication alone (`requireAuth`); they now name the capability they require —
+`requirePermission(PERMISSIONS.PRODUCTS_VIEW)`, `SUPPLIERS_VIEW` and `PURCHASE_ORDERS_VIEW`
+respectively — so a route's authorization requirement is stated rather than implied by "any
+authenticated member". This is **behaviour-neutral by construction**: all four roles hold all three
+view permissions, so the only requests whose outcome changes are those from a role that holds no
+capability at all. **No role grant was added, removed or changed** for OWNER, ADMIN, MANAGER or
+STAFF. Categories and locations read routes were deliberately left on `requireAuth` because no
+`categories.view`/`locations.view` key exists, and inventing one was out of scope.
+
+The phase also makes the permission **catalogue** self-checking. `server/src/constants/roles.js`
+gains `CATALOGUE_ONLY_PERMISSIONS`, which names the capabilities that are granted to roles but
+implemented by no endpoint: `business.manage`, `roles.manage` and `transactions.view`. This is
+**metadata for the regression guard only** — it is not imported by `middlewares/authorize.js` and
+takes no part in any runtime authorization decision. The ledger read stays on
+`GET /api/inventory/history` under `inventory.history.view`; it was deliberately **not** moved to
+`transactions.view`, because only OWNER/ADMIN/MANAGER hold that key while every role holds
+`inventory.history.view`, so the switch would have silently revoked STAFF history access.
+
+`server/test/phase22-authorization-contract.test.mjs` (DB-free) is the guard: it proves each
+read route's binding structurally (router stack), behaviourally (it invokes the gate and requires a
+403 for an ungranted role while admitting STAFF) and by declaration (the route names the expected
+catalogue key); it requires every catalogue entry to be either enforced or listed as
+catalogue-only, with the two sets disjoint; it rejects any permission a route references that is
+not in the catalogue; and it pins that `CATALOGUE_ONLY_PERMISSIONS` never reaches the runtime
+authorization path. No model, service, controller, index, migration or mobile file changed, and no
+mutation route's gate was altered.
 
 Phase 18 is an owner-directed mobile UI extension delivered in approved lettered increments (18A,
 18B, …) after Phase 17. It turns the app into a modern SaaS-style product surface WITHOUT changing

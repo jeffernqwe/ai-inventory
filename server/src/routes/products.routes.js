@@ -7,14 +7,18 @@ import { PERMISSIONS } from '../constants/roles.js';
 
 const router = Router();
 
-// Catalog reads: any authenticated member of the business. Mutations: those
-// with products.manage (OWNER, ADMIN, MANAGER per spec §7).
-router.get('/', requireAuth, productsController.list);
+// Catalog reads: products.view, which every role holds (OWNER, ADMIN, MANAGER,
+// STAFF per spec §7) — so this is behavior-neutral today, but it makes the
+// capability the route depends on explicit rather than implied by "any
+// authenticated member". Mutations: those with products.manage (OWNER, ADMIN,
+// MANAGER per spec §7). Phase 22 pinned both bindings in
+// test/phase22-authorization-contract.test.mjs.
+router.get('/', requireAuth, requirePermission(PERMISSIONS.PRODUCTS_VIEW), productsController.list);
 router.post('/', requireAuth, requirePermission(PERMISSIONS.PRODUCTS_MANAGE), productsController.create);
 // Static path must be registered before the parameterized /:id routes below.
-router.get('/reorder', requireAuth, productsController.reorder);
-router.get('/barcode', requireAuth, productsController.byBarcode);
-router.get('/:id', requireAuth, productsController.get);
+router.get('/reorder', requireAuth, requirePermission(PERMISSIONS.PRODUCTS_VIEW), productsController.reorder);
+router.get('/barcode', requireAuth, requirePermission(PERMISSIONS.PRODUCTS_VIEW), productsController.byBarcode);
+router.get('/:id', requireAuth, requirePermission(PERMISSIONS.PRODUCTS_VIEW), productsController.get);
 router.patch('/:id', requireAuth, requirePermission(PERMISSIONS.PRODUCTS_MANAGE), productsController.update);
 router.post('/:id/archive', requireAuth, requirePermission(PERMISSIONS.PRODUCTS_MANAGE), productsController.archive);
 router.post('/:id/restore', requireAuth, requirePermission(PERMISSIONS.PRODUCTS_MANAGE), productsController.restore);

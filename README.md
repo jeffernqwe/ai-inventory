@@ -598,3 +598,24 @@ Phase 07 (testing + production hardening) and Phase 08 (owner-directed hardening
   existing best-effort `recordAudit` path. One consequence is deliberate and was accepted: tokens
   issued before this change carry no `jti` and are rejected, so every user signs in once more. No
   refresh-token rotation was added.
+- **Phase 27 — Mobile Password Recovery:** implemented, verified, and committed (`6b8c3c0`) — the
+  client half of the Phase 26B recovery surface, with **ZERO backend changes** and no new dependency.
+  Two **public** screens are added — `/forgot-password` and `/reset-password` — plus a "Forgot
+  password?" entry point on the Sign In screen and two tokenless wrappers in `lib/api.js` that call the
+  existing endpoints. Both screens sit outside the `(app)` group, whose layout would redirect an
+  unauthenticated visitor and discard the incoming token before it could be read. The reset token comes
+  from the deep link's URL parameter and nowhere else; it is never rendered, logged by application
+  code, persisted, or copied into another navigation, and it leaves the app only in the reset POST
+  body. A missing, empty or malformed token is rejected locally with no request. The forgot-password
+  success state is a fixed client constant that does not read the response, so the client cannot undo
+  the server's enumeration resistance. **After a successful reset the client session is cleared before
+  navigating to Login** — `login.js` redirects a signed-in client into the app, so without that
+  ordering a completed reset would bounce the user back inside instead of asking them to sign in.
+  Reset links target the custom scheme (`inventoryai://reset-password`, i.e.
+  `PASSWORD_RESET_URL=inventoryai://reset-password`); Universal Links and Android App Links remain
+  deferred, so a link opened without the app installed has no web fallback. Verified by mobile
+  android+iOS exports (iOS is export/bundle-only — **no iOS runtime verification**), the unchanged
+  backend suite (`test:unit` 209 pass / `test:db` 394 pass, `npm run lint` exit 0), and Android runtime
+  QA in Expo Go through `exp://…/--/reset-password` — the same route-resolution path a custom scheme
+  uses, because Expo Go cannot be launched by a custom scheme, which leaves the literal
+  `inventoryai://` handoff configuration-verified only.

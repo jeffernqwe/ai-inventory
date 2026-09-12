@@ -254,6 +254,10 @@ Colours come from tokens only — never a literal, and never `colors` imported f
   4.40:1 → 4.87:1 on `surfaceMuted`; 4.60:1 → 5.10:1 on `background`). The dark theme is unchanged
   (it already cleared AA at 5.40:1 / 4.76:1). Behavior unchanged: no component, layout, copy or
   logic edit — two token values only.
+- **27**: `Banner` gains an additive **`success`** tone, using the existing `success` / `successSoft`
+  theme colors — no token was added or changed. Additive in the strict sense: every pre-existing
+  `Banner` call site uses `error`, `warn` or `info`, so no existing screen can render differently.
+  The new tone carries the two password-recovery success states (link requested, password changed).
 
 ### Known issues (reported, not fixed)
 

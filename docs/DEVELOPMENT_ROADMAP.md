@@ -2744,6 +2744,208 @@ Also from the audit, all accepted as inherent or as the deliberate price of a ch
 
 ---
 
+# 27C. Phase 27 — Mobile Password Recovery
+
+**Status: implemented, verified and committed (2026-09-13); not pushed.**
+**Commit: `6b8c3c0` — "feat: add password recovery screens to the mobile app (Phase 27)", 5 files,
++380/−7. ZERO `server/` files changed, and no dependency added to either `package.json`.**
+
+## Objective
+
+Give the mobile application the client half of Phase 26B. Phase 26B shipped two public recovery routes
+and a mail layer, but deliberately made **no mobile change**, so a reset link pointed at
+`PASSWORD_RESET_URL` opened nothing a user could complete the flow in. Phase 27 adds the two screens
+that consume those endpoints, so a locked-out user can finish a reset entirely inside the app.
+
+The scope is deliberate and narrow: **mobile only, zero backend change, no new dependency, no
+navigation change, no permission or role-grant change.** `PASSWORD_RESET_URL` already accepted a
+custom scheme, so `mailConfig.js` needed no edit — the backend was complete as shipped.
+
+## Scope
+
+### `mobile/app/forgot-password.js` (new)
+
+A **PUBLIC** screen, a sibling of login/register and deliberately **outside the `(app)` group**,
+whose layout redirects anyone who is not signed in and would discard the flow before it starts. It
+collects an email and calls the existing `POST /api/auth/forgot-password`.
+
+- **Presence-only email check.** No client-side email-shape rule is imposed, because the shape rule
+  lives in the server's validator and a second copy would drift from it.
+- **The success state is a fixed client constant and never reads the response.** The server answers one
+  identical 202 whether or not the address exists, and swallows a post-lookup delivery failure to that
+  same 202 precisely because a distinguishable answer would be an account-existence oracle. Rendering
+  the response body would be the one place the client could undo that, so this screen does not read it.
+- **No `signedIn` redirect.** A signed-in visitor landing here is harmless — the reset would simply end
+  their sessions — and bouncing them into `(app)` would be exactly the silent navigation the phase
+  forbids.
+
+### `mobile/app/reset-password.js` (new)
+
+A **PUBLIC** screen outside `(app)`, reached by the emailed deep link, calling the existing
+`POST /api/auth/reset-password`.
+
+- **The token is read from `useLocalSearchParams()` and from nowhere else.** A missing param is
+  `undefined`, and a link carrying the key twice yields an **array**; neither is a usable token and
+  neither reaches the network — both render "Link incomplete" with no request made.
+- **The token's shape is deliberately not validated client-side beyond a trim.** The value is opaque
+  base64url, so any client-side rule about its length or alphabet could only ever reject a *valid*
+  link. There is no client-side token length restriction.
+- **`confirmPassword` keeps the server's own field name** on its input, so a server-side field error
+  lands on the field it names. A field error naming `token` — which has no input of its own — is
+  **promoted to form level** rather than dropped silently.
+- **Friendly pre-checks** mirror the server rules (required, minimum 8 characters, confirmation match)
+  and never substitute for them: the server remains authoritative.
+- **A new token arriving while the screen is mounted resets the screen completely** — form values,
+  field errors, the form error and the success state — so a fresh attempt cannot inherit a previous
+  success.
+- **All hooks precede every early return.** The three render states (`no token` / `done` / `form`) are
+  entered after the hooks, so the component does not repeat the frozen hooks-after-early-return pattern
+  in `(app)/ai/index.js`.
+- Three render states: **"Link incomplete"** (no token, with a route to `/forgot-password`),
+  **"Password changed"** (success), and the form.
+
+### Login entry point (`mobile/app/login.js`)
+
+A "Forgot password?" link was added to the existing `AuthLayout` footer, above the existing
+"New to Inventory AI? Create an account" line. Nothing else on the screen changed: the same fields,
+the same validation, the same `signedIn` redirect and the same error handling. The footer's two lines
+are separate `Text` nodes with a margin between them rather than a `gap`, so each centres on its own
+when it wraps at large font scales.
+
+### API layer (`mobile/lib/api.js`)
+
+Two thin wrappers over the **existing** endpoints — `forgotPassword(email)` and
+`resetPassword({ token, newPassword, confirmPassword })` — following the file's established
+`apiFetch`/`ApiError` convention, plus both names added to the default export.
+
+Both are deliberately **tokenless**: neither takes nor sends a JWT. The recovery surface is public, so
+sending authorization would be meaningless, and not sending it means a refused public call can never
+trip the central session-loss handling in `lib/client.js`.
+
+### Shared component (`mobile/components/Banner.jsx`)
+
+One **additive** line: a `success` tone. Every one of the 23 pre-existing call sites uses
+`error`/`warn`/`info`, so no existing screen can change appearance. The tone uses the `success` and
+`successSoft` tokens, which already existed in **both** palettes — no token was added or altered.
+
+### Deep linking
+
+Custom-scheme deep linking uses **`inventoryai://reset-password`**, matching the `scheme` already
+declared in `mobile/app.json`, so the operator-facing configuration is:
+
+```text
+PASSWORD_RESET_URL=inventoryai://reset-password
+```
+
+A link of the form `inventoryai://reset-password?token=<token>` opens the app directly and hands the
+token to the reset screen as a route parameter. Expo Router's `fromDeepLink()` concatenates host +
+pathname + query and strips a leading slash, so `reset-password` is the route name — kept lowercase
+because `new URL()` lower-cases a host.
+
+**Universal Links and Android App Links remain intentionally deferred.** As shipped, a reset link
+opened on a device that does not have the app installed has no web fallback; that is a known,
+accepted limitation of this increment, not an oversight.
+
+## Token security rules
+
+The reset token is treated as a live credential for its whole lifetime.
+
+- **Read from route params only.** It is never constructed, guessed, defaulted or accepted from any
+  other source.
+- **Never rendered.** It appears in no label, message, hint or accessibility string.
+- **Never logged by application code.** The five files contain no `console.*` call at all.
+- **Never persisted.** It is not written to SecureStore, `AsyncStorage`, or any other storage; the only
+  persisted auth value in the app remains the session token.
+- **Never copied into navigation.** It is not forwarded to another route, a `router.replace`/`push`
+  target, or a param object.
+- **Sent in exactly one place:** the JSON body of `POST /api/auth/reset-password`.
+- **Rejected locally when unusable.** A missing, empty or non-string token produces no network request.
+- **Never in a log line on the way out.** The server records `req.path` only for these routes, so no
+  request log carries the body or the query.
+
+## Successful reset clears the client session before navigating to Login
+
+On success the screen sets its success state and then calls **`await clearSession()` before
+`router.replace('/login')`**. That ordering is load-bearing rather than cosmetic: `login.js` redirects a
+`signedIn` status into `(app)`, so navigating to Login while the client still believed it was signed in
+would have silently landed the user **inside the app**. `clearSession` is the correct call rather than
+`signOut` because the reset already ended every server-side session (Phase 26B-2's
+`passwordChangedAt` stamp plus `revokeAllSessions`), so a logout request would be a guaranteed 401
+fired for nothing.
+
+## Accepted residual
+
+Recorded here so it is owner-visible rather than merely in code.
+
+- **The reset token necessarily exists in the route params for as long as the reset screen is
+  mounted.** There is no way to complete the flow without it, and it cannot be cleared from the URL
+  before it is submitted. It is therefore mitigated rather than eliminated: it is never rendered,
+  never logged by application code, never persisted, and never copied into another navigation, and
+  **the route is replaced after a successful reset**, so the spent token does not remain the active
+  route's parameter.
+- **The foreground same-route second-token case (token A → token B while the reset screen is already
+  mounted) remains an explicit QA risk and was not device-tested.** The code handles it by design —
+  the token is read from the focused route's params rather than latched into state, and a `useEffect`
+  keyed on the token clears the form, the errors and the success state — but that is **reasoned
+  behaviour, not observed behaviour**. Delivering two links to an already-open screen was not exercised
+  on a device in this increment.
+
+## Verification limits
+
+- **Expo Go cannot runtime-test the custom `inventoryai://` scheme.** Expo Go is launched by its own
+  `exp://` scheme, so a literal `inventoryai://reset-password` run requires a development build, which
+  this repository does not produce (no `expo-dev-client`, no `android/`, no `eas.json`). Runtime QA was
+  therefore performed through **`exp://<host>:8081/--/reset-password?token=…`**, which Expo Router
+  resolves through the **same** `fromDeepLink()` code path a custom scheme uses, so the route
+  resolution, the param parsing and the screen behaviour are all genuinely exercised. What is *not*
+  exercised is the custom-scheme handoff itself.
+- **The `inventoryai://` target is configuration-verified only**, by inspection of `mobile/app.json`'s
+  `scheme` value and of Expo Router's documented resolution, not by a runtime launch.
+- **iOS was not runtime-verified.** iOS verification was **export/bundle-only**: the bundle builds and
+  contains both routes, but no iOS device or simulator run was performed.
+- **Development-environment caveat, not an application defect.** Expo Go's dev runtime writes the
+  launching URL — including a reset token — to logcat as `initialUri`. A control launch on a
+  token-free route shows it logs `initialUri` on **every** launch regardless of route, which
+  identifies it as the Expo Go shell rather than application logging; the app itself contains no
+  `console.*` calls. It applies to any deep link in Expo Go, and it disappears in a production build.
+
+## Verified
+
+- **`npx expo export --platform android` — exit 0; `npx expo export --platform ios` — exit 0**
+  (iOS bundle verification only, no runtime). Both `forgot-password` and `reset-password` are present
+  in the shipped bundle.
+- **Backend regression, unchanged baseline:** `npm run test:unit` — **209 pass, 20 skipped, 0 fail**;
+  `npm run test:db` — **394 pass, 15 skipped, 0 fail**; `npm run lint` — **exit 0**. Identical to the
+  Phase 26B numbers, as expected: no backend file changed.
+- **Android runtime QA on the emulator (Expo Go, `exp://10.0.2.2:8081/--/…`, cold launch each time):**
+  token present → reset form; token missing → "Link incomplete" with no request; `?token=` empty →
+  the same, with no request; **full end-to-end reset** — minted token → form → `200` → "Password
+  changed" → Login screen (**not** `(app)`) → **sign in with the newly set password** → dashboard as
+  OWNER; spent token re-use → `400` with the server's message; mismatched confirmation → the client
+  pre-check. `/login` renders "Forgot password?" with the rest of the screen unchanged, and
+  `/forgot-password` renders.
+- **The token was confirmed absent from the rendered UI** by dumping the view hierarchy during the
+  reset flow and searching it for the token value.
+- **Security review:** zero `console.*` in all five files; no reset token in any persisted storage;
+  no `Authorization` header sent by either wrapper; the server's request log records no token.
+- **Commit contents audited:** exactly the five production files; `server/**` empty in the commit;
+  the 33 pre-existing untracked artifacts untouched; nothing pushed.
+
+## Definition of Done
+
+- A user who follows a reset link can set a new password entirely inside the app and sign in with it.
+- The token is read only from the deep link, never rendered, logged, persisted or copied into
+  navigation, and leaves the app only in the reset POST body.
+- A successful reset returns the user to Login — never into `(app)` — because the client session is
+  cleared before navigation.
+- No backend file, permission, role grant or existing screen behaviour changed, and no dependency was
+  added.
+- The two verification limits (custom-scheme runtime untested; iOS export-only) and the one QA risk
+  (foreground second-token delivery) are recorded in writing here rather than left implicit.
+- Nothing pushed without explicit owner approval.
+
+---
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

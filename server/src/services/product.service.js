@@ -446,7 +446,27 @@ export const productService = {
 
     const locCond = locationId ? [{ $eq: ['$locationId', new ObjectId(locationId)] }] : [];
 
-    const pipeline = [{ $match: match }, ...availabilityStages(bizOid, locCond)];
+    const pipeline = [
+      { $match: match },
+      // Phase 20H: the sort has to sit ABOVE the first $lookup, not inside the
+      // $facet below. A $facet sub-pipeline runs in the aggregation executor —
+      // past the point where the query planner can absorb a sort — and a $sort
+      // placed after a $lookup is equally out of the planner's reach. In either
+      // position the order was left to a blocking in-memory sort and the winning
+      // plan was `FETCH | IXSCAN[businessId_1]`, an index that cannot supply
+      // `{ createdAt: -1, _id: -1 }`. Here the planner takes `$match + $sort`
+      // together and walks the Phase 20G index
+      // `{ businessId: 1, createdAt: -1, _id: -1 }` instead, so the order is
+      // index-provided for every filter combination this method accepts.
+      // Returning already-ordered rows is safe: $lookup, $addFields, $match and
+      // $unwind all preserve their input order (the same reliance the History
+      // pipeline in transactions.service.js already has), and $facet.metadata
+      // counts the documents reaching the facet, which this move does not change.
+      // `_id` breaks createdAt ties in the same direction as the primary sort
+      // so an offset page boundary inside a tie is stable.
+      { $sort: { createdAt: -1, _id: -1 } },
+      ...availabilityStages(bizOid, locCond),
+    ];
 
     // Only products actually stocked at the chosen location.
     if (locationId) {
@@ -473,9 +493,10 @@ export const productService = {
     pipeline.push({
       $facet: {
         metadata: [{ $count: 'total' }],
-        // `_id` breaks createdAt ties in the same direction as the primary sort
-        // so an offset page boundary inside a tie is stable.
-        data: [{ $sort: { createdAt: -1, _id: -1 } }, { $skip: skip }, { $limit: limit }],
+        // The $sort that orders these rows lives at the top of the pipeline
+        // (Phase 20H) so the planner can serve it from an index; only the page
+        // window is applied here.
+        data: [{ $skip: skip }, { $limit: limit }],
       },
     });
 

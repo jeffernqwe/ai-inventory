@@ -9,11 +9,12 @@ import Input from '../components/Input';
 import { ApiError } from '../lib/client';
 import { useSession } from '../lib/auth';
 import { defaultHomePath } from '../lib/permissions';
-import { type } from '../lib/theme';
+import { spacing, type } from '../lib/theme';
 import { useTheme } from '../lib/theme-context';
 
 const createStyles = (colors) =>
   StyleSheet.create({
+    footer: { alignSelf: 'stretch' },
     // alignSelf:'stretch' + centred text so the "New to Inventory AI? <link>"
     // line wraps cleanly instead of shrink-wrapping off-centre at large scales.
     footerText: {
@@ -22,6 +23,9 @@ const createStyles = (colors) =>
       alignSelf: 'stretch',
       textAlign: 'center',
     },
+    // Margin rather than a `gap` on the wrapper: the two lines are separate
+    // Text nodes precisely so each centres on its own when it wraps.
+    footerSpaced: { marginTop: spacing.md },
     link: { color: colors.link, fontWeight: '700' },
   });
 
@@ -66,12 +70,19 @@ export default function LoginScreen() {
       title="Welcome back"
       subtitle="Sign in to manage your inventory."
       footer={
-        <Text style={styles.footerText}>
-          New to Inventory AI?{' '}
-          <Link href="/register" style={styles.link}>
-            Create an account
-          </Link>
-        </Text>
+        <View style={styles.footer}>
+          <Text style={styles.footerText}>
+            <Link href="/forgot-password" style={styles.link}>
+              Forgot password?
+            </Link>
+          </Text>
+          <Text style={[styles.footerText, styles.footerSpaced]}>
+            New to Inventory AI?{' '}
+            <Link href="/register" style={styles.link}>
+              Create an account
+            </Link>
+          </Text>
+        </View>
       }
     >
       <Banner type="error" text={formError} />

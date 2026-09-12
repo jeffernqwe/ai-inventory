@@ -14,7 +14,7 @@
 // SAME direction as the primary sort, making the order total so every page
 // boundary is stable.
 //
-// This is the regression for that, over all seven paginated paths:
+// This is the regression for that, over all nine paginated paths:
 //   /api/products                        catalog list, no location filter
 //   /api/products?locationId=…           catalog list, location-filtered
 //   /api/products/reorder                compound sort, availability ascending
@@ -22,6 +22,8 @@
 //   /api/purchase-orders
 //   /api/categories, /api/locations, /api/suppliers — one shared list service
 //   /api/users                           ASCENDING primary sort
+//   /api/ai/conversations                sorts on updatedAt (Phase 20C / H-2)
+//   /api/ai/conversations/:id/messages   ASCENDING, scoped by conversationId
 //
 // Each path is asserted three ways:
 //   1. distinct sort values -> the intended business order is unchanged;
@@ -34,7 +36,6 @@
 
 import 'dotenv/config';
 
-import mongoose from 'mongoose';
 import { it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -45,6 +46,7 @@ import {
   registerOwner,
   uniqueName,
   uniqueEmail,
+  stampField,
   disconnectDb,
 } from './support.mjs';
 import { dbSuite } from './testEnv.mjs';
@@ -55,12 +57,12 @@ import Category from '../src/models/category.model.js';
 import Location from '../src/models/location.model.js';
 import Supplier from '../src/models/supplier.model.js';
 import User from '../src/models/user.model.js';
+import AIConversation from '../src/models/aiConversation.model.js';
+import AIMessage from '../src/models/aiMessage.model.js';
 
 const { dbOk, baseUrl, server } = await startServer();
 const api = makeApi(baseUrl);
 const tracker = createTracker(dbOk);
-
-const { ObjectId } = mongoose.Types;
 
 const PASSWORD = 'Password123!';
 /** Rows seeded per path — enough that a page boundary falls inside the tie. */
@@ -76,9 +78,11 @@ let stock; // /api/inventory
 let refs; // /api/categories + /api/locations + /api/suppliers
 let people; // /api/users
 let orders; // /api/purchase-orders
+let ai; // /api/ai/conversations + /api/ai/conversations/:id/messages
 
 let locatedLocationId;
 let reorderDirRows; // [{ id, available }] — the reorder list's intended order
+let aiConversationId; // the conversation whose messages are paged
 
 /** URL with query params; undefined/null values are dropped. */
 function url(path, params = {}) {
@@ -103,29 +107,10 @@ async function listPage(path, token, params) {
 }
 
 /**
- * Writes ONE value onto a raw column. `timestamps: true` owns createdAt /
- * updatedAt, so a deliberate tie has to be stamped onto the collection directly
- * — the same technique the Phase 16 audit suite uses.
- *
- * The write is then read back and asserted. This is not belt-and-braces: the raw
- * collection API does NOT cast, so a string `_id` would match nothing and leave
- * the rows with their natural, already-distinct timestamps. The suite would then
- * "pass" against the unfixed code because there was never a tie to page over.
+ * Writes ONE value onto a raw column — the shared `stampField` support helper.
+ * The local alias keeps the call sites below reading the same as in Phase 20A.
  */
-async function stamp(model, ids, field, value) {
-  const oids = ids.map((id) => new ObjectId(id));
-  await model.collection.updateMany({ _id: { $in: oids } }, { $set: { [field]: value } });
-
-  const stamped = await model.find({ _id: { $in: oids } }).select(field).lean();
-  assert.equal(stamped.length, ids.length, `stamp: expected ${ids.length} rows to exist`);
-  for (const doc of stamped) {
-    assert.equal(
-      new Date(doc[field]).getTime(),
-      value.getTime(),
-      `stamp: ${field} did not take effect on ${doc._id}`
-    );
-  }
-}
+const stamp = stampField;
 
 /**
  * Walks every page at `limit`, returning the ids in arrival order and asserting
@@ -171,12 +156,12 @@ async function assertPaginationContract({
   path,
   token,
   model,
-  businessId,
+  filter,
   field,
   direction,
   params = {},
 }) {
-  const rows = await model.find({ businessId }).select('_id').lean();
+  const rows = await model.find(filter).select('_id').lean();
   const ids = rows.map((r) => String(r._id)).sort();
   assert.ok(ids.length >= 3, `${label}: expected seeded rows to page over`);
 
@@ -252,6 +237,7 @@ dbSuite('Phase 20A — paginated list ordering is deterministic', dbOk, () => {
     refs = await registerOwner(api, tracker);
     people = await registerOwner(api, tracker);
     orders = await registerOwner(api, tracker);
+    ai = await registerOwner(api, tracker);
 
     for (let i = 0; i < TIED; i += 1) await newProduct(catalog);
 
@@ -307,6 +293,33 @@ dbSuite('Phase 20A — paginated list ordering is deterministic', dbOk, () => {
       });
       assert.equal(res.status, 201, `PO create -> ${res.status} ${JSON.stringify(res.json)}`);
     }
+
+    // AI conversations are created through the real route so the list is genuine
+    // data. Their messages are written straight to the collection instead: the
+    // only production writer is the chat route (already covered by the Phase 06
+    // suites), and what this suite has to prove is how messages are ORDERED and
+    // paged, which a directly-seeded set exercises without a provider in the loop.
+    // All TIED messages share one conversation so the equality prefix is fixed and
+    // only `createdAt` / `_id` can separate them.
+    for (let i = 0; i < TIED; i += 1) {
+      const res = await api('POST', '/api/ai/conversations', {
+        token: ai.token,
+        body: { title: uniqueName('C20') },
+      });
+      assert.equal(
+        res.status,
+        201,
+        `conversation create -> ${res.status} ${JSON.stringify(res.json)}`
+      );
+      if (i === 0) aiConversationId = res.json.conversation.id;
+    }
+    for (let i = 0; i < TIED; i += 1) {
+      await AIMessage.create({
+        conversationId: aiConversationId,
+        role: 'USER',
+        content: `Phase 20C seed ${i}`,
+      });
+    }
   });
 
   after(async () => {
@@ -321,7 +334,7 @@ dbSuite('Phase 20A — paginated list ordering is deterministic', dbOk, () => {
       path: '/api/products',
       token: catalog.token,
       model: Product,
-      businessId: catalog.businessId,
+      filter: { businessId: catalog.businessId },
       field: 'createdAt',
       direction: 'desc',
     });
@@ -333,7 +346,7 @@ dbSuite('Phase 20A — paginated list ordering is deterministic', dbOk, () => {
       path: '/api/products',
       token: located.token,
       model: Product,
-      businessId: located.businessId,
+      filter: { businessId: located.businessId },
       field: 'createdAt',
       direction: 'desc',
       params: { locationId: locatedLocationId },
@@ -349,7 +362,7 @@ dbSuite('Phase 20A — paginated list ordering is deterministic', dbOk, () => {
       path: '/api/products/reorder',
       token: reorderTie.token,
       model: Product,
-      businessId: reorderTie.businessId,
+      filter: { businessId: reorderTie.businessId },
       field: 'createdAt',
       direction: 'desc',
     });
@@ -374,7 +387,7 @@ dbSuite('Phase 20A — paginated list ordering is deterministic', dbOk, () => {
       path: '/api/inventory',
       token: stock.token,
       model: Inventory,
-      businessId: stock.businessId,
+      filter: { businessId: stock.businessId },
       field: 'updatedAt',
       direction: 'desc',
     });
@@ -386,7 +399,7 @@ dbSuite('Phase 20A — paginated list ordering is deterministic', dbOk, () => {
       path: '/api/purchase-orders',
       token: orders.token,
       model: PurchaseOrder,
-      businessId: orders.businessId,
+      filter: { businessId: orders.businessId },
       field: 'createdAt',
       direction: 'desc',
     });
@@ -404,7 +417,7 @@ dbSuite('Phase 20A — paginated list ordering is deterministic', dbOk, () => {
         path,
         token: refs.token,
         model,
-        businessId: refs.businessId,
+        filter: { businessId: refs.businessId },
         field: 'createdAt',
         direction: 'desc',
       });
@@ -422,9 +435,75 @@ dbSuite('Phase 20A — paginated list ordering is deterministic', dbOk, () => {
       path: '/api/users',
       token: people.token,
       model: User,
-      businessId: people.businessId,
+      filter: { businessId: people.businessId },
       field: 'createdAt',
       direction: 'asc',
     });
+  });
+
+  it('orders and pages the AI conversation list (sorts on updatedAt)', async () => {
+    // The conversation filter is businessId AND userId, so the contract is given
+    // both — the list the route returns is exactly this user's conversations.
+    await assertPaginationContract({
+      label: 'GET /api/ai/conversations',
+      path: '/api/ai/conversations',
+      token: ai.token,
+      model: AIConversation,
+      filter: { businessId: ai.businessId, userId: ai.userId },
+      field: 'updatedAt',
+      direction: 'desc',
+    });
+  });
+
+  it('orders and pages a conversation\'s messages, which ascend', async () => {
+    // Messages carry no businessId — the route scopes them by the conversation it
+    // has already ownership-checked — so the filter is the conversationId.
+    await assertPaginationContract({
+      label: 'GET /api/ai/conversations/:id/messages',
+      path: `/api/ai/conversations/${aiConversationId}/messages`,
+      token: ai.token,
+      model: AIMessage,
+      filter: { conversationId: aiConversationId },
+      field: 'createdAt',
+      direction: 'asc',
+    });
+  });
+
+  it('applies default pagination and echoes the coerced page/limit on the AI lists', async () => {
+    const conversationPath = '/api/ai/conversations';
+    const messagePath = `/api/ai/conversations/${aiConversationId}/messages`;
+
+    for (const [label, path] of [
+      ['conversations', conversationPath],
+      ['messages', messagePath],
+    ]) {
+      // Omitted page/limit -> page 1 at the default limit, with totalPages derived
+      // from that same (coerced) limit.
+      const defaults = await listPage(path, ai.token);
+      assert.deepEqual(
+        Object.keys(defaults).sort(),
+        ['items', 'limit', 'page', 'total', 'totalPages'],
+        `${label}: the standard envelope`
+      );
+      assert.equal(defaults.page, 1, `${label}: page defaults to 1`);
+      assert.equal(defaults.limit, 20, `${label}: limit defaults to 20`);
+      assert.equal(defaults.total, TIED, `${label}: total is the seeded row count`);
+      assert.equal(defaults.totalPages, Math.ceil(TIED / 20), `${label}: totalPages`);
+      assert.equal(defaults.items.length, TIED, `${label}: every row fits on page 1`);
+
+      // Explicit page/limit are echoed back as sent when they are valid.
+      const explicit = await listPage(path, ai.token, { page: 2, limit: 2 });
+      assert.equal(explicit.page, 2, `${label}: page is echoed`);
+      assert.equal(explicit.limit, 2, `${label}: limit is echoed`);
+      assert.equal(explicit.total, TIED, `${label}: total does not depend on the page`);
+      assert.equal(explicit.totalPages, Math.ceil(TIED / 2), `${label}: totalPages at limit 2`);
+      assert.equal(explicit.items.length, 2, `${label}: a full second page`);
+
+      // Past the final page the envelope still comes back, with no rows.
+      const beyond = await listPage(path, ai.token, { page: 99, limit: 2 });
+      assert.equal(beyond.page, 99, `${label}: the requested page is echoed`);
+      assert.equal(beyond.total, TIED, `${label}: total is unchanged past the end`);
+      assert.deepEqual(beyond.items, [], `${label}: past the final page is empty`);
+    }
   });
 });

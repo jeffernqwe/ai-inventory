@@ -14,6 +14,7 @@ import {
   registerOwner,
   makeRoleUser,
   uniqueName,
+  stampField,
   disconnectDb,
 } from './support.mjs';
 import { dbSuite } from './testEnv.mjs';
@@ -378,14 +379,69 @@ dbSuite('Phase 04 — inventory core + dashboard', dbOk, () => {
     const since = await api('GET', `/api/inventory/history?from=${encodeURIComponent(from)}`, { token: hist.token });
     assert.equal(since.json.total, 3);
 
-    const page1 = await api('GET', '/api/inventory/history?limit=2&page=1', { token: hist.token });
-    assert.equal(page1.json.total, 4);
-    assert.equal(page1.json.items.length, 2);
-    const page2 = await api('GET', '/api/inventory/history?limit=2&page=2', { token: hist.token });
-    assert.equal(page2.json.items.length, 2);
-    assert.notDeepEqual(page1.json.items.map((i) => i.id), page2.json.items.map((i) => i.id));
-  });
+    // Phase 20C (L-2): the previous check only proved the two pages DIFFER, which
+    // a repeated row plus a dropped row would also satisfy. Page the whole history
+    // instead and assert the traversal properly: every row exactly once, in the
+    // newest-first order `all` already established, under a stable envelope.
+    const fullOrder = all.json.items.map((i) => i.id);
+    const walked = [];
+    let totalPages = 1;
+    for (let page = 1; page <= totalPages; page += 1) {
+      const res = await api('GET', `/api/inventory/history?limit=2&page=${page}`, {
+        token: hist.token,
+      });
+      assert.equal(res.status, 200, JSON.stringify(res.json));
+      assert.equal(res.json.page, page);
+      assert.equal(res.json.limit, 2);
+      assert.equal(res.json.total, 4, 'total must not depend on the page');
+      assert.equal(res.json.totalPages, 2);
+      totalPages = res.json.totalPages;
+      walked.push(...res.json.items.map((i) => i.id));
+      assert.ok(page <= 10, 'history paging terminated');
+    }
+    const page1Ids = walked.slice(0, 2);
+    const page2Ids = walked.slice(2);
+    assert.deepEqual(page1Ids.filter((id) => page2Ids.includes(id)), [], 'the pages are disjoint');
+    assert.deepEqual(walked, fullOrder, 'paged order reproduces the single-page order');
+    assert.equal(new Set(walked).size, walked.length, 'no history row repeats across pages');
+    assert.equal(walked.length, all.json.total, 'every history row is returned exactly once');
 
+    // The four movements above were written in one burst, so they can share a
+    // createdAt. Collapse them onto ONE instant deliberately: only the `_id`
+    // tiebreaker is left to order them, and it must run in the SAME (descending)
+    // direction as the primary sort. This is what proves the sort-before-lookup /
+    // $facet pipeline yields correctly ordered pages, rather than the rows merely
+    // happening to carry distinct timestamps.
+    const txns = await InventoryTransaction.find({ businessId: hist.businessId })
+      .select('_id')
+      .lean();
+    assert.equal(txns.length, 4, 'the four movements are in the ledger');
+    const txnIds = txns.map((t) => String(t._id)).sort();
+    await stampField(InventoryTransaction, txnIds, 'createdAt', new Date());
+    const newestFirst = [...txnIds].reverse();
+
+    const tiedAll = await api('GET', '/api/inventory/history?limit=100', { token: hist.token });
+    assert.deepEqual(
+      tiedAll.json.items.map((i) => i.id),
+      newestFirst,
+      'rows sharing a createdAt fall back to _id, descending'
+    );
+
+    const tiedWalked = [];
+    let tiedPages = 1;
+    for (let page = 1; page <= tiedPages; page += 1) {
+      const res = await api('GET', `/api/inventory/history?limit=1&page=${page}`, {
+        token: hist.token,
+      });
+      assert.equal(res.json.total, 4, 'total is unchanged by the tie');
+      assert.equal(res.json.totalPages, 4, 'a tied list still reports the right page count');
+      tiedPages = res.json.totalPages;
+      tiedWalked.push(...res.json.items.map((i) => i.id));
+      assert.ok(page <= 10, 'tied history paging terminated');
+    }
+    assert.deepEqual(tiedWalked, newestFirst, 'a tied history pages in the full order');
+    assert.equal(new Set(tiedWalked).size, tiedWalked.length, 'no tied row repeats across pages');
+  });
   it('enforces RBAC on inventory, history and dashboard', async () => {
     const p = await newProduct(owner);
     const l = await newLocation(owner);

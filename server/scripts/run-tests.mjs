@@ -47,6 +47,7 @@ const PURE_DB = [
   'phase07a-inventory-compensation.test.mjs', // failure-injection hardening
   'phase07b-auth-security.test.mjs',  // business status + auth rate limiting
   'phase19-transfers.test.mjs',       // stock transfers between locations + compensation
+  'phase20-pagination-order.test.mjs', // offset-pagination ordering determinism across the seven list paths
 ];
 const MIXED = [
   'phase06-ai-provider.test.mjs',     // unit: provider selection; db: loop + mapping

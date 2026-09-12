@@ -260,7 +260,9 @@ async function list(businessId, { status, supplierId, q, skip, limit }) {
     PurchaseOrder.find(match)
       .populate({ path: 'supplierId', select: 'name status' })
       .populate({ path: 'locationId', select: 'name' })
-      .sort({ createdAt: -1 })
+      // `_id` breaks createdAt ties in the same direction as the primary sort so
+      // paging cannot repeat or skip an order.
+      .sort({ createdAt: -1, _id: -1 })
       .skip(skip)
       .limit(limit)
       .lean(),

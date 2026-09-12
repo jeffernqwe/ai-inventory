@@ -417,7 +417,10 @@ export const productService = {
     const total = await Product.countDocuments(filter);
     const docs = await Product.find(filter)
       .populate('categoryId', 'name status')
-      .sort({ createdAt: -1 })
+      // `_id` breaks createdAt ties in the same direction as the primary sort,
+      // so paging a page boundary that falls inside a tie cannot repeat or skip
+      // a product (see the Phase 16 audit list for the same convention).
+      .sort({ createdAt: -1, _id: -1 })
       .skip(skip)
       .limit(limit);
     return { items: docs, total };
@@ -470,7 +473,9 @@ export const productService = {
     pipeline.push({
       $facet: {
         metadata: [{ $count: 'total' }],
-        data: [{ $sort: { createdAt: -1 } }, { $skip: skip }, { $limit: limit }],
+        // `_id` breaks createdAt ties in the same direction as the primary sort
+        // so an offset page boundary inside a tie is stable.
+        data: [{ $sort: { createdAt: -1, _id: -1 } }, { $skip: skip }, { $limit: limit }],
       },
     });
 
@@ -522,7 +527,9 @@ export const productService = {
       {
         $facet: {
           metadata: [{ $count: 'total' }],
-          data: [{ $sort: { available: 1, createdAt: -1 } }, { $skip: skip }, { $limit: limit }],
+          // Worst-off first (available ascending), then newest, then `_id` so a
+          // tie on both leading keys still pages deterministically.
+          data: [{ $sort: { available: 1, createdAt: -1, _id: -1 } }, { $skip: skip }, { $limit: limit }],
         },
       },
     ];

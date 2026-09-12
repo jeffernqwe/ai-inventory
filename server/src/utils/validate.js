@@ -154,6 +154,67 @@ export function validateLogout(body) {
 }
 
 // ---------------------------------------------------------------------------
+// Password recovery (Phase 26B-3)
+// ---------------------------------------------------------------------------
+
+// A reset token is 32 random bytes as base64url (43 chars). The cap is generous
+// headroom, not a format check — see validateResetPassword.
+const RESET_TOKEN_MAX = 256;
+
+/**
+ * Forgot-password payload. The address is validated for SHAPE only: a
+ * well-formed but unknown address is not an error, because telling the two apart
+ * is the one thing this endpoint must never do. Every other key — userId,
+ * businessId, role, status, whatever — is ignored rather than rejected, matching
+ * the other unauthenticated credential payloads (validateLogin, validateRegister)
+ * rather than the strict allowlists on the self-service ones. Reading only
+ * `email` is what makes those keys inert.
+ */
+export function validateForgotPassword(body) {
+  const problems = [];
+  const email = normalizeEmail(body?.email);
+  problems.push(...emailProblems(email));
+  return { problems, email };
+}
+
+/**
+ * Reset-password payload.
+ *
+ * `confirmPassword` is an HTTP-LAYER field and is handled here on purpose:
+ * checking it in the controller before the service is called is what guarantees
+ * a mistyped confirmation cannot burn a valid reset token. It is also
+ * deliberately ABSENT from the returned object, so no caller has a variable to
+ * forward into resetPassword() and it can never be persisted.
+ *
+ * The token is bounded but NOT format-checked: a token that merely looks wrong
+ * is the service's single generic INVALID_RESET_TOKEN, not a 400 that would
+ * imply the server knows what a real token looks like.
+ *
+ * `newPassword` is returned UNTRIMMED — trimming would silently change the
+ * credential the user typed — and its problems are re-labelled `newPassword`,
+ * exactly as validateChangePassword does.
+ */
+export function validateResetPassword(body) {
+  const problems = [];
+
+  const token = requiredString(body?.token, 'token', RESET_TOKEN_MAX);
+  problems.push(...token.problems);
+
+  problems.push(
+    ...passwordProblems(body?.newPassword).map((p) => ({ ...p, field: 'newPassword' }))
+  );
+
+  const confirm = body?.confirmPassword;
+  if (typeof confirm !== 'string' || confirm.length === 0) {
+    problems.push({ field: 'confirmPassword', message: 'confirmPassword is required' });
+  } else if (confirm !== body?.newPassword) {
+    problems.push({ field: 'confirmPassword', message: 'confirmPassword must match newPassword' });
+  }
+
+  return { problems, token: token.value, newPassword: body?.newPassword };
+}
+
+// ---------------------------------------------------------------------------
 // User management (Phase 14A)
 // ---------------------------------------------------------------------------
 
@@ -830,6 +891,8 @@ export default {
   validateChangePassword,
   validateMeUpdate,
   validateLogout,
+  validateForgotPassword,
+  validateResetPassword,
   validateUserCreate,
   validateUserUpdate,
   USER_STATUSES,

@@ -1,6 +1,7 @@
 import Business from './business.model.js';
 import User from './user.model.js';
 import Session from './session.model.js';
+import PasswordResetToken from './passwordResetToken.model.js';
 import Location from './location.model.js';
 import Category from './category.model.js';
 import Supplier from './supplier.model.js';
@@ -16,6 +17,7 @@ export {
   Business,
   User,
   Session,
+  PasswordResetToken,
   Location,
   Category,
   Supplier,
@@ -33,6 +35,7 @@ export const models = [
   Business,
   User,
   Session,
+  PasswordResetToken,
   Location,
   Category,
   Supplier,

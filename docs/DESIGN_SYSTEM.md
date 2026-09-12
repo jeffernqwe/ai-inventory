@@ -67,9 +67,9 @@ Semantic, not literal: a component says `colors.danger`, never `#DC2626`.
 | `borderStrong`   | `#CBD2DD`                      | `#3A4150`                       | Input borders, chips                       |
 | `text`           | `#101828`                      | `#F2F4F8`                       | Primary text                               |
 | `textSecondary`  | `#5B6472`                      | `#C2C9D6`                       | Secondary text                             |
-| `textMuted`      | `#667085` (≥ AA on white)      | `#98A1B3`                       | Captions, placeholders-adjacent            |
+| `textMuted`      | `#5F697E` (≥ AA on every surface) | `#98A1B3`                       | Captions, placeholders-adjacent            |
 | `textOnPrimary`  | `#FFFFFF`                      | `#0B1220`                       | Text/icons on filled primary buttons       |
-| `placeholder`    | `#8A94A6` (below AA — see §7)  | `#8A93A6` (lifted for AA)       | Input placeholder text                     |
+| `placeholder`    | `#646E83` (raised for AA)      | `#8A93A6` (lifted for AA)       | Input placeholder text                     |
 | `primary`        | `#2557D6`                      | `#6E93F0` (lifted for AA)       | Brand, links, primary buttons, focus ring  |
 | `primarySoft`    | `#E8EEFC`                      | rgba(110,147,240,0.16)          | Tinted backgrounds for primary content     |
 | `success`        | `#15803D`                      | `#4ADE80`                       | Positive states                            |
@@ -247,14 +247,31 @@ Colours come from tokens only — never a literal, and never `colors` imported f
   becomes the semantic `Icon name="lock"`. `lib/theme.js`'s dark `placeholder` was lifted to
   `#8A93A6` (§2, §7). Behavior unchanged: RBAC gates, validation order, payload shapes, and
   loading/empty/error copy are preserved.
+- **25**: the two light-theme contrast findings below are closed, by owner decision, with measured
+  values rather than visual judgement. `lib/theme.js`'s light `placeholder` moves `#8A94A6` →
+  `#646E83` (3.06:1 → 5.12:1 on `surface`; 2.70:1 → 4.53:1 on `surfaceMuted`; 2.83:1 → 4.73:1 on
+  `background`) and light `textMuted` moves `#667085` → `#5F697E` (4.97:1 → 5.51:1 on `surface`;
+  4.40:1 → 4.87:1 on `surfaceMuted`; 4.60:1 → 5.10:1 on `background`). The dark theme is unchanged
+  (it already cleared AA at 5.40:1 / 4.76:1). Behavior unchanged: no component, layout, copy or
+  logic edit — two token values only.
 
 ### Known issues (reported, not fixed)
 
-- **Light `placeholder` is below AA.** `#8A94A6` measures 3.06:1 on `surface` (`#FFFFFF`) and
-  2.70:1 on `surfaceMuted` (`#EEF1F7`) — both under the 4.5:1 floor. 18F's owner decision (D1)
-  covered the **dark** token only, because that is the one 18E reported; the light value was never
-  flagged. It needs an owner decision to change, since it alters every input placeholder in the
-  light theme that has shipped since 18A. Every field also carries a real label, so placeholders
-  are supplemental.
-- **Light `textMuted` on `surfaceMuted` is 4.40:1** (`#667085` on `#EEF1F7`) — marginally under AA
-  for normal text. Same class of finding; reported, not changed.
+**`SearchField` placeholder clips at 160% font scale (found by the 25 smoke, pre-existing).** On the
+products list the placeholder copy is long enough that at 160% it wraps to a second line, and the
+second line is cut off at the field's bottom edge — only the ascender tops of the final word render.
+It reproduces identically in light and dark, which is what identifies it as a layout issue rather
+than a token issue: 25 changed two hex values and no geometry, and a colour cannot clip text. The
+field's `minHeight: 44` and fixed `paddingVertical: 11` do not grow with the wrapped line, and it is
+the products copy specifically (the longest placeholder in the app) that triggers it. Deliberately
+**not** fixed here: it is outside 25's approved scope, which forbids primitive and layout edits.
+Recorded so it is not rediscovered as a regression.
+
+The two contrast findings previously listed here — light `placeholder` at 3.06:1 / 2.70:1 and light
+`textMuted` at 4.40:1 on `surfaceMuted` — were closed by the **25** entry above; both are now
+measured in the §2 table. The history is kept deliberately: the dark `placeholder` was lifted by
+18F (D1) because 18E reported it, while the light value went un-flagged for the same reason it was
+never fixed — placeholder text is *supplemental* here (every field carries a real label), which is
+why it survived four increments of AA review. It is not, however, exempt: WCAG 1.4.3 excludes only
+incidental text, logotypes and **inactive** components, and the binding surfaces (`SearchField`,
+`SelectField`'s in-sheet search, `AiChat`'s composer) are all live fields.

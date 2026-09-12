@@ -552,3 +552,21 @@ Phase 07 (testing + production hardening) and Phase 08 (owner-directed hardening
   OWNER-only runtime tier is asserted explicitly rather than left implicit — the two OWNER-exclusive
   capabilities are catalogue-only, so no real route distinguishes OWNER from ADMIN. Suite 459 → 469,
   `test:db` 320 → 330, `test:unit` unchanged at 170; `npm run lint` 0/0.
+- **Phase 25 — Design-Token Contrast Close-Out & Mobile Known-Issue Reconciliation:** implemented and
+  verified — **two light-theme token values and documentation; no production behavior change.** Closes
+  the last two entries in `docs/DESIGN_SYSTEM.md`'s open known-issues list, which 18E and 18F had
+  reported and left alone because each was a cross-phase token change needing an owner decision.
+  Values were **computed, not chosen by eye**: `palettes.light.placeholder` `#8A94A6` → `#646E83`
+  (3.06:1 → 5.12:1 on `surface`; 2.70:1 → 4.53:1 on `surfaceMuted`) and `palettes.light.textMuted`
+  `#667085` → `#5F697E` (4.97:1 → 5.51:1; 4.40:1 → 4.87:1). The dark theme already cleared AA
+  (5.40:1 / 4.76:1) and is unchanged. Two things drove the result and are documented rather than
+  smoothed over: `surfaceMuted` — the lightest ground a placeholder sits on — is the **binding
+  surface** that sets the floor for both tokens; and consequently **`textMuted` had to move too**,
+  because clearing AA there requires a value darker than `#667085`, which would otherwise leave the
+  placeholder darker than the token it sits beneath and invert the muted hierarchy. The cost is a
+  **~7% contrast separation** between the two tokens, the ceiling that floor allows, approved
+  explicitly as Option A. Placeholders are **not** exempt from WCAG 1.4.3 (its exceptions cover only
+  incidental text, logotypes and inactive components, and the binding sites are live fields). The
+  diff is two lines in `mobile/lib/theme.js` but reaches four placeholder-emitting components across
+  five sites, plus 44 `textMuted` sites; `server/**` is untouched. Contrast re-verified
+  programmatically from the edited file.

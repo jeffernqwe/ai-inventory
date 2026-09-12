@@ -235,6 +235,7 @@ Phase 21 — Product Archive-Only Lifecycle & Inventory Invariant (documentation
 Phase 22 — Authorization Contract Enforcement & RBAC Coverage Guards (read routes bound to their view permissions; `CATALOGUE_ONLY_PERMISSIONS` declared; no role grant changed)
 Phase 23 — Authorization Contract Completion: Route Classification & RBAC Mirror Guards (every route classified into a declared authorization bucket; mobile RBAC mirror pinned to the server matrix; `requireRole` inertness and client error-code contract; no production behavior change)
 Phase 24 — Runtime Authorization Matrix & Tenant-Isolation Verification (runtime role × real-route matrix derived from `ROLE_PERMISSIONS`; role-change effect proven on an existing JWT in both directions; empty OWNER-only runtime tier asserted; no production behavior change)
+Phase 25 — Design-Token Contrast Close-Out & Mobile Known-Issue Reconciliation (two light-theme tokens raised to WCAG AA on every surface they are used on; measured, not eyeballed; no production behavior change)
 ```
 
 Phase 08 is an owner-directed hardening extension delivered in approved lettered increments
@@ -449,6 +450,45 @@ outcome (still 403 after promotion, still 200 after demotion) were confirmed to 
 matrix cell was confirmed to throw, and the typo guard was confirmed to distinguish the global 404 from
 an `ApiError` 404. Suite 459 → 469, `test:db` 320 → 330, `test:unit` unchanged at 170; `npm run lint`
 0/0.
+
+Phase 25 is an owner-directed design-token increment delivered as a single approved increment after
+Phase 24, and it is the smallest phase in the project's history: **two token values and
+documentation**. It closes the last two entries in `docs/DESIGN_SYSTEM.md`'s open known-issues list —
+the light-theme contrast failures that 18E and 18F reported and deliberately did not fix, because
+each was a cross-phase token change needing an owner decision.
+
+The replacement values were **computed, not chosen by eye**. WCAG 2.x relative luminance and
+`(L_light + 0.05) / (L_dark + 0.05)` were evaluated over the palette's own slate hue family, and
+`palettes.light.placeholder` moves `#8A94A6` → `#646E83` (3.06:1 → 5.12:1 on `surface`; 2.70:1 →
+4.53:1 on `surfaceMuted`; 2.83:1 → 4.73:1 on `background`) while `palettes.light.textMuted` moves
+`#667085` → `#5F697E` (4.97:1 → 5.51:1; 4.40:1 → 4.87:1; 4.60:1 → 5.10:1). The dark theme was
+already compliant (5.40:1 / 4.76:1) and is **unchanged**.
+
+Two findings are worth keeping, because both were counter-intuitive and both are documented rather
+than smoothed over. First, **`surfaceMuted` is the binding surface**: it is the lightest ground a
+placeholder sits on, so it sets the floor for both tokens, and `#646E83` is the *lightest* value in
+the hue family that clears 4.5:1 there. Second, and consequently, **`textMuted` had to move too** —
+on a light surface, clearing AA on `surfaceMuted` requires a darker value than `#667085`, so any
+conforming placeholder would have been darker than the token it must sit beneath, inverting the
+muted hierarchy. Darkening `textMuted` restores the ordering and spaces the three muted tokens
+evenly, at the cost of a **~7% contrast separation** between `placeholder` and `textMuted` — the
+ceiling the `surfaceMuted` floor allows. That is tighter than the 0.615x gap it replaces, which
+existed only because the placeholder was failing; the owner approved it explicitly as Option A.
+
+**Placeholders are not exempt from 1.4.3.** Its exceptions are incidental text, logotypes and
+*inactive* user-interface components only; the three binding sites (`SearchField`, `SelectField`'s
+in-sheet search, `AiChat`'s composer) are live fields, so 4.5:1 genuinely applies. What *is* exempt
+is `Input`'s disabled state, and `textMuted`'s icon/glyph uses on `surfaceMuted` fall under 1.4.11's
+3:1 non-text threshold, which 4.40:1 already cleared — that asymmetry is why `textMuted`'s own
+compliance was never the issue, and why the phase's real driver was the placeholder.
+
+The change reaches the whole app visually — five components emit `colors.placeholder` and
+`textMuted` has 44 sites across 26 files — while the diff is two lines in `mobile/lib/theme.js`.
+`server/**` is **untouched** (no route, controller, service, model, middleware or test), the Phase
+22/23/24 authorization artifacts are untouched, `mobile/app/(app)/ai/index.js`'s frozen
+hooks-after-early-return is not restructured, and no mobile test runner was added. Contrast was
+re-verified programmatically from the edited file, and the palette carries no hardcoded duplicate
+of either hex outside it.
 
 Phase 18 is an owner-directed mobile UI extension delivered in approved lettered increments (18A,
 18B, …) after Phase 17. It turns the app into a modern SaaS-style product surface WITHOUT changing

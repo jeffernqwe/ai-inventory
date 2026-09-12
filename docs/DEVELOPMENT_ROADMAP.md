@@ -126,6 +126,9 @@ Authorization Contract Completion: Route Classification & RBAC Mirror Guards
         ↓
 Phase 24
 Runtime Authorization Matrix & Tenant-Isolation Verification
+        ↓
+Phase 25
+Design-Token Contrast Close-Out & Mobile Known-Issue Reconciliation
 ```
 
 ---
@@ -2143,7 +2146,125 @@ and `CLAUDE.md`, `docs/SYSTEM_SPECIFICATION.md`, `README.md`, `docs/DEVELOPMENT_
 
 ---
 
-# 26. Phase Gate System
+# 26. Phase 25 — Design-Token Contrast Close-Out & Mobile Known-Issue Reconciliation
+
+**Status: implemented and verified (2026-09-12); not committed pending owner approval.**
+
+## Objective
+
+Close the two measured WCAG-AA contrast failures in the **light** theme that `docs/DESIGN_SYSTEM.md`
+had carried as open known issues since 18E/18F, and reconcile the design-system documentation with
+the corrected values. Delivered as a single owner-approved increment (Option A) after Phase 24, and
+confined to two token values plus documentation. No production behavior change.
+
+The owner approved Option A explicitly, including the tighter ~7% visual separation between the two
+muted tokens that the AA floor on `surfaceMuted` forces; the dark theme is unchanged.
+
+## Scope
+
+- `mobile/lib/theme.js` — `palettes.light.placeholder` `#8A94A6` → **`#646E83`** and
+  `palettes.light.textMuted` `#667085` → **`#5F697E`**. No other line of the file changed; the dark
+  palette, the shared scales and the exports are untouched.
+- The replacement values were **computed, not chosen by eye**. WCAG 2.x relative luminance
+  (`c ≤ 0.03928 ? c/12.92 : ((c+0.055)/1.055)^2.4`, `L = 0.2126R + 0.7152G + 0.0722B`) and
+  `(L_light + 0.05) / (L_dark + 0.05)` were evaluated over the palette's own slate hue family.
+- `surfaceMuted` (`#EEF1F7`) is the **binding surface** for both tokens: it is the lightest ground a
+  placeholder sits on, so it sets the floor. `#646E83` is the lightest value in the hue family that
+  clears 4.5:1 there (4.53:1) — the maximum subordination available.
+
+## Measured result
+
+| Token | Before | on `surface` | on `surfaceMuted` | on `background` | After | on `surface` | on `surfaceMuted` | on `background` |
+|---|---|---|---|---|---|---|---|---|
+| `placeholder` | `#8A94A6` | 3.06:1 | 2.70:1 | 2.83:1 | `#646E83` | 5.12:1 | 4.53:1 | 4.73:1 |
+| `textMuted` | `#667085` | 4.97:1 | 4.40:1 | 4.60:1 | `#5F697E` | 5.51:1 | 4.87:1 | 5.10:1 |
+
+`textSecondary` (`#5B6472`, 5.98:1 / 5.29:1 / 5.53:1) is unchanged and still leads the ladder.
+Dark theme unchanged and already compliant: `placeholder` `#8A93A6` 5.40:1 / 4.76:1;
+`textMuted` `#98A1B3` 6.41:1 / 5.66:1.
+
+**Why `textMuted` had to move too.** On a light surface, clearing 4.5:1 on `surfaceMuted` requires a
+*darker* value than `#667085` (4.40:1) — so any conforming placeholder would have been darker than
+the token it must sit beneath, inverting the muted hierarchy. Darkening `textMuted` to `#5F697E`
+restores the ordering and spaces the three muted tokens evenly (steps of ~0.93x on every surface).
+The result is a **~7% contrast separation** between `placeholder` and `textMuted` — the ceiling the
+`surfaceMuted` floor allows, reported rather than hidden. It is deliberately tighter than the
+0.615x gap it replaces, which existed only because the placeholder was failing.
+
+**Placeholders are not exempt.** WCAG 1.4.3 excludes incidental text, logotypes and **inactive**
+user-interface components only. The three binding placeholder sites — `SearchField`,
+`SelectField`'s in-sheet search and `AiChat`'s composer — are live fields, so 4.5:1 genuinely
+applies and no exception was claimed.
+
+## Blast Radius (enumerated, not assumed)
+
+Four components emit `colors.placeholder` across five sites (`SelectField` has two); the edit is two
+lines but reaches the whole app.
+
+| Site | Ground |
+|---|---|
+| `components/Input.jsx` | `surface` (its `inputDisabled` state uses `surfaceMuted`, but is exempt as inactive) |
+| `components/SearchField.jsx` | `surfaceMuted` — binding |
+| `components/SelectField.jsx` (field text + in-sheet search) | `surface`; in-sheet search `surfaceMuted` — binding |
+| `components/AiChat.jsx` (composer) | `surfaceMuted` — binding |
+
+`colors.textMuted` has 44 sites across 26 files. Informational text sits on `surface` or
+`background`, both already compliant; its only `surfaceMuted` pairings are a **disabled** input
+(exempt, 1.4.3) and icon/glyph uses governed by 1.4.11's 3:1 non-text threshold, which 4.40:1
+already cleared. Verified by grep that **no hardcoded duplicate** of either old or new hex exists
+outside `mobile/lib/theme.js`, and that **no server test imports `mobile/lib/theme.js`** (the Phase
+23 guard reads `mobile/lib/permissions.js` only).
+
+## Out of Scope
+
+- No `server/**` change of any kind: no route, controller, service, model, middleware, index,
+  config, script or test. `server/` diff is empty and the suite is not re-run, because nothing in it
+  can be affected.
+- No RBAC, permission, audit or AI change; `assertBusinessAccess`, `requireRole`,
+  `CATALOGUE_ONLY_PERMISSIONS` and every Phase 22/23/24 authorization artifact are untouched.
+- No component, layout, copy or logic edit; no new screen, primitive, navigation or feature.
+- `mobile/app/(app)/ai/index.js`'s hooks-after-early-return is **not** restructured: it remains the
+  frozen known issue recorded by 18E.
+- No mobile test runner added (Phase 23 recorded that as a deliberate non-goal), no new dependency,
+  no unrelated cleanup of the pre-existing untracked artifacts.
+- No change to the dark theme, to `textSecondary`, or to any other token.
+- The smoke surfaced one **pre-existing** layout defect — the products-list `SearchField` placeholder
+  clips its wrapped second line at 160% font scale, identically in light and dark, so it is not a
+  token effect. It is recorded in `docs/DESIGN_SYSTEM.md`'s known-issues section and deliberately
+  left unfixed, since a primitive/layout edit is outside this phase's approved scope.
+
+## Verified
+
+- Contrast recomputed **programmatically from the edited file** (the palette is parsed out of
+  `mobile/lib/theme.js`, not from the plan's notes) for `placeholder`, `textMuted`,
+  `textSecondary` and `text`, against all three light surfaces at a 4.5:1 floor: all pass, and
+  `placeholder` is subordinate to `textMuted` on every surface (0.929x).
+- Dark tokens recomputed and unchanged: `placeholder` 5.40:1 / 4.76:1, `textMuted` 6.41:1 / 5.66:1.
+  The dark `placeholder` was also re-measured on the device (4.76:1 on `surfaceMuted`), matching the
+  computed value.
+- Expo export green for Android and iOS (`--platform android` and `--platform ios`, both exit 0);
+  the new tokens are present in both emitted bundles and the superseded light values are absent
+  from them.
+- Emulator smoke across light and dark at 100% and 160% system font scale, on the screens that
+  carry the affected tokens: every one of the four `colors.placeholder` components (`Input`,
+  `SearchField`, `SelectField` field + in-sheet search, `AiChat` composer) plus muted-caption, icon
+  and empty-state sites on the dashboard, product/PO/supplier lists, stock-in, adjust, AI hub and
+  the AI chat. Each rendered token was sampled from the screenshot pixels and reproduces the
+  computed value exactly.
+- `git diff --name-only -- server/` empty.
+
+## Definition of Done
+
+- Both light tokens clear 4.5:1 on every surface they are used on, with the hierarchy preserved.
+- `docs/DESIGN_SYSTEM.md` §2 carries the measured values and §7 has no open known issues, with the
+  closure recorded rather than the history erased.
+- The change surface is exactly five paths: `mobile/lib/theme.js`, `docs/DESIGN_SYSTEM.md`, this
+  roadmap, `CLAUDE.md` and `README.md`.
+- Nothing committed or pushed without explicit owner approval.
+
+---
+
+# 27. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.
 
@@ -2184,7 +2305,7 @@ The project owner decides whether to proceed.
 
 ---
 
-# 27. Change Control
+# 28. Change Control
 
 If Claude discovers that the current specification is incomplete or incorrect:
 
@@ -2202,7 +2323,7 @@ Minor implementation improvements that do not alter architectural decisions may 
 
 ---
 
-# 28. Bug Handling
+# 29. Bug Handling
 
 If a bug is discovered during a phase:
 
@@ -2227,7 +2348,7 @@ Only fix it immediately if it blocks the current phase.
 
 ---
 
-# 29. Refactoring Rules
+# 30. Refactoring Rules
 
 Refactoring is allowed when it:
 
@@ -2245,7 +2366,7 @@ Keep changes focused.
 
 ---
 
-# 30. Dependency Rules
+# 31. Dependency Rules
 
 Before adding a dependency:
 
@@ -2259,7 +2380,7 @@ Do not add dependencies simply for convenience.
 
 ---
 
-# 31. Git Checkpoints
+# 32. Git Checkpoints
 
 A Git commit should be created after a stable phase.
 
@@ -2292,7 +2413,7 @@ Before committing:
 
 ---
 
-# 32. V1 Completion
+# 33. V1 Completion
 
 V1 is complete only when all major requirements in:
 
@@ -2334,7 +2455,7 @@ AI Inventory Questions
 
 ---
 
-# 33. Future Development
+# 34. Future Development
 
 After V1, future features must be planned separately.
 
@@ -2369,7 +2490,7 @@ Future functionality must not be implemented during V1 unless explicitly approve
 
 ---
 
-# 34. Final Development Rule
+# 35. Final Development Rule
 
 The goal is not to produce the largest amount of code as quickly as possible.
 

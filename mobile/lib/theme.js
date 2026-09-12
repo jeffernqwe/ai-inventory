@@ -28,9 +28,18 @@ const LIGHT = {
   // Text
   text: '#101828',
   textSecondary: '#5B6472',
-  textMuted: '#667085', // raised from #8A94A6 for WCAG AA (~4.98:1) on white
+  // Darkened from #667085, which measured 4.40:1 on `surfaceMuted` — below the
+  // 4.5:1 AA floor. #5F697E measures 5.51:1 / 4.87:1 / 5.10:1 (surface /
+  // surfaceMuted / background) and stays clear of `textSecondary` (5.98:1).
+  textMuted: '#5F697E',
   textOnPrimary: '#FFFFFF',
-  placeholder: '#8A94A6',
+  // Raised from #8A94A6, which measured 3.06:1 on `surface` and 2.70:1 on
+  // `surfaceMuted` — both below the 4.5:1 AA floor. #646E83 is the lightest
+  // value in this hue family that clears AA on `surfaceMuted`, the harder case
+  // (search fields and the AI composer use it): 5.12:1 / 4.53:1 / 4.73:1.
+  // Because AA on `surfaceMuted` is the binding constraint for both tokens,
+  // the muted ladder compresses to ~7% contrast separation here.
+  placeholder: '#646E83',
 
   // Brand
   primary: '#2557D6',

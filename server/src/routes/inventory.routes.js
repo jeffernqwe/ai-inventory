@@ -4,7 +4,7 @@ import requireAuth from '../middlewares/authenticate.js';
 import { requirePermission } from '../middlewares/authorize.js';
 import inventoryController from '../controllers/inventory.controller.js';
 import transactionsController from '../controllers/transactions.controller.js';
-import { PERMISSIONS } from '../constants/roles.js';
+import { PERMISSIONS } from '../constants/roles.ts';
 
 const router = Router();
 

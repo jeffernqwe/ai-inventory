@@ -16,7 +16,7 @@ import jwt from 'jsonwebtoken';
 
 import { validateProductionConfig, JWT_SECRET_MIN_LENGTH } from '../src/config/validateConfig.js';
 import { signAccessToken, verifyAccessToken } from '../src/config/jwt.js';
-import env from '../src/config/env.js';
+import env from '../src/config/env.ts';
 import { createHealthRouter } from '../src/routes/health.routes.js';
 import { createShutdownHandler, registerSignalHandlers } from '../src/config/shutdown.js';
 import { startServer } from '../src/config/startup.js';

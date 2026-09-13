@@ -28,9 +28,9 @@ import {
   disconnectDb,
 } from './support.mjs';
 import { dbSuite } from './testEnv.mjs';
-import { ROLES } from '../src/constants/roles.js';
+import { ROLES } from '../src/constants/roles.ts';
 import AuditLog from '../src/models/auditLog.model.ts';
-import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../src/constants/audit.js';
+import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../src/constants/audit.ts';
 
 const { dbOk, baseUrl, server } = await startServer();
 const api = makeApi(baseUrl);

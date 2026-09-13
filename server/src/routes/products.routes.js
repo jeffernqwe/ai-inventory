@@ -3,7 +3,7 @@ import { Router } from 'express';
 import requireAuth from '../middlewares/authenticate.js';
 import { requirePermission } from '../middlewares/authorize.js';
 import productsController from '../controllers/products.controller.js';
-import { PERMISSIONS } from '../constants/roles.js';
+import { PERMISSIONS } from '../constants/roles.ts';
 
 const router = Router();
 

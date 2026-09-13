@@ -27,8 +27,8 @@
  * never returned to the client, and never shown in error bodies.
  */
 
-import { aiConfig } from '../aiConfig.js';
-import { AiNotConfigured } from '../aiErrors.js';
+import { aiConfig } from '../aiConfig.ts';
+import { AiNotConfigured } from '../aiErrors.ts';
 import { createAnthropicCompatibleProvider } from './anthropicWire.js';
 
 /** Default claude-cli identity the gateway recognises. Bump on rotation. */

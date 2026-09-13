@@ -28,8 +28,8 @@ import {
   disconnectDb,
 } from './support.mjs';
 import { unitSuite, dbSuite } from './testEnv.mjs';
-import { ROLES } from '../src/constants/roles.js';
-import { STOCK_STATUSES, classifyStockStatus } from '../src/constants/stockStatus.js';
+import { ROLES } from '../src/constants/roles.ts';
+import { STOCK_STATUSES, classifyStockStatus } from '../src/constants/stockStatus.ts';
 import { executeTool } from '../src/services/ai/tools.js';
 
 // ---------------------------------------------------------------------------

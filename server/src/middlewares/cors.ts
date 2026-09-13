@@ -24,7 +24,7 @@
 import cors from 'cors';
 
 /** Case-sensitive exact compare, ignoring a single trailing slash. */
-function normalizeOrigin(origin) {
+function normalizeOrigin(origin: string) {
   return String(origin).trim().replace(/\/+$/, '');
 }
 

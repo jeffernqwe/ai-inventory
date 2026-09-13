@@ -4,7 +4,7 @@ import requireAuth from '../middlewares/authenticate.js';
 import { requirePermission } from '../middlewares/authorize.js';
 import aiController from '../controllers/ai.controller.js';
 import { aiRateLimiter } from '../services/ai/rateLimiter.js';
-import { PERMISSIONS } from '../constants/roles.js';
+import { PERMISSIONS } from '../constants/roles.ts';
 
 const router = Router();
 

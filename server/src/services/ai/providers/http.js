@@ -5,7 +5,7 @@
  * bodies and statuses are logged server-side, never returned to the client.
  */
 
-import { AiProviderError } from '../aiErrors.js';
+import { AiProviderError } from '../aiErrors.ts';
 
 export async function postJson({ url, headers = {}, body, timeoutMs = 60000, providerName = 'ai' }) {
   const controller = new AbortController();

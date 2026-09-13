@@ -35,8 +35,8 @@ import {
   MailDeliveryError,
   isMailError,
 } from '../src/services/mail/index.js';
-import { mailConfig } from '../src/services/mail/mailConfig.js';
-import { MAIL_NOT_CONFIGURED, MAIL_UNAVAILABLE } from '../src/services/mail/mailErrors.js';
+import { mailConfig } from '../src/services/mail/mailConfig.ts';
+import { MAIL_NOT_CONFIGURED, MAIL_UNAVAILABLE } from '../src/services/mail/mailErrors.ts';
 import {
   registerProvider,
   deregisterProvider,
@@ -46,7 +46,7 @@ import {
   selectProvider,
 } from '../src/services/mail/providers/index.js';
 import { createResendProvider } from '../src/services/mail/providers/resendProvider.js';
-import { passwordResetEmail } from '../src/services/mail/templates/passwordReset.js';
+import { passwordResetEmail } from '../src/services/mail/templates/passwordReset.ts';
 import {
   FAKE_MAIL_PROVIDER,
   registerFakeMailProvider,

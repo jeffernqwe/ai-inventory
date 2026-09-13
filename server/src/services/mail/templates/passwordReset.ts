@@ -13,17 +13,31 @@
 
 export const DEFAULT_EXPIRES_IN_MINUTES = 30;
 
-function normaliseAppName(appName) {
+function normaliseAppName(appName: string | undefined) {
   const raw = typeof appName === 'string' ? appName.trim() : '';
   return raw || 'Inventory AI';
 }
 
-function normaliseExpiry(expiresInMinutes) {
-  const parsed = Number.parseInt(expiresInMinutes, 10);
+function normaliseExpiry(expiresInMinutes: number | undefined) {
+  // The explicit String() is the coercion parseInt performs internally anyway;
+  // writing it down is what lets the checker accept a numeric parameter.
+  const parsed = Number.parseInt(String(expiresInMinutes), 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_EXPIRES_IN_MINUTES;
 }
 
-export function passwordResetEmail({ resetUrl, expiresInMinutes, appName } = {}) {
+/** Everything the email body depends on. All three are optional: a mail with no
+ * URL is refused below, and the other two fall back to their defaults. */
+interface PasswordResetEmailOptions {
+  resetUrl?: string;
+  expiresInMinutes?: number;
+  appName?: string;
+}
+
+export function passwordResetEmail({
+  resetUrl,
+  expiresInMinutes,
+  appName,
+}: PasswordResetEmailOptions = {}) {
   const url = typeof resetUrl === 'string' ? resetUrl.trim() : '';
   if (!url) {
     // Rendering a mail whose only action is an empty link would fail silently at

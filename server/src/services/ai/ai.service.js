@@ -12,8 +12,8 @@
  * the authenticated session passed in by the caller.
  */
 
-import { aiConfig } from './aiConfig.js';
-import { AiProviderError, isAiError } from './aiErrors.js';
+import { aiConfig } from './aiConfig.ts';
+import { AiProviderError, isAiError } from './aiErrors.ts';
 import { selectProvider } from './providers/index.js';
 import { executeTool, AI_TOOL_DEFS } from './tools.js';
 

@@ -43,7 +43,7 @@ import {
   disconnectDb,
 } from './support.mjs';
 import { dbSuite } from './testEnv.mjs';
-import { ROLES, ROLE_VALUES, PERMISSIONS, hasPermission } from '../src/constants/roles.js';
+import { ROLES, ROLE_VALUES, PERMISSIONS, hasPermission } from '../src/constants/roles.ts';
 import {
   registerFakeProvider,
   setFakeScenario,

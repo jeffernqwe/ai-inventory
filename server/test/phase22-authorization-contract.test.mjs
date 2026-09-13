@@ -58,7 +58,7 @@ import {
   ROLES,
   ROLE_VALUES,
   hasPermission,
-} from '../src/constants/roles.js';
+} from '../src/constants/roles.ts';
 import requireAuth from '../src/middlewares/authenticate.js';
 import productsRoutes from '../src/routes/products.routes.js';
 import suppliersRoutes from '../src/routes/suppliers.routes.js';

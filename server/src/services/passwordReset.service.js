@@ -58,9 +58,9 @@ import { recordAudit } from './audit.service.js';
 import { assertActiveBusiness } from './business.service.js';
 import { revokeAllSessions } from './session.service.js';
 import { sendPasswordResetEmail, isMailConfigured, MailNotConfigured, MailDeliveryError } from './mail/index.js';
-import { mailConfig } from './mail/mailConfig.js';
+import { mailConfig } from './mail/mailConfig.ts';
 import { error as logError } from '../utils/logger.js';
-import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../constants/audit.js';
+import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../constants/audit.ts';
 
 // ---------------------------------------------------------------------------
 // Constants

@@ -6,8 +6,8 @@
  * normalize input and collect errors in one pass.
  */
 
-import { NON_OWNER_ROLES } from '../constants/roles.js';
-import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../constants/audit.js';
+import { NON_OWNER_ROLES } from '../constants/roles.ts';
+import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../constants/audit.ts';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_EMAIL = 254;

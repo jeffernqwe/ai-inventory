@@ -20,7 +20,7 @@ import {
   toPublicSession,
 } from '../services/session.service.js';
 import ApiError from '../utils/ApiError.js';
-import env from '../config/env.js';
+import env from '../config/env.ts';
 
 /**
  * POST /api/auth/register

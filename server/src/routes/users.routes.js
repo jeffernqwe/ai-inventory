@@ -3,7 +3,7 @@ import { Router } from 'express';
 import requireAuth from '../middlewares/authenticate.js';
 import { requirePermission } from '../middlewares/authorize.js';
 import { usersController } from '../controllers/users.controller.js';
-import { PERMISSIONS } from '../constants/roles.js';
+import { PERMISSIONS } from '../constants/roles.ts';
 
 /**
  * User management (Phase 14A). OWNER/ADMIN only — every route requires

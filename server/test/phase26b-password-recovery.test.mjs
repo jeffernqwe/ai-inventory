@@ -47,7 +47,7 @@ import User from '../src/models/user.model.ts';
 import Session from '../src/models/session.model.ts';
 import Business from '../src/models/business.model.ts';
 import AuditLog from '../src/models/auditLog.model.ts';
-import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../src/constants/audit.js';
+import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../src/constants/audit.ts';
 import { validateChangePassword } from '../src/utils/validate.js';
 
 import {

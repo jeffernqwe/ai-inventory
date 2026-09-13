@@ -1,6 +1,6 @@
 import jwt from 'jsonwebtoken';
 
-import env from './env.js';
+import env from './env.ts';
 import ApiError from '../utils/ApiError.js';
 
 /**

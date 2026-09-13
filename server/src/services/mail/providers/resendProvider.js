@@ -24,8 +24,8 @@
  * error — only a message built from safe facts.
  */
 
-import { MailNotConfigured, MailDeliveryError } from '../mailErrors.js';
-import { mailConfig } from '../mailConfig.js';
+import { MailNotConfigured, MailDeliveryError } from '../mailErrors.ts';
+import { mailConfig } from '../mailConfig.ts';
 
 const RESEND_ENDPOINT = 'https://api.resend.com/emails';
 

@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import type { PipelineStage } from 'mongoose';
 
 import Product from '../models/product.model.ts';
 import Category from '../models/category.model.ts';
@@ -9,10 +10,89 @@ import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../constants/audit.ts';
 import { classifyStockStatus } from '../constants/stockStatus.ts';
 import { internalEan13Candidates } from '../utils/internalBarcode.ts';
 
-const { ObjectId } = mongoose.Types;
-const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/**
+ * A business/user id as it arrives here: the request layer stringifies it
+ * (`req.user.businessId`, `req.user.id`) while a caller holding an already-loaded
+ * document passes a real ObjectId. Neither form can be dropped, so both are
+ * accepted and `new ObjectId(...)` normalises them.
+ */
+type IdLike = string | mongoose.Types.ObjectId;
 
-function duplicateError(payload) {
+/**
+ * The catalog fields `toProductDTO` reads. Written against BOTH shapes it is
+ * handed — a hydrated document and a raw aggregation row — so the scalars that
+ * the DTO passes on to `classifyStockStatus` keep their real types (`null` is
+ * included because Mongoose types a non-required path as `T | null | undefined`)
+ * and the rest stay `unknown` rather than being asserted.
+ */
+type ProductDTOsource = {
+  _id?: unknown;
+  businessId?: unknown;
+  name?: unknown;
+  sku?: string | null;
+  barcode?: string | null;
+  description?: string | null;
+  categoryId?: unknown;
+  costPrice?: number | null;
+  sellingPrice?: number | null;
+  unit?: string | null;
+  minimumStock?: number | null;
+  imageUrl?: string | null;
+  status?: unknown;
+  createdAt?: unknown;
+  updatedAt?: unknown;
+};
+
+/** A populated `categoryId` as it appears on either a document or an aggregate row. */
+type CategoryRefSource = { _id?: unknown; name?: unknown; status?: unknown };
+
+/** A restock row: the DTO fields plus the availability the aggregation computed. */
+type ReorderItemSource = ProductDTOsource & { available?: number | null };
+
+/** The create/update payload the products controller has already validated. */
+type ProductWritePayload = {
+  name?: string;
+  sku?: string;
+  barcode?: string;
+  description?: string;
+  categoryId?: string;
+  costPrice?: number;
+  sellingPrice?: number;
+  unit?: string;
+  minimumStock?: number;
+  imageUrl?: string;
+};
+
+/**
+ * List filters. `skip`/`limit` are required rather than optional because
+ * `listWithStock` feeds them straight to `$skip`/`$limit` aggregation stages,
+ * which need a real number; every caller (the controller's `parsePagination`
+ * and the AI tools) supplies both.
+ */
+type ProductListFilters = {
+  q?: string;
+  status?: string;
+  categoryId?: string;
+  locationId?: string;
+  lowStock?: boolean;
+  outOfStock?: boolean;
+  skip: number;
+  limit: number;
+};
+
+/** Restock filters — `listReorder` defaults `status`/`skip`/`limit` itself. */
+type ProductReorderFilters = {
+  q?: string;
+  status?: string;
+  categoryId?: string;
+  skip?: number;
+  limit?: number;
+};
+
+const { ObjectId } = mongoose.Types;
+const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+function duplicateError(payload: { sku?: unknown; barcode?: unknown }) {
   const { sku, barcode } = payload;
   if (sku && barcode) {
     return new ApiError(
@@ -27,8 +107,12 @@ function duplicateError(payload) {
 }
 
 /** Map a Mongo duplicate-key error to a 409 with the offending field. */
-function mapDuplicateKey(err) {
-  const pattern = err?.keyPattern || err?.keyValue || {};
+function mapDuplicateKey(err: unknown) {
+  // `err?.keyPattern || err?.keyValue || {}`, narrowed: the optional access keeps
+  // the original `&&` short-circuit and the cast is type-only, so a driver error
+  // carrying a non-object `keyPattern` still reaches `in` exactly as it did.
+  const source = err as { keyPattern?: unknown; keyValue?: unknown } | null | undefined;
+  const pattern = (source?.keyPattern || source?.keyValue || {}) as Record<string, unknown>;
   if ('sku' in pattern) {
     return new ApiError(409, 'A product with this SKU already exists', 'PRODUCT_SKU_EXISTS');
   }
@@ -38,13 +122,16 @@ function mapDuplicateKey(err) {
   return err;
 }
 
-function isDuplicateKey(err) {
-  return err?.code === 11000;
+function isDuplicateKey(err: unknown) {
+  return (err as { code?: unknown } | null | undefined)?.code === 11000;
 }
 
-function toProductDTO(doc) {
-  const cat = doc.categoryId;
-  let category = null;
+function toProductDTO(doc: ProductDTOsource) {
+  // `categoryId` is either an ObjectId (unpopulated) or a hydrated category; the
+  // cast is the boundary that lets both branches read the fields they actually
+  // have. `String(cat)` still covers the ObjectId case, exactly as before.
+  const cat = doc.categoryId as CategoryRefSource | string | null | undefined;
+  let category: { id: string; name?: unknown; status?: unknown } | null = null;
   if (cat) {
     const isPopulated = typeof cat === 'object' && cat._id;
     category = isPopulated
@@ -76,7 +163,7 @@ function toProductDTO(doc) {
  * LOW_STOCK, §19). Shared by the /api/products/reorder endpoint and the
  * read-only AI restock tool so both surfaces return identical data.
  */
-function reorderItemPublic(doc) {
+function reorderItemPublic(doc: ReorderItemSource) {
   const base = toProductDTO(doc);
   return {
     id: base.id,
@@ -100,7 +187,10 @@ function reorderItemPublic(doc) {
  * matches. Shared by listWithStock and listReorder so every stock list uses the
  * same §19 math and can never disagree with the dashboard.
  */
-function availabilityStages(bizOid, locCond = []) {
+function availabilityStages(
+  bizOid: mongoose.Types.ObjectId,
+  locCond: Record<string, unknown>[] = []
+): PipelineStage[] {
   return [
     {
       $lookup: {
@@ -152,7 +242,7 @@ export const productService = {
   toProductDTO,
   reorderItemPublic,
 
-  async assertCategoryOfBusiness(businessId, categoryId) {
+  async assertCategoryOfBusiness(businessId: IdLike, categoryId: string | undefined) {
     if (!categoryId) return null;
     const category = await Category.findOne({ _id: categoryId, businessId });
     if (!category) {
@@ -161,7 +251,7 @@ export const productService = {
     return category;
   },
 
-  async create(businessId, userId, payload) {
+  async create(businessId: IdLike, userId: IdLike, payload: ProductWritePayload) {
     await this.assertCategoryOfBusiness(businessId, payload.categoryId);
 
     const data = {
@@ -204,7 +294,7 @@ export const productService = {
     return doc;
   },
 
-  async get(businessId, id) {
+  async get(businessId: IdLike, id: IdLike) {
     const doc = await Product.findOne({ _id: id, businessId }).populate('categoryId', 'name status');
     if (!doc) notFound('Product not found');
     return doc;
@@ -216,8 +306,11 @@ export const productService = {
    * malformed — used by the read-only AI getProduct tool so "not found" is
    * data the assistant can report instead of an internal error.
    */
-  async getByIdentifier(businessId, { id, sku, barcode } = {}) {
-    let by;
+  async getByIdentifier(
+    businessId: IdLike,
+    { id, sku, barcode }: { id?: unknown; sku?: unknown; barcode?: unknown } = {}
+  ) {
+    let by: Record<string, unknown>;
     if (id) {
       if (!/^[0-9a-fA-F]{24}$/.test(String(id))) return null;
       by = { _id: id };
@@ -237,13 +330,13 @@ export const productService = {
    * product; ARCHIVED products are returned with their status (never treated as
    * active — the caller sees `status`). 404 when the barcode is unknown here.
    */
-  async getByBarcode(businessId, barcode) {
+  async getByBarcode(businessId: IdLike, barcode: unknown) {
     const doc = await this.getByIdentifier(businessId, { barcode });
     if (!doc) notFound('Product not found');
     return doc;
   },
 
-  async update(businessId, id, userId, payload) {
+  async update(businessId: IdLike, id: IdLike, userId: IdLike, payload: ProductWritePayload) {
     const doc = await Product.findOne({ _id: id, businessId }).populate('categoryId', 'name status');
     if (!doc) notFound('Product not found');
 
@@ -251,11 +344,15 @@ export const productService = {
       await this.assertCategoryOfBusiness(businessId, payload.categoryId);
     }
 
-    const updatedFields = [];
-    const apply = (field, value) => {
+    const updatedFields: string[] = [];
+    // The document is written through here so the field name may be a variable.
+    // It IS the same object, so every assignment still runs the schema setters;
+    // only the static type is widened.
+    const target = doc as unknown as Record<string, unknown>;
+    const apply = (field: string, value: unknown) => {
       if (value === undefined) return;
-      if (value !== doc[field]) {
-        doc[field] = value;
+      if (value !== target[field]) {
+        target[field] = value;
         updatedFields.push(field);
       }
     };
@@ -271,7 +368,8 @@ export const productService = {
     apply('imageUrl', payload.imageUrl);
     // categoryId: apply only when explicitly provided
     if (payload.categoryId !== undefined && String(payload.categoryId) !== String(doc.categoryId?._id ?? doc.categoryId ?? '')) {
-      doc.categoryId = payload.categoryId || null;
+      // A validated ObjectId string; Mongoose casts it to ObjectId on assignment.
+      target.categoryId = payload.categoryId || null;
       updatedFields.push('categoryId');
     }
 
@@ -311,7 +409,7 @@ export const productService = {
    * is deterministic from the product's ObjectId and unique within the business;
    * the partial (businessId, barcode) index is the final authority.
    */
-  async generateBarcode(businessId, id, userId) {
+  async generateBarcode(businessId: IdLike, id: IdLike, userId: IdLike) {
     const doc = await this.get(businessId, id); // 404 when not in this business
     if (doc.status === 'ARCHIVED') {
       throw new ApiError(409, 'Archived products cannot receive a new barcode', 'PRODUCT_ARCHIVED');
@@ -387,7 +485,7 @@ export const productService = {
     return this.get(businessId, id);
   },
 
-  async setStatus(businessId, id, userId, status) {
+  async setStatus(businessId: IdLike, id: IdLike, userId: IdLike, status: string) {
     const doc = await Product.findOne({ _id: id, businessId });
     if (!doc) notFound('Product not found');
     if (doc.status === status) return doc;
@@ -406,8 +504,8 @@ export const productService = {
   },
 
   /** Plain catalog list + search (name/sku/barcode) + category/status filters. */
-  async listSimple(businessId, { q, status, categoryId, skip, limit }) {
-    const filter = { businessId };
+  async listSimple(businessId: IdLike, { q, status, categoryId, skip, limit }: ProductListFilters) {
+    const filter: Record<string, unknown> = { businessId };
     if (status === 'ACTIVE' || status === 'ARCHIVED') filter.status = status;
     if (categoryId) filter.categoryId = new ObjectId(categoryId);
     if (q) {
@@ -434,9 +532,13 @@ export const productService = {
    * outOfStock -> available <= 0
    * (SYSTEM_SPECIFICATION.md §19 — availability, never total quantity.)
    */
-  async listWithStock(businessId, { q, status, categoryId, locationId, lowStock, outOfStock, skip, limit }) {
+  async listWithStock(
+    businessId: IdLike,
+    { q, status, categoryId, locationId, lowStock, outOfStock, skip, limit }: ProductListFilters
+  ) {
     const bizOid = new ObjectId(businessId);
-    const match = { businessId: bizOid };
+    // Loose filter document: keys are added conditionally below.
+    const match: Record<string, unknown> = { businessId: bizOid };
     if (status === 'ACTIVE' || status === 'ARCHIVED') match.status = status;
     if (categoryId) match.categoryId = new ObjectId(categoryId);
     if (q) {
@@ -446,7 +548,7 @@ export const productService = {
 
     const locCond = locationId ? [{ $eq: ['$locationId', new ObjectId(locationId)] }] : [];
 
-    const pipeline = [
+    const pipeline: PipelineStage[] = [
       { $match: match },
       // Phase 20H: the sort has to sit ABOVE the first $lookup, not inside the
       // $facet below. A $facet sub-pipeline runs in the aggregation executor —
@@ -520,9 +622,13 @@ export const productService = {
    * sort before low-stock items so the worst-off products come first. Rows are
    * tagged OUT_OF_STOCK vs LOW_STOCK by reorderItemPublic.
    */
-  async listReorder(businessId, { q, status = 'ACTIVE', categoryId, skip = 0, limit = 20 }) {
+  async listReorder(
+    businessId: IdLike,
+    { q, status = 'ACTIVE', categoryId, skip = 0, limit = 20 }: ProductReorderFilters
+  ) {
     const bizOid = new ObjectId(businessId);
-    const match = { businessId: bizOid };
+    // Loose filter document: keys are added conditionally below.
+    const match: Record<string, unknown> = { businessId: bizOid };
     if (status === 'ACTIVE' || status === 'ARCHIVED') match.status = status;
     if (categoryId) match.categoryId = new ObjectId(categoryId);
     if (q) {
@@ -530,7 +636,7 @@ export const productService = {
       match.$or = [{ name: re }, { sku: re }, { barcode: re }];
     }
 
-    const pipeline = [
+    const pipeline: PipelineStage[] = [
       { $match: match },
       ...availabilityStages(bizOid),
       { $match: { $expr: { $lte: ['$available', '$minimumStock'] } } },
@@ -566,7 +672,7 @@ export const productService = {
   },
 
   /** Chooses the right listing strategy depending on whether stock filters are used. */
-  async list(businessId, query) {
+  async list(businessId: IdLike, query: ProductListFilters) {
     const { q, status, categoryId, locationId, lowStock, outOfStock, skip, limit } = query;
     const needsStock = Boolean(locationId || lowStock || outOfStock);
     if (needsStock) {

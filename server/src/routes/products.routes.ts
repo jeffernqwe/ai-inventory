@@ -2,7 +2,7 @@ import { Router } from 'express';
 
 import requireAuth from '../middlewares/authenticate.ts';
 import { requirePermission } from '../middlewares/authorize.ts';
-import productsController from '../controllers/products.controller.js';
+import productsController from '../controllers/products.controller.ts';
 import { PERMISSIONS } from '../constants/roles.ts';
 
 const router = Router();

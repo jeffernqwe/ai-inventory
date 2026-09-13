@@ -32,8 +32,8 @@ import assert from 'node:assert/strict';
 import Product from '../src/models/product.model.ts';
 import Inventory from '../src/models/inventory.model.ts';
 import InventoryTransaction from '../src/models/inventoryTransaction.model.ts';
-import productService from '../src/services/product.service.js';
-import productRoutes from '../src/routes/products.routes.js';
+import productService from '../src/services/product.service.ts';
+import productRoutes from '../src/routes/products.routes.ts';
 import { AUDIT_ACTIONS } from '../src/constants/audit.ts';
 import { unitSuite } from './testEnv.mjs';
 

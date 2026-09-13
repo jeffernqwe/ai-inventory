@@ -61,7 +61,7 @@ import {
 } from '../src/constants/roles.ts';
 import requireAuth from '../src/middlewares/authenticate.ts';
 import productsRoutes from '../src/routes/products.routes.ts';
-import suppliersRoutes from '../src/routes/suppliers.routes.js';
+import suppliersRoutes from '../src/routes/suppliers.routes.ts';
 import purchaseOrdersRoutes from '../src/routes/purchase-orders.routes.js';
 import inventoryRoutes from '../src/routes/inventory.routes.js';
 

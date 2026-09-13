@@ -1,8 +1,8 @@
 import mongoose from 'mongoose';
 
-import Product from '../models/product.model.js';
-import Inventory from '../models/inventory.model.js';
-import InventoryTransaction from '../models/inventoryTransaction.model.js';
+import Product from '../models/product.model.ts';
+import Inventory from '../models/inventory.model.ts';
+import InventoryTransaction from '../models/inventoryTransaction.model.ts';
 
 const { ObjectId } = mongoose.Types;
 const oid = (id) => new ObjectId(id);

@@ -32,9 +32,9 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
-import Product from '../src/models/product.model.js';
-import PurchaseOrder from '../src/models/purchaseOrder.model.js';
-import User from '../src/models/user.model.js';
+import Product from '../src/models/product.model.ts';
+import PurchaseOrder from '../src/models/purchaseOrder.model.ts';
+import User from '../src/models/user.model.ts';
 
 /** The sort-bearing shape every one of the three list endpoints needs. */
 const REQUIRED_KEY = { businessId: 1, createdAt: -1, _id: -1 };

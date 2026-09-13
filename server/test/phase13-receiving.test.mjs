@@ -50,10 +50,10 @@ import {
 } from './support.mjs';
 import { dbSuite } from './testEnv.mjs';
 import { ROLES } from '../src/constants/roles.js';
-import Inventory from '../src/models/inventory.model.js';
-import InventoryTransaction from '../src/models/inventoryTransaction.model.js';
-import AuditLog from '../src/models/auditLog.model.js';
-import PurchaseOrder from '../src/models/purchaseOrder.model.js';
+import Inventory from '../src/models/inventory.model.ts';
+import InventoryTransaction from '../src/models/inventoryTransaction.model.ts';
+import AuditLog from '../src/models/auditLog.model.ts';
+import PurchaseOrder from '../src/models/purchaseOrder.model.ts';
 import { purchaseOrderService, releaseClaim } from '../src/services/purchase-orders.service.js';
 
 const { ObjectId } = mongoose.Types;

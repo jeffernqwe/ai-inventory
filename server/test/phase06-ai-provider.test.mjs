@@ -14,7 +14,7 @@ import {
   disconnectDb,
 } from './support.mjs';
 import { dbSuite, unitSuite } from './testEnv.mjs';
-import Product from '../src/models/product.model.js';
+import Product from '../src/models/product.model.ts';
 import { ROLES } from '../src/constants/roles.js';
 import { AiNotConfigured, AiProviderError } from '../src/services/ai/aiErrors.js';
 import { selectProvider, registeredProviders } from '../src/services/ai/providers/index.js';

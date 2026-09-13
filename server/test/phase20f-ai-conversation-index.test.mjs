@@ -24,7 +24,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
-import AIConversation from '../src/models/aiConversation.model.js';
+import AIConversation from '../src/models/aiConversation.model.ts';
 
 /** The index the conversations list must be able to use. */
 const REQUIRED_KEY = { businessId: 1, userId: 1, updatedAt: -1, _id: -1 };

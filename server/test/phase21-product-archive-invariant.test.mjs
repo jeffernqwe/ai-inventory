@@ -29,9 +29,9 @@
 import { it } from 'node:test';
 import assert from 'node:assert/strict';
 
-import Product from '../src/models/product.model.js';
-import Inventory from '../src/models/inventory.model.js';
-import InventoryTransaction from '../src/models/inventoryTransaction.model.js';
+import Product from '../src/models/product.model.ts';
+import Inventory from '../src/models/inventory.model.ts';
+import InventoryTransaction from '../src/models/inventoryTransaction.model.ts';
 import productService from '../src/services/product.service.js';
 import productRoutes from '../src/routes/products.routes.js';
 import { AUDIT_ACTIONS } from '../src/constants/audit.js';

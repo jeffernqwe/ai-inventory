@@ -1,6 +1,6 @@
 import bcrypt from 'bcryptjs';
 
-import User from '../models/user.model.js';
+import User from '../models/user.model.ts';
 import ApiError from '../utils/ApiError.js';
 import { recordAudit } from './audit.service.js';
 import { notFound } from '../utils/errors.js';

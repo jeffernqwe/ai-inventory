@@ -10,9 +10,9 @@ import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 
 import app from '../src/app.js';
-import Business from '../src/models/business.model.js';
-import User from '../src/models/user.model.js';
-import Session from '../src/models/session.model.js';
+import Business from '../src/models/business.model.ts';
+import User from '../src/models/user.model.ts';
+import Session from '../src/models/session.model.ts';
 import { signAccessToken, decodeAccessToken } from '../src/config/jwt.js';
 import { newSessionId } from '../src/services/session.service.js';
 import { ensureDb, disconnectDb } from './helpers.mjs';

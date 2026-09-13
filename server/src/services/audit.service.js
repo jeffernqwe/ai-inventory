@@ -1,4 +1,4 @@
-import AuditLog from '../models/auditLog.model.js';
+import AuditLog from '../models/auditLog.model.ts';
 
 const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 

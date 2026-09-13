@@ -1,7 +1,7 @@
 import { parsePagination, pageResult } from '../utils/pagination.js';
 import { isObjectId, validatePurchaseOrder, validateReceive, validatePurchaseOrderList } from '../utils/validate.js';
 import { throwValidation, invalidId } from '../utils/errors.js';
-import { PURCHASE_ORDER_STATUSES } from '../models/purchaseOrder.model.js';
+import { PURCHASE_ORDER_STATUSES } from '../models/purchaseOrder.model.ts';
 import { purchaseOrderService } from '../services/purchase-orders.service.js';
 
 /**

@@ -1,6 +1,6 @@
-import Category from '../models/category.model.js';
-import Location from '../models/location.model.js';
-import Supplier from '../models/supplier.model.js';
+import Category from '../models/category.model.ts';
+import Location from '../models/location.model.ts';
+import Supplier from '../models/supplier.model.ts';
 import { recordAudit } from './audit.service.js';
 import { notFound } from '../utils/errors.js';
 import {

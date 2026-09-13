@@ -18,14 +18,14 @@ import assert from 'node:assert/strict';
 
 import { ensureDb, disconnectDb } from './helpers.mjs';
 import { dbSuite, unitSuite } from './testEnv.mjs';
-import Business from '../src/models/business.model.js';
+import Business from '../src/models/business.model.ts';
 import ApiError from '../src/utils/ApiError.js';
 import {
   DEFAULT_PLAN_CODE,
   PLANS,
   PLAN_FEATURES,
   resolvePlan,
-} from '../src/constants/plans.js';
+} from '../src/constants/plans.ts';
 import {
   decideFeature,
   getBusinessPlan,

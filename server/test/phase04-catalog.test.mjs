@@ -16,7 +16,7 @@ import {
   disconnectDb,
 } from './support.mjs';
 import { dbSuite } from './testEnv.mjs';
-import AuditLog from '../src/models/auditLog.model.js';
+import AuditLog from '../src/models/auditLog.model.ts';
 import { ROLES } from '../src/constants/roles.js';
 
 const { dbOk, baseUrl, server } = await startServer();

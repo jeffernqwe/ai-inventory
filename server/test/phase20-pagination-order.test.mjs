@@ -50,15 +50,15 @@ import {
   disconnectDb,
 } from './support.mjs';
 import { dbSuite } from './testEnv.mjs';
-import Product from '../src/models/product.model.js';
-import Inventory from '../src/models/inventory.model.js';
-import PurchaseOrder from '../src/models/purchaseOrder.model.js';
-import Category from '../src/models/category.model.js';
-import Location from '../src/models/location.model.js';
-import Supplier from '../src/models/supplier.model.js';
-import User from '../src/models/user.model.js';
-import AIConversation from '../src/models/aiConversation.model.js';
-import AIMessage from '../src/models/aiMessage.model.js';
+import Product from '../src/models/product.model.ts';
+import Inventory from '../src/models/inventory.model.ts';
+import PurchaseOrder from '../src/models/purchaseOrder.model.ts';
+import Category from '../src/models/category.model.ts';
+import Location from '../src/models/location.model.ts';
+import Supplier from '../src/models/supplier.model.ts';
+import User from '../src/models/user.model.ts';
+import AIConversation from '../src/models/aiConversation.model.ts';
+import AIMessage from '../src/models/aiMessage.model.ts';
 
 const { dbOk, baseUrl, server } = await startServer();
 const api = makeApi(baseUrl);

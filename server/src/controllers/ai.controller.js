@@ -8,7 +8,7 @@
  * secrets ever stored.
  */
 
-import { AIConversation, AIMessage } from '../models/index.js';
+import { AIConversation, AIMessage } from '../models/index.ts';
 import { parsePagination, pageResult } from '../utils/pagination.js';
 import { optionalObjectId, requiredString, isObjectId } from '../utils/validate.js';
 import { invalidId, notFound, throwValidation } from '../utils/errors.js';

@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 
-import User from '../models/user.model.js';
+import User from '../models/user.model.ts';
 import ApiError from '../utils/ApiError.js';
 import { verifyAccessToken } from '../config/jwt.js';
 import { assertActiveBusiness } from '../services/business.service.js';

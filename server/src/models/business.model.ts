@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { DEFAULT_PLAN_CODE } from '../constants/plans.js';
+import { DEFAULT_PLAN_CODE } from '../constants/plans.ts';
 
 const { Schema } = mongoose;
 

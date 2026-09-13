@@ -15,7 +15,7 @@
  *   * per-feature decisions are fail-closed (see `decideFeature`); only the
  *     documented FOUNDATION default is lenient, and only for unassignable codes.
  */
-import Business from '../models/business.model.js';
+import Business from '../models/business.model.ts';
 import ApiError from '../utils/ApiError.js';
 import { assertActiveBusiness } from './business.service.js';
 import {
@@ -23,7 +23,7 @@ import {
   PLAN_FEATURES,
   FEATURE_LABELS,
   resolvePlan,
-} from '../constants/plans.js';
+} from '../constants/plans.ts';
 
 export const PLAN_FEATURE_NOT_INCLUDED_CODE = 'PLAN_FEATURE_NOT_INCLUDED';
 export const PLAN_LIMIT_REACHED_CODE = 'PLAN_LIMIT_REACHED';

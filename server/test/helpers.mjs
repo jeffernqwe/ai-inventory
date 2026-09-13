@@ -3,7 +3,7 @@ import 'dotenv/config';
 
 import mongoose from 'mongoose';
 import { connectDatabase } from '../src/config/db.js';
-import { models } from '../src/models/index.js';
+import { models } from '../src/models/index.ts';
 
 let _dbOk = false;
 let _attempted = false;

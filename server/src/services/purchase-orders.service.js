@@ -1,10 +1,10 @@
 import mongoose from 'mongoose';
 
-import PurchaseOrder from '../models/purchaseOrder.model.js';
-import Supplier from '../models/supplier.model.js';
-import Inventory from '../models/inventory.model.js';
-import InventoryTransaction from '../models/inventoryTransaction.model.js';
-import AuditLog from '../models/auditLog.model.js';
+import PurchaseOrder from '../models/purchaseOrder.model.ts';
+import Supplier from '../models/supplier.model.ts';
+import Inventory from '../models/inventory.model.ts';
+import InventoryTransaction from '../models/inventoryTransaction.model.ts';
+import AuditLog from '../models/auditLog.model.ts';
 import { inventoryService } from './inventory.service.js';
 import ApiError from '../utils/ApiError.js';
 import { recordAudit } from './audit.service.js';

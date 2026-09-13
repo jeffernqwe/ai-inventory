@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 
-import InventoryTransaction from '../models/inventoryTransaction.model.js';
+import InventoryTransaction from '../models/inventoryTransaction.model.ts';
 import { transactionPublic } from './inventory.service.js';
 
 const { ObjectId } = mongoose.Types;

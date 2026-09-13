@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 
-import Product from '../models/product.model.js';
-import Category from '../models/category.model.js';
+import Product from '../models/product.model.ts';
+import Category from '../models/category.model.ts';
 import ApiError from '../utils/ApiError.js';
 import { recordAudit } from './audit.service.js';
 import { notFound } from '../utils/errors.js';

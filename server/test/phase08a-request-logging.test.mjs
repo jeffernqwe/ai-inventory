@@ -27,9 +27,9 @@ import { issueSessionToken } from './support.mjs';
 import { dbSuite, unitSuite } from './testEnv.mjs';
 import { createApp } from '../src/app.js';
 import errorHandler from '../src/middlewares/errorHandler.js';
-import Business from '../src/models/business.model.js';
-import User from '../src/models/user.model.js';
-import Session from '../src/models/session.model.js';
+import Business from '../src/models/business.model.ts';
+import User from '../src/models/user.model.ts';
+import Session from '../src/models/session.model.ts';
 
 const dbOk = await ensureDb();
 

@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 
 import mongoose from 'mongoose';
 
-import Session from '../models/session.model.js';
+import Session from '../models/session.model.ts';
 import ApiError from '../utils/ApiError.js';
 import { decodeAccessToken } from '../config/jwt.js';
 import { recordAudit } from './audit.service.js';

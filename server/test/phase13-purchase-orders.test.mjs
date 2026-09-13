@@ -27,7 +27,7 @@ import {
 } from './support.mjs';
 import { dbSuite } from './testEnv.mjs';
 import { ROLES } from '../src/constants/roles.js';
-import InventoryTransaction from '../src/models/inventoryTransaction.model.js';
+import InventoryTransaction from '../src/models/inventoryTransaction.model.ts';
 
 const { ObjectId } = mongoose.Types;
 

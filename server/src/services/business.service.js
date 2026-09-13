@@ -1,4 +1,4 @@
-import Business from '../models/business.model.js';
+import Business from '../models/business.model.ts';
 import ApiError from '../utils/ApiError.js';
 
 export const BUSINESS_NOT_ACTIVE_CODE = 'BUSINESS_NOT_ACTIVE';

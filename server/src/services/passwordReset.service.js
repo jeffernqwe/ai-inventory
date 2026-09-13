@@ -51,8 +51,8 @@ import crypto from 'node:crypto';
 
 import bcrypt from 'bcryptjs';
 
-import PasswordResetToken from '../models/passwordResetToken.model.js';
-import User from '../models/user.model.js';
+import PasswordResetToken from '../models/passwordResetToken.model.ts';
+import User from '../models/user.model.ts';
 import { normalizeEmail } from '../utils/validate.js';
 import { recordAudit } from './audit.service.js';
 import { assertActiveBusiness } from './business.service.js';

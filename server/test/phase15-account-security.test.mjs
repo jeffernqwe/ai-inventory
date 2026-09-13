@@ -39,7 +39,7 @@ import {
 } from './support.mjs';
 import { dbSuite } from './testEnv.mjs';
 import { verifyAccessToken } from '../src/config/jwt.js';
-import User from '../src/models/user.model.js';
+import User from '../src/models/user.model.ts';
 
 const { dbOk, baseUrl, server } = await startServer();
 const api = makeApi(baseUrl);

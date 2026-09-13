@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs';
 
-import Business from '../models/business.model.js';
-import User from '../models/user.model.js';
+import Business from '../models/business.model.ts';
+import User from '../models/user.model.ts';
 import ApiError from '../utils/ApiError.js';
 import { signAccessToken } from '../config/jwt.js';
 import { normalizeEmail } from '../utils/validate.js';

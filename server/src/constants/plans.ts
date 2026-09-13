@@ -63,12 +63,12 @@ export const PLANS = Object.freeze({
  * business document — must never lock a tenant out of features it already has.
  * Only the default (unlimited) plan is used for that fallback.
  */
-export function resolvePlan(planCode) {
+export function resolvePlan(planCode: unknown) {
   if (
     typeof planCode === 'string' &&
     Object.prototype.hasOwnProperty.call(PLANS, planCode)
   ) {
-    return PLANS[planCode];
+    return PLANS[planCode as keyof typeof PLANS];
   }
   return PLANS[DEFAULT_PLAN_CODE];
 }

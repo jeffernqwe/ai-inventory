@@ -42,11 +42,11 @@ import {
 import { dbSuite, unitSuite } from './testEnv.mjs';
 import { SOURCE_EXTENSION_PATTERN, readSource, sourceModuleName } from './sourceFiles.mjs';
 
-import PasswordResetToken from '../src/models/passwordResetToken.model.js';
-import User from '../src/models/user.model.js';
-import Session from '../src/models/session.model.js';
-import Business from '../src/models/business.model.js';
-import AuditLog from '../src/models/auditLog.model.js';
+import PasswordResetToken from '../src/models/passwordResetToken.model.ts';
+import User from '../src/models/user.model.ts';
+import Session from '../src/models/session.model.ts';
+import Business from '../src/models/business.model.ts';
+import AuditLog from '../src/models/auditLog.model.ts';
 import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../src/constants/audit.js';
 import { validateChangePassword } from '../src/utils/validate.js';
 

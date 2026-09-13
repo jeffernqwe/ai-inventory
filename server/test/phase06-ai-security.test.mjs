@@ -19,7 +19,7 @@ import {
 } from './support.mjs';
 import { dbSuite } from './testEnv.mjs';
 import { ROLES } from '../src/constants/roles.js';
-import AIConversation from '../src/models/aiConversation.model.js';
+import AIConversation from '../src/models/aiConversation.model.ts';
 import {
   registerFakeProvider,
   setFakeScenario,

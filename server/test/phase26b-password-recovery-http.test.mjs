@@ -60,11 +60,11 @@ import notFound from '../src/middlewares/notFound.js';
 import errorHandler from '../src/middlewares/errorHandler.js';
 import requireAuth from '../src/middlewares/authenticate.js';
 
-import User from '../src/models/user.model.js';
-import Business from '../src/models/business.model.js';
-import Session from '../src/models/session.model.js';
-import PasswordResetToken from '../src/models/passwordResetToken.model.js';
-import AuditLog from '../src/models/auditLog.model.js';
+import User from '../src/models/user.model.ts';
+import Business from '../src/models/business.model.ts';
+import Session from '../src/models/session.model.ts';
+import PasswordResetToken from '../src/models/passwordResetToken.model.ts';
+import AuditLog from '../src/models/auditLog.model.ts';
 
 import {
   validateForgotPassword,

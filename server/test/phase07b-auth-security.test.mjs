@@ -28,10 +28,10 @@ import mongoose from 'mongoose';
 import { ensureDb, disconnectDb } from './helpers.mjs';
 import { issueSessionToken } from './support.mjs';
 import { dbSuite } from './testEnv.mjs';
-import Business from '../src/models/business.model.js';
-import User from '../src/models/user.model.js';
-import Product from '../src/models/product.model.js';
-import Session from '../src/models/session.model.js';
+import Business from '../src/models/business.model.ts';
+import User from '../src/models/user.model.ts';
+import Product from '../src/models/product.model.ts';
+import Session from '../src/models/session.model.ts';
 
 import { createAuthRouter } from '../src/routes/auth.routes.js';
 import categoryRoutes from '../src/routes/categories.routes.js';

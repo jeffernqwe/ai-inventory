@@ -4,7 +4,7 @@ import type { PipelineStage } from 'mongoose';
 import Product from '../models/product.model.ts';
 import Category from '../models/category.model.ts';
 import ApiError from '../utils/ApiError.ts';
-import { recordAudit } from './audit.service.js';
+import { recordAudit } from './audit.service.ts';
 import { notFound } from '../utils/errors.ts';
 import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../constants/audit.ts';
 import { classifyStockStatus } from '../constants/stockStatus.ts';

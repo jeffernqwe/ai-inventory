@@ -34,8 +34,8 @@ import Product from '../src/models/product.model.ts';
 import Session from '../src/models/session.model.ts';
 
 import { createAuthRouter } from '../src/routes/auth.routes.js';
-import categoryRoutes from '../src/routes/categories.routes.js';
-import locationRoutes from '../src/routes/locations.routes.js';
+import categoryRoutes from '../src/routes/categories.routes.ts';
+import locationRoutes from '../src/routes/locations.routes.ts';
 import productRoutes from '../src/routes/products.routes.ts';
 import notFound from '../src/middlewares/notFound.ts';
 import errorHandler from '../src/middlewares/errorHandler.ts';

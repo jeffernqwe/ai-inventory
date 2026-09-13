@@ -25,8 +25,6 @@
 
 import 'dotenv/config';
 
-import { readFileSync } from 'node:fs';
-
 import { it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import bcrypt from 'bcryptjs';
@@ -42,6 +40,7 @@ import {
   disconnectDb,
 } from './support.mjs';
 import { dbSuite, unitSuite } from './testEnv.mjs';
+import { SOURCE_EXTENSION_PATTERN, readSource, sourceModuleName } from './sourceFiles.mjs';
 
 import PasswordResetToken from '../src/models/passwordResetToken.model.js';
 import User from '../src/models/user.model.js';
@@ -377,13 +376,18 @@ unitSuite('Phase 26B-2 — token helpers, password policy and domain errors', ()
     // A structural guard, because the transport boundary is easy to pierce by
     // accident: importing the provider registry or the Resend provider directly
     // would let a transport concern — or an API key — into the recovery service.
-    const source = readFileSync(
-      new URL('../src/services/passwordReset.service.js', import.meta.url),
-      'utf8',
-    );
+    const source = readSource(new URL('../src/services/passwordReset.service.js', import.meta.url));
 
-    assert.match(source, /from '\.\/mail\/index\.js'/, 'the mail service boundary is imported');
-    assert.match(source, /from '\.\/mail\/mailConfig\.js'/, 'the reset URL comes from mail config');
+    assert.match(
+      source,
+      new RegExp(`from '\\./mail/index${SOURCE_EXTENSION_PATTERN}'`),
+      'the mail service boundary is imported'
+    );
+    assert.match(
+      source,
+      new RegExp(`from '\\./mail/mailConfig${SOURCE_EXTENSION_PATTERN}'`),
+      'the reset URL comes from mail config'
+    );
 
     assert.equal(source.includes('providers/'), false, 'no direct provider access');
     assert.equal(source.includes('resendProvider'), false);
@@ -392,10 +396,13 @@ unitSuite('Phase 26B-2 — token helpers, password policy and domain errors', ()
 
     // Model access stays inside its own services: the token store and User, and
     // nothing else. Sessions are revoked through session.service, not directly.
-    const modelImports = [...source.matchAll(/from '\.\.\/models\/([^']+)'/g)].map((m) => m[1]);
+    // The assertion pins WHICH modules are imported, not the extension they carry.
+    const modelImports = [...source.matchAll(/from '\.\.\/models\/([^']+)'/g)].map((m) =>
+      sourceModuleName(m[1])
+    );
     assert.deepEqual(modelImports.sort(), [
-      'passwordResetToken.model.js',
-      'user.model.js',
+      'passwordResetToken.model',
+      'user.model',
     ]);
 
     // The token is never logged, and no failure path un-spends it.
@@ -1231,7 +1238,7 @@ dbSuite('Phase 26B-2 — password recovery over a real database', dbOk, () => {
     // so the guard is inverted rather than deleted, and it still fails if a
     // THIRD recovery surface appears, if either route stops being public, or if
     // the routes get mounted a second time through another router.
-    const authRoutes = readFileSync(new URL('../src/routes/auth.routes.js', import.meta.url), 'utf8');
+    const authRoutes = readSource(new URL('../src/routes/auth.routes.js', import.meta.url));
 
     // Exactly the two recovery paths are registered, and nothing adjacent.
     const declared = [...authRoutes.matchAll(/router\.(get|post|patch|put|delete)\(\s*'([^']+)'/g)]
@@ -1259,7 +1266,7 @@ dbSuite('Phase 26B-2 — password recovery over a real database', dbOk, () => {
 
     // app.js mounts the auth router once and no second recovery router. Phase
     // 26B-3 added no mount of its own: /api/auth was already there.
-    const appSource = readFileSync(new URL('../src/app.js', import.meta.url), 'utf8');
+    const appSource = readSource(new URL('../src/app.js', import.meta.url));
     assert.equal(
       (appSource.match(/createAuthRouter\(/g) || []).length,
       1,

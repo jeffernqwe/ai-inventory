@@ -38,7 +38,6 @@ import express from 'express';
 
 import { it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import bcrypt from 'bcryptjs';
 import mongoose from 'mongoose';
 
@@ -53,6 +52,7 @@ import {
   disconnectDb,
 } from './support.mjs';
 import { dbSuite, unitSuite } from './testEnv.mjs';
+import { readSource } from './sourceFiles.mjs';
 
 import { createApp } from '../src/app.js';
 import { createAuthRouter } from '../src/routes/auth.routes.js';
@@ -408,10 +408,7 @@ unitSuite('Phase 26B-3 — recovery payloads and rate limiters (no database)', (
     // Comments are stripped first, and that is not a convenience: the function's
     // docstring explains this very rule in prose and therefore names the field
     // while doing so. Only CODE can forward it.
-    const controller = readFileSync(
-      new URL('../src/controllers/passwordReset.controller.js', import.meta.url),
-      'utf8'
-    );
+    const controller = readSource(new URL('../src/controllers/passwordReset.controller.js', import.meta.url));
     const code = controller.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
     // Positive control for the strip: prose that names the field survives in the
     // raw source, so a strip that silently ate the whole file would show up here
@@ -1578,14 +1575,8 @@ dbSuite('Phase 26B-3 — password recovery over HTTP and a real database', dbOk,
     // the behaviour, this pins the mechanism so a later refactor cannot quietly
     // restore `await` and reintroduce the transport term while the behaviour
     // tests continue to pass on a fast local fake.
-    const service = readFileSync(
-      new URL('../src/services/passwordReset.service.js', import.meta.url),
-      'utf8'
-    );
-    const controller = readFileSync(
-      new URL('../src/controllers/passwordReset.controller.js', import.meta.url),
-      'utf8'
-    );
+    const service = readSource(new URL('../src/services/passwordReset.service.js', import.meta.url));
+    const controller = readSource(new URL('../src/controllers/passwordReset.controller.js', import.meta.url));
 
     assert.equal(
       /await\s+sendPasswordResetEmail\s*\(/.test(service),

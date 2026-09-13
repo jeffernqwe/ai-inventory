@@ -73,6 +73,14 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { unitSuite } from './testEnv.mjs';
+import {
+  COMPONENT_EXTENSIONS,
+  SOURCE_EXTENSIONS,
+  listSourceFiles,
+  readSource,
+  resolveSourcePath,
+  walkSourceFiles,
+} from './sourceFiles.mjs';
 import { PERMISSIONS, ROLES, ROLE_PERMISSIONS, ROLE_VALUES } from '../src/constants/roles.js';
 import requireAuth from '../src/middlewares/authenticate.js';
 
@@ -85,27 +93,21 @@ const SRC_DIR = fileURLToPath(new URL('../src/', import.meta.url));
 const ROUTES_DIR = path.join(SRC_DIR, 'routes');
 const MOBILE_DIR = path.join(REPO_ROOT, 'mobile');
 
-const readSrc = (relPath) => fs.readFileSync(new URL(`../src/${relPath}`, import.meta.url), 'utf8');
+const readSrc = (relPath) => readSource(new URL(`../src/${relPath}`, import.meta.url));
 
-/** Recursively list files under `dir` with a matching extension, skipping `skipDirs`. */
-function walk(dir, extension, skipDirs = new Set()) {
-  const out = [];
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (entry.isDirectory()) {
-      if (skipDirs.has(entry.name)) continue;
-      out.push(...walk(path.join(dir, entry.name), extension, skipDirs));
-    } else if (entry.name.endsWith(extension)) {
-      out.push(path.join(dir, entry.name));
-    }
-  }
-  return out;
-}
+/**
+ * Directories under `mobile/` that are generated or ignored rather than application
+ * source: dependencies, the Expo export output, Expo's own cache/types, and the local
+ * smoke-test scratch directory. Skipping them keeps the RBAC-mirror and client-error-code
+ * scans reading the app, not a build artifact or a generated `.d.ts`.
+ */
+const MOBILE_SKIP_DIRS = new Set(['node_modules', 'dist', '.expo', '.smoke']);
 
 // ---------------------------------------------------------------------------
 // 23A — the cross-layer RBAC mirror
 // ---------------------------------------------------------------------------
 
-const MIRROR_PATH = path.join(MOBILE_DIR, 'lib', 'permissions.js');
+const MIRROR_PATH = resolveSourcePath(path.join(MOBILE_DIR, 'lib', 'permissions.js'));
 const mirror = await import(pathToFileURL(MIRROR_PATH).href);
 
 /**
@@ -458,15 +460,18 @@ function unmatchedClientCodes(serverCodes, clientCodes) {
   return [...clientCodes.keys()].filter((code) => !serverCodes.has(code)).sort();
 }
 
-const SERVER_SOURCES = walk(SRC_DIR, '.js').map((file) => ({
+const SERVER_SOURCES = walkSourceFiles(SRC_DIR, { extensions: SOURCE_EXTENSIONS }).map((file) => ({
   file: path.relative(SRC_DIR, file).split(path.sep).join('/'),
   text: fs.readFileSync(file, 'utf8'),
 }));
 
-const MOBILE_SOURCES = walk(MOBILE_DIR, '.jsx', new Set(['node_modules']))
+const MOBILE_SOURCES = walkSourceFiles(MOBILE_DIR, {
+  extensions: COMPONENT_EXTENSIONS,
+  skipDirs: MOBILE_SKIP_DIRS,
+})
   .map((file) => ({ file, text: fs.readFileSync(file, 'utf8') }))
   .concat(
-    walk(MOBILE_DIR, '.js', new Set(['node_modules'])).map((file) => ({
+    walkSourceFiles(MOBILE_DIR, { extensions: SOURCE_EXTENSIONS, skipDirs: MOBILE_SKIP_DIRS }).map((file) => ({
       file,
       text: fs.readFileSync(file, 'utf8'),
     }))
@@ -642,11 +647,8 @@ unitSuite('Phase 23 — authorization contract completion', () => {
         'requireRole is expected to remain exported from middlewares/authorize.js'
       );
 
-      const offenders = fs
-        .readdirSync(ROUTES_DIR)
-        .filter((f) => f.endsWith('.js'))
-        .filter((f) => fs.readFileSync(path.join(ROUTES_DIR, f), 'utf8').includes('requireRole'))
-        .sort();
+      const offenders = listSourceFiles(ROUTES_DIR)
+        .filter((f) => fs.readFileSync(path.join(ROUTES_DIR, f), 'utf8').includes('requireRole'));
       assert.deepEqual(
         offenders,
         [],

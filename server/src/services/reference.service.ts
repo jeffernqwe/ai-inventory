@@ -3,7 +3,7 @@ import type { HydratedDocument, Model, QueryFilter } from 'mongoose';
 import Category from '../models/category.model.ts';
 import Location from '../models/location.model.ts';
 import Supplier from '../models/supplier.model.ts';
-import { recordAudit } from './audit.service.js';
+import { recordAudit } from './audit.service.ts';
 import { notFound } from '../utils/errors.ts';
 import {
   AUDIT_ACTIONS,

@@ -74,6 +74,7 @@ import {
   clearSentMessages,
   lastSentMessage,
   fakeMailFailure,
+  awaitPendingMail,
 } from './fakes/mailProvider.mjs';
 
 const { dbOk, baseUrl, server } = await startServer();
@@ -643,25 +644,100 @@ dbSuite('Phase 26B-2 — password recovery over a real database', dbOk, () => {
     assert.equal(await PasswordResetToken.countDocuments({ userId: user._id }), 0);
   });
 
-  it('11. a delivery failure surfaces as MAIL_UNAVAILABLE and leaves the issued token in place', async () => {
+  it('11. a delivery failure is logged on the DETACHED path and leaves the issued token in place', async () => {
     const user = await makeUser();
     clearSentMessages();
-    setFakeMailScenario(fakeMailFailure('The email provider is unavailable.'));
-    let err;
+
+    // ★ Phase 28 B1. This case previously asserted the OPPOSITE contract: that
+    //   `requestPasswordReset` REJECTED with a MailDeliveryError. That rejection
+    //   was the transport failure sitting on the request path, so it is exactly
+    //   what B1 removes — the service now resolves and handles the rejection in
+    //   its own `.catch`. The test is therefore rewritten to the new contract
+    //   rather than the production code being restored to satisfy the old one.
+    //
+    //   What has NOT changed is the error the transport raises, and that is still
+    //   asserted below exactly as before: the instance is captured through the
+    //   scenario (the same object the service's `.catch` receives), so the
+    //   namespaced-code claim is pinned rather than dropped.
+    const reason = 'The email provider is unavailable.';
+    let raised;
+    const failing = fakeMailFailure(reason);
+    setFakeMailScenario((message) => {
+      try {
+        return failing(message);
+      } catch (err) {
+        raised = err;
+        throw err;
+      }
+    });
+
+    const records = [];
+    const realError = console.error;
+    const rejections = [];
+    const onRejection = (err) => rejections.push(err);
+    console.error = (line) => {
+      records.push(String(line));
+    };
+    process.on('unhandledRejection', onRejection);
+
+    let result;
+    let rejection = null;
     try {
-      err = await captureError(() => requestPasswordReset({ email: user.email }));
+      result = await requestPasswordReset({ email: user.email });
+
+      // ★ Deterministic wait, not a sleep: the failure lands on the detached
+      //   path, so its log record is only guaranteed to exist once that path has
+      //   settled. The extra macrotask turns let an unhandled rejection be
+      //   reported while the listener is still installed.
+      await awaitPendingMail();
+      for (let i = 0; i < 3; i += 1) await new Promise((resolve) => setImmediate(resolve));
+    } catch (err) {
+      rejection = err;
     } finally {
+      console.error = realError;
       setFakeMailScenario(null);
+      process.off('unhandledRejection', onRejection);
     }
 
+    // ★ THE NEW CONTRACT: the request resolves. Anything thrown here would be the
+    //   pre-B1 behaviour returning, i.e. an outbound send back on the request path.
+    assert.equal(
+      rejection,
+      null,
+      `the request must resolve — delivery is detached: ${rejection && rejection.message}`
+    );
+    // And it still returns nothing a caller could reflect.
+    assert.equal(result, undefined, 'every non-error outcome stays indistinguishable');
+
     // The transport failure keeps its own namespaced code — never an auth code.
-    assert.ok(err instanceof MailDeliveryError);
-    assert.equal(err.code, 'MAIL_UNAVAILABLE');
-    assert.match(err.code, /^MAIL_/);
+    assert.ok(raised instanceof MailDeliveryError);
+    assert.equal(raised.code, 'MAIL_UNAVAILABLE');
+    assert.match(raised.code, /^MAIL_/);
+
+    // The operator-facing signal that replaced the thrown error: one record, the
+    // real reason, and the standard shape. The classification is what preserves
+    // the distinction from a misconfiguration (`mail_not_configured`).
+    const failures = records
+      .map((line) => {
+        try {
+          return JSON.parse(line);
+        } catch {
+          return null;
+        }
+      })
+      .filter((record) => record && record.type === 'mail_delivery_failure');
+    assert.equal(failures.length, 1, `exactly one failure record, got ${JSON.stringify(records)}`);
+    assert.ok(failures[0].message.includes(reason), 'the operator gets the real reason');
+    assert.ok(failures[0].ts, 'and the standard record shape');
+
+    // The detached promise had a handler: a lost one would have surfaced here.
+    assert.deepEqual(rejections, [], 'a background failure must never go unhandled');
 
     // The token WAS issued and IS audited: the attempt happened and a credential
     // exists. Its meaning is "a reset was requested and a single-use token was
-    // issued" — true whether or not the transport then succeeded.
+    // issued" — true whether or not the transport then succeeded. UNCHANGED by
+    // B1, and the reason the detach is safe: it happens strictly AFTER these
+    // writes, so the durable state is already committed when the send starts.
     const rows = await tokensOf(user._id);
     assert.equal(rows.length, 1);
     assert.equal(rows[0].usedAt, null);

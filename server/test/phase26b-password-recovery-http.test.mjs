@@ -82,6 +82,9 @@ import {
   clearSentMessages,
   lastSentMessage,
   fakeMailFailure,
+  awaitPendingMail,
+  pendingMailCount,
+  fakeMailGate,
 } from './fakes/mailProvider.mjs';
 
 const { dbOk, baseUrl, server } = await startServer();
@@ -673,6 +676,13 @@ dbSuite('Phase 26B-3 — password recovery over HTTP and a real database', dbOk,
     assert.deepEqual(res.json, { message: FORGOT_ACCEPTED }, 'the body is the constant, and nothing else');
     assert.deepEqual(Object.keys(res.json), ['message']);
 
+    // ★ Phase 28 B1: delivery is DETACHED, so the message's outcome is awaited
+    //   explicitly rather than assumed to have settled with the response. The
+    //   attempt itself is still recorded synchronously, so `sentMessages()` would
+    //   already show it — this makes the result deterministic as well, instead of
+    //   restoring synchronous behaviour in production to suit the test.
+    await awaitPendingMail();
+
     const messages = sentMessages();
     assert.equal(messages.length, 1, 'exactly one email');
     assert.equal(messages[0].to, user.email);
@@ -1037,6 +1047,13 @@ dbSuite('Phase 26B-3 — password recovery over HTTP and a real database', dbOk,
     let res;
     try {
       res = await forgot(known.email);
+
+      // ★ Phase 28 B1: the failure now happens on the DETACHED path, so the log
+      //   record it produces lands AFTER the 202. The capture has to stay
+      //   installed until that path has settled, or this case would race its own
+      //   assertion. See case 39 for the same failure with the ordering and the
+      //   no-unhandled-rejection property asserted explicitly.
+      await awaitPendingMail();
     } finally {
       console.error = realError;
       setFakeMailScenario(null);
@@ -1405,5 +1422,198 @@ dbSuite('Phase 26B-3 — password recovery over HTTP and a real database', dbOk,
     const unconfigured = await withEnv({ MAIL_PROVIDER: '' }, () => forgot('who@example.com'));
     assert.equal(unconfigured.status, 503);
     assert.equal(unconfigured.json.fields, undefined, 'a 503 exposes no field structure');
+  });
+
+  // =========================================================================
+  // ★ Phase 28 B1 — delivery is detached from the request path
+  //
+  // The timing oracle these cases defend against is an OBSERVABLE property, so
+  // none of them is asserted statistically: each holds the transport open with
+  // `fakeMailGate`, which makes "the response did not wait for delivery" a fact
+  // about ordering rather than a measurement. A latency-threshold test would be
+  // flaky on a loaded machine and would prove nothing when it passed.
+  // =========================================================================
+
+  it('37. the 202 does not wait for the mail transport', async () => {
+    const user = await makeUser();
+    clearSentMessages();
+
+    const gate = fakeMailGate();
+    setFakeMailScenario(gate.scenario);
+    try {
+      const res = await forgot(user.email);
+
+      // ★ THE INVARIANT. The response has already been received...
+      assert.equal(res.status, 202);
+      assert.deepEqual(res.json, { message: FORGOT_ACCEPTED });
+
+      // ...while the send it triggered is STILL blocked inside the transport.
+      // That the attempt is already recorded is what stops this passing
+      // vacuously: it proves the transport was reached, so the case cannot
+      // succeed by the send never having been attempted at all.
+      assert.equal(sentMessages().length, 1, 'the transport was reached during the request');
+      assert.equal(pendingMailCount(), 1, 'and the send has not settled');
+    } finally {
+      gate.release();
+      await awaitPendingMail();
+      setFakeMailScenario(null);
+    }
+  });
+
+  it('38. the detached send still completes exactly once, after release', async () => {
+    const user = await makeUser();
+    clearSentMessages();
+
+    const gate = fakeMailGate();
+    setFakeMailScenario(gate.scenario);
+    try {
+      const res = await forgot(user.email);
+      assert.equal(res.status, 202);
+
+      // The durable half is already committed when the caller is answered — the
+      // detach happens strictly after the token and audit writes, which is what
+      // makes the order survivable: a process that died on the next line would
+      // still have a valid, usable token on disk.
+      assert.equal(
+        await PasswordResetToken.countDocuments({ userId: user._id, usedAt: null }),
+        1,
+        'precondition: the token was persisted before the response'
+      );
+      assert.equal(
+        await AuditLog.countDocuments({
+          userId: user._id,
+          action: 'PASSWORD_RESET_REQUESTED',
+        }),
+        1,
+        'precondition: the audit row was written before the response'
+      );
+
+      gate.release();
+      await awaitPendingMail();
+
+      assert.equal(sentMessages().length, 1, 'exactly one email — not zero, not two');
+      assert.equal(pendingMailCount(), 0, 'and nothing is left in flight');
+      // The message is the real one, carrying the token that was persisted.
+      assert.ok(resetUrlSent().startsWith(RESET_BASE), 'the configured base is used');
+      assert.equal(
+        hashResetToken(rawTokenSent()),
+        (await PasswordResetToken.findOne({ userId: user._id })).tokenHash,
+        'the delivered link carries the token that was stored, as a hash'
+      );
+    } finally {
+      gate.release();
+      await awaitPendingMail();
+      setFakeMailScenario(null);
+    }
+  });
+
+  it('39. a detached delivery failure is logged AFTER the response, and never goes unhandled', async () => {
+    const user = await makeUser();
+    const reason = 'The email service rejected the message (HTTP 503, provider_unavailable)';
+
+    // A gate that FAILS on release, so the ordering is provable: while the send
+    // is blocked no failure can have happened yet, so a zero count here is a
+    // fact rather than a fast machine.
+    const gate = fakeMailGate({ fail: reason });
+    setFakeMailScenario(gate.scenario);
+
+    const rejections = [];
+    const onRejection = (err) => rejections.push(err);
+    process.on('unhandledRejection', onRejection);
+
+    const records = [];
+    const realError = console.error;
+    console.error = (line) => {
+      records.push(String(line));
+    };
+
+    const failuresLogged = () =>
+      records
+        .map((line) => {
+          try {
+            return JSON.parse(line);
+          } catch {
+            return null;
+          }
+        })
+        .filter((record) => record && record.type === 'mail_delivery_failure');
+
+    try {
+      const res = await forgot(user.email);
+
+      // ★ The caller is answered, uniformly, before the transport has even
+      //   resolved its failure — and nothing about it reaches them.
+      assert.equal(res.status, 202);
+      assert.deepEqual(res.json, { message: FORGOT_ACCEPTED });
+      assert.equal(JSON.stringify(res.json).includes(reason), false);
+      assert.equal(failuresLogged().length, 0, 'nothing can have failed while the send is blocked');
+
+      gate.release();
+      await awaitPendingMail();
+      // Extra macrotask turns so an unhandled rejection would be reported before
+      // the listener comes off.
+      for (let i = 0; i < 3; i += 1) await new Promise((resolve) => setImmediate(resolve));
+
+      // ★ Neither an unhandled rejection nor a crash: the detached promise has a
+      //   handler, and this is the assertion that would fail if it lost one.
+      assert.deepEqual(rejections, [], 'the detached promise must never reject unhandled');
+
+      const lines = failuresLogged();
+      assert.equal(lines.length, 1, `exactly one failure record, got ${JSON.stringify(records)}`);
+      assert.ok(lines[0].message.includes(reason), 'the operator gets the real reason');
+      assert.ok(lines[0].ts, 'and the standard record shape');
+      assert.equal(lines[0].userId, undefined, 'an unauthenticated route names no user');
+      assert.equal(lines[0].message.includes(user.email), false, 'and no address');
+    } finally {
+      gate.release();
+      await awaitPendingMail();
+      console.error = realError;
+      setFakeMailScenario(null);
+      process.off('unhandledRejection', onRejection);
+    }
+  });
+
+  it('40. the delivery call is detached in the source, and no awaited send remains', () => {
+    // The structural half of B1, and the one that cannot rot: cases 37-39 prove
+    // the behaviour, this pins the mechanism so a later refactor cannot quietly
+    // restore `await` and reintroduce the transport term while the behaviour
+    // tests continue to pass on a fast local fake.
+    const service = readFileSync(
+      new URL('../src/services/passwordReset.service.js', import.meta.url),
+      'utf8'
+    );
+    const controller = readFileSync(
+      new URL('../src/controllers/passwordReset.controller.js', import.meta.url),
+      'utf8'
+    );
+
+    assert.equal(
+      /await\s+sendPasswordResetEmail\s*\(/.test(service),
+      false,
+      'no awaited delivery may remain in the recovery service'
+    );
+    assert.match(
+      service,
+      /sendPasswordResetEmail\(\{[\s\S]*?\}\)\s*\.catch\(/,
+      'the detached call must attach a .catch synchronously, or a delivery failure becomes an unhandled rejection'
+    );
+    assert.match(
+      service,
+      /\.catch\(logDetachedMailFailure\)/,
+      'and the handler must be the one that logs without throwing'
+    );
+
+    // The controller keeps its branch — retained as a regression guard, not
+    // because it is reachable today. Deleting it is the change this pins against.
+    assert.match(
+      controller,
+      /err instanceof MailDeliveryError/,
+      'the controller must keep its delivery-failure guard'
+    );
+    assert.match(
+      controller,
+      /logMailFailure\(err, 'mail_delivery_failure'\)/,
+      'and the branch must still answer the uniform 202 rather than falling through to a 503'
+    );
   });
 });

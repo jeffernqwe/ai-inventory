@@ -25,6 +25,13 @@
  *      cannot be used to probe whether an account exists, is disabled, or
  *      belongs to a suspended tenant.
  *
+ * PHASE 28 B1 narrows the gap between point 3 and what is actually guaranteed on
+ * the REQUEST path. Delivery is no longer awaited (see `logDetachedMailFailure`
+ * and the detached call at the end of `requestPasswordReset`), so the HTTP
+ * response no longer waits on an external mail provider. That term — the largest
+ * by far — is gone. The remaining difference is database work, and it is
+ * documented as a partial mitigation rather than a closure.
+ *
  * ERRORS. This is the domain layer, so nothing here carries an HTTP status: the
  * error types below expose a stable `code` (and, for a bad password, `problems`)
  * and the Phase 26B-3 controller decides what to answer. The two mail error
@@ -50,8 +57,9 @@ import { normalizeEmail } from '../utils/validate.js';
 import { recordAudit } from './audit.service.js';
 import { assertActiveBusiness } from './business.service.js';
 import { revokeAllSessions } from './session.service.js';
-import { sendPasswordResetEmail, isMailConfigured, MailNotConfigured } from './mail/index.js';
+import { sendPasswordResetEmail, isMailConfigured, MailNotConfigured, MailDeliveryError } from './mail/index.js';
 import { mailConfig } from './mail/mailConfig.js';
+import { error as logError } from '../utils/logger.js';
 import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../constants/audit.js';
 
 // ---------------------------------------------------------------------------
@@ -188,6 +196,57 @@ async function auditPasswordReset({ businessId, userId, action }) {
 }
 
 // ---------------------------------------------------------------------------
+// Detached delivery (Phase 28 B1)
+// ---------------------------------------------------------------------------
+
+/**
+ * Operator-facing reason codes. The two MAIL_* names are the SAME strings the
+ * Phase 26B-3 controller used in `logMailFailure`, kept identical so the
+ * distinction an operator greps for survives the move to the detached path.
+ */
+const MAIL_NOT_CONFIGURED_LOG_TYPE = 'mail_not_configured';
+const MAIL_DELIVERY_FAILURE_LOG_TYPE = 'mail_delivery_failure';
+/**
+ * A failure that is neither of the two above — a template or programming error
+ * rather than a transport one. Named distinctly on purpose: reporting a code
+ * defect as `mail_delivery_failure` would send an operator to the provider's
+ * status page for something the provider never saw.
+ */
+const MAIL_DISPATCH_ERROR_LOG_TYPE = 'mail_dispatch_error';
+
+/**
+ * Records why a DETACHED send failed. Phase 28 B1 moved the send off the request
+ * path, so the controller can no longer observe a delivery failure — the log
+ * written here is now the operator's ONLY signal, which is why it must carry the
+ * real reason.
+ *
+ * MUST NOT THROW, and is written so that it cannot: the caller is a `.catch`
+ * handler, and an exception raised inside one produces a fresh rejected promise
+ * with nothing attached to it — the exact unhandled rejection this boundary
+ * exists to prevent. Every operation below is a string or `instanceof` test, and
+ * the reason read is tolerant of a rejection value that is not an Error.
+ *
+ * The message deliberately mirrors `logMailFailure` in the controller. It
+ * carries safe facts only — the mail layer builds its messages from an HTTP
+ * status, a provider error name and "could not be reached" — so the reset URL,
+ * which is a live credential and travels inside the request, can never appear.
+ * `userId` is omitted for the same reason it is there: this path is
+ * unauthenticated and naming the account would be the enumeration oracle the
+ * response refuses to be.
+ */
+function logDetachedMailFailure(err) {
+  let type = MAIL_DISPATCH_ERROR_LOG_TYPE;
+  if (err instanceof MailNotConfigured) type = MAIL_NOT_CONFIGURED_LOG_TYPE;
+  else if (err instanceof MailDeliveryError) type = MAIL_DELIVERY_FAILURE_LOG_TYPE;
+
+  const reason = err && typeof err.message === 'string' ? err.message : String(err);
+  logError({
+    type,
+    message: `[password-reset] the recovery email could not be sent: ${reason}`,
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Request
 // ---------------------------------------------------------------------------
 
@@ -203,10 +262,15 @@ async function auditPasswordReset({ businessId, userId, action }) {
  * outside. Returning `{ sent: false }` would put that leak one careless
  * `res.json` away; returning nothing removes the possibility.
  *
- * KNOWN LIMITATION (not claimed as fixed): the success path does more work than
- * the silent exit, so a timing side channel exists in principle. No delay is
- * injected to mask it, because unmeasured timing noise is not a security
- * control. Recorded here so it is not mistaken for coverage.
+ * KNOWN LIMITATION — PARTIALLY MITIGATED, NOT CLOSED (Phase 28 B1). The outbound
+ * transport is no longer awaited on this path, which removes the largest and most
+ * easily measured term: a synchronous HTTPS POST that took orders of magnitude
+ * longer than the silent exit. What remains is DATABASE work — the business
+ * check, the token insert, the deleteMany and the audit insert against one
+ * indexed read — so a timing difference is still there in principle and is NOT
+ * claimed to be eliminated. No delay is injected to mask it, because unmeasured
+ * timing noise is not a security control. Recorded here so partial mitigation is
+ * not mistaken for closure.
  *
  * `requestedByIp` is deliberately NOT a parameter. The model forbids an IP
  * field, the audit row has no place for one, and per-IP throttling is the route
@@ -283,14 +347,28 @@ export async function requestPasswordReset({ email } = {}) {
     action: AUDIT_ACTIONS.PASSWORD_RESET_REQUESTED,
   });
 
-  // Errors propagate unchanged: MailDeliveryError / MailNotConfigured reach the
-  // caller with their own MAIL_* code, so the transport failure stays tellable
-  // from an authentication failure.
-  await sendPasswordResetEmail({
+  // ★ PHASE 28 B1 — DETACHED, deliberately not awaited.
+  //
+  // Everything durable has already happened above: the token row exists and the
+  // audit row is written. Awaiting here put a synchronous outbound HTTPS POST —
+  // up to MAIL_REQUEST_TIMEOUT_MS — between the caller and their 202, and that
+  // transport wait was the largest and most easily measured term distinguishing
+  // a known address from an unknown one. It is now off the request path.
+  //
+  // The rejected promise MUST be handled, and the handler is attached in the same
+  // synchronous turn the promise is created, so no rejection can escape: an
+  // unhandled rejection here would crash the process on a delivery failure,
+  // converting a swallowed, operator-visible event into an outage. `catch` is
+  // used rather than `void` or a bare call for exactly that reason.
+  //
+  // Failures still surface — to the operator, in the log — and a caller learns
+  // nothing: the HTTP response is the same constant whichever way this settles.
+  // See `logDetachedMailFailure` for why that handler cannot itself throw.
+  sendPasswordResetEmail({
     to: user.email,
     resetUrl: buildResetUrl(resetUrl, rawToken),
     expiresInMinutes: PASSWORD_RESET_TTL_MINUTES,
-  });
+  }).catch(logDetachedMailFailure);
 }
 
 // ---------------------------------------------------------------------------

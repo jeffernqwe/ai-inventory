@@ -24,8 +24,15 @@
  *     only reach the send after it has found a live, ACTIVE user in an active
  *     business — so a 503 there would be reachable ONLY for an address that
  *     exists, making it an account-existence oracle. The failure is therefore
- *     logged server-side and swallowed at the HTTP layer (approved decision D1,
- *     option B).
+ *     logged server-side and swallowed (approved decision D1, option B).
+ *
+ *     PHASE 28 B1 moved WHERE that happens, not whether: the service now detaches
+ *     the send, so a delivery failure is caught and logged inside
+ *     `logDetachedMailFailure` and never reaches this file. The 202 this
+ *     controller returns is unchanged and still returned uniformly. The
+ *     `MailDeliveryError` branch in `forgotPassword` is intentionally retained as
+ *     a regression guard — see the comment at its call site for why deleting it
+ *     would be the dangerous choice.
  *   * `MAIL_NOT_CONFIGURED` REMAINS A 503, because the service checks mail
  *     configuration BEFORE it looks the account up — every caller gets it
  *     identically, so it distinguishes nothing. Its client-facing copy is FIXED
@@ -165,11 +172,24 @@ export async function forgotPassword(req, res) {
     await requestPasswordReset({ email });
   } catch (err) {
     if (err instanceof MailDeliveryError) {
-      // ★ D1 (option B). By the time this can be thrown the service has already
-      //   found a live account, so answering 503 here would tell an attacker
-      //   which addresses exist. The operator still learns about it — the log
-      //   record below is the whole point of swallowing it — and the caller is
-      //   answered exactly as an unknown address would be.
+      // ★ RETAINED AS A REGRESSION GUARD (Phase 28 B1). This branch is
+      //   deliberately NOT dead code to be deleted, and it is expected to be
+      //   UNREACHABLE: since B1 the service detaches the send and handles its
+      //   rejection itself (`logDetachedMailFailure`), so a delivery failure can
+      //   no longer propagate to this frame. It is kept because if a future
+      //   change ever reintroduces an awaited delivery path, the failure would
+      //   start arriving HERE again — and without this branch it would fall
+      //   through to `mapPasswordResetFailure`, answering a MAIL_* 503 for an
+      //   address that exists. That is precisely the account-existence oracle
+      //   decision D1 chose to avoid, so the guard is what stops the regression
+      //   from being silent rather than what serves today's traffic.
+      //
+      //   ★ D1 (option B), the original reasoning, which still holds for any
+      //   caller that reaches this line: by the time a delivery failure can be
+      //   thrown the service has already found a live account, so answering 503
+      //   would tell an attacker which addresses exist. The operator learns about
+      //   it from the log record; the caller is answered exactly as an unknown
+      //   address would be.
       logMailFailure(err, 'mail_delivery_failure');
       return res.status(202).json({ message: REQUEST_ACCEPTED_MESSAGE });
     }

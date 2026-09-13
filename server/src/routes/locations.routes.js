@@ -1,7 +1,7 @@
 import { Router } from 'express';
 
-import requireAuth from '../middlewares/authenticate.js';
-import { requirePermission } from '../middlewares/authorize.js';
+import requireAuth from '../middlewares/authenticate.ts';
+import { requirePermission } from '../middlewares/authorize.ts';
 import { locationService } from '../services/reference.service.js';
 import { createReferenceController } from '../controllers/reference.controller.js';
 import { validateLocation } from '../utils/validate.ts';

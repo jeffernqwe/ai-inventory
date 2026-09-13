@@ -19,10 +19,10 @@ import mongoose from 'mongoose';
 import { ensureDb, disconnectDb } from './helpers.mjs';
 import { dbSuite, unitSuite } from './testEnv.mjs';
 import { createApp } from '../src/app.js';
-import errorHandler from '../src/middlewares/errorHandler.js';
-import { isDatabaseDownError } from '../src/config/db.js';
+import errorHandler from '../src/middlewares/errorHandler.ts';
+import { isDatabaseDownError } from '../src/config/db.ts';
 import ApiError from '../src/utils/ApiError.ts';
-import { signAccessToken } from '../src/config/jwt.js';
+import { signAccessToken } from '../src/config/jwt.ts';
 
 const dbOk = await ensureDb();
 

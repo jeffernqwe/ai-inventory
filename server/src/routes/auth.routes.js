@@ -2,7 +2,7 @@ import { Router } from 'express';
 
 import { register, login, me, changePassword, updateMe, logout, listSessions, revokeSession } from '../controllers/auth.controller.js';
 import { forgotPassword, resetPassword as resetPasswordHandler } from '../controllers/passwordReset.controller.js';
-import requireAuth from '../middlewares/authenticate.js';
+import requireAuth from '../middlewares/authenticate.ts';
 import {
   createLoginAccountLimiter,
   createLoginIpLimiter,
@@ -10,7 +10,7 @@ import {
   createPasswordResetRequestAccountLimiter,
   createPasswordResetRequestIpLimiter,
   createPasswordResetConfirmLimiter,
-} from '../middlewares/rateLimit.js';
+} from '../middlewares/rateLimit.ts';
 
 /**
  * Factory. Each call returns a router whose public-auth rate limiters have

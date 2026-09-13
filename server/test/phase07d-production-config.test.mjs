@@ -14,12 +14,12 @@ import express from 'express';
 import { EventEmitter } from 'node:events';
 import jwt from 'jsonwebtoken';
 
-import { validateProductionConfig, JWT_SECRET_MIN_LENGTH } from '../src/config/validateConfig.js';
-import { signAccessToken, verifyAccessToken } from '../src/config/jwt.js';
+import { validateProductionConfig, JWT_SECRET_MIN_LENGTH } from '../src/config/validateConfig.ts';
+import { signAccessToken, verifyAccessToken } from '../src/config/jwt.ts';
 import env from '../src/config/env.ts';
 import { createHealthRouter } from '../src/routes/health.routes.js';
-import { createShutdownHandler, registerSignalHandlers } from '../src/config/shutdown.js';
-import { startServer } from '../src/config/startup.js';
+import { createShutdownHandler, registerSignalHandlers } from '../src/config/shutdown.ts';
+import { startServer } from '../src/config/startup.ts';
 
 // ---------------------------------------------------------------------------
 // process.env isolation helpers. Validator/startup read live env; each test

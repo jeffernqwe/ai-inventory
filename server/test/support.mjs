@@ -13,7 +13,7 @@ import app from '../src/app.js';
 import Business from '../src/models/business.model.ts';
 import User from '../src/models/user.model.ts';
 import Session from '../src/models/session.model.ts';
-import { signAccessToken, decodeAccessToken } from '../src/config/jwt.js';
+import { signAccessToken, decodeAccessToken } from '../src/config/jwt.ts';
 import { newSessionId } from '../src/services/session.service.js';
 import { ensureDb, disconnectDb } from './helpers.mjs';
 

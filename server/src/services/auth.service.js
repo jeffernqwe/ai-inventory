@@ -3,7 +3,7 @@ import bcrypt from 'bcryptjs';
 import Business from '../models/business.model.ts';
 import User from '../models/user.model.ts';
 import ApiError from '../utils/ApiError.ts';
-import { signAccessToken } from '../config/jwt.js';
+import { signAccessToken } from '../config/jwt.ts';
 import { normalizeEmail } from '../utils/validate.ts';
 import { assertActiveBusiness } from './business.service.js';
 import { createSessionForToken, newSessionId } from './session.service.js';

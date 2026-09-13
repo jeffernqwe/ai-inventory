@@ -1,7 +1,7 @@
 import { Router } from 'express';
 
-import requireAuth from '../middlewares/authenticate.js';
-import { requirePermission } from '../middlewares/authorize.js';
+import requireAuth from '../middlewares/authenticate.ts';
+import { requirePermission } from '../middlewares/authorize.ts';
 import { categoryService } from '../services/reference.service.js';
 import { createReferenceController } from '../controllers/reference.controller.js';
 import { validateCategory } from '../utils/validate.ts';

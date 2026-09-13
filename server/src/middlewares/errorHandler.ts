@@ -2,8 +2,37 @@
  * Centralized error handler. Must be registered last, after all routes/middleware.
  * Keeps responses consistent and prevents leaking internal details to clients.
  */
-import { isDatabaseDownError, sanitizeMongoMessage } from '../config/db.js';
+import type { NextFunction, Request, Response } from 'express';
+
+import { isDatabaseDownError, sanitizeMongoMessage } from '../config/db.ts';
 import { error as logError } from '../utils/logger.ts';
+
+/**
+ * The error shape this handler reads. Structural and entirely optional, because
+ * an error handler is handed whatever was thrown — an `ApiError`, a body-parser
+ * error, a driver error — and must narrow rather than assume.
+ */
+type ErrorLike = {
+  type?: string;
+  status?: number;
+  statusCode?: number;
+  message?: string;
+  code?: string;
+  fields?: unknown;
+  applied?: unknown;
+  stack?: string;
+};
+
+/**
+ * The slice of the request this handler reads. Local and structural: `requestId`
+ * and `user` are attached by earlier middleware, and an error raised outside a
+ * request (or before those ran) reaches here without them, which is exactly why
+ * both helpers below stay guarded.
+ */
+type RequestWithContext = Request & {
+  requestId?: string;
+  user?: { id: string };
+};
 
 /**
  * body-parser tags the failures it raises with a machine-readable `type`.
@@ -13,7 +42,7 @@ import { error as logError } from '../utils/logger.ts';
  * Mapping deliberately covers only the cases we reject; anything else keeps
  * flowing to the generic handler below.
  */
-const BODY_ERRORS = {
+const BODY_ERRORS: Record<string, { status: number; code: string; message: string }> = {
   'entity.parse.failed': {
     status: 400,
     code: 'INVALID_JSON',
@@ -33,7 +62,7 @@ const BODY_ERRORS = {
  * client-supplied beyond the path is echoed. Empty when no request object is
  * present (e.g. an error raised outside a request).
  */
-function describeRequest(req) {
+function describeRequest(req: RequestWithContext) {
   if (!req || typeof req.method !== 'string') return '';
   const user = req.user && req.user.id ? ` (user ${req.user.id})` : '';
   return `${req.method} ${req.path || req.originalUrl || '/'}${user}`;
@@ -45,7 +74,7 @@ function describeRequest(req) {
  * as machine-readable fields keeps the record filterable without adding any
  * data — headers, bodies and query strings are never included.
  */
-function requestContext(req) {
+function requestContext(req: RequestWithContext) {
   if (!req || typeof req.method !== 'string') return {};
   return {
     requestId: req.requestId,
@@ -55,7 +84,12 @@ function requestContext(req) {
   };
 }
 
-const errorHandler = (err, req, res, next) => {
+const errorHandler = (
+  err: ErrorLike,
+  req: RequestWithContext,
+  res: Response,
+  next: NextFunction
+) => {
   // If headers were already sent, defer to Express's default handler.
   if (res.headersSent) {
     return next(err);
@@ -63,7 +97,9 @@ const errorHandler = (err, req, res, next) => {
 
   // Oversized / malformed JSON (Phase 07C / L2): stable code + fixed message,
   // no request-content echo, no stack trace (not even in development).
-  const bodyError = BODY_ERRORS[err.type];
+  // The truthiness guard replaces indexing with a possibly-undefined key; a
+  // literal `undefined` key has always missed the map, so the result is the same.
+  const bodyError = err.type ? BODY_ERRORS[err.type] : undefined;
   if (bodyError) {
     return res.status(bodyError.status).json({
       error: bodyError.message,
@@ -102,7 +138,13 @@ const errorHandler = (err, req, res, next) => {
     });
   }
 
-  const body = {
+  const body: {
+    error: string;
+    code?: string;
+    fields?: unknown;
+    applied?: unknown;
+    stack?: string;
+  } = {
     error: isServerError ? 'Internal Server Error' : err.message || 'Error',
   };
 

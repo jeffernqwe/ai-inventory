@@ -1,6 +1,6 @@
 import { Router } from 'express';
 
-import { getDatabaseState, isDatabaseReady } from '../config/db.js';
+import { getDatabaseState, isDatabaseReady } from '../config/db.ts';
 
 /**
  * Health endpoints (Phase 07D / M1). Three complementary signals:

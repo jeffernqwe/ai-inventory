@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import type { PipelineStage } from 'mongoose';
 
 import Inventory from '../models/inventory.model.ts';
 import InventoryTransaction from '../models/inventoryTransaction.model.ts';
@@ -9,7 +10,18 @@ import { recordAudit } from './audit.service.js';
 import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../constants/audit.ts';
 
 const { ObjectId } = mongoose.Types;
-const oid = (id) => new ObjectId(id);
+
+/**
+ * An identifier as it reaches this service. Both forms occur at real call sites:
+ * a hex string — the request layer stringifies `req.user.businessId` and
+ * `req.user.id` — and an ObjectId already loaded from a document, which
+ * `purchase-orders.service.js` passes as `line.productId` and
+ * `existing.locationId._id`. `oid()` accepts either, so the alias names the
+ * pair rather than asserting which one a given caller holds.
+ */
+type IdLike = string | mongoose.Types.ObjectId;
+
+const oid = (id: IdLike) => new ObjectId(id);
 
 const AUDIT_ACTION_BY_TYPE = {
   STOCK_IN: AUDIT_ACTIONS.INVENTORY_STOCK_IN,
@@ -17,26 +29,181 @@ const AUDIT_ACTION_BY_TYPE = {
   ADJUSTMENT: AUDIT_ACTIONS.INVENTORY_ADJUSTED,
 };
 
-function isDuplicateKey(err) {
-  return err?.code === 11000;
+/**
+ * The stock movements recorded through `recordMovement`, named as the keys of
+ * the action table above so the audit lookup is an index of a known key rather
+ * than of `string`. TRANSFER is deliberately absent: a transfer writes its two
+ * ledger rows directly and records one audit for the pair.
+ */
+type MovementType = keyof typeof AUDIT_ACTION_BY_TYPE;
+
+/** The movement payloads the public service methods accept. */
+type MovementInput = {
+  productId: IdLike;
+  locationId: IdLike;
+  quantity: number;
+  reason?: string;
+  reference?: string;
+};
+
+/** The transfer payload, which names two locations instead of one. */
+type TransferInput = {
+  productId: IdLike;
+  fromLocationId: IdLike;
+  toLocationId: IdLike;
+  quantity: number;
+  reason?: string;
+  reference?: string;
+};
+
+/** The inventory list query, already parsed and validated by the controller. */
+type InventoryListFilters = {
+  productId?: string;
+  locationId?: string;
+  q?: string;
+  status?: string;
+  lowStock?: boolean;
+  outOfStock?: boolean;
+  skip: number;
+  limit: number;
+};
+
+/** The movement recorded by `recordMovement`, before defaults are applied. */
+type MovementRecord = {
+  businessId: IdLike;
+  userId: IdLike;
+  productId: IdLike;
+  locationId: IdLike;
+  type: MovementType;
+  quantity: number;
+  previousQuantity: number;
+  newQuantity: number;
+  reason?: string;
+  reference?: string;
+};
+
+/**
+ * The shape `compensateTransfer` is handed. `dstPrev`/`dstNew` describe the
+ * destination leg and are absent when there is nothing to undo there — a
+ * destination credit that failed has no post-write quantity, which is how this
+ * function knows to compensate the source alone. Only `_id` is ever read off
+ * `srcPrev`/`dstPrev`, so those are typed as the one field the rollback anchors
+ * on rather than as a whole document.
+ */
+type TransferCompensation = {
+  businessId: IdLike;
+  productId: IdLike;
+  toLocationId: IdLike;
+  quantity: number;
+  srcPrev: { _id: unknown };
+  srcNew: number;
+  dstPrev?: { _id: unknown } | null;
+  dstNew?: number;
+  label: string;
+};
+
+/**
+ * The product fields `pickProductRef` reads. Structural rather than the `Product`
+ * document type because this is also handed a raw `$lookup` result from
+ * `listRows`, which is a plain BSON document rather than a hydrated model. The
+ * identifier fields are narrowed where they are read; everything else is copied
+ * through untouched, so it is typed as the value the document actually holds.
+ */
+type ProductRefSource = {
+  _id?: unknown;
+  id?: unknown;
+  name?: unknown;
+  sku?: unknown;
+  barcode?: unknown;
+  unit?: unknown;
+  status?: unknown;
+  minimumStock?: number;
+};
+
+/** The public product reference. `minimumStock` is defaulted, so it is a number. */
+type ProductRef = {
+  id: string;
+  name: unknown;
+  sku: unknown;
+  barcode: unknown;
+  unit: unknown;
+  status: unknown;
+  minimumStock: number;
+};
+
+type LocationRefSource = { _id?: unknown; id?: unknown; name?: unknown };
+
+type LocationRef = { id: string; name: unknown };
+
+/**
+ * The inventory row shapes `inventoryRowPublic` accepts: an aggregation row from
+ * `listRows` (nested `product`/`location` objects) or a populated Mongoose doc
+ * from `getRow`.
+ *
+ * The reference fields are `unknown` rather than a declared document type
+ * because Mongoose types a populated field as the raw `ObjectId` it replaced, so
+ * at the type level `getRow`'s `productId` is an ObjectId even though at runtime
+ * it is the whole product. The untyped code read `_id` off it either way, so the
+ * read is narrowed at the one place it happens instead of asserting a shape the
+ * compiler cannot confirm.
+ */
+type InventoryRowSource = {
+  _id: unknown;
+  businessId: unknown;
+  quantity?: number;
+  reservedQuantity?: number;
+  availableQuantity?: number;
+  updatedAt?: unknown;
+  product?: unknown;
+  productId?: unknown;
+  location?: unknown;
+  locationId?: unknown;
+};
+
+/** A reference field that has been populated: the referenced document, with `_id`. */
+type PopulatedRef = { _id?: unknown };
+
+/** The transaction fields `transactionPublic` reads off a ledger document. */
+type TransactionSource = {
+  _id: unknown;
+  businessId: unknown;
+  productId: unknown;
+  locationId: unknown;
+  userId: unknown;
+  type?: unknown;
+  quantity?: unknown;
+  previousQuantity?: unknown;
+  newQuantity?: unknown;
+  reason?: unknown;
+  reference?: unknown;
+  createdAt?: unknown;
+};
+
+function isDuplicateKey(err: unknown) {
+  // `err?.code === 11000`, narrowed. The optional access reproduces the original
+  // short-circuit, so a thrown `null`/`undefined`/primitive still compares
+  // unequal rather than raising.
+  return (err as { code?: unknown } | null | undefined)?.code === 11000;
 }
 
-function pickProductRef(p) {
+function pickProductRef(p: unknown): ProductRef | null {
   if (!p) return null;
+  const { _id, id, name, sku, barcode, unit, status, minimumStock } = p as ProductRefSource;
   return {
-    id: String(p._id ?? p.id),
-    name: p.name,
-    sku: p.sku ?? null,
-    barcode: p.barcode ?? null,
-    unit: p.unit ?? null,
-    status: p.status,
-    minimumStock: p.minimumStock ?? 0,
+    id: String(_id ?? id),
+    name,
+    sku: sku ?? null,
+    barcode: barcode ?? null,
+    unit: unit ?? null,
+    status,
+    minimumStock: minimumStock ?? 0,
   };
 }
 
-function pickLocationRef(l) {
+function pickLocationRef(l: unknown): LocationRef | null {
   if (!l) return null;
-  return { id: String(l._id ?? l.id), name: l.name };
+  const { _id, id, name } = l as LocationRefSource;
+  return { id: String(_id ?? id), name };
 }
 
 /**
@@ -44,17 +211,17 @@ function pickLocationRef(l) {
  * nested `product`/`location` objects or a populated Mongoose doc (productId/
  * locationId populated). Stock-status flags follow SYSTEM_SPECIFICATION.md §19.
  */
-export function inventoryRowPublic(row) {
+export function inventoryRowPublic(row: InventoryRowSource) {
   const product =
     row.product != null
       ? pickProductRef(row.product)
-      : row.productId?._id
+      : (row.productId as PopulatedRef | null | undefined)?._id
         ? pickProductRef(row.productId)
         : null;
   const location =
     row.location != null
       ? pickLocationRef(row.location)
-      : row.locationId?._id
+      : (row.locationId as PopulatedRef | null | undefined)?._id
         ? pickLocationRef(row.locationId)
         : null;
   const quantity = row.quantity ?? 0;
@@ -75,7 +242,7 @@ export function inventoryRowPublic(row) {
 }
 
 /** Safe API/DTO shape for an inventory transaction record. */
-export function transactionPublic(txn) {
+export function transactionPublic(txn: TransactionSource) {
   return {
     id: String(txn._id),
     businessId: String(txn.businessId),
@@ -115,7 +282,7 @@ async function recordMovement({
   newQuantity,
   reason,
   reference,
-}) {
+}: MovementRecord) {
   const txn = await InventoryTransaction.create({
     businessId,
     productId,
@@ -148,8 +315,11 @@ async function recordMovement({
       },
     });
   } catch (err) {
+    // `${err.message}`, narrowed: a caught value is `unknown`, and the template
+    // stringifies it exactly as the untyped code did. `String()` is what the
+    // interpolation itself would have produced, for every value.
     console.error(
-      `[inventory] audit record failed for ${type} transaction ${String(txn._id)} (movement preserved): ${err.message}`
+      `[inventory] audit record failed for ${type} transaction ${String(txn._id)} (movement preserved): ${String((err as { message?: unknown }).message)}`
     );
   }
   return txn;
@@ -168,14 +338,20 @@ async function recordMovement({
  * negative quantity (Phase 07A / H5). Compensation failures are logged, never
  * masked, so the original error still reaches the caller.
  */
-async function rollbackInventory(filter, operation, label) {
+async function rollbackInventory(
+  filter: Record<string, unknown>,
+  operation: Record<string, unknown>,
+  label: string
+) {
   try {
     const res = await Inventory.updateOne(filter, operation);
     if (res.modifiedCount !== 1) {
       console.error(`[inventory] ${label}: rollback skipped (row no longer at the written quantity)`);
     }
   } catch (err) {
-    console.error(`[inventory] ${label}: rollback failed:`, err.message);
+    // `err.message`, narrowed. The raw value is passed through exactly as
+    // before, so `console.error` still receives whatever the caught value held.
+    console.error(`[inventory] ${label}: rollback failed:`, (err as { message?: unknown }).message);
   }
 }
 
@@ -187,7 +363,13 @@ async function rollbackInventory(filter, operation, label) {
  * / L5) and a concurrent movement that built on the new row is never removed.
  * Best-effort like rollbackInventory.
  */
-async function rollbackCreatedRow(businessId, productId, locationId, quantity, label) {
+async function rollbackCreatedRow(
+  businessId: IdLike,
+  productId: IdLike,
+  locationId: IdLike,
+  quantity: number,
+  label: string
+) {
   try {
     const res = await Inventory.deleteOne({
       businessId,
@@ -200,7 +382,7 @@ async function rollbackCreatedRow(businessId, productId, locationId, quantity, l
       console.error(`[inventory] ${label}: created-row rollback skipped (row no longer at quantity ${quantity})`);
     }
   } catch (err) {
-    console.error(`[inventory] ${label}: created-row rollback failed:`, err.message);
+    console.error(`[inventory] ${label}: created-row rollback failed:`, (err as { message?: unknown }).message);
   }
 }
 
@@ -229,7 +411,7 @@ async function compensateTransfer({
   dstPrev,
   dstNew,
   label,
-}) {
+}: TransferCompensation) {
   if (dstNew !== undefined) {
     if (dstPrev == null) {
       // This transfer created the destination row (upsert insert) — delete it
@@ -260,7 +442,7 @@ async function compensateTransfer({
  */
 export const inventoryService = {
   /** Product must exist in the business and not be archived. */
-  async assertOperationalProduct(businessId, productId) {
+  async assertOperationalProduct(businessId: IdLike, productId: IdLike) {
     const product = await Product.findOne({ _id: oid(productId), businessId: oid(businessId) }).lean();
     if (!product) throw new ApiError(404, 'Product not found', 'PRODUCT_NOT_FOUND');
     if (product.status === 'ARCHIVED') {
@@ -270,7 +452,7 @@ export const inventoryService = {
   },
 
   /** Location must exist in the business and not be archived. */
-  async assertOperationalLocation(businessId, locationId) {
+  async assertOperationalLocation(businessId: IdLike, locationId: IdLike) {
     const location = await Location.findOne({ _id: oid(locationId), businessId: oid(businessId) }).lean();
     if (!location) throw new ApiError(404, 'Location not found', 'LOCATION_NOT_FOUND');
     if (location.status === 'ARCHIVED') {
@@ -284,7 +466,7 @@ export const inventoryService = {
    * on first stock-in (upsert). Atomic; retried once if a concurrent upsert
    * races the unique (businessId, productId, locationId) index.
    */
-  async stockIn(businessId, userId, { productId, locationId, quantity, reason, reference }) {
+  async stockIn(businessId: IdLike, userId: IdLike, { productId, locationId, quantity, reason, reference }: MovementInput) {
     await this.assertOperationalProduct(businessId, productId);
     await this.assertOperationalLocation(businessId, locationId);
 
@@ -357,7 +539,7 @@ export const inventoryService = {
    * never drive available below zero. Missing row vs insufficient stock are
    * distinguished with a follow-up read when the guard rejects the update.
    */
-  async stockOut(businessId, userId, { productId, locationId, quantity, reason, reference }) {
+  async stockOut(businessId: IdLike, userId: IdLike, { productId, locationId, quantity, reason, reference }: MovementInput) {
     await this.assertOperationalProduct(businessId, productId);
     await this.assertOperationalLocation(businessId, locationId);
 
@@ -434,9 +616,9 @@ export const inventoryService = {
    * (Phase 07A), which the H3/H4/H5/L5 suites already pin down.
    */
   async transfer(
-    businessId,
-    userId,
-    { productId, fromLocationId, toLocationId, quantity, reason, reference }
+    businessId: IdLike,
+    userId: IdLike,
+    { productId, fromLocationId, toLocationId, quantity, reason, reference }: TransferInput
   ) {
     if (String(fromLocationId) === String(toLocationId)) {
       throw new ApiError(409, 'Source and destination must be different locations', 'TRANSFER_SAME_LOCATION');
@@ -548,7 +730,7 @@ export const inventoryService = {
         } catch (cleanupErr) {
           console.error(
             `[inventory] transfer: ledger cleanup failed for txn ${String(row._id)}:`,
-            cleanupErr.message
+            (cleanupErr as { message?: unknown }).message
           );
         }
       }
@@ -574,7 +756,9 @@ export const inventoryService = {
         userId,
         action: AUDIT_ACTIONS.INVENTORY_TRANSFERRED,
         entityType: AUDIT_ENTITY_TYPES.INVENTORY_TRANSACTION,
-        entityId: created[0]._id,
+        // Both ledger rows were pushed above, or the catch threw — so `created`
+        // holds exactly two here.
+        entityId: created[0]!._id,
         metadata: {
           productId: String(productId),
           fromLocationId: String(fromLocationId),
@@ -592,13 +776,13 @@ export const inventoryService = {
       });
     } catch (err) {
       console.error(
-        `[inventory] audit record failed for TRANSFER ${transferRef} (movement preserved): ${err.message}`
+        `[inventory] audit record failed for TRANSFER ${transferRef} (movement preserved): ${String((err as { message?: unknown }).message)}`
       );
     }
 
     return {
-      transaction: transactionPublic(created[0]),
-      destinationTransaction: transactionPublic(created[1]),
+      transaction: transactionPublic(created[0]!),
+      destinationTransaction: transactionPublic(created[1]!),
       reference: transferRef,
       previousQuantity: srcPrev.quantity,
       newQuantity: srcNew,
@@ -613,7 +797,7 @@ export const inventoryService = {
    * NO_CHANGE (no zero-quantity transaction is ever created). The update is
    * guarded so the resulting available quantity can never be negative.
    */
-  async adjust(businessId, userId, { productId, locationId, quantity: target, reason, reference }) {
+  async adjust(businessId: IdLike, userId: IdLike, { productId, locationId, quantity: target, reason, reference }: MovementInput) {
     await this.assertOperationalProduct(businessId, productId);
     await this.assertOperationalLocation(businessId, locationId);
 
@@ -672,7 +856,7 @@ export const inventoryService = {
   },
 
   /** A single inventory row by its row id, scoped to the business. */
-  async getRow(businessId, id) {
+  async getRow(businessId: IdLike, id: IdLike) {
     const doc = await Inventory.findOne({ _id: oid(id), businessId: oid(businessId) })
       .populate('productId')
       .populate('locationId');
@@ -686,14 +870,16 @@ export const inventoryService = {
    * `lowStock`/`outOfStock` filter rows by per-row available quantity (per
    * §19: low = available <= minimumStock, out = available <= 0).
    */
-  async listRows(businessId, { productId, locationId, q, status, lowStock, outOfStock, skip, limit }) {
+  async listRows(businessId: IdLike, { productId, locationId, q, status, lowStock, outOfStock, skip, limit }: InventoryListFilters) {
     const bizOid = oid(businessId);
-    const match = { businessId: bizOid };
+    // A MongoDB filter document whose keys are added conditionally below, so it
+    // is a record rather than the single-key object literal it is seeded with.
+    const match: Record<string, unknown> = { businessId: bizOid };
     if (productId) match.productId = oid(productId);
     if (locationId) match.locationId = oid(locationId);
 
-    const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const pipeline = [
+    const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pipeline: PipelineStage[] = [
       { $match: match },
       {
         $lookup: {
@@ -707,7 +893,7 @@ export const inventoryService = {
       },
     ];
 
-    const productMatch = { 'product.0': { $exists: true } };
+    const productMatch: Record<string, unknown> = { 'product.0': { $exists: true } };
     if (status === 'ACTIVE' || status === 'ARCHIVED') productMatch['product.status'] = status;
     if (q) {
       const re = { $regex: escapeRegExp(q), $options: 'i' };

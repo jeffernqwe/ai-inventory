@@ -5,7 +5,7 @@ import Inventory from '../models/inventory.model.ts';
 import InventoryTransaction from '../models/inventoryTransaction.model.ts';
 
 const { ObjectId } = mongoose.Types;
-const oid = (id) => new ObjectId(id);
+const oid = (id: string) => new ObjectId(id);
 
 const RECENT_LIMIT = 5;
 // Ledger rows are not events one-to-one: a stock transfer writes TWO rows
@@ -14,13 +14,72 @@ const RECENT_LIMIT = 5;
 // in half by the boundary — see recentActivities().
 const RECENT_WINDOW = RECENT_LIMIT * 2;
 
-/** `{ id, name }` reference to a populated document, or null when absent. */
-function ref(doc) {
-  return doc?._id ? { id: String(doc._id), name: doc.name } : null;
+/**
+ * The ledger fields the recent-activity helpers read off a document. The
+ * reference fields are `unknown` rather than a declared document type because
+ * Mongoose types a populated field as the raw `ObjectId` it replaced — the same
+ * reason `inventory.service.ts` declares its `*Source` shapes this way.
+ *
+ * `quantity`, `previousQuantity` and `newQuantity` are required Numbers in the
+ * schema, so they are declared `number`; `createdAt` is declared `Date` because
+ * both the newest-leg pick and the final sort compare it by time value, and
+ * `timestamps: true` guarantees Mongoose supplies one.
+ */
+type LedgerRow = {
+  _id: unknown;
+  type?: unknown;
+  quantity: number;
+  previousQuantity: number;
+  newQuantity: number;
+  productId?: unknown;
+  locationId?: unknown;
+  reference?: unknown;
+  createdAt: Date;
+};
+
+/** The `{ id, name }` reference shape both activity DTOs carry. */
+type ReferenceDto = { id: string; name: unknown };
+
+/** A single-row movement (stock in / stock out / adjustment), as sent to the client. */
+type MovementActivity = {
+  id: string;
+  type: unknown;
+  quantity: number;
+  previousQuantity: number;
+  newQuantity: number;
+  product: ReferenceDto | null;
+  location: ReferenceDto | null;
+  createdAt: Date;
+};
+
+/**
+ * One transfer event as sent to the client. `type` is the literal this helper
+ * always writes, and `location` is deliberately absent — see transferActivity().
+ */
+type TransferActivity = {
+  id: string;
+  type: 'TRANSFER';
+  quantity: number;
+  product: ReferenceDto | null;
+  from: ReferenceDto | null;
+  to: ReferenceDto | null;
+  reference: unknown;
+  createdAt: Date;
+};
+
+/**
+ * `{ id, name }` reference to a populated document, or null when absent. The
+ * parameter is `unknown` because a populated reference arrives as either the
+ * referenced document or the bare `ObjectId` it replaced; the cast only names
+ * the two fields read below, and the truthiness test is the original one.
+ */
+function ref(doc: unknown): ReferenceDto | null {
+  const source = doc as { _id?: unknown; name?: unknown } | null | undefined;
+  return source?._id ? { id: String(source._id), name: source.name } : null;
 }
 
 /** Safe DTO for a single-row movement (stock in / stock out / adjustment). */
-function recentPublic(t) {
+function recentPublic(t: LedgerRow): MovementActivity {
   return {
     id: String(t._id),
     type: t.type,
@@ -47,7 +106,7 @@ function recentPublic(t) {
  * `location` is deliberately absent: a two-location event has no single
  * location. `from`/`to` say it unambiguously, and the badge carries the type.
  */
-function transferActivity(legs) {
+function transferActivity(legs: LedgerRow[]): TransferActivity | null {
   const source = legs.find((t) => t.newQuantity < t.previousQuantity);
   const destination = legs.find((t) => t.newQuantity > t.previousQuantity);
   if (!source || !destination) return null;
@@ -73,8 +132,8 @@ function transferActivity(legs) {
  * guarantees at least RECENT_LIMIT complete activities remain: 2L rows can form
  * at most L groups, so a short group implies some other group is complete.
  */
-function recentActivities(rows) {
-  const groups = new Map();
+function recentActivities(rows: LedgerRow[]): (MovementActivity | TransferActivity)[] {
+  const groups = new Map<string, LedgerRow[]>();
   for (const row of rows) {
     // A transfer's two legs are correlated by the shared reference; the row id
     // is the fallback so an unpaired row can never merge with another.
@@ -84,18 +143,28 @@ function recentActivities(rows) {
     else groups.set(key, [row]);
   }
 
-  const activities = [];
+  // A group always holds at least the row that created it, so the first element
+  // is asserted rather than guarded — the same idiom as `created[0]!` in
+  // `inventory.service.ts`. A runtime guard here would be a branch the original
+  // never had.
+  const activities: (MovementActivity | TransferActivity)[] = [];
   for (const group of groups.values()) {
-    if (group[0].type === 'TRANSFER') {
+    if (group[0]!.type === 'TRANSFER') {
       const activity = transferActivity(group);
       if (activity) activities.push(activity);
     } else {
-      activities.push(recentPublic(group[0]));
+      activities.push(recentPublic(group[0]!));
     }
   }
 
   return activities
-    .sort((a, b) => b.createdAt - a.createdAt || String(b.id).localeCompare(String(a.id)))
+    // The unary `+` is a type-level addition only: JavaScript's subtraction
+    // already coerces each operand with ToNumber, and ToNumber on a Date IS its
+    // time value, so `+b.createdAt - +a.createdAt` is the same number the
+    // original `b.createdAt - a.createdAt` produced in every case. TypeScript
+    // rejects `-` on two Dates outright (TS2362/TS2363) unless the operands are
+    // declared numeric, so this is the narrowest way to keep the expression.
+    .sort((a, b) => +b.createdAt - +a.createdAt || String(b.id).localeCompare(String(a.id)))
     .slice(0, RECENT_LIMIT);
 }
 
@@ -107,7 +176,7 @@ function recentActivities(rows) {
  * V1 dashboard). Only ACTIVE products are counted for product metrics.
  */
 export const dashboardService = {
-  async summary(businessId) {
+  async summary(businessId: string) {
     const bizOid = oid(businessId);
     const matchActive = { businessId: bizOid, status: 'ACTIVE' };
 

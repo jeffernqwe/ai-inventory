@@ -14,7 +14,7 @@ import supplierRoutes from './routes/suppliers.routes.ts';
 import purchaseOrderRoutes from './routes/purchase-orders.routes.js';
 import productRoutes from './routes/products.routes.ts';
 import inventoryRoutes from './routes/inventory.routes.js';
-import dashboardRoutes from './routes/dashboard.routes.js';
+import dashboardRoutes from './routes/dashboard.routes.ts';
 import aiRoutes from './routes/ai.routes.js';
 import auditRoutes from './routes/audit.routes.js';
 import notFound from './middlewares/notFound.ts';

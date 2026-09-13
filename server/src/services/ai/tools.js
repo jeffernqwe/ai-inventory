@@ -16,7 +16,7 @@
  * inventory, transactions, dashboard) so the numbers match the app exactly.
  */
 
-import { dashboardService } from '../dashboard.service.js';
+import { dashboardService } from '../dashboard.service.ts';
 import { inventoryService } from '../inventory.service.ts';
 import { productService } from '../product.service.ts';
 import { transactionsService, TRANSACTION_TYPES } from '../transactions.service.js';

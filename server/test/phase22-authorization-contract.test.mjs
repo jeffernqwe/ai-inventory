@@ -47,9 +47,11 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { unitSuite } from './testEnv.mjs';
+import { listSourceFiles, readSource, sourceModuleName, walkSourceFiles } from './sourceFiles.mjs';
 import {
   CATALOGUE_ONLY_PERMISSIONS,
   PERMISSIONS,
@@ -70,17 +72,16 @@ import inventoryRoutes from '../src/routes/inventory.routes.js';
 const SRC_DIR = fileURLToPath(new URL('../src/', import.meta.url));
 const ROUTES_DIR = fileURLToPath(new URL('../src/routes/', import.meta.url));
 
-const readSrc = (relPath) => fs.readFileSync(new URL(`../src/${relPath}`, import.meta.url), 'utf8');
+// Extension-agnostic (Phase TS-1): every read below resolves `x.js` or `x.ts`, so a
+// migrated module is found without the guard having to be retargeted by hand.
+const readSrc = (relPath) => readSource(new URL(`../src/${relPath}`, import.meta.url));
 
 /**
  * The enforcement surface: every route module (read from disk, so a NEW route
  * module is covered automatically) plus the AI tool table. These are the only
  * two places a permission can be attached to anything.
  */
-const ROUTE_FILES = fs
-  .readdirSync(ROUTES_DIR)
-  .filter((f) => f.endsWith('.js'))
-  .sort();
+const ROUTE_FILES = listSourceFiles(ROUTES_DIR);
 
 const ROUTE_SOURCES = ROUTE_FILES.map((f) => [`routes/${f}`, fs.readFileSync(ROUTES_DIR + f, 'utf8')]);
 const ALL_SOURCES = [...ROUTE_SOURCES, ['services/ai/tools.js', readSrc('services/ai/tools.js')]];
@@ -239,11 +240,10 @@ unitSuite('Phase 22 — authorization contract & RBAC coverage', () => {
         'middlewares/authorize.js must not consume CATALOGUE_ONLY_PERMISSIONS'
       );
 
-      const importers = fs
-        .readdirSync(SRC_DIR, { recursive: true })
-        .map((entry) => String(entry).replace(/\\/g, '/'))
-        .filter((rel) => rel.endsWith('.js') && rel !== 'constants/roles.js')
-        .filter((rel) => fs.readFileSync(SRC_DIR + rel, 'utf8').includes('CATALOGUE_ONLY_PERMISSIONS'));
+      const importers = walkSourceFiles(SRC_DIR)
+        .map((file) => path.relative(SRC_DIR, file).split(path.sep).join('/'))
+        .filter((rel) => sourceModuleName(rel) !== 'constants/roles')
+        .filter((rel) => fs.readFileSync(path.join(SRC_DIR, rel), 'utf8').includes('CATALOGUE_ONLY_PERMISSIONS'));
 
       assert.deepEqual(
         importers,

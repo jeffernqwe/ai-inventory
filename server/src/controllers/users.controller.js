@@ -1,6 +1,6 @@
-import { parsePagination, pageResult } from '../utils/pagination.js';
-import { isObjectId, validateUserCreate, validateUserUpdate, validateUserList } from '../utils/validate.js';
-import { throwValidation, invalidId } from '../utils/errors.js';
+import { parsePagination, pageResult } from '../utils/pagination.ts';
+import { isObjectId, validateUserCreate, validateUserUpdate, validateUserList } from '../utils/validate.ts';
+import { throwValidation, invalidId } from '../utils/errors.ts';
 import { usersService } from '../services/users.service.js';
 
 /**

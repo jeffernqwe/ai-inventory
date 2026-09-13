@@ -16,10 +16,46 @@ const PASSWORD_MIN = 8;
 const PASSWORD_MAX = 72;
 
 // ---------------------------------------------------------------------------
+// Shapes shared by the validators below.
+//
+// All five are module-private: they describe the DATA these functions exchange,
+// not the module's API, so exporting them would widen the surface for nothing.
+// ---------------------------------------------------------------------------
+
+/** A single field-level problem, the shape every validator reports. */
+interface Problem {
+  field: string;
+  message: string;
+}
+
+/**
+ * A request body as it actually arrives: keys whose types are not known until
+ * they are tested, and the body itself possibly absent. Every validator reads
+ * its fields defensively for exactly that reason, so this is what they accept —
+ * not a declared payload shape they would then have to trust.
+ */
+type Body = Record<string, unknown> | null | undefined;
+
+/** A list endpoint's parsed query string; same treatment as a body. */
+type QueryLike = Record<string, unknown> | undefined;
+
+/** Numeric bounds a caller may impose on a number field. */
+interface NumberBounds {
+  min?: number;
+  max?: number;
+  integer?: boolean;
+}
+
+/** The PATCH-style endpoints, where every field is optional. */
+interface PartialOption {
+  partial?: boolean;
+}
+
+// ---------------------------------------------------------------------------
 // Auth (Phase 03) + user management (Phase 14A)
 // ---------------------------------------------------------------------------
 
-function emailProblems(value) {
+function emailProblems(value: string) {
   const problems = [];
   if (!value) {
     problems.push({ field: 'email', message: 'email is required' });
@@ -29,7 +65,7 @@ function emailProblems(value) {
   return problems;
 }
 
-function passwordProblems(password) {
+function passwordProblems(password: unknown) {
   const problems = [];
   if (typeof password !== 'string' || password.length === 0) {
     problems.push({ field: 'password', message: 'password is required' });
@@ -41,11 +77,11 @@ function passwordProblems(password) {
   return problems;
 }
 
-export function normalizeEmail(value) {
+export function normalizeEmail(value: unknown) {
   return typeof value === 'string' ? value.trim().toLowerCase() : '';
 }
 
-export function validateRegister(body) {
+export function validateRegister(body: Body) {
   const problems = [];
   const businessName = typeof body?.businessName === 'string' ? body.businessName.trim() : '';
   const name = typeof body?.name === 'string' ? body.name.trim() : '';
@@ -65,7 +101,7 @@ export function validateRegister(body) {
   return problems;
 }
 
-export function validateLogin(body) {
+export function validateLogin(body: Body) {
   const problems = [];
   const email = normalizeEmail(body?.email);
   const password = body?.password;
@@ -89,7 +125,7 @@ export function validateLogin(body) {
  * the shared password rules (8–72 chars) and is reported under its own field
  * so the client can anchor the error on the right input.
  */
-export function validateChangePassword(body) {
+export function validateChangePassword(body: Body) {
   const problems = [];
   if (typeof body?.currentPassword !== 'string' || body.currentPassword.length === 0) {
     problems.push({ field: 'currentPassword', message: 'currentPassword is required' });
@@ -110,9 +146,9 @@ const ME_UPDATE_FIELDS = new Set(['name']);
  * rejected explicitly, never silently ignored. Identity comes exclusively from
  * the authenticated session, never from the payload.
  */
-export function validateMeUpdate(body) {
+export function validateMeUpdate(body: Body) {
   const problems = [];
-  const bodyObj = body && typeof body === 'object' ? body : {};
+  const bodyObj: Record<string, unknown> = body && typeof body === 'object' ? body : {};
   for (const key of Object.keys(bodyObj)) {
     if (!ME_UPDATE_FIELDS.has(key)) {
       problems.push({ field: key, message: `field '${key}' is not allowed` });
@@ -138,9 +174,9 @@ const LOGOUT_FIELDS = new Set(['all']);
  * or a `businessId` is refused outright rather than silently ignored, so the
  * attempt is visible instead of looking like it worked.
  */
-export function validateLogout(body) {
+export function validateLogout(body: Body) {
   const problems = [];
-  const bodyObj = body && typeof body === 'object' ? body : {};
+  const bodyObj: Record<string, unknown> = body && typeof body === 'object' ? body : {};
   for (const key of Object.keys(bodyObj)) {
     if (!LOGOUT_FIELDS.has(key)) {
       problems.push({ field: key, message: `field '${key}' is not allowed` });
@@ -170,7 +206,7 @@ const RESET_TOKEN_MAX = 256;
  * rather than the strict allowlists on the self-service ones. Reading only
  * `email` is what makes those keys inert.
  */
-export function validateForgotPassword(body) {
+export function validateForgotPassword(body: Body) {
   const problems = [];
   const email = normalizeEmail(body?.email);
   problems.push(...emailProblems(email));
@@ -194,7 +230,7 @@ export function validateForgotPassword(body) {
  * credential the user typed — and its problems are re-labelled `newPassword`,
  * exactly as validateChangePassword does.
  */
-export function validateResetPassword(body) {
+export function validateResetPassword(body: Body) {
   const problems = [];
 
   const token = requiredString(body?.token, 'token', RESET_TOKEN_MAX);
@@ -223,11 +259,20 @@ const USER_NAME_MAX = 100;
 export const USER_STATUSES = Object.freeze(['ACTIVE', 'DISABLED']);
 
 /**
+ * `NON_OWNER_ROLES` is inferred as a tuple of its literal members, so calling
+ * `includes` on it directly would demand a value already known to be one of
+ * them — which is the very thing the two role checks below are testing. This is
+ * a widened, type-level view of the same frozen array: read-only, same values,
+ * same order, nothing added or removed, and no runtime effect.
+ */
+const ASSIGNABLE_ROLES: readonly string[] = NON_OWNER_ROLES;
+
+/**
  * Create-user payload. role is REQUIRED and must be ADMIN/MANAGER/STAFF —
  * OWNER can never be created through the API (registration is the only path
  * that mints an OWNER). businessId is never accepted.
  */
-export function validateUserCreate(body) {
+export function validateUserCreate(body: Body) {
   const problems = [];
 
   const name = requiredString(body?.name, 'name', USER_NAME_MAX);
@@ -237,7 +282,9 @@ export function validateUserCreate(body) {
   problems.push(...passwordProblems(body?.password));
 
   const role = body?.role;
-  if (!NON_OWNER_ROLES.includes(role)) {
+  // The `typeof` test narrows `role` for the catalogue lookup; it adds no new
+  // rejection, since a non-string was already absent from NON_OWNER_ROLES.
+  if (typeof role !== 'string' || !ASSIGNABLE_ROLES.includes(role)) {
     problems.push({ field: 'role', message: 'role is required and must be one of ADMIN, MANAGER, STAFF' });
   }
 
@@ -255,7 +302,7 @@ export function validateUserCreate(body) {
  * `role` may only be ADMIN/MANAGER/STAFF; `status` only ACTIVE/DISABLED.
  * Service-side rules (self/OWNER/ADMIN restrictions) run after this pass.
  */
-export function validateUserUpdate(body) {
+export function validateUserUpdate(body: Body) {
   const problems = [];
 
   const hasRole = body?.role !== undefined && body?.role !== null && body?.role !== '';
@@ -264,13 +311,15 @@ export function validateUserUpdate(body) {
     problems.push({ field: 'body', message: 'At least one of role or status is required' });
   }
 
-  const role = hasRole ? body.role : undefined;
-  if (hasRole && !NON_OWNER_ROLES.includes(role)) {
+  // Both `typeof` tests narrow the value for the catalogue lookup below; neither
+  // adds a rejection, since a non-string was already absent from the catalogue.
+  const role = hasRole ? body?.role : undefined;
+  if (hasRole && (typeof role !== 'string' || !ASSIGNABLE_ROLES.includes(role))) {
     problems.push({ field: 'role', message: 'role must be one of ADMIN, MANAGER, STAFF' });
   }
 
-  const status = hasStatus ? body.status : undefined;
-  if (hasStatus && !USER_STATUSES.includes(status)) {
+  const status = hasStatus ? body?.status : undefined;
+  if (hasStatus && (typeof status !== 'string' || !USER_STATUSES.includes(status))) {
     problems.push({ field: 'status', message: 'status must be one of ACTIVE, DISABLED' });
   }
 
@@ -283,12 +332,17 @@ export function validateUserUpdate(body) {
 
 const OBJECT_ID_RE = /^[0-9a-fA-F]{24}$/;
 
-export function isObjectId(value) {
+/**
+ * The predicate form is what carries the narrowing to every caller that has to
+ * use the id afterwards (parsePoLine/parseReceiveLine key a Set by it), so it is
+ * part of the contract here rather than an internal detail.
+ */
+export function isObjectId(value: unknown): value is string {
   return typeof value === 'string' && OBJECT_ID_RE.test(value);
 }
 
 /** Optional ObjectId. Blank -> undefined; invalid -> a problem entry. */
-export function optionalObjectId(value, field) {
+export function optionalObjectId(value: unknown, field: string) {
   if (value === undefined || value === null || value === '') {
     return { value: undefined, problems: [] };
   }
@@ -299,7 +353,7 @@ export function optionalObjectId(value, field) {
 }
 
 /** Trimmed optional string; blank -> undefined; over-length -> a problem. */
-export function optionalString(value, field, max) {
+export function optionalString(value: unknown, field: string, max?: number) {
   if (value === undefined || value === null) return { value: undefined, problems: [] };
   if (typeof value !== 'string') {
     return { value: undefined, problems: [{ field, message: `${field} must be a string` }] };
@@ -313,7 +367,7 @@ export function optionalString(value, field, max) {
 }
 
 /** Required trimmed string. */
-export function requiredString(value, field, max) {
+export function requiredString(value: unknown, field: string, max?: number) {
   if (typeof value !== 'string' || value.trim() === '') {
     return { value: undefined, problems: [{ field, message: `${field} is required` }] };
   }
@@ -331,7 +385,7 @@ export function requiredString(value, field, max) {
  * same problem, which is what the product/inventory list parsers did before
  * this was consolidated.
  */
-export function optionalSearch(value, field = 'q', max) {
+export function optionalSearch(value: unknown, field = 'q', max?: number) {
   if (value === undefined || value === null) return { value: undefined, problems: [] };
   const trimmed = typeof value === 'string' ? value.trim() : '';
   if (trimmed === '') {
@@ -345,16 +399,23 @@ export function optionalSearch(value, field = 'q', max) {
  * a filter to quietly ignore. `message` lets an endpoint keep the wording it
  * already used for this field.
  */
-export function optionalEnum(value, field, allowed, { message } = {}) {
+export function optionalEnum(
+  value: unknown,
+  field: string,
+  allowed: readonly string[],
+  { message }: { message?: string } = {}
+) {
   if (value === undefined || value === null) return { value: undefined, problems: [] };
-  if (allowed.includes(value)) return { value, problems: [] };
+  // The `typeof` test is what lets the narrowed value reach `includes`; it does
+  // not change the outcome, since a non-string never equals a string element.
+  if (typeof value === 'string' && allowed.includes(value)) return { value, problems: [] };
   return {
     value: undefined,
     problems: [{ field, message: message ?? `${field} must be one of ${allowed.join(', ')}` }],
   };
 }
 
-function toNumber(value) {
+function toNumber(value: unknown) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value))) {
     return Number(value);
@@ -362,7 +423,11 @@ function toNumber(value) {
   return null;
 }
 
-function numberProblems(value, field, { min = -Infinity, max = Infinity, integer = false } = {}) {
+function numberProblems(
+  value: number | null,
+  field: string,
+  { min = -Infinity, max = Infinity, integer = false }: NumberBounds = {}
+) {
   const problems = [];
   if (value === null) {
     problems.push({ field, message: `${field} must be a valid number` });
@@ -377,7 +442,7 @@ function numberProblems(value, field, { min = -Infinity, max = Infinity, integer
 }
 
 /** Required finite number within [min, max]. */
-export function requiredNumber(value, field, opts = {}) {
+export function requiredNumber(value: unknown, field: string, opts: NumberBounds = {}) {
   const n = toNumber(value);
   if (n === null) {
     return { value: undefined, problems: [{ field, message: `${field} is required and must be a number` }] };
@@ -386,7 +451,7 @@ export function requiredNumber(value, field, opts = {}) {
 }
 
 /** Optional finite number; absent when blank/undefined. */
-export function optionalNumber(value, field, opts = {}) {
+export function optionalNumber(value: unknown, field: string, opts: NumberBounds = {}) {
   if (value === undefined || value === null || value === '') {
     return { value: undefined, problems: [] };
   }
@@ -405,7 +470,7 @@ const CATEGORY_NAME_MAX = 100;
 const LOCATION_NAME_MAX = 100;
 const DESCRIPTION_MAX = 500;
 
-function nameAndDescriptionProblems(body, partial, nameMax, prefix) {
+function nameAndDescriptionProblems(body: Body, partial: boolean, nameMax: number, prefix: string) {
   const problems = [];
   const r = partial ? optionalString(body?.name, 'name', nameMax) : requiredString(body?.name, 'name', nameMax);
   problems.push(...r.problems);
@@ -414,12 +479,12 @@ function nameAndDescriptionProblems(body, partial, nameMax, prefix) {
   return { problems, name: r.value, description: d.value, prefix };
 }
 
-export function validateCategory(body, { partial = false } = {}) {
+export function validateCategory(body: Body, { partial = false }: PartialOption = {}) {
   const { problems, name, description } = nameAndDescriptionProblems(body, partial, CATEGORY_NAME_MAX, 'category');
   return { problems, name, description };
 }
 
-export function validateLocation(body, { partial = false } = {}) {
+export function validateLocation(body: Body, { partial = false }: PartialOption = {}) {
   const { problems, name, description } = nameAndDescriptionProblems(body, partial, LOCATION_NAME_MAX, 'location');
   return { problems, name, description };
 }
@@ -428,7 +493,7 @@ const SUPPLIER_NAME_MAX = 100;
 const CONTACT_NAME_MAX = 100;
 const PHONE_MAX = 50;
 
-export function validateSupplier(body, { partial = false } = {}) {
+export function validateSupplier(body: Body, { partial = false }: PartialOption = {}) {
   const problems = [];
 
   const name = partial ? optionalString(body?.name, 'name', SUPPLIER_NAME_MAX)
@@ -467,7 +532,7 @@ export const CODE_MAX = 100;
 const UNIT_MAX = 30;
 const IMAGE_URL_MAX = 1000;
 
-export function validateProduct(body, { partial = false } = {}) {
+export function validateProduct(body: Body, { partial = false }: PartialOption = {}) {
   const problems = [];
 
   const name = partial ? optionalString(body?.name, 'name', PRODUCT_NAME_MAX)
@@ -517,7 +582,7 @@ const REFERENCE_MAX = 200;
  * in/out (must be > 0) and the target on-hand quantity for adjustment
  * (may be 0). `fieldName` is what the client sent (always "quantity").
  */
-export function validateStockMovement(body, { allowZero = false } = {}) {
+export function validateStockMovement(body: Body, { allowZero = false }: { allowZero?: boolean } = {}) {
   const problems = [];
 
   const productId = optionalObjectId(body?.productId, 'productId');
@@ -554,7 +619,7 @@ export function validateStockMovement(body, { allowZero = false } = {}) {
  * Quantity is always a positive integer (no allowZero: a zero transfer is a
  * no-op, never a movement).
  */
-export function validateTransfer(body) {
+export function validateTransfer(body: Body) {
   const problems = [];
 
   const productId = optionalObjectId(body?.productId, 'productId');
@@ -598,20 +663,27 @@ export function validateTransfer(body) {
 const PO_ITEMS_MAX = 200;
 const PO_NOTES_MAX = 1000;
 
-function optionalDate(value, field) {
+function optionalDate(value: unknown, field: string) {
   if (value === undefined || value === null || value === '') {
     return { value: undefined, problems: [] };
   }
-  const d = value instanceof Date ? new Date(value.getTime()) : new Date(value);
+  // `new Date` takes a string, a number or a Date, and answers Invalid Date for
+  // anything else — which the next line already turns into a field problem. The
+  // cast states exactly that: the raw value goes in unexamined, as it always has.
+  const d = value instanceof Date
+    ? new Date(value.getTime())
+    : new Date(value as string | number);
   if (Number.isNaN(d.getTime())) {
     return { value: undefined, problems: [{ field, message: `${field} must be a valid date` }] };
   }
   return { value: d, problems: [] };
 }
 
-function parsePoLine(line, idx, problems, seenProductIds) {
+function parsePoLine(line: unknown, idx: number, problems: Problem[], seenProductIds: Set<string>) {
   const prefix = `items[${idx}]`;
-  const obj = line && typeof line === 'object' ? line : {};
+  // An element of an untrusted array: treated from here on as the bag of
+  // unknown keys it is, so every field below still has to be tested.
+  const obj = (line && typeof line === 'object' ? line : {}) as Record<string, unknown>;
 
   const productId = isObjectId(obj.productId) ? obj.productId : undefined;
   if (!productId) {
@@ -643,10 +715,10 @@ function parsePoLine(line, idx, problems, seenProductIds) {
  * the line set. Service-side operational checks (references belong to the
  * business and are ACTIVE) happen separately, after this structural pass.
  */
-export function validatePurchaseOrder(body, { partial = false } = {}) {
-  const problems = [];
+export function validatePurchaseOrder(body: Body, { partial = false }: PartialOption = {}) {
+  const problems: Problem[] = [];
 
-  const requiredRef = (field) => {
+  const requiredRef = (field: string) => {
     if (partial) return optionalObjectId(body?.[field], field);
     if (!body?.[field]) return { value: undefined, problems: [{ field, message: `${field} is required` }] };
     return optionalObjectId(body[field], field);
@@ -675,7 +747,7 @@ export function validatePurchaseOrder(body, { partial = false } = {}) {
     if (rawItems.length > PO_ITEMS_MAX) {
       problems.push({ field: 'items', message: `items must have at most ${PO_ITEMS_MAX} entries` });
     }
-    const seenProductIds = new Set();
+    const seenProductIds = new Set<string>();
     items = rawItems.map((line, idx) => parsePoLine(line, idx, problems, seenProductIds));
   }
 
@@ -689,9 +761,11 @@ export function validatePurchaseOrder(body, { partial = false } = {}) {
   };
 }
 
-function parseReceiveLine(line, idx, problems, seenProductIds) {
+function parseReceiveLine(line: unknown, idx: number, problems: Problem[], seenProductIds: Set<string>) {
   const prefix = `lines[${idx}]`;
-  const obj = line && typeof line === 'object' ? line : {};
+  // Same treatment as parsePoLine: an untrusted array element read as a bag of
+  // unknown keys.
+  const obj = (line && typeof line === 'object' ? line : {}) as Record<string, unknown>;
 
   const productId = isObjectId(obj.productId) ? obj.productId : undefined;
   if (!productId) {
@@ -720,8 +794,8 @@ function parseReceiveLine(line, idx, problems, seenProductIds) {
  * (PO state, line membership, remaining, ACTIVE products) happen after this
  * structural pass, before anything moves.
  */
-export function validateReceive(body, { partial = false } = {}) {
-  const problems = [];
+export function validateReceive(body: Body, { partial = false }: PartialOption = {}) {
+  const problems: Problem[] = [];
 
   const reference = optionalString(body?.reference, 'reference', REFERENCE_MAX);
   problems.push(...reference.problems);
@@ -739,7 +813,7 @@ export function validateReceive(body, { partial = false } = {}) {
     if (rawLines.length > PO_ITEMS_MAX) {
       problems.push({ field: 'lines', message: `lines must have at most ${PO_ITEMS_MAX} entries` });
     }
-    const seenProductIds = new Set();
+    const seenProductIds = new Set<string>();
     lines = rawLines.map((line, idx) => parseReceiveLine(line, idx, problems, seenProductIds));
   }
 
@@ -751,8 +825,14 @@ export function validateReceive(body, { partial = false } = {}) {
 // ---------------------------------------------------------------------------
 
 const AUDIT_Q_MAX = 100;
-const AUDIT_ACTION_VALUES = new Set(Object.values(AUDIT_ACTIONS));
-const AUDIT_ENTITY_TYPE_VALUES = new Set(Object.values(AUDIT_ENTITY_TYPES));
+/**
+ * The two audit catalogues, widened to `Set<string>` for the same reason
+ * ASSIGNABLE_ROLES is a `readonly string[]`: their members are literal types, so
+ * an unwidened `has` would demand a value already known to be a member instead of
+ * testing whether the query value is one. Same values, no runtime effect.
+ */
+const AUDIT_ACTION_VALUES: Set<string> = new Set(Object.values(AUDIT_ACTIONS));
+const AUDIT_ENTITY_TYPE_VALUES: Set<string> = new Set(Object.values(AUDIT_ENTITY_TYPES));
 
 /**
  * GET /api/audit query validation. Every filter value must be known:
@@ -760,9 +840,9 @@ const AUDIT_ENTITY_TYPE_VALUES = new Set(Object.values(AUDIT_ENTITY_TYPES));
  * valid ISO dates with to >= from, q a bounded string. Unknown filter values
  * are rejected with field problems — never silently ignored.
  */
-export function validateAuditList(query) {
+export function validateAuditList(query: QueryLike) {
   const problems = [];
-  const q = query ?? {};
+  const q: Record<string, unknown> = query ?? {};
 
   const action = typeof q.action === 'string' && q.action ? q.action : undefined;
   if (action && !AUDIT_ACTION_VALUES.has(action)) {
@@ -821,9 +901,9 @@ export const ACTIVE_ARCHIVED_STATUSES = Object.freeze(['ACTIVE', 'ARCHIVED']);
  * GET /api/users query filters. `status` is validated rather than coerced: an
  * unknown value must not silently widen the list to every user.
  */
-export function validateUserList(query) {
+export function validateUserList(query: QueryLike) {
   const problems = [];
-  const q = query ?? {};
+  const q: Record<string, unknown> = query ?? {};
 
   const search = optionalSearch(q.q, 'q');
   problems.push(...search.problems);
@@ -844,9 +924,9 @@ export function validateUserList(query) {
  * removed from the match — doing so returns every purchase order in the
  * business while appearing to be filtered to one supplier.
  */
-export function validatePurchaseOrderList(query, statuses) {
+export function validatePurchaseOrderList(query: QueryLike, statuses: readonly string[]) {
   const problems = [];
-  const q = query ?? {};
+  const q: Record<string, unknown> = query ?? {};
 
   const search = optionalSearch(q.q, 'q');
   problems.push(...search.problems);
@@ -869,9 +949,9 @@ export function validatePurchaseOrderList(query, statuses) {
  * The status wording matches the product endpoints, which validate the same
  * ACTIVE/ARCHIVED enum.
  */
-export function validateReferenceList(query) {
+export function validateReferenceList(query: QueryLike) {
   const problems = [];
-  const q = query ?? {};
+  const q: Record<string, unknown> = query ?? {};
 
   const search = optionalSearch(q.q, 'q');
   problems.push(...search.problems);

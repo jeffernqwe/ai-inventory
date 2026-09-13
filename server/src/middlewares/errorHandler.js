@@ -3,7 +3,7 @@
  * Keeps responses consistent and prevents leaking internal details to clients.
  */
 import { isDatabaseDownError, sanitizeMongoMessage } from '../config/db.js';
-import { error as logError } from '../utils/logger.js';
+import { error as logError } from '../utils/logger.ts';
 
 /**
  * body-parser tags the failures it raises with a machine-readable `type`.

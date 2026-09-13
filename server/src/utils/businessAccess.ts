@@ -1,4 +1,4 @@
-import ApiError from './ApiError.js';
+import ApiError from './ApiError.ts';
 
 /**
  * Business-isolation guard.
@@ -9,7 +9,10 @@ import ApiError from './ApiError.js';
  * scope a query. Requests that reference another business are rejected with
  * 403 before any data access.
  */
-export function assertBusinessAccess(user, targetBusinessId) {
+export function assertBusinessAccess(
+  user: { businessId?: unknown } | null | undefined,
+  targetBusinessId: unknown
+) {
   if (!user || user.businessId == null) {
     throw new ApiError(401, 'Authentication required', 'AUTH_REQUIRED');
   }

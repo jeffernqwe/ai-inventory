@@ -2,12 +2,12 @@ import mongoose from 'mongoose';
 
 import Product from '../models/product.model.ts';
 import Category from '../models/category.model.ts';
-import ApiError from '../utils/ApiError.js';
+import ApiError from '../utils/ApiError.ts';
 import { recordAudit } from './audit.service.js';
-import { notFound } from '../utils/errors.js';
+import { notFound } from '../utils/errors.ts';
 import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../constants/audit.ts';
 import { classifyStockStatus } from '../constants/stockStatus.ts';
-import { internalEan13Candidates } from '../utils/internalBarcode.js';
+import { internalEan13Candidates } from '../utils/internalBarcode.ts';
 
 const { ObjectId } = mongoose.Types;
 const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

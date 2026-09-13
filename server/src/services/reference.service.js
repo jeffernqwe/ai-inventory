@@ -2,7 +2,7 @@ import Category from '../models/category.model.ts';
 import Location from '../models/location.model.ts';
 import Supplier from '../models/supplier.model.ts';
 import { recordAudit } from './audit.service.js';
-import { notFound } from '../utils/errors.js';
+import { notFound } from '../utils/errors.ts';
 import {
   AUDIT_ACTIONS,
   AUDIT_ENTITY_TYPES,

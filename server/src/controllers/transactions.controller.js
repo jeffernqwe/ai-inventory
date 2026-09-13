@@ -1,6 +1,6 @@
-import { parsePagination, pageResult } from '../utils/pagination.js';
-import { optionalObjectId } from '../utils/validate.js';
-import { throwValidation } from '../utils/errors.js';
+import { parsePagination, pageResult } from '../utils/pagination.ts';
+import { optionalObjectId } from '../utils/validate.ts';
+import { throwValidation } from '../utils/errors.ts';
 import transactionsService, { TRANSACTION_TYPES } from '../services/transactions.service.js';
 
 function parseDateParam(value, field, problems) {

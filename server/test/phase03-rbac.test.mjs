@@ -14,8 +14,8 @@ import {
   NON_OWNER_ROLES,
   hasPermission,
 } from '../src/constants/roles.ts';
-import assertBusinessAccess from '../src/utils/businessAccess.js';
-import ApiError from '../src/utils/ApiError.js';
+import assertBusinessAccess from '../src/utils/businessAccess.ts';
+import ApiError from '../src/utils/ApiError.ts';
 
 /** Invoke a middleware with a fabricated req/res and resolve with next's error (null on pass). */
 function callMw(mw, req) {

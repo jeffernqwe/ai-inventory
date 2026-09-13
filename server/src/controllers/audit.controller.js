@@ -1,7 +1,7 @@
-import { parsePagination, pageResult } from '../utils/pagination.js';
-import { throwValidation } from '../utils/errors.js';
+import { parsePagination, pageResult } from '../utils/pagination.ts';
+import { throwValidation } from '../utils/errors.ts';
 import { listAudit } from '../services/audit.service.js';
-import { validateAuditList } from '../utils/validate.js';
+import { validateAuditList } from '../utils/validate.ts';
 
 /**
  * Read-only audit trail controller (Phase 16). businessId always comes from the

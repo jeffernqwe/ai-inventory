@@ -19,7 +19,7 @@ import assert from 'node:assert/strict';
 import { ensureDb, disconnectDb } from './helpers.mjs';
 import { dbSuite, unitSuite } from './testEnv.mjs';
 import Business from '../src/models/business.model.ts';
-import ApiError from '../src/utils/ApiError.js';
+import ApiError from '../src/utils/ApiError.ts';
 import {
   DEFAULT_PLAN_CODE,
   PLANS,

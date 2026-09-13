@@ -1,9 +1,9 @@
 import bcrypt from 'bcryptjs';
 
 import User from '../models/user.model.ts';
-import ApiError from '../utils/ApiError.js';
+import ApiError from '../utils/ApiError.ts';
 import { recordAudit } from './audit.service.js';
-import { notFound } from '../utils/errors.js';
+import { notFound } from '../utils/errors.ts';
 import { toPublicUser } from './auth.service.js';
 import { ROLES, NON_OWNER_ROLES } from '../constants/roles.ts';
 import {

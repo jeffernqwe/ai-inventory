@@ -50,11 +50,11 @@ import {
   PasswordResetError,
   VALIDATION_ERROR_CODE,
 } from '../services/passwordReset.service.js';
-import { validateForgotPassword, validateResetPassword } from '../utils/validate.js';
+import { validateForgotPassword, validateResetPassword } from '../utils/validate.ts';
 import { MailNotConfigured, MailDeliveryError } from '../services/mail/index.js';
-import { throwValidation } from '../utils/errors.js';
-import { error as logError } from '../utils/logger.js';
-import ApiError from '../utils/ApiError.js';
+import { throwValidation } from '../utils/errors.ts';
+import { error as logError } from '../utils/logger.ts';
+import ApiError from '../utils/ApiError.ts';
 
 // ---------------------------------------------------------------------------
 // Fixed client-facing copy

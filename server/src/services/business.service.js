@@ -1,5 +1,5 @@
 import Business from '../models/business.model.ts';
-import ApiError from '../utils/ApiError.js';
+import ApiError from '../utils/ApiError.ts';
 
 export const BUSINESS_NOT_ACTIVE_CODE = 'BUSINESS_NOT_ACTIVE';
 // Generic and safe: never reveals whether the business is missing, SUSPENDED,

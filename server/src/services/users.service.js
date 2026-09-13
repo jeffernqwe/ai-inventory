@@ -5,11 +5,11 @@ import ApiError from '../utils/ApiError.js';
 import { recordAudit } from './audit.service.js';
 import { notFound } from '../utils/errors.js';
 import { toPublicUser } from './auth.service.js';
-import { ROLES, NON_OWNER_ROLES } from '../constants/roles.js';
+import { ROLES, NON_OWNER_ROLES } from '../constants/roles.ts';
 import {
   AUDIT_ACTIONS,
   AUDIT_ENTITY_TYPES,
-} from '../constants/audit.js';
+} from '../constants/audit.ts';
 
 const BCRYPT_ROUNDS = 10;
 const ACTIVE_STATUS = 'ACTIVE';

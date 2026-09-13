@@ -10,8 +10,8 @@ import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 
-import { aiConfig } from '../src/services/ai/aiConfig.js';
-import { AiProviderError } from '../src/services/ai/aiErrors.js';
+import { aiConfig } from '../src/services/ai/aiConfig.ts';
+import { AiProviderError } from '../src/services/ai/aiErrors.ts';
 import { createAgentrouterProvider } from '../src/services/ai/providers/agentrouterProvider.js';
 
 const TEST_KEY = 'ar_wire_test_key';

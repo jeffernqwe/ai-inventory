@@ -5,7 +5,7 @@ import { requirePermission } from '../middlewares/authorize.js';
 import { categoryService } from '../services/reference.service.js';
 import { createReferenceController } from '../controllers/reference.controller.js';
 import { validateCategory } from '../utils/validate.js';
-import { PERMISSIONS } from '../constants/roles.js';
+import { PERMISSIONS } from '../constants/roles.ts';
 
 const router = Router();
 const c = createReferenceController(categoryService, validateCategory);

@@ -13,7 +13,7 @@ import {
   PERMISSIONS,
   NON_OWNER_ROLES,
   hasPermission,
-} from '../src/constants/roles.js';
+} from '../src/constants/roles.ts';
 import assertBusinessAccess from '../src/utils/businessAccess.js';
 import ApiError from '../src/utils/ApiError.js';
 

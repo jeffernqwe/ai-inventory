@@ -28,7 +28,7 @@ import {
   disconnectDb,
 } from './support.mjs';
 import { dbSuite } from './testEnv.mjs';
-import { ROLES } from '../src/constants/roles.js';
+import { ROLES } from '../src/constants/roles.ts';
 import { ean13Value, ean13CheckDigit, internalEan13Candidates } from '../src/utils/internalBarcode.js';
 
 const { dbOk, baseUrl, server } = await startServer();

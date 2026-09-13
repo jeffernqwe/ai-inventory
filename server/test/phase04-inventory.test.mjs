@@ -21,7 +21,7 @@ import { dbSuite } from './testEnv.mjs';
 import Inventory from '../src/models/inventory.model.ts';
 import InventoryTransaction from '../src/models/inventoryTransaction.model.ts';
 import AuditLog from '../src/models/auditLog.model.ts';
-import { ROLES } from '../src/constants/roles.js';
+import { ROLES } from '../src/constants/roles.ts';
 
 const { dbOk, baseUrl, server } = await startServer();
 const api = makeApi(baseUrl);

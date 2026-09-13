@@ -29,7 +29,7 @@ import {
   disconnectDb,
 } from './support.mjs';
 import { dbSuite } from './testEnv.mjs';
-import { ROLES } from '../src/constants/roles.js';
+import { ROLES } from '../src/constants/roles.ts';
 import AuditLog from '../src/models/auditLog.model.ts';
 import User from '../src/models/user.model.ts';
 

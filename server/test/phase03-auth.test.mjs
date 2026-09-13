@@ -8,12 +8,12 @@ import bcrypt from 'bcryptjs';
 
 import authRouter from '../src/routes/auth.routes.js';
 import healthRouter from '../src/routes/health.routes.js';
-import notFound from '../src/middlewares/notFound.js';
+import notFound from '../src/middlewares/notFound.ts';
 import errorHandler from '../src/middlewares/errorHandler.js';
 import requireAuth from '../src/middlewares/authenticate.js';
 import { requireRole, requirePermission } from '../src/middlewares/authorize.js';
 import assertBusinessAccess from '../src/utils/businessAccess.js';
-import env from '../src/config/env.js';
+import env from '../src/config/env.ts';
 import User from '../src/models/user.model.ts';
 import Business from '../src/models/business.model.ts';
 import Session from '../src/models/session.model.ts';

@@ -20,7 +20,7 @@ import { dashboardService } from '../dashboard.service.js';
 import { inventoryService } from '../inventory.service.js';
 import { productService } from '../product.service.js';
 import { transactionsService, TRANSACTION_TYPES } from '../transactions.service.js';
-import { hasPermission, PERMISSIONS } from '../../constants/roles.js';
+import { hasPermission, PERMISSIONS } from '../../constants/roles.ts';
 
 const objectId = { type: 'string', pattern: '^[0-9a-fA-F]{24}$' };
 const statusEnum = { type: 'string', enum: ['ACTIVE', 'ARCHIVED'] };

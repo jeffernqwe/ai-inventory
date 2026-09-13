@@ -17,7 +17,7 @@ import {
 } from './support.mjs';
 import { dbSuite } from './testEnv.mjs';
 import AuditLog from '../src/models/auditLog.model.ts';
-import { ROLES } from '../src/constants/roles.js';
+import { ROLES } from '../src/constants/roles.ts';
 
 const { dbOk, baseUrl, server } = await startServer();
 const api = makeApi(baseUrl);

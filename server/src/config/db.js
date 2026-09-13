@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 
-import env from './env.js';
+import env from './env.ts';
 
 const DB_STATES = ['disconnected', 'connected', 'connecting', 'disconnecting'];
 

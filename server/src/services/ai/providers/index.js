@@ -12,7 +12,7 @@
  * and only the resulting text reaches the client.
  */
 
-import { AiNotConfigured } from '../aiErrors.js';
+import { AiNotConfigured } from '../aiErrors.ts';
 import { createAgentrouterProvider } from './agentrouterProvider.js';
 import { createClaudeProvider } from './claudeProvider.js';
 import { createGeminiProvider } from './geminiProvider.js';

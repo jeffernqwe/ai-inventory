@@ -3,7 +3,7 @@ import { Router } from 'express';
 import requireAuth from '../middlewares/authenticate.js';
 import { requirePermission } from '../middlewares/authorize.js';
 import { auditController } from '../controllers/audit.controller.js';
-import { PERMISSIONS } from '../constants/roles.js';
+import { PERMISSIONS } from '../constants/roles.ts';
 
 /**
  * Read-only audit trail (Phase 16). OWNER/ADMIN only — every route requires

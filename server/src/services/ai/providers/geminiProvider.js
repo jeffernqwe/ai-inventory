@@ -9,8 +9,8 @@
  * parts in model turns, and `functionResponse` parts in the following user turn.
  */
 
-import { aiConfig } from '../aiConfig.js';
-import { AiNotConfigured, AiProviderError } from '../aiErrors.js';
+import { aiConfig } from '../aiConfig.ts';
+import { AiNotConfigured, AiProviderError } from '../aiErrors.ts';
 import { postJson } from './http.js';
 
 function geminiEndpoint(model) {

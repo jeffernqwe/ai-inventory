@@ -138,9 +138,19 @@ export const ROLE_PERMISSIONS = Object.freeze({
   ]),
 });
 
-/** Whether a role holds a given permission. */
-export function hasPermission(role, permission) {
-  const granted = ROLE_PERMISSIONS[role];
+/**
+ * Whether a role holds a given permission.
+ *
+ * Both arguments stay `string`: `role` reaches this from a database-loaded user
+ * and `permission` from a route's declared key, and an unknown role must answer
+ * `false` rather than throw. The index is widened to a string lookup so that
+ * "no such role" is a value (`undefined`) the existing `Array.isArray` guard
+ * can reject, not a compile-time impossibility.
+ */
+export function hasPermission(role: string, permission: string) {
+  const granted = (ROLE_PERMISSIONS as Record<string, readonly string[] | undefined>)[
+    role
+  ];
   return Array.isArray(granted) && granted.includes(permission);
 }
 

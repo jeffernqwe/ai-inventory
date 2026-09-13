@@ -21,7 +21,7 @@
  */
 
 import { registerProvider, deregisterProvider } from '../../src/services/mail/providers/index.js';
-import { MailDeliveryError } from '../../src/services/mail/mailErrors.js';
+import { MailDeliveryError } from '../../src/services/mail/mailErrors.ts';
 
 export const FAKE_MAIL_PROVIDER = 'fake-mail';
 

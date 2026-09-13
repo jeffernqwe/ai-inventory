@@ -10,8 +10,8 @@
  * sent to the mobile application or to the AI provider's training process.
  */
 
-function positiveInt(raw, fallback) {
-  const n = Number.parseInt(raw, 10);
+function positiveInt(raw: string | undefined, fallback: number) {
+  const n = Number.parseInt(raw ?? '', 10);
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 

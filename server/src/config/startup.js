@@ -17,7 +17,7 @@
  */
 
 import app from '../app.js';
-import env from './env.js';
+import env from './env.ts';
 import { connectDatabase, disconnectDatabase } from './db.js';
 import { createShutdownHandler, registerSignalHandlers } from './shutdown.js';
 import { validateProductionConfig } from './validateConfig.js';

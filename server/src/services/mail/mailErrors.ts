@@ -20,6 +20,8 @@ export const MAIL_NOT_CONFIGURED = 'MAIL_NOT_CONFIGURED';
 export const MAIL_UNAVAILABLE = 'MAIL_UNAVAILABLE';
 
 export class MailNotConfigured extends Error {
+  declare code: string;
+
   constructor(message = 'Email delivery is not configured on this server.') {
     super(message);
     this.name = 'MailNotConfigured';
@@ -28,6 +30,8 @@ export class MailNotConfigured extends Error {
 }
 
 export class MailDeliveryError extends Error {
+  declare code: string;
+
   constructor(message = 'The email could not be sent.', code = MAIL_UNAVAILABLE) {
     super(message);
     this.name = 'MailDeliveryError';
@@ -35,7 +39,7 @@ export class MailDeliveryError extends Error {
   }
 }
 
-export function isMailError(err) {
+export function isMailError(err: unknown) {
   return err instanceof MailNotConfigured || err instanceof MailDeliveryError;
 }
 

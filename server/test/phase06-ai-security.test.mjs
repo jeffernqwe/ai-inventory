@@ -18,7 +18,7 @@ import {
   disconnectDb,
 } from './support.mjs';
 import { dbSuite } from './testEnv.mjs';
-import { ROLES } from '../src/constants/roles.js';
+import { ROLES } from '../src/constants/roles.ts';
 import AIConversation from '../src/models/aiConversation.model.ts';
 import {
   registerFakeProvider,

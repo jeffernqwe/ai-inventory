@@ -13,8 +13,8 @@ import { parsePagination, pageResult } from '../utils/pagination.js';
 import { optionalObjectId, requiredString, isObjectId } from '../utils/validate.js';
 import { invalidId, notFound, throwValidation } from '../utils/errors.js';
 import ApiError from '../utils/ApiError.js';
-import { aiConfig } from '../services/ai/aiConfig.js';
-import { AiNotConfigured, AiProviderError } from '../services/ai/aiErrors.js';
+import { aiConfig } from '../services/ai/aiConfig.ts';
+import { AiNotConfigured, AiProviderError } from '../services/ai/aiErrors.ts';
 import { runAiChat } from '../services/ai/ai.service.js';
 
 const TITLE_MAX = 120;

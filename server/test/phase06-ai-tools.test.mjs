@@ -18,7 +18,7 @@ import {
   disconnectDb,
 } from './support.mjs';
 import { dbSuite } from './testEnv.mjs';
-import { ROLES } from '../src/constants/roles.js';
+import { ROLES } from '../src/constants/roles.ts';
 import { executeTool, validateToolArgs, AI_TOOL_DEFS, aiToolsById } from '../src/services/ai/tools.js';
 
 const { dbOk, baseUrl, server } = await startServer();

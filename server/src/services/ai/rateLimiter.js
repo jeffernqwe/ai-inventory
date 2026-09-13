@@ -8,7 +8,7 @@
  * no billing system). Expired windows are pruned so memory stays bounded.
  */
 
-import { aiConfig } from './aiConfig.js';
+import { aiConfig } from './aiConfig.ts';
 
 function createAiRateLimiter() {
   const hits = new Map(); // userId -> number[] (timestamps within the current window)

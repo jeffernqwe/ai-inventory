@@ -49,7 +49,7 @@ import {
   disconnectDb,
 } from './support.mjs';
 import { dbSuite } from './testEnv.mjs';
-import { ROLES } from '../src/constants/roles.js';
+import { ROLES } from '../src/constants/roles.ts';
 import Inventory from '../src/models/inventory.model.ts';
 import InventoryTransaction from '../src/models/inventoryTransaction.model.ts';
 import AuditLog from '../src/models/auditLog.model.ts';

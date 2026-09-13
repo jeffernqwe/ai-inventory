@@ -6,7 +6,7 @@ import { notFound } from '../utils/errors.js';
 import {
   AUDIT_ACTIONS,
   AUDIT_ENTITY_TYPES,
-} from '../constants/audit.js';
+} from '../constants/audit.ts';
 
 const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 

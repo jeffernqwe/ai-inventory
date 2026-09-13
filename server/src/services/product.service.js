@@ -5,8 +5,8 @@ import Category from '../models/category.model.ts';
 import ApiError from '../utils/ApiError.js';
 import { recordAudit } from './audit.service.js';
 import { notFound } from '../utils/errors.js';
-import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../constants/audit.js';
-import { classifyStockStatus } from '../constants/stockStatus.js';
+import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../constants/audit.ts';
+import { classifyStockStatus } from '../constants/stockStatus.ts';
 import { internalEan13Candidates } from '../utils/internalBarcode.js';
 
 const { ObjectId } = mongoose.Types;

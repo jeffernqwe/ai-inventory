@@ -14,7 +14,7 @@
  */
 
 import { createResendProvider } from './resendProvider.js';
-import { MailNotConfigured } from '../mailErrors.js';
+import { MailNotConfigured } from '../mailErrors.ts';
 
 const registry = new Map();
 

@@ -28,10 +28,10 @@
  * inside it is a live credential.
  */
 
-import { mailConfig } from './mailConfig.js';
+import { mailConfig } from './mailConfig.ts';
 import { selectProvider } from './providers/index.js';
-import { passwordResetEmail } from './templates/passwordReset.js';
-import { MailNotConfigured, MailDeliveryError, isMailError } from './mailErrors.js';
+import { passwordResetEmail } from './templates/passwordReset.ts';
+import { MailNotConfigured, MailDeliveryError, isMailError } from './mailErrors.ts';
 
 export { MailNotConfigured, MailDeliveryError, isMailError };
 

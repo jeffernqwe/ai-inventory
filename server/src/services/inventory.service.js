@@ -6,7 +6,7 @@ import Product from '../models/product.model.ts';
 import Location from '../models/location.model.ts';
 import ApiError from '../utils/ApiError.js';
 import { recordAudit } from './audit.service.js';
-import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../constants/audit.js';
+import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../constants/audit.ts';
 
 const { ObjectId } = mongoose.Types;
 const oid = (id) => new ObjectId(id);

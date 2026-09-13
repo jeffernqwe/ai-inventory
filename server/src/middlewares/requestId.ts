@@ -17,12 +17,21 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import type { NextFunction, Request, Response } from 'express';
 
 const HEADER = 'x-request-id';
 const MAX_REQUEST_ID_LENGTH = 128;
 const SAFE_REQUEST_ID = /^[A-Za-z0-9._:-]+$/;
 
-export function requestId(req, res, next) {
+/**
+ * A Request carrying the correlation id this middleware sets. The field is
+ * declared here rather than globally so the addition stays owned by the module
+ * that makes it; every reader of `req.requestId` (controllers, the error
+ * handler) is still untyped JavaScript and reads it as before.
+ */
+type RequestWithRequestId = Request & { requestId?: string };
+
+export function requestId(req: RequestWithRequestId, res: Response, next: NextFunction) {
   const incoming = typeof req.get === 'function' ? req.get(HEADER) : undefined;
   const id =
     typeof incoming === 'string' &&

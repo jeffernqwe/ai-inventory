@@ -24,11 +24,11 @@ import assert from 'node:assert/strict';
 
 import { startServer, makeApi, createTracker, registerOwner, disconnectDb } from './support.mjs';
 import { dbSuite, unitSuite } from './testEnv.mjs';
-import { ROLES } from '../src/constants/roles.js';
+import { ROLES } from '../src/constants/roles.ts';
 import { AIConversation, AIMessage } from '../src/models/index.ts';
 import { runAiChat } from '../src/services/ai/ai.service.js';
 import { toAnthropicMessages } from '../src/services/ai/providers/anthropicWire.js';
-import { AiProviderError } from '../src/services/ai/aiErrors.js';
+import { AiProviderError } from '../src/services/ai/aiErrors.ts';
 import {
   registerFakeProvider,
   setFakeScenario,

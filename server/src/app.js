@@ -1,9 +1,9 @@
 import express from 'express';
 import helmet from 'helmet';
 
-import env from './config/env.js';
-import { createCors } from './middlewares/cors.js';
-import requestId from './middlewares/requestId.js';
+import env from './config/env.ts';
+import { createCors } from './middlewares/cors.ts';
+import requestId from './middlewares/requestId.ts';
 import requestLogger from './middlewares/httpLogger.js';
 import healthRoutes from './routes/health.routes.js';
 import { createAuthRouter } from './routes/auth.routes.js';
@@ -17,7 +17,7 @@ import inventoryRoutes from './routes/inventory.routes.js';
 import dashboardRoutes from './routes/dashboard.routes.js';
 import aiRoutes from './routes/ai.routes.js';
 import auditRoutes from './routes/audit.routes.js';
-import notFound from './middlewares/notFound.js';
+import notFound from './middlewares/notFound.ts';
 import errorHandler from './middlewares/errorHandler.js';
 
 /**

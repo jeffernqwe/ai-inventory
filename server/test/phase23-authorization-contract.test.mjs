@@ -81,7 +81,7 @@ import {
   resolveSourcePath,
   walkSourceFiles,
 } from './sourceFiles.mjs';
-import { PERMISSIONS, ROLES, ROLE_PERMISSIONS, ROLE_VALUES } from '../src/constants/roles.js';
+import { PERMISSIONS, ROLES, ROLE_PERMISSIONS, ROLE_VALUES } from '../src/constants/roles.ts';
 import requireAuth from '../src/middlewares/authenticate.js';
 
 // ---------------------------------------------------------------------------

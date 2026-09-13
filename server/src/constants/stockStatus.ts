@@ -27,8 +27,15 @@ export const STOCK_STATUSES = Object.freeze({
  * products the same way). Negative availability (should not occur under normal
  * V1 rules) is treated as out of stock.
  */
-export function classifyStockStatus(available, minimumStock = 0) {
-  const avail = Number.isFinite(available) ? available : 0;
+export function classifyStockStatus(
+  available: number | null | undefined,
+  minimumStock = 0,
+) {
+  // `Number.isFinite` rejects a non-number as well as a non-finite one, so the
+  // `typeof` test is what lets the checker see the fallback below — it narrows
+  // exactly the same inputs and never changes which branch is taken.
+  const avail =
+    typeof available === 'number' && Number.isFinite(available) ? available : 0;
   const min = Number.isFinite(minimumStock) ? minimumStock : 0;
   if (avail <= 0) return STOCK_STATUSES.OUT_OF_STOCK;
   if (avail <= min) return STOCK_STATUSES.LOW_STOCK;

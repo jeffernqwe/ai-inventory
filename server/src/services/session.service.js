@@ -6,7 +6,7 @@ import Session from '../models/session.model.ts';
 import ApiError from '../utils/ApiError.js';
 import { decodeAccessToken } from '../config/jwt.js';
 import { recordAudit } from './audit.service.js';
-import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../constants/audit.js';
+import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../constants/audit.ts';
 
 /**
  * Phase 26A — session lifecycle.

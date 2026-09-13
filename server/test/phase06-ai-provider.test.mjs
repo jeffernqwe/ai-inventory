@@ -15,8 +15,8 @@ import {
 } from './support.mjs';
 import { dbSuite, unitSuite } from './testEnv.mjs';
 import Product from '../src/models/product.model.ts';
-import { ROLES } from '../src/constants/roles.js';
-import { AiNotConfigured, AiProviderError } from '../src/services/ai/aiErrors.js';
+import { ROLES } from '../src/constants/roles.ts';
+import { AiNotConfigured, AiProviderError } from '../src/services/ai/aiErrors.ts';
 import { selectProvider, registeredProviders } from '../src/services/ai/providers/index.js';
 import { runAiChat } from '../src/services/ai/ai.service.js';
 import {

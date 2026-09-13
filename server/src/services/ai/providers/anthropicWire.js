@@ -14,8 +14,8 @@
  * header; they are never logged or returned.
  */
 
-import { aiConfig } from '../aiConfig.js';
-import { AiNotConfigured, AiProviderError } from '../aiErrors.js';
+import { aiConfig } from '../aiConfig.ts';
+import { AiNotConfigured, AiProviderError } from '../aiErrors.ts';
 import { postJson } from './http.js';
 
 /** Neutral tools -> Anthropic tools (they expect `input_schema`). */

@@ -13,6 +13,8 @@ export const AI_NOT_CONFIGURED = 'AI_NOT_CONFIGURED';
 export const AI_UNAVAILABLE = 'AI_UNAVAILABLE';
 
 export class AiNotConfigured extends Error {
+  declare code: string;
+
   constructor(message = 'The AI assistant is not configured on this server.') {
     super(message);
     this.name = 'AiNotConfigured';
@@ -21,6 +23,8 @@ export class AiNotConfigured extends Error {
 }
 
 export class AiProviderError extends Error {
+  declare code: string;
+
   constructor(message = 'The AI service could not be reached.', code = AI_UNAVAILABLE) {
     super(message);
     this.name = 'AiProviderError';
@@ -28,7 +32,7 @@ export class AiProviderError extends Error {
   }
 }
 
-export function isAiError(err) {
+export function isAiError(err: unknown) {
   return err instanceof AiNotConfigured || err instanceof AiProviderError;
 }
 

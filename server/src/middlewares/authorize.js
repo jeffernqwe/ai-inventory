@@ -1,5 +1,5 @@
 import ApiError from '../utils/ApiError.js';
-import { hasPermission } from '../constants/roles.js';
+import { hasPermission } from '../constants/roles.ts';
 
 /**
  * Role / permission authorization middleware.

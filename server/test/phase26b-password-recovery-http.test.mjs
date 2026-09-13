@@ -56,7 +56,7 @@ import { readSource } from './sourceFiles.mjs';
 
 import { createApp } from '../src/app.js';
 import { createAuthRouter } from '../src/routes/auth.routes.js';
-import notFound from '../src/middlewares/notFound.js';
+import notFound from '../src/middlewares/notFound.ts';
 import errorHandler from '../src/middlewares/errorHandler.js';
 import requireAuth from '../src/middlewares/authenticate.js';
 

@@ -14,7 +14,7 @@
  * without real sockets or a real process exit.
  */
 
-import env from './env.js';
+import env from './env.ts';
 
 /**
  * Build the shutdown handler bound to a started http server.

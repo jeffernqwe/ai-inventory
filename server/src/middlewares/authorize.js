@@ -1,4 +1,4 @@
-import ApiError from '../utils/ApiError.js';
+import ApiError from '../utils/ApiError.ts';
 import { hasPermission } from '../constants/roles.ts';
 
 /**

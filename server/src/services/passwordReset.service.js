@@ -53,13 +53,13 @@ import bcrypt from 'bcryptjs';
 
 import PasswordResetToken from '../models/passwordResetToken.model.ts';
 import User from '../models/user.model.ts';
-import { normalizeEmail } from '../utils/validate.js';
+import { normalizeEmail } from '../utils/validate.ts';
 import { recordAudit } from './audit.service.js';
 import { assertActiveBusiness } from './business.service.js';
 import { revokeAllSessions } from './session.service.js';
 import { sendPasswordResetEmail, isMailConfigured, MailNotConfigured, MailDeliveryError } from './mail/index.js';
 import { mailConfig } from './mail/mailConfig.ts';
-import { error as logError } from '../utils/logger.js';
+import { error as logError } from '../utils/logger.ts';
 import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../constants/audit.ts';
 
 // ---------------------------------------------------------------------------

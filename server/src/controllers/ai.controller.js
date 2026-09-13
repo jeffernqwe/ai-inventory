@@ -9,10 +9,10 @@
  */
 
 import { AIConversation, AIMessage } from '../models/index.ts';
-import { parsePagination, pageResult } from '../utils/pagination.js';
-import { optionalObjectId, requiredString, isObjectId } from '../utils/validate.js';
-import { invalidId, notFound, throwValidation } from '../utils/errors.js';
-import ApiError from '../utils/ApiError.js';
+import { parsePagination, pageResult } from '../utils/pagination.ts';
+import { optionalObjectId, requiredString, isObjectId } from '../utils/validate.ts';
+import { invalidId, notFound, throwValidation } from '../utils/errors.ts';
+import ApiError from '../utils/ApiError.ts';
 import { aiConfig } from '../services/ai/aiConfig.ts';
 import { AiNotConfigured, AiProviderError } from '../services/ai/aiErrors.ts';
 import { runAiChat } from '../services/ai/ai.service.js';

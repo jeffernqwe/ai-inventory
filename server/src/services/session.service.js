@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 import mongoose from 'mongoose';
 
 import Session from '../models/session.model.ts';
-import ApiError from '../utils/ApiError.js';
+import ApiError from '../utils/ApiError.ts';
 import { decodeAccessToken } from '../config/jwt.js';
 import { recordAudit } from './audit.service.js';
 import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../constants/audit.ts';

@@ -12,7 +12,7 @@ import notFound from '../src/middlewares/notFound.ts';
 import errorHandler from '../src/middlewares/errorHandler.js';
 import requireAuth from '../src/middlewares/authenticate.js';
 import { requireRole, requirePermission } from '../src/middlewares/authorize.js';
-import assertBusinessAccess from '../src/utils/businessAccess.js';
+import assertBusinessAccess from '../src/utils/businessAccess.ts';
 import env from '../src/config/env.ts';
 import User from '../src/models/user.model.ts';
 import Business from '../src/models/business.model.ts';

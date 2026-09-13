@@ -15,7 +15,7 @@
  * unaffected and always emit.
  */
 
-import { info } from '../utils/logger.js';
+import { info } from '../utils/logger.ts';
 
 export function requestLogger({ enabled = process.env.LOG_REQUESTS !== '0' } = {}) {
   if (!enabled) {

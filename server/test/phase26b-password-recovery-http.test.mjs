@@ -70,7 +70,7 @@ import {
   validateForgotPassword,
   validateResetPassword,
   validateChangePassword,
-} from '../src/utils/validate.js';
+} from '../src/utils/validate.ts';
 import { hashResetToken, INVALID_RESET_TOKEN_CODE } from '../src/services/passwordReset.service.js';
 
 import {

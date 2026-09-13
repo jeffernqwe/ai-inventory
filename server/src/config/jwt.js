@@ -1,7 +1,7 @@
 import jwt from 'jsonwebtoken';
 
 import env from './env.ts';
-import ApiError from '../utils/ApiError.js';
+import ApiError from '../utils/ApiError.ts';
 
 /**
  * JWT access-token helpers. Tokens carry the user id (`sub`), the id of the

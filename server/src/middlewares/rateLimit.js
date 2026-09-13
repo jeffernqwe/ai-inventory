@@ -31,7 +31,7 @@
 
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 
-import { normalizeEmail } from '../utils/validate.js';
+import { normalizeEmail } from '../utils/validate.ts';
 
 function positiveInt(raw, fallback) {
   const n = Number.parseInt(raw, 10);

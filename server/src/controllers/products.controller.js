@@ -1,6 +1,6 @@
-import { parsePagination, pageResult } from '../utils/pagination.js';
-import { isObjectId, optionalObjectId, optionalSearch, optionalEnum, requiredString, validateProduct, ACTIVE_ARCHIVED_STATUSES, CODE_MAX } from '../utils/validate.js';
-import { throwValidation, invalidId } from '../utils/errors.js';
+import { parsePagination, pageResult } from '../utils/pagination.ts';
+import { isObjectId, optionalObjectId, optionalSearch, optionalEnum, requiredString, validateProduct, ACTIVE_ARCHIVED_STATUSES, CODE_MAX } from '../utils/validate.ts';
+import { throwValidation, invalidId } from '../utils/errors.ts';
 import { productService } from '../services/product.service.js';
 
 function paramId(req) {

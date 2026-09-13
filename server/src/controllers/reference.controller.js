@@ -1,6 +1,6 @@
-import { parsePagination, pageResult } from '../utils/pagination.js';
-import { isObjectId, validateReferenceList } from '../utils/validate.js';
-import { throwValidation, invalidId } from '../utils/errors.js';
+import { parsePagination, pageResult } from '../utils/pagination.ts';
+import { isObjectId, validateReferenceList } from '../utils/validate.ts';
+import { throwValidation, invalidId } from '../utils/errors.ts';
 
 /**
  * Thin controllers for reference resources (Category/Location). BusinessId and

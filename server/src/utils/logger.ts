@@ -12,20 +12,26 @@
  * do not appear.
  */
 
-/** @param {'info'|'error'} level @param {object} fields */
-function record(level, fields) {
+/**
+ * Fields a caller may attach. Read only by `JSON.stringify`, never interpreted:
+ * a `undefined` value is omitted by it, so callers can spread a context object
+ * and absent fields simply do not appear.
+ */
+type LogFields = Record<string, unknown>;
+
+function record(level: 'info' | 'error', fields: LogFields) {
   const line = JSON.stringify({ ts: new Date().toISOString(), level, ...fields });
   if (level === 'error') console.error(line);
   else console.log(line);
 }
 
 /** Structured info-level record (request access logs, lifecycle events). */
-export function info(fields) {
+export function info(fields: LogFields) {
   record('info', fields);
 }
 
 /** Structured error-level record (server-side error logs, never the client body). */
-export function error(fields) {
+export function error(fields: LogFields) {
   record('error', fields);
 }
 

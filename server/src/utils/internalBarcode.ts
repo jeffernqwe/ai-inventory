@@ -30,7 +30,7 @@ export const MAX_BARCODE_ATTEMPTS = 64;
  * with weight 3 on the rightmost payload digit, then the check is the amount
  * that makes the total a multiple of ten.
  */
-export function ean13CheckDigit(payload12) {
+export function ean13CheckDigit(payload12: string) {
   let sum = 0;
   for (let i = 0; i < 12; i += 1) {
     const weight = (11 - i) % 2 === 0 ? 3 : 1; // rightmost (i=11) is weight 3
@@ -40,12 +40,12 @@ export function ean13CheckDigit(payload12) {
 }
 
 /** Full 13-digit EAN-13 value for a 12-digit payload (check digit appended). */
-export function ean13Value(payload12) {
+export function ean13Value(payload12: string) {
   return `${payload12}${ean13CheckDigit(payload12)}`;
 }
 
 /** Whether a stored barcode is one this system issues (prefix 2 + valid check). */
-export function isInternalEan13(value) {
+export function isInternalEan13(value: unknown) {
   if (typeof value !== 'string' || !/^2\d{12}$/.test(value)) return false;
   return ean13CheckDigit(value.slice(0, 12)) === Number(value[12]);
 }
@@ -54,7 +54,7 @@ export function isInternalEan13(value) {
  * Deterministic EAN-13 candidates for a product (given its ObjectId hex):
  * base payload from the id, then +1 for each collision. Yields 13-digit codes.
  */
-export function* internalEan13Candidates(productIdHex) {
+export function* internalEan13Candidates(productIdHex: string) {
   let seed = BigInt(`0x${productIdHex}`) % PAYLOAD_RANGE;
   for (let i = 0; i < MAX_BARCODE_ATTEMPTS; i += 1) {
     const payload = INTERNAL_PREFIX + seed.toString().padStart(PAYLOAD_DIGITS, '0');

@@ -4,7 +4,7 @@ import {
   validateChangePassword,
   validateMeUpdate,
   validateLogout,
-} from '../utils/validate.js';
+} from '../utils/validate.ts';
 import {
   registerBusinessOwner,
   loginWithPassword,
@@ -19,7 +19,7 @@ import {
   revokeAllSessions,
   toPublicSession,
 } from '../services/session.service.js';
-import ApiError from '../utils/ApiError.js';
+import ApiError from '../utils/ApiError.ts';
 import env from '../config/env.ts';
 
 /**

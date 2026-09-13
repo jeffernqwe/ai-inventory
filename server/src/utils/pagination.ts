@@ -25,14 +25,14 @@ const MAX_LIMIT = 100;
  * Surrounding whitespace is trimmed, matching `toNumber` in validate.js, so
  * `?limit=+10` (decoded to `' 10'`) keeps working. Leading zeros are fine.
  */
-function toInt(value) {
+function toInt(value: unknown) {
   if (typeof value === 'number') return Number.isInteger(value) ? value : NaN;
   if (typeof value !== 'string') return NaN;
   const text = value.trim();
   return /^\d+$/.test(text) ? Number(text) : NaN;
 }
 
-export function parsePagination(query = {}) {
+export function parsePagination(query: Record<string, unknown> = {}) {
   const rawPage = toInt(query.page);
   const rawLimit = toInt(query.limit);
 
@@ -43,12 +43,12 @@ export function parsePagination(query = {}) {
   return { page, limit, skip: (page - 1) * limit };
 }
 
-export function totalPages(total, limit) {
+export function totalPages(total: number, limit: number) {
   return limit > 0 ? Math.ceil(total / limit) : 0;
 }
 
 /** Wraps an array + count into the standard list payload. */
-export function pageResult(items, total, page, limit) {
+export function pageResult(items: unknown[], total: number, page: number, limit: number) {
   return {
     items,
     page,

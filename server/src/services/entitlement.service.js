@@ -16,7 +16,7 @@
  *     documented FOUNDATION default is lenient, and only for unassignable codes.
  */
 import Business from '../models/business.model.ts';
-import ApiError from '../utils/ApiError.js';
+import ApiError from '../utils/ApiError.ts';
 import { assertActiveBusiness } from './business.service.js';
 import {
   DEFAULT_PLAN_CODE,

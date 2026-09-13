@@ -4,7 +4,7 @@ import requireAuth from '../middlewares/authenticate.js';
 import { requirePermission } from '../middlewares/authorize.js';
 import { categoryService } from '../services/reference.service.js';
 import { createReferenceController } from '../controllers/reference.controller.js';
-import { validateCategory } from '../utils/validate.js';
+import { validateCategory } from '../utils/validate.ts';
 import { PERMISSIONS } from '../constants/roles.ts';
 
 const router = Router();

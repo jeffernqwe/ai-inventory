@@ -82,7 +82,7 @@ import {
   walkSourceFiles,
 } from './sourceFiles.mjs';
 import { PERMISSIONS, ROLES, ROLE_PERMISSIONS, ROLE_VALUES } from '../src/constants/roles.ts';
-import requireAuth from '../src/middlewares/authenticate.js';
+import requireAuth from '../src/middlewares/authenticate.ts';
 
 // ---------------------------------------------------------------------------
 // Paths — every one resolved from this file, never from cwd.

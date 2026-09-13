@@ -5,7 +5,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { requireRole, requirePermission } from '../src/middlewares/authorize.js';
+import { requireRole, requirePermission } from '../src/middlewares/authorize.ts';
 import {
   ROLES,
   ROLE_VALUES,

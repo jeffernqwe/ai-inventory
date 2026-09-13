@@ -38,7 +38,7 @@ import categoryRoutes from '../src/routes/categories.routes.js';
 import locationRoutes from '../src/routes/locations.routes.js';
 import productRoutes from '../src/routes/products.routes.js';
 import notFound from '../src/middlewares/notFound.ts';
-import errorHandler from '../src/middlewares/errorHandler.js';
+import errorHandler from '../src/middlewares/errorHandler.ts';
 
 const { ObjectId } = mongoose;
 

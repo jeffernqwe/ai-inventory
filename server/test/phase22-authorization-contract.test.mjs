@@ -59,7 +59,7 @@ import {
   ROLE_VALUES,
   hasPermission,
 } from '../src/constants/roles.ts';
-import requireAuth from '../src/middlewares/authenticate.js';
+import requireAuth from '../src/middlewares/authenticate.ts';
 import productsRoutes from '../src/routes/products.routes.js';
 import suppliersRoutes from '../src/routes/suppliers.routes.js';
 import purchaseOrdersRoutes from '../src/routes/purchase-orders.routes.js';

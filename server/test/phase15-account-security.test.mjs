@@ -38,7 +38,7 @@ import {
   disconnectDb,
 } from './support.mjs';
 import { dbSuite } from './testEnv.mjs';
-import { verifyAccessToken } from '../src/config/jwt.js';
+import { verifyAccessToken } from '../src/config/jwt.ts';
 import User from '../src/models/user.model.ts';
 
 const { dbOk, baseUrl, server } = await startServer();

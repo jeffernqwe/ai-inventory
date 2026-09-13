@@ -29,17 +29,52 @@
  * (e.g. Redis) — out of scope for V1, documented in the wiki of this library.
  */
 
+import type { Request, Response } from 'express';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 
 import { normalizeEmail } from '../utils/validate.ts';
 
-function positiveInt(raw, fallback) {
-  const n = Number.parseInt(raw, 10);
+/**
+ * The tunable limits every auth limiter is built from. Declared explicitly
+ * because `authRateConfig` both accepts a PARTIAL override of it and returns a
+ * COMPLETE one — a shape TypeScript cannot infer from the function itself.
+ */
+export type AuthRateConfig = {
+  loginWindowMs: number;
+  loginMax: number;
+  loginIpWindowMs: number;
+  loginIpMax: number;
+  registerWindowMs: number;
+  registerMax: number;
+  passwordResetWindowMs: number;
+  passwordResetMax: number;
+  passwordResetIpWindowMs: number;
+  passwordResetIpMax: number;
+  passwordResetConfirmWindowMs: number;
+  passwordResetConfirmMax: number;
+};
+
+function positiveInt(raw: string | undefined, fallback: number): number {
+  // `?? ''` parses to NaN, which the guard below turns into the fallback — the
+  // same result the untyped version produced for a missing variable.
+  const n = Number.parseInt(raw ?? '', 10);
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
+/**
+ * The client address the limiters key on. Express types `req.ip` as possibly
+ * undefined, but it is always populated for a request that reached a limiter
+ * (it falls back to the socket address). `ipKeyGenerator` would throw on an
+ * undefined address in the original code too, so this assertion states an
+ * existing assumption rather than introducing a fallback that would change
+ * behaviour under the `trust proxy` settings documented below.
+ */
+function clientIp(request: Request): string {
+  return request.ip as string;
+}
+
 /** Base limits; individual keys can be overridden per router (tests/tuning). */
-export function authRateConfig(overrides = {}) {
+export function authRateConfig(overrides: Partial<AuthRateConfig> = {}): AuthRateConfig {
   return {
     loginWindowMs: positiveInt(process.env.AUTH_LOGIN_RATE_LIMIT_WINDOW_MS, 15 * 60 * 1000),
     loginMax: positiveInt(process.env.AUTH_LOGIN_RATE_LIMIT_MAX, 10),
@@ -70,12 +105,14 @@ export function authRateConfig(overrides = {}) {
 }
 
 /** Shared response conventions for every auth rate-limit block. */
-function limitResponse(code, message) {
+function limitResponse(code: string, message: string) {
   return {
     // IETF draft-7 RateLimit / RateLimit-Policy + Retry-After headers.
-    standardHeaders: 'draft-7',
+    // `as const` keeps the literal: the library types this option as a union of
+    // three header dialects, and a widened `string` matches none of them.
+    standardHeaders: 'draft-7' as const,
     legacyHeaders: false,
-    handler: (req, res) => res.status(429).json({ error: message, code }),
+    handler: (req: Request, res: Response) => res.status(429).json({ error: message, code }),
   };
 }
 
@@ -84,7 +121,7 @@ function limitResponse(code, message) {
  * responses count, so failed password attempts accumulate and lock the
  * ip+account until the window elapses, while correct logins pass through.
  */
-export function createLoginAccountLimiter(overrides = {}) {
+export function createLoginAccountLimiter(overrides: Partial<AuthRateConfig> = {}) {
   const { loginWindowMs, loginMax } = authRateConfig(overrides);
   return rateLimit({
     windowMs: loginWindowMs,
@@ -94,7 +131,7 @@ export function createLoginAccountLimiter(overrides = {}) {
     // keys; the email half (normalized exactly like auth.service login) scopes
     // the budget to a single account.
     keyGenerator(request) {
-      const ip = ipKeyGenerator(request.ip);
+      const ip = ipKeyGenerator(clientIp(request));
       const email = normalizeEmail(request.body?.email);
       return `${ip}|${email || '(no-email)'}`;
     },
@@ -119,14 +156,14 @@ export function createLoginAccountLimiter(overrides = {}) {
  * buckets; under trust N, request.ip resolves to the forwarded client IP and
  * the limiter keys on the real client, exactly as configured.
  */
-export function createLoginIpLimiter(overrides = {}) {
+export function createLoginIpLimiter(overrides: Partial<AuthRateConfig> = {}) {
   const { loginIpWindowMs, loginIpMax } = authRateConfig(overrides);
   return rateLimit({
     windowMs: loginIpWindowMs,
     limit: loginIpMax,
     skipSuccessfulRequests: true,
     keyGenerator(request) {
-      return ipKeyGenerator(request.ip);
+      return ipKeyGenerator(clientIp(request));
     },
     ...limitResponse(
       'LOGIN_RATE_LIMITED',
@@ -139,13 +176,13 @@ export function createLoginIpLimiter(overrides = {}) {
  * Registration limiter — per IP, counting every attempt (mass signups). Same
  * explicit request.ip keying rationale as createLoginIpLimiter above.
  */
-export function createRegisterLimiter(overrides = {}) {
+export function createRegisterLimiter(overrides: Partial<AuthRateConfig> = {}) {
   const { registerWindowMs, registerMax } = authRateConfig(overrides);
   return rateLimit({
     windowMs: registerWindowMs,
     limit: registerMax,
     keyGenerator(request) {
-      return ipKeyGenerator(request.ip);
+      return ipKeyGenerator(clientIp(request));
     },
     ...limitResponse(
       'REGISTER_RATE_LIMITED',
@@ -187,13 +224,13 @@ const PASSWORD_RESET_RATE_LIMITED = 'PASSWORD_RESET_RATE_LIMITED';
  * grants nothing — a forged address only spends that address's own budget, and a
  * correct-but-unknown address spends it identically.
  */
-export function createPasswordResetRequestAccountLimiter(overrides = {}) {
+export function createPasswordResetRequestAccountLimiter(overrides: Partial<AuthRateConfig> = {}) {
   const { passwordResetWindowMs, passwordResetMax } = authRateConfig(overrides);
   return rateLimit({
     windowMs: passwordResetWindowMs,
     limit: passwordResetMax,
     keyGenerator(request) {
-      const ip = ipKeyGenerator(request.ip);
+      const ip = ipKeyGenerator(clientIp(request));
       const email = normalizeEmail(request.body?.email);
       return `${ip}|${email || '(no-email)'}`;
     },
@@ -211,13 +248,13 @@ export function createPasswordResetRequestAccountLimiter(overrides = {}) {
  * Same explicit request.ip keying rationale as createLoginIpLimiter — never the
  * library default, which turns a spoofed X-Forwarded-For into a 500.
  */
-export function createPasswordResetRequestIpLimiter(overrides = {}) {
+export function createPasswordResetRequestIpLimiter(overrides: Partial<AuthRateConfig> = {}) {
   const { passwordResetIpWindowMs, passwordResetIpMax } = authRateConfig(overrides);
   return rateLimit({
     windowMs: passwordResetIpWindowMs,
     limit: passwordResetIpMax,
     keyGenerator(request) {
-      return ipKeyGenerator(request.ip);
+      return ipKeyGenerator(clientIp(request));
     },
     ...limitResponse(
       PASSWORD_RESET_RATE_LIMITED,
@@ -232,13 +269,13 @@ export function createPasswordResetRequestIpLimiter(overrides = {}) {
  * the cap is per source. It matters because each accepted attempt costs a SHA-256
  * lookup, an atomic claim and a bcrypt hash on an unauthenticated endpoint.
  */
-export function createPasswordResetConfirmLimiter(overrides = {}) {
+export function createPasswordResetConfirmLimiter(overrides: Partial<AuthRateConfig> = {}) {
   const { passwordResetConfirmWindowMs, passwordResetConfirmMax } = authRateConfig(overrides);
   return rateLimit({
     windowMs: passwordResetConfirmWindowMs,
     limit: passwordResetConfirmMax,
     keyGenerator(request) {
-      return ipKeyGenerator(request.ip);
+      return ipKeyGenerator(clientIp(request));
     },
     ...limitResponse(
       PASSWORD_RESET_RATE_LIMITED,

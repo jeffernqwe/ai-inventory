@@ -15,14 +15,29 @@
  * unaffected and always emit.
  */
 
+import type { NextFunction, Request, Response } from 'express';
+
 import { info } from '../utils/logger.ts';
 
-export function requestLogger({ enabled = process.env.LOG_REQUESTS !== '0' } = {}) {
+/**
+ * The slice of the request this logger reads. Local and structural, like the
+ * other middleware: both fields are attached at runtime by earlier middleware
+ * (`requestId`, `requireAuth`) and are absent on a request that never reached
+ * them, which is why the userId expression below stays guarded.
+ */
+type RequestWithContext = Request & {
+  requestId?: string;
+  user?: { id: string };
+};
+
+export function requestLogger({
+  enabled = process.env.LOG_REQUESTS !== '0',
+}: { enabled?: boolean } = {}) {
   if (!enabled) {
-    return (req, res, next) => next();
+    return (req: Request, res: Response, next: NextFunction) => next();
   }
 
-  return function httpLog(req, res, next) {
+  return function httpLog(req: RequestWithContext, res: Response, next: NextFunction) {
     const start = process.hrtime.bigint();
     const method = req.method;
     const path = req.path; // captured at entry so the query string never leaks in

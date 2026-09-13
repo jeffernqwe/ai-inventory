@@ -4,7 +4,7 @@ import helmet from 'helmet';
 import env from './config/env.ts';
 import { createCors } from './middlewares/cors.ts';
 import requestId from './middlewares/requestId.ts';
-import requestLogger from './middlewares/httpLogger.js';
+import requestLogger from './middlewares/httpLogger.ts';
 import healthRoutes from './routes/health.routes.js';
 import { createAuthRouter } from './routes/auth.routes.js';
 import userRoutes from './routes/users.routes.js';
@@ -18,7 +18,7 @@ import dashboardRoutes from './routes/dashboard.routes.js';
 import aiRoutes from './routes/ai.routes.js';
 import auditRoutes from './routes/audit.routes.js';
 import notFound from './middlewares/notFound.ts';
-import errorHandler from './middlewares/errorHandler.js';
+import errorHandler from './middlewares/errorHandler.ts';
 
 /**
  * Build a fully wired Express app. Exported as a factory so tests can exercise

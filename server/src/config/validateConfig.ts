@@ -23,13 +23,20 @@
  */
 
 import jwt from 'jsonwebtoken';
+import type { SignOptions } from 'jsonwebtoken';
 
 import { providerRequiredEnv } from '../services/ai/providers/index.js';
+
+/**
+ * One problem with the production configuration. `message` names the VARIABLE
+ * that is wrong and never carries its value, so no secret can be printed.
+ */
+export type ConfigProblem = { variable: string; message: string };
 
 /** Minimum JWT_SECRET length. A short secret is not a credible HS256 signing key. */
 export const JWT_SECRET_MIN_LENGTH = 32;
 
-function missing(variable) {
+function missing(variable: string): ConfigProblem {
   return { variable, message: `Missing required environment variable: ${variable}` };
 }
 
@@ -38,11 +45,15 @@ function missing(variable) {
  * process.env). Returns an array of { variable, message } problems — empty when
  * the configuration is valid. Never includes secret values.
  */
-export function validateProductionConfig(values = process.env) {
-  const problems = [];
-  const get = (key) => {
-    const raw = values && typeof values[key] === 'string' ? values[key] : '';
-    return raw.trim();
+export function validateProductionConfig(
+  values: Record<string, string | undefined> = process.env
+): ConfigProblem[] {
+  const problems: ConfigProblem[] = [];
+  const get = (key: string) => {
+    // Optional chaining reproduces the original `values && ...` guard; a missing
+    // or non-string entry still yields '' rather than undefined.
+    const raw = values?.[key];
+    return typeof raw === 'string' ? raw.trim() : '';
   };
 
   if (!get('MONGODB_URI')) {
@@ -70,7 +81,10 @@ export function validateProductionConfig(values = process.env) {
     try {
       jwt.sign({ sub: 'startup-config-probe' }, jwtSecret, {
         algorithm: 'HS256',
-        expiresIn: jwtExpiresIn,
+        // Same operator-supplied timespan as config/jwt.ts. Probing with the
+        // value jsonwebtoken itself would parse is the point of this check, so
+        // the cast states a contract the next line already enforces.
+        expiresIn: jwtExpiresIn as SignOptions['expiresIn'],
       });
     } catch {
       problems.push({

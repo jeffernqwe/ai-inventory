@@ -18,9 +18,36 @@
 
 import app from '../app.js';
 import env from './env.ts';
-import { connectDatabase, disconnectDatabase } from './db.js';
-import { createShutdownHandler, registerSignalHandlers } from './shutdown.js';
-import { validateProductionConfig } from './validateConfig.js';
+import { connectDatabase, disconnectDatabase } from './db.ts';
+import {
+  createShutdownHandler,
+  registerSignalHandlers,
+} from './shutdown.ts';
+import type { Logger, ShutdownHandler, ShutdownServer, SignalTarget } from './shutdown.ts';
+import { validateProductionConfig } from './validateConfig.ts';
+import type { ConfigProblem } from './validateConfig.ts';
+
+/**
+ * Everything `startServer` reaches the outside world through, injectable so the
+ * fail-fast, dev-leniency and readiness paths are exercised deterministically
+ * without real sockets or process exits.
+ *
+ * `appInstance` is structural rather than `Express` for the same reason
+ * `ShutdownServer` is: the only thing this module does with it is `listen`, and
+ * a test fake supplies exactly that.
+ */
+type StartServerOptions = {
+  appInstance?: { listen(port: number, callback: () => void): ShutdownServer };
+  nodeEnv?: string;
+  port?: number;
+  connectFn?: () => unknown;
+  closeFn?: () => unknown;
+  validator?: () => ConfigProblem[];
+  exit?: (code: number) => void;
+  logger?: Logger;
+  signalTarget?: SignalTarget;
+  shutdownTimeoutMs?: number;
+};
 
 /**
  * Boot the server.
@@ -50,8 +77,12 @@ export async function startServer({
   logger = console,
   signalTarget = process,
   shutdownTimeoutMs = env.shutdownTimeoutMs,
-} = {}) {
-  const exitFn = exit || ((code) => process.exit(code));
+}: StartServerOptions = {}): Promise<{
+  server: ShutdownServer;
+  shutdown: ShutdownHandler;
+  connected: boolean;
+} | null> {
+  const exitFn = exit || ((code: number) => process.exit(code));
 
   // H7 — production fail-fast on invalid configuration.
   if (nodeEnv === 'production') {
@@ -75,7 +106,14 @@ export async function startServer({
     connected = (await connectFn()) === true;
   } catch (err) {
     if (nodeEnv === 'production') {
-      logger.error(`[db] could not connect to MongoDB at startup (${err && err.name ? err.name : 'Error'}) — exiting`);
+      // `${err && err.name ? err.name : 'Error'}`, narrowed. The original
+      // interpolated into a template, which stringifies the branch it took, so
+      // `String()` yields the same text for every value; the `err &&`
+      // short-circuit is reproduced by the optional access.
+      const name = (err as { name?: unknown } | null | undefined)?.name;
+      logger.error(
+        `[db] could not connect to MongoDB at startup (${name ? String(name) : 'Error'}) — exiting`
+      );
       exitFn(1);
       return null;
     }

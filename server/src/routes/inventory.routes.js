@@ -1,7 +1,7 @@
 import { Router } from 'express';
 
-import requireAuth from '../middlewares/authenticate.js';
-import { requirePermission } from '../middlewares/authorize.js';
+import requireAuth from '../middlewares/authenticate.ts';
+import { requirePermission } from '../middlewares/authorize.ts';
 import inventoryController from '../controllers/inventory.controller.js';
 import transactionsController from '../controllers/transactions.controller.js';
 import { PERMISSIONS } from '../constants/roles.ts';

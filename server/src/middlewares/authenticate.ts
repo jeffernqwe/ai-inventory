@@ -1,8 +1,9 @@
+import type { NextFunction, Request, Response } from 'express';
 import mongoose from 'mongoose';
 
 import User from '../models/user.model.ts';
 import ApiError from '../utils/ApiError.ts';
-import { verifyAccessToken } from '../config/jwt.js';
+import { verifyAccessToken } from '../config/jwt.ts';
 import { assertActiveBusiness } from '../services/business.service.js';
 import {
   findActiveSessionByJti,
@@ -38,7 +39,30 @@ import {
  * 403 -> user is DISABLED, or the user's business is missing / not ACTIVE
  *        (SUSPENDED or ARCHIVED revoke existing JWTs immediately — Phase 07B)
  */
-export async function requireAuth(req, res, next) {
+
+/**
+ * The request context this middleware ATTACHES. Local and structural, matching
+ * the pattern the other middleware use: these fields exist only because this
+ * function ran, so declaring them on Express's global `Request` would let any
+ * module read an authoritative-looking `req.user` on a public route.
+ *
+ * The fields are the ones the doc block above promises, and `name`/`email` are
+ * optional only because this middleware does not read them back — every field
+ * it writes is always populated.
+ */
+type AuthenticatedRequest = Request & {
+  user?: {
+    id: string;
+    businessId: string;
+    name?: string;
+    email?: string;
+    role: string;
+    status?: string;
+  };
+  auth?: { sessionId: string; jti: string };
+};
+
+export async function requireAuth(req: AuthenticatedRequest, res: Response, next: NextFunction) {
   try {
     const header = req.headers.authorization || '';
     const [scheme, token] = header.split(' ');

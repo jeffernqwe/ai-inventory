@@ -30,7 +30,9 @@ An AI-powered inventory management system for Android and iOS.
 
 ## Prerequisites
 
-- Node.js **≥ 18 LTS** (recommended: current LTS)
+- Node.js **≥ 24** — `.nvmrc` pins the major version. The server runs its `.ts` modules
+  directly, with no build step, through Node's native type stripping (on by default from
+  Node 24); an older runtime cannot start it.
 - npm (ships with Node)
 - Git
 

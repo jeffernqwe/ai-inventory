@@ -2123,17 +2123,20 @@ Automated Purchasing
 ## V2
 
 ```text
-Barcode/QR Scanner
 Push Notifications
 Advanced Reports
 Multiple Branch Improvements
-Supplier Management
-Stock Transfers
 Document Upload
 RAG
 MongoDB Vector Search
 Improved AI Context
 ```
+
+Shipped since this list was written, and therefore no longer future work: the barcode/QR scanner
+(Phases 12B–12D), supplier management (Phases 13A and 17) and stock transfers (Phase 19). They were
+removed from the list above by Phase 29 so that this roadmap states the remaining future scope rather
+than repeating delivered work; their implemented behaviour is specified in §13–§19 and §39. This
+reconciliation matches the equivalent note in `docs/DEVELOPMENT_ROADMAP.md` §35.
 
 ## V3
 
@@ -2159,6 +2162,13 @@ Team Management
 Organization Settings
 SaaS Administration
 ```
+
+A **shared rate-limit / shared-state store** is also deferred to V4 rather than to V1. The
+recovery-flooding exposure (B2) and the per-process limiter stores (E3) share one root cause and one
+remedy, so they are recorded as related shared-infrastructure work and deferred together by the Phase
+29 owner decision. Both remain **open**, V1 ships in-memory per-process limiters by decision, and no
+shared store is in scope. See `docs/DEVELOPMENT_ROADMAP.md` §27B for the risks and §27E for the
+decision.
 
 ---
 

@@ -240,6 +240,7 @@ Phase 26A — Session Hardening & Real Logout (server-side session records named
 Phase 26B — Password Recovery (email reset link: provider-agnostic mail layer with a Resend transport, single-use hashed reset tokens; `POST /api/auth/forgot-password` and `POST /api/auth/reset-password` added as two PUBLIC routes; no new permission, no new dependency, no mobile change; the request path answers one identical 202 to every caller)
 Phase 27 — Mobile Password Recovery (`/forgot-password` and `/reset-password` public screens consuming the existing Phase 26B endpoints; custom-scheme reset link `inventoryai://reset-password`; a successful reset clears the client session before returning to Login; ZERO backend changes and no new dependency; Universal Links / Android App Links deferred; iOS verification export-only)
 Phase 28 — Password Reset Mail Delivery Timing Hardening (B1 ONLY — the outbound password-reset email send is detached from the HTTP request path, so the 202 no longer waits on a mail provider: the send is dispatched unawaited after the durable token and audit writes, with an explicit rejection handler attached in the same synchronous turn; the pre-lookup `MAIL_NOT_CONFIGURED` 503, the uniform 202, token semantics, audit ordering, rate limiting and mobile are unchanged; PARTIALLY MITIGATED, NOT CLOSED — the residual database-work timing term is NOT eliminated; B2 was NOT implemented and remains open)
+Phase 29 — Residual Security-Risk Decision Record & Documentation Reconciliation (documentation only; records the owner's dispositions of the three remaining open security items — B1's residual database-work timing term ACCEPTED FOR V1 and DEFERRED, still PARTIALLY MITIGATED and NOT CLOSED; B2 and E3 DEFERRED TO V4 as related shared-infrastructure work, both still open — and reconciles the roadmap Phase Overview, the missing README Phase 26B entry, and the specification's §48 future-roadmap list with what has already shipped; no production code, test, dependency, configuration, limiter or password-reset behavior changed, no shared store introduced, and no historical verification snapshot back-updated)
 ```
 
 Phase 08 is an owner-directed hardening extension delivered in approved lettered increments
@@ -605,16 +606,18 @@ on the two Phase 07B login limiters, and both facts are guarded. A spent token, 
 reused token all answer 400 `INVALID_RESET_TOKEN`; a too-weak password answers 400 `VALIDATION_ERROR`
 with `fields`; a limiter answers 429 `PASSWORD_RESET_RATE_LIMITED`.
 
-The pre-commit audit identified two risks, and they no longer share a status. **B1 — the request path as
+The pre-commit audit identified two risks, and they do not share a status. **B1 — the request path as
 a practical timing oracle — is PARTIALLY MITIGATED by Phase 28 B1 (`7185e5e`) and is NOT closed:** the
 outbound transport is off the request path, so an unknown address (one indexed query) and a known one
 no longer differ by a mail round-trip, but the known path still does more **database** work (writes, an
-audit insert), and that residual term is not claimed to be eliminated. **B2 — distributed reset-mail
-flooding of a single victim — remains OPEN and unfixed**, because the per-account bucket keys on
-`ip|email` while a rotating attacker never trips the per-IP bucket, and closing it needs a shared store
-that is out of V1 scope by decision. Both are recorded in `docs/DEVELOPMENT_ROADMAP.md` §27B, with
-Phase 28 B1's own record in §27D. No new route was added anywhere else, and the Phase 23 classifier's
-`PUBLIC` bucket declares both routes with their reasons.
+audit insert), and that residual term is not claimed to be eliminated. **Phase 29 recorded the owner's
+disposition: that residue is ACCEPTED FOR V1 and DEFERRED** — it is not pursued further in V1, and it is
+never to be described as fixed. **B2 — distributed reset-mail flooding of a single victim — remains OPEN
+and is DEFERRED TO V4**, together with **E3** (the in-memory, per-process limiter stores, which share
+its root cause and its remedy) as related shared-infrastructure work; no shared store was introduced and
+the limiters are unchanged. Both are recorded in `docs/DEVELOPMENT_ROADMAP.md` §27B, with Phase 28 B1's
+own record in §27D and the owner's decisions in §27E. No new route was added anywhere else, and the
+Phase 23 classifier's `PUBLIC` bucket declares both routes with their reasons.
 
 Phase 27 is an owner-directed mobile password-recovery increment delivered as a single approved
 increment after Phase 26B, and it is the half Phase 26B deliberately left out: mobile password
@@ -704,8 +707,44 @@ the `deleteMany` and the audit insert against one indexed read), which is explic
 be eliminated. No delay is injected to mask it, because unmeasured timing noise is not a security
 control. **B2 — distributed reset-mail flooding of one address — was not implemented, not mitigated and
 not touched**: the per-account bucket still keys on `ip|email` while a rotating attacker never trips the
-per-IP bucket, and the limiter stores are still in-memory and per-process. It remains open and needs a
-shared store, which is out of V1 scope by decision.
+per-IP bucket, and the limiter stores are still in-memory and per-process. **Phase 29 recorded its
+disposition: DEFERRED TO V4**, together with E3, as related shared-infrastructure work — still open, not
+mitigated, and with no shared store introduced.
+
+Phase 29 is an owner-directed documentation-and-decision increment delivered as a single approved
+increment after Phase 28 B1, and it is **documentation only**: no production code, test, dependency,
+configuration, limiter or password-reset behaviour changed, and `server/**` and `mobile/**` are
+byte-identical. Its purpose was to stop the repository saying "requires an owner decision" and start it
+saying what was decided — because every remaining open security item was blocked on exactly that. Phase
+28 B1's residual timing term, B2 and E3 each resolve either to an acceptance decision or to a
+shared-store infrastructure decision, and no code phase could legitimately proceed ahead of one.
+
+**Three owner decisions were recorded.** D-1: **B1's residual database-work timing difference is ACCEPTED
+FOR V1 and DEFERRED** — it stays **PARTIALLY MITIGATED, NOT CLOSED**, is never to be described as fixed,
+and no delay is injected to mask it. The reasoning is that the dominant and most separable term (the
+transport wait) is already gone, and that equalizing the remainder would require either dummy writes on
+the silent path or moving durability off the request path — and the latter would trade a timing oracle
+for a lost-token correctness failure. D-2: **B2 is DEFERRED TO V4**, still open. D-3: **E3 is DEFERRED TO
+V4**, still open, with B2 and E3 recorded as **related shared-infrastructure work** — same root cause (no
+shared store), same remedy, therefore the same future increment. **No Redis or other shared store was
+introduced**, and the in-memory per-process limiter architecture is unchanged.
+
+**Four documentation inconsistencies were reconciled**, each verified against the files before being
+changed rather than restated from memory. The roadmap's §3 Phase Overview flow diagram had stopped at
+Phase 26B, so **Phase 27 and Phase 28 were missing from the canonical phase list** although both exist
+as top-level sections — Phases 27, 28 and 29 are now listed. The README Phase Status list jumped from
+Phase 26A to Phase 27 with **no Phase 26B entry at all** — the follow-up deferred at the Phase 28
+close-out, discharged here. And the specification's §48 V2 "Future Roadmap" still listed the **barcode/QR
+scanner, supplier management and stock transfers** as future work although all three shipped (Phases
+12B–12D, 13A/17 and 19) — a correction the roadmap's §35 already carried and the specification had not.
+The Phase 29 decision record itself lives in roadmap §27E.
+
+**Historical snapshots were deliberately not back-updated**, in keeping with the convention every
+earlier phase follows: §27B's Phase 26B-4 `## Verified` block still reads 36/36 HTTP cases, 39 recovery
+cases and 209 + 394 = 603 even though the current figures are 40, 39 and 209 + 398 = 607. No test-count
+snapshot was rewritten to match today's totals — the snapshot is the record of the phase that measured
+it. The retained controller `MailDeliveryError` branch was not deleted, and no roadmap section was
+renumbered: §27E is a new lettered subsection and sections 28–36 keep their numbers.
 
 Phase 18 is an owner-directed mobile UI extension delivered in approved lettered increments (18A,
 18B, …) after Phase 17. It turns the app into a modern SaaS-style product surface WITHOUT changing

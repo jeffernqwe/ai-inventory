@@ -598,6 +598,27 @@ Phase 07 (testing + production hardening) and Phase 08 (owner-directed hardening
   existing best-effort `recordAudit` path. One consequence is deliberate and was accepted: tokens
   issued before this change carry no `jti` and are rejected, so every user signs in once more. No
   refresh-token rotation was added.
+- **Phase 26B — Password Recovery (Email Reset):** implemented, verified, and committed (`5a46781`
+  for the mail service; `9900e9a` for the token store, recovery service and HTTP surface; documentation
+  close-out `e95c785`) — the first way back into an account without an operator. A provider-agnostic
+  mail layer with a Resend transport (`server/src/services/mail/`) sits behind three functions, and
+  `POST /api/auth/forgot-password` and `POST /api/auth/reset-password` were added as two **public**,
+  rate-limited routes. Reset tokens are single-use and stored only as a SHA-256 digest — the raw
+  32-byte value is emailed and never persisted — expire after 30 minutes, are claimed by one conditional
+  `findOneAndUpdate`, and are **fail-closed**: no branch ever unsets `usedAt`, so a spent token stays
+  spent even if everything after the claim fails. Only one token is live per user, and the `deleteMany`
+  that enforces it uses `_id: { $lt: token._id }` so two concurrent requests converge instead of
+  cancelling each other out. An unknown, expired, already-used, disabled or suspended account is
+  rejected identically and no mail is sent. The request path is an enumeration-resistant invariant: one
+  module-level constant is returned as a **202** from every non-error exit, and a **mail delivery
+  failure is swallowed to that same 202**, because it can only be thrown *after* the account lookup,
+  where a `503` would be an account-existence oracle. The one deliberate exception is
+  `MAIL_NOT_CONFIGURED`, which stays a `503` because it is checked *before* the lookup and therefore
+  distinguishes nothing — an ordering argument, not a status choice. Two audit events are written
+  through the existing best-effort path and carry no metadata, so a token can never reach the trail.
+  **No new permission**, no role grant change, no new dependency, and no mobile file touched; mobile
+  consumption arrived in Phase 27. Two residual risks were identified by the pre-commit audit and
+  recorded rather than fixed — their dispositions are recorded in Phases 28 and 29 below.
 - **Phase 27 — Mobile Password Recovery:** implemented, verified, and committed (`6b8c3c0`) — the
   client half of the Phase 26B recovery surface, with **ZERO backend changes** and no new dependency.
   Two **public** screens are added — `/forgot-password` and `/reset-password` — plus a "Forgot
@@ -634,5 +655,21 @@ Phase 07 (testing + production hardening) and Phase 08 (owner-directed hardening
   PARTIALLY MITIGATED, NOT CLOSED:** the transport wait — the dominant, most separable term — is gone,
   but the known-address path still does more **database** work (writes and an audit insert against one
   indexed read), and that residual is not claimed to be eliminated. No delay is injected to mask it.
-  **B2 — distributed reset-mail flooding of one address — was not implemented and remains open.** No
-  backend route, permission, role grant, dependency or mobile file changed.
+  **B2 — distributed reset-mail flooding of one address — was not implemented and remains open,
+  deferred to V4 by the Phase 29 owner decision.** No backend route, permission, role grant, dependency
+  or mobile file changed.
+- **Phase 29 — Residual Security-Risk Decision Record & Documentation Reconciliation:** implemented and
+  verified — **documentation only**: no production code, test, dependency, configuration or behavior
+  changed, and `server/**` and `mobile/**` are byte-identical. It converts the project's three remaining
+  open security items from "requires an owner decision" into **recorded owner decisions**, and
+  reconciles four documentation inconsistencies against the shipped implementation. **B1's residual
+  database-work timing term is ACCEPTED FOR V1 and DEFERRED** — the oracle stays **PARTIALLY MITIGATED,
+  NOT CLOSED**, is explicitly not claimed to be eliminated, and no delay is injected to mask it; token
+  durability, audit ordering and detached-mail behavior are unchanged. **B2 and E3 are DEFERRED TO V4**
+  as related shared-infrastructure work: no Redis or other shared store was introduced, and the
+  in-memory per-process limiter architecture is unchanged. Documentation reconciled: the roadmap Phase
+  Overview gained Phases 27 and 28 (it had stopped at 26B), the missing Phase 26B entry was added to
+  this list, and the specification's §48 V2 list was corrected to drop the barcode/QR scanner, supplier
+  management and stock transfers — all long since shipped. The retained `MailDeliveryError` regression
+  guard is untouched, no roadmap section was renumbered, and historical verification snapshots were
+  deliberately **not** back-updated.

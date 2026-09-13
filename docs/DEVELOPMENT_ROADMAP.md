@@ -135,6 +135,15 @@ Session Hardening & Real Logout
         ↓
 Phase 26B
 Password Recovery (Email Reset)
+        ↓
+Phase 27
+Mobile Password Recovery
+        ↓
+Phase 28
+Password Reset Mail Delivery Timing Hardening (B1)
+        ↓
+Phase 29
+Residual Security-Risk Decision Record & Documentation Reconciliation
 ```
 
 ---
@@ -2654,8 +2663,8 @@ owner, and explicitly deferred — they are open, not closed, and neither has an
 
 ### B1 — `forgot-password` is a practical timing oracle on account existence
 
-**Status: PARTIALLY MITIGATED by Phase 28 B1 (`7185e5e`). NOT CLOSED.** The residual still requires an
-owner decision. **Do not describe this as fixed.**
+**Status: PARTIALLY MITIGATED by Phase 28 B1 (`7185e5e`). NOT CLOSED — the residual is ACCEPTED FOR V1
+and DEFERRED by the Phase 29 owner decision, recorded in §27E.** **Do not describe this as fixed.**
 
 For an **unknown** address the request costs one indexed `User.findOne` and returns. For a **known,
 active** address the same request additionally performs a business existence check, a token insert, a
@@ -2677,11 +2686,13 @@ recorded as a **partial mitigation so that it is not mistaken for closure**.
 Enumeration resistance remains the governing invariant of this phase, and the uniform 202 does not
 protect the clock. The remedy anticipated in this entry — *"making the send fire-and-forget after the
 202 is written"* — **was implemented by Phase 28 B1**. It closed the transport term and, as predicted
-here, left the database term; that residue is what still requires an owner decision.
+here, left the database term; **Phase 29 recorded the owner's decision to ACCEPT that residue for V1
+and DEFER it rather than pursue it further** (§27E).
 
 ### B2 — Distributed reset-mail flooding of one address is not bounded
 
-**Status: accepted / deferred. Not fixed. Requires an owner decision.**
+**Status: accepted / deferred. Not fixed. DEFERRED TO V4 by the Phase 29 owner decision (§27E),
+together with E3, as related shared-infrastructure work.**
 
 The account bucket keys on `ip|email`, so its 5/hour cap applies per (source, address). The IP bucket
 keys purely on IP, so it bounds total recovery traffic per source but **not** mail volume to any single
@@ -2699,6 +2710,10 @@ it did not address them. **Current status (Phase 28 B1, `7185e5e`): B1 is PARTIA
 outbound transport is off the request path, the residual database-work term remains and is not claimed
 to be eliminated — and B2 remains OPEN and unimplemented.** See §27D.
 
+**Phase 29 then recorded the owner's dispositions, and those are the current ones:** B1's residual is
+**ACCEPTED FOR V1 and DEFERRED** — not closed, and not pursued further in V1; B2 and E3 are **DEFERRED
+TO V4** as related shared-infrastructure work, both still open. See §27D and §27E.
+
 ## Residual Risks (accepted)
 
 Also from the audit, all accepted as inherent or as the deliberate price of a chosen trade-off.
@@ -2709,7 +2724,9 @@ Also from the audit, all accepted as inherent or as the deliberate price of a ch
   added; the user simply asks again.
 - **E3 — The limiter stores are in-memory and therefore per-process.** A multi-instance deployment
   multiplies every budget. A shared store (Redis) is out of V1 scope by decision; this is the same
-  underlying limit as B2.
+  underlying limit as B2. **DEFERRED TO V4 by the Phase 29 owner decision (§27E), recorded together
+  with B2 as related shared-infrastructure work** — the in-memory architecture is unchanged and no
+  shared store was introduced.
 - **E4 — A delivery failure leaves a live, unused token row** for an account whose owner never received
   the link. Nobody holds the raw token, so it is unusable; the next request's `deleteMany` removes it,
   and the TTL index removes it eventually. The alternative — deleting the row on delivery failure —
@@ -2979,7 +2996,8 @@ Recorded here so it is owner-visible rather than merely in code.
 **Status: implemented, verified and committed (2026-09-13); not pushed.**
 **Commit: `7185e5e` — "fix: detach password reset email delivery from request path (Phase 28 B1)",
 5 files, +507/−27.**
-**B1 ONLY. Phase 28 B2 was NOT implemented and remains open.**
+**B1 ONLY. Phase 28 B2 was NOT implemented and remains open — DEFERRED TO V4 by the Phase 29 owner
+decision (§27E).**
 
 ## Objective
 
@@ -3074,6 +3092,10 @@ an unknown address. That difference still exists in principle and is **explicitl
 eliminated**. No delay is injected to mask it, because unmeasured timing noise is not a security
 control.
 
+**Phase 29 recorded the owner's decision on this residue: ACCEPTED FOR V1 and DEFERRED.** No further
+work on it is scheduled in V1, its token durability, audit ordering and detached-mail behaviour are
+unchanged, and **this phase does not claim the oracle is closed** — it remains PARTIALLY MITIGATED.
+
 ## B2 remains open
 
 **B2 — distributed reset-mail flooding of one address is not bounded — was not implemented, not
@@ -3081,6 +3103,11 @@ mitigated, and not touched.** The account bucket still keys on `ip|email` while 
 never trips the per-IP bucket, and the limiter stores are still in-memory and therefore per-process.
 Closing it needs a shared store (Redis), which is out of V1 scope by decision and requires its own
 owner decision. The rate limiters are byte-identical to Phase 26B.
+
+**Phase 29 recorded that decision: B2 is DEFERRED TO V4**, together with **E3** (the in-memory,
+per-process limiter stores, which share the same root cause and the same remedy) — both recorded as
+**related shared-infrastructure work**. **No shared store was introduced, no dependency was added, and
+the rate limiters remain byte-identical**; B2 stays OPEN and is explicitly deferred rather than fixed.
 
 ## Verified
 
@@ -3129,6 +3156,110 @@ owner decision. The rate limiters are byte-identical to Phase 26B.
 - **B2 is recorded as open and unimplemented**, with its reasoning unchanged.
 - The retained controller `MailDeliveryError` branch is preserved as an unreachable regression guard
   and is documented as such, so that deleting it is a visible decision rather than a tidy-up.
+- Nothing pushed without explicit owner approval.
+
+---
+
+# 27E. Phase 29 — Residual Security-Risk Decision Record & Documentation Reconciliation
+
+**Status: implemented, verified and committed (2026-09-13); not pushed.**
+**Documentation only — no production code, no test, no dependency and no configuration changed.**
+
+## Objective
+
+Two things, and nothing else. First, to convert the project's three remaining open security items from
+*"requires an owner decision"* into **recorded owner decisions**, so the repository states what was
+decided rather than what is pending. Second, to reconcile four verified documentation inconsistencies so
+the documents match the shipped implementation — which matters here not as tidiness but because
+`docs/SYSTEM_SPECIFICATION.md` §54 criterion 29 is *"Documentation accurately reflects the
+implementation."*
+
+Without this phase every remaining open item was blocked. The residual timing term of B1, B2 and E3 all
+resolve to either an acceptance decision or a shared-store infrastructure decision, and no code phase
+could legitimately proceed ahead of one.
+
+## The three owner decisions
+
+**D-1 — B1 residual: ACCEPT FOR V1 / DEFER.** The database-work timing difference left by Phase 28 B1 is
+**accepted for V1 and deferred**. It remains **PARTIALLY MITIGATED, NOT CLOSED**. No attempt was made to
+eliminate it, no delay is injected to mask it, and token durability, audit ordering and detached-mail
+behaviour are unchanged. The reasoning the owner accepted: the dominant, most separable term — the
+transport wait — is already gone; what remains is database work whose equalization would require either
+dummy writes on the silent path or moving durability off the request path, and the latter would trade a
+timing oracle for a lost-token correctness failure.
+
+**D-2 — B2: DEFER TO V4.** Distributed reset-mail flooding of one address stays **OPEN and explicitly
+deferred to V4**. No Redis, no shared rate-limit store and no other shared-store infrastructure was
+introduced, and the rate limiters are unchanged.
+
+**D-3 — E3: DEFER TO V4.** The in-memory, per-process limiter stores stay **OPEN and explicitly deferred
+to V4**. The current limiter architecture is unchanged in this phase. **B2 and E3 are recorded as
+related future shared-infrastructure work** — same root cause (no shared store), same remedy, and
+therefore the same future increment.
+
+## What did NOT change
+
+- **No production code.** `server/**` and `mobile/**` are byte-identical; no route, controller, service,
+  model, middleware, limiter or dependency was touched.
+- **No test file changed.** The suite is untouched, and its figures are unchanged by this phase.
+- **No dependency, lockfile, configuration or deployment file changed.**
+- **Password-reset behaviour is unchanged** — the detach, token semantics, audit ordering, the uniform
+  202 and the pre-lookup `MAIL_NOT_CONFIGURED` 503 are exactly as Phase 28 B1 left them.
+- **Rate limiter behaviour is unchanged**, including the deliberate omission of
+  `skipSuccessfulRequests` on the three recovery limiters.
+- **The retained controller `MailDeliveryError` branch is preserved.** It was not deleted, and it is
+  still documented as an unreachable regression guard.
+- **No roadmap section was renumbered.** §27E is a new lettered subsection in the post-27 series;
+  sections 28–36 keep their existing numbers, and no `# 28` was created for Phase 28 or Phase 29.
+
+## Documentation reconciliation
+
+Four inconsistencies, each verified against the files before being changed:
+
+- **`docs/DEVELOPMENT_ROADMAP.md` §3 "Phase Overview"** — the flow diagram ended at Phase 26B, so
+  **Phase 27 and Phase 28 were absent** from the canonical overview although both exist as top-level
+  sections. Phases 27, 28 and 29 are now listed.
+- **`README.md` Phase Status** — the list jumped from Phase 26A to Phase 27, and Phase 26B appeared once
+  in the whole file only as a passing mention. **The missing Phase 26B entry was added.** This was the
+  follow-up deferred by the Phase 28 documentation close-out, discharged here.
+- **`docs/SYSTEM_SPECIFICATION.md` §48 "Future Roadmap"** — the V2 list still named the **Barcode/QR
+  Scanner, Supplier Management and Stock Transfers** as future work although all three shipped (Phases
+  12B–12D, 13A/17 and 19). Roadmap §35 already carried that correction; the specification was
+  reconciled to match it.
+- **The three risk dispositions** — now recorded in §27B, §27D, `CLAUDE.md` and `README.md` as decisions
+  rather than as pending questions.
+
+## Historical snapshots are preserved
+
+This phase **did not back-update any historical `## Verified` figure**, in keeping with the convention
+every earlier phase follows. In particular §27B's Phase 26B-4 snapshot still reads *36/36 HTTP cases, 39
+recovery cases, 209 + 394, 603 total* even though the current figures are 40, 39 and 209 + 398 = 607 —
+the snapshot is the record of that phase, and the qualifier paragraph explaining this remains in place.
+**No test-count snapshot was rewritten merely to make it match today's totals.**
+
+## Verified
+
+- **`git diff --name-only` — documentation files only.** No `server/**` or `mobile/**` path appears.
+- **`git diff --check` — exit 0.**
+- **The 33 pre-existing untracked entries are unchanged and untouched**, and none is staged.
+- **Every decision statement was re-checked against the implementation before being written**, not
+  restated from memory: the request path in `passwordReset.service.js` still ends in the unawaited
+  `.catch(logDetachedMailFailure)`; `mapPasswordResetFailure` and the controller's `MailDeliveryError`
+  branch are both still present; the limiter stores are still in-memory and per-process.
+- **No new test run is claimed for this phase.** It changes no code and no test, so the suite's state is
+  exactly `7185e5e`'s — 607/607 across 87 suites, `test:unit` 209 pass / 20 skipped, `test:db` 398 pass
+  / 15 skipped, `lint` exit 0 — which was measured during the Phase 28 close-out.
+
+## Definition of Done
+
+- The three residual risks have a recorded owner disposition instead of an open question.
+- **B1 is recorded as PARTIALLY MITIGATED, NOT CLOSED and ACCEPTED FOR V1 / DEFERRED** — never as fixed.
+- **B2 and E3 are recorded as OPEN and DEFERRED TO V4**, as related shared-infrastructure work, with no
+  shared store introduced.
+- The four documentation inconsistencies are reconciled, and the deferred Phase 26B README follow-up is
+  discharged.
+- Historical verification snapshots are preserved untouched.
+- No production code, test, dependency, configuration, limiter or password-reset behaviour changed.
 - Nothing pushed without explicit owner approval.
 
 ---

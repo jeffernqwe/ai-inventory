@@ -17,7 +17,7 @@
  */
 
 import { dashboardService } from '../dashboard.service.js';
-import { inventoryService } from '../inventory.service.js';
+import { inventoryService } from '../inventory.service.ts';
 import { productService } from '../product.service.js';
 import { transactionsService, TRANSACTION_TYPES } from '../transactions.service.js';
 import { hasPermission, PERMISSIONS } from '../../constants/roles.ts';

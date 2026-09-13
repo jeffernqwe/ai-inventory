@@ -1,7 +1,7 @@
 import { parsePagination, pageResult } from '../utils/pagination.ts';
 import { isObjectId, optionalObjectId, optionalSearch, optionalEnum, validateStockMovement, validateTransfer, ACTIVE_ARCHIVED_STATUSES } from '../utils/validate.ts';
 import { throwValidation, invalidId } from '../utils/errors.ts';
-import inventoryService from '../services/inventory.service.js';
+import inventoryService from '../services/inventory.service.ts';
 
 function paramId(req) {
   if (!isObjectId(req.params.id)) invalidId();

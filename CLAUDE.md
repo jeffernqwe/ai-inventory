@@ -239,6 +239,7 @@ Phase 25 — Design-Token Contrast Close-Out & Mobile Known-Issue Reconciliation
 Phase 26A — Session Hardening & Real Logout (server-side session records named by a mandatory `jti`; real server-side sign-out, per-session revocation and sign-out-everywhere; no new permission, no refresh-token rotation; every pre-26A token is rejected once)
 Phase 26B — Password Recovery (email reset link: provider-agnostic mail layer with a Resend transport, single-use hashed reset tokens; `POST /api/auth/forgot-password` and `POST /api/auth/reset-password` added as two PUBLIC routes; no new permission, no new dependency, no mobile change; the request path answers one identical 202 to every caller)
 Phase 27 — Mobile Password Recovery (`/forgot-password` and `/reset-password` public screens consuming the existing Phase 26B endpoints; custom-scheme reset link `inventoryai://reset-password`; a successful reset clears the client session before returning to Login; ZERO backend changes and no new dependency; Universal Links / Android App Links deferred; iOS verification export-only)
+Phase 28 — Password Reset Mail Delivery Timing Hardening (B1 ONLY — the outbound password-reset email send is detached from the HTTP request path, so the 202 no longer waits on a mail provider: the send is dispatched unawaited after the durable token and audit writes, with an explicit rejection handler attached in the same synchronous turn; the pre-lookup `MAIL_NOT_CONFIGURED` 503, the uniform 202, token semantics, audit ordering, rate limiting and mobile are unchanged; PARTIALLY MITIGATED, NOT CLOSED — the residual database-work timing term is NOT eliminated; B2 was NOT implemented and remains open)
 ```
 
 Phase 08 is an owner-directed hardening extension delivered in approved lettered increments
@@ -604,13 +605,16 @@ on the two Phase 07B login limiters, and both facts are guarded. A spent token, 
 reused token all answer 400 `INVALID_RESET_TOKEN`; a too-weak password answers 400 `VALIDATION_ERROR`
 with `fields`; a limiter answers 429 `PASSWORD_RESET_RATE_LIMITED`.
 
-Two risks were identified by the pre-commit audit and **accepted and deferred, not fixed**: the
-request path is a practical timing oracle (an unknown address costs one indexed query; a known one
-costs writes, an audit insert and an outbound HTTPS request), and distributed reset-mail flooding of a
-single victim is unbounded, because the per-account bucket keys on `ip|email` while a rotating
-attacker never trips the per-IP bucket. Both are recorded in `docs/DEVELOPMENT_ROADMAP.md` §27B as
-open items for a future owner decision. No new route was added anywhere else, and the Phase 23
-classifier's `PUBLIC` bucket declares both routes with their reasons.
+The pre-commit audit identified two risks, and they no longer share a status. **B1 — the request path as
+a practical timing oracle — is PARTIALLY MITIGATED by Phase 28 B1 (`7185e5e`) and is NOT closed:** the
+outbound transport is off the request path, so an unknown address (one indexed query) and a known one
+no longer differ by a mail round-trip, but the known path still does more **database** work (writes, an
+audit insert), and that residual term is not claimed to be eliminated. **B2 — distributed reset-mail
+flooding of a single victim — remains OPEN and unfixed**, because the per-account bucket keys on
+`ip|email` while a rotating attacker never trips the per-IP bucket, and closing it needs a shared store
+that is out of V1 scope by decision. Both are recorded in `docs/DEVELOPMENT_ROADMAP.md` §27B, with
+Phase 28 B1's own record in §27D. No new route was added anywhere else, and the Phase 23 classifier's
+`PUBLIC` bucket declares both routes with their reasons.
 
 Phase 27 is an owner-directed mobile password-recovery increment delivered as a single approved
 increment after Phase 26B, and it is the half Phase 26B deliberately left out: mobile password
@@ -657,6 +661,51 @@ runtime writes the launching URL — including a reset token — to logcat as `i
 launch on a token-free route shows it logs `initialUri` on **every** launch, which identifies it as
 the Expo Go shell rather than application logging — the app contains no `console.*` calls at all. It
 is a development-environment limitation, not an application logging defect.
+
+Phase 28 is an owner-directed password-recovery hardening increment delivered as a single approved
+increment (B1 only) after Phase 27, and it removes the outbound mail transport from the synchronous
+request path. Until it, `POST /api/auth/forgot-password` awaited a real HTTPS `POST` to the mail
+provider before answering, so an unknown address (one indexed lookup) and a known one (writes, an audit
+insert and that transport wait) were trivially separable by latency even though the responses were
+identical. The service now ends with an **unawaited** send whose rejection is handled in the same
+synchronous turn — `sendPasswordResetEmail({…}).catch(logDetachedMailFailure)` — dispatched strictly
+after the token insert, the one-live-token `deleteMany` and the `PASSWORD_RESET_REQUESTED` audit row.
+That order is forced by the code's shape rather than merely asserted: the send is addressed to
+`user.email`, which is only reachable after the account lookup. The rejection cannot escape, because
+`.catch` is attached synchronously and `sendPasswordResetEmail` is `async`, so even a synchronous throw
+inside it — notably `selectProvider()`'s `MailNotConfigured` — arrives as a rejection; and
+`logDetachedMailFailure` itself performs only `instanceof` tests and one structured log call, so it
+cannot throw and manufacture the very unhandled rejection the boundary exists to prevent.
+
+The operator keeps the same distinction as before, under the same two strings, plus one new one:
+`mail_not_configured`, `mail_delivery_failure`, and `mail_dispatch_error` for a template or programming
+fault — named separately so a code defect is not misreported as a provider outage. The message carries
+safe facts only (an HTTP status and a provider error name), so the reset URL, a live credential, can
+never appear. Nothing else moved: `isMailConfigured()` and `resetUrl` still guard **before** the account
+lookup, so `MAIL_NOT_CONFIGURED` is still a pre-lookup 503 that distinguishes nothing; the uniform 202
+and the `undefined` return are unchanged; token generation, hashing, TTL, the atomic single-use claim,
+fail-closed `usedAt` and one-live-token semantics are untouched; and rate limiting, the reset-password
+flow, mobile and the route inventory are unchanged (65 routes — no route was added).
+
+**The controller's `MailDeliveryError` branch is retained and is now unreachable**, which is deliberate:
+if a future change reintroduces an awaited delivery path the failure would arrive there again, and
+without the branch it would fall through to `mapPasswordResetFailure` and answer a post-lookup `MAIL_*`
+503 for an address that exists — exactly the oracle decision D1 avoids. It is documented in place as a
+regression guard and **must not be deleted as dead code**; the `MailDeliveryError → 503` row in
+`mapPasswordResetFailure` is retained as forward defence for the same reason. The detach is proven in
+three layers: behaviorally (a gated transport holds the send open while the 202 is asserted to have
+already arrived, plus exactly-once completion, post-response failure logging and no unhandled
+rejection) and structurally (a source guard pinning that no `await sendPasswordResetEmail(` remains and
+that both the `.catch` handler and the controller's guard are present).
+
+**B1 is PARTIALLY MITIGATED, NOT CLOSED, and is documented as such.** The dominant, most separable term
+— the transport wait — is gone; what remains is **database work** (the business check, the token insert,
+the `deleteMany` and the audit insert against one indexed read), which is explicitly **not** claimed to
+be eliminated. No delay is injected to mask it, because unmeasured timing noise is not a security
+control. **B2 — distributed reset-mail flooding of one address — was not implemented, not mitigated and
+not touched**: the per-account bucket still keys on `ip|email` while a rotating attacker never trips the
+per-IP bucket, and the limiter stores are still in-memory and per-process. It remains open and needs a
+shared store, which is out of V1 scope by decision.
 
 Phase 18 is an owner-directed mobile UI extension delivered in approved lettered increments (18A,
 18B, …) after Phase 17. It turns the app into a modern SaaS-style product surface WITHOUT changing

@@ -2574,9 +2574,17 @@ change:
   account — and it stays a 503 so an operator can see that recovery is broken.
 - **`MailDeliveryError` can only be thrown after the lookup**, because it comes from the send. A 503
   there would be reachable *only* for an address that exists, making it an account-existence oracle.
-  `forgotPassword` therefore intercepts it, logs the operational reason server-side, and answers the
-  identical 202. The log record is the whole point of swallowing it: the operator still learns, the
-  attacker learns nothing.
+  The failure is therefore intercepted, the operational reason is logged server-side, and the caller
+  receives the identical 202. The log record is the whole point of swallowing it: the operator still
+  learns, the attacker learns nothing.
+  **Since Phase 28 B1 the interception happens on the DETACHED path, in the service's
+  `logDetachedMailFailure`, not in `forgotPassword`** — the send is dispatched without being awaited,
+  so a delivery failure can no longer reach the controller frame at all. The caller's 202 is unchanged
+  and still identical to every other outcome. The `MailDeliveryError` branch in `forgotPassword` is
+  **retained as an unreachable regression guard**: if a future change ever reintroduces an awaited
+  delivery path, the failure would start arriving there again, and without the branch it would fall
+  through to `mapPasswordResetFailure` and answer a post-lookup `MAIL_*` 503. **That branch is
+  deliberate and must not be deleted as dead code.**
 - The `MailDeliveryError → 503 MAIL_UNAVAILABLE` row remains in `mapPasswordResetFailure` as
   documented, presently-unreachable **forward defence**, so that if the reset path ever gains a mail
   step a `MAIL_*` code becomes a namespaced 503 rather than an unhandled 500. It is not a defect and
@@ -2646,19 +2654,30 @@ owner, and explicitly deferred — they are open, not closed, and neither has an
 
 ### B1 — `forgot-password` is a practical timing oracle on account existence
 
-**Status: accepted / deferred. Not fixed. Requires an owner decision.**
+**Status: PARTIALLY MITIGATED by Phase 28 B1 (`7185e5e`). NOT CLOSED.** The residual still requires an
+owner decision. **Do not describe this as fixed.**
 
 For an **unknown** address the request costs one indexed `User.findOne` and returns. For a **known,
 active** address the same request additionally performs a business existence check, a token insert, a
-`deleteMany`, an **audit insert**, and a synchronous outbound HTTPS `POST` to Resend with up to a 10 s
-timeout. That is a sub-millisecond path versus a typically 100 ms+ path — trivially separable by
-latency measurement over a modest sample. The HTTP surface is uniform; **the clock is not**.
+`deleteMany`, and an **audit insert**. Until Phase 28 B1 it *also* awaited a synchronous outbound
+HTTPS `POST` to Resend with up to a 10 s timeout, and that transport wait was by far the dominant term
+— a sub-millisecond path versus a typically 100 ms+ path, trivially separable by latency measurement
+over a modest sample.
 
-Enumeration resistance is the governing invariant of this phase and the uniform 202 does not protect
-against this. It is not a defect in what was built — timing-attack mitigation was explicitly excluded
-from the approved scope — but it is the single largest gap between the stated invariant and the
-delivered guarantee, and it must not be forgotten. A future increment could close it most cheaply by
-making the send fire-and-forget after the 202 is written.
+**Phase 28 B1 removed that transport term from the request path.** The send is now dispatched after
+the durable writes and is not awaited, so the 202 no longer waits on a mail provider. The dominant,
+most easily measured component of the difference is therefore **gone**.
+
+**What is NOT eliminated.** The success path still performs more DATABASE work than the silent exit —
+the business check, the token insert, the `deleteMany` and the audit insert against one indexed read.
+A timing difference therefore still exists in principle, it is **not** claimed to be eliminated, and no
+delay is injected to mask it, because unmeasured timing noise is not a security control. This entry is
+recorded as a **partial mitigation so that it is not mistaken for closure**.
+
+Enumeration resistance remains the governing invariant of this phase, and the uniform 202 does not
+protect the clock. The remedy anticipated in this entry — *"making the send fire-and-forget after the
+202 is written"* — **was implemented by Phase 28 B1**. It closed the transport term and, as predicted
+here, left the database term; that residue is what still requires an owner decision.
 
 ### B2 — Distributed reset-mail flooding of one address is not bounded
 
@@ -2675,8 +2694,10 @@ mail-flooding a third party is the primary abuse vector for a feature of this sh
 to the approved design — no Redis, no shared store, both explicitly out of V1 scope, so no in-scope fix
 exists. Closing it needs a shared store and therefore a new owner decision.
 
-**Neither B1 nor B2 is closed by the Phase 26B-4 documentation close-out.** This phase records them; it
-does not address them.
+**Neither B1 nor B2 was closed by the Phase 26B-4 documentation close-out.** That phase recorded them;
+it did not address them. **Current status (Phase 28 B1, `7185e5e`): B1 is PARTIALLY MITIGATED — the
+outbound transport is off the request path, the residual database-work term remains and is not claimed
+to be eliminated — and B2 remains OPEN and unimplemented.** See §27D.
 
 ## Residual Risks (accepted)
 
@@ -2707,6 +2728,11 @@ Also from the audit, all accepted as inherent or as the deliberate price of a ch
   the claim query filters `expiresAt` directly.
 
 ## Verified
+
+**Figures below are the Phase 26B-4 close-out snapshot and are preserved as the record of that phase.
+Phase 28 B1 subsequently added four cases to the same HTTP suite and moved the suite arithmetic — see
+§27D for the current numbers. The historical values here have deliberately not been back-updated, in
+keeping with how every earlier phase's `## Verified` block is kept.**
 
 - **`npm run test:unit` — 209 pass, 20 skipped, 0 fail.**
 - **`npm run test:db` — 394 pass, 15 skipped, 0 fail.**
@@ -2739,7 +2765,9 @@ Also from the audit, all accepted as inherent or as the deliberate price of a ch
 - A reset token is single-use, expires, is stored only as a hash, and can never be replayed or
   released once claimed.
 - No new permission, role grant, session semantic or mobile change; no new dependency.
-- The two accepted High risks (**B1**, **B2**) are recorded in writing here and remain open.
+- The two accepted High risks were recorded in writing here. **At the time of this close-out both
+  remained open**; subsequently **B1 was PARTIALLY MITIGATED by Phase 28 B1 (`7185e5e`) and is still
+  not closed**, while **B2 remains open and unimplemented**.
 - Nothing pushed without explicit owner approval.
 
 ---
@@ -2942,6 +2970,165 @@ Recorded here so it is owner-visible rather than merely in code.
   added.
 - The two verification limits (custom-scheme runtime untested; iOS export-only) and the one QA risk
   (foreground second-token delivery) are recorded in writing here rather than left implicit.
+- Nothing pushed without explicit owner approval.
+
+---
+
+# 27D. Phase 28 — Password Reset Mail Delivery Timing Hardening
+
+**Status: implemented, verified and committed (2026-09-13); not pushed.**
+**Commit: `7185e5e` — "fix: detach password reset email delivery from request path (Phase 28 B1)",
+5 files, +507/−27.**
+**B1 ONLY. Phase 28 B2 was NOT implemented and remains open.**
+
+## Objective
+
+Remove the outbound password-reset email transport from the synchronous HTTP request path, so that
+`POST /api/auth/forgot-password` no longer waits on an external mail provider before answering. This
+is the remedy §27B's B1 entry anticipated — *"making the send fire-and-forget after the 202 is
+written"* — and it targets the single largest and most easily measured component of the account-existence
+timing oracle.
+
+The owner's scope was explicitly limited to **B1 only**. B2 (distributed reset-mail flooding) was
+named, left untouched, and is still open. No permission, role grant, route, dependency, configuration,
+token semantic, audit semantic, rate limiter or mobile file changed.
+
+## Scope
+
+Five files, of which **two are production**:
+
+- `server/src/services/passwordReset.service.js` (+98/−19) — the detach itself, plus
+  `logDetachedMailFailure` and its three reason codes.
+- `server/src/controllers/passwordReset.controller.js` (+34) — **comment-only**: the retained
+  `MailDeliveryError` branch is preserved verbatim and annotated with why it is a regression guard.
+- `server/test/fakes/mailProvider.mjs` (+100) — `inflight` tracking, `awaitPendingMail()`,
+  `pendingMailCount()` and `fakeMailGate()`.
+- `server/test/phase26b-password-recovery-http.test.mjs` (+210) — cases 37-40.
+- `server/test/phase26b-password-recovery.test.mjs` (+92) — case 11 rewritten to the new contract.
+
+## The detached-delivery contract
+
+`requestPasswordReset` ends with an **unawaited** send whose rejection is handled in the same
+synchronous turn:
+
+```js
+sendPasswordResetEmail({
+  to: user.email,
+  resetUrl: buildResetUrl(resetUrl, rawToken),
+  expiresInMinutes: PASSWORD_RESET_TTL_MINUTES,
+}).catch(logDetachedMailFailure);
+```
+
+Four properties make this safe, and each is load-bearing rather than stylistic:
+
+- **Order is forced, not merely asserted.** Everything durable — the token insert, the `deleteMany`
+  that enforces one live token, and the `PASSWORD_RESET_REQUESTED` audit row — completes **before**
+  dispatch. This falls out of the code's shape: the send is addressed to `user.email`, which is only
+  reachable after the account lookup, so the detach is structurally the last statement.
+- **The rejection cannot escape.** `.catch` is attached in the same synchronous turn the promise is
+  created, and `sendPasswordResetEmail` is an `async` function, so even a synchronous throw inside it
+  (notably `selectProvider()`'s `MailNotConfigured`) arrives as a rejection rather than propagating to
+  the caller. An unhandled rejection here would crash the process on a delivery failure — converting a
+  swallowed, operator-visible event into an outage.
+- **The handler cannot itself throw.** `logDetachedMailFailure` performs only `instanceof` tests, one
+  `typeof` guard and a structured log call. A throw inside a `.catch` handler would create a fresh
+  rejected promise with nothing attached — precisely the unhandled rejection this boundary exists to
+  prevent.
+- **The operator keeps the distinction.** Three reason codes are emitted: `mail_not_configured`,
+  `mail_delivery_failure` (both the **same strings** the controller's `logMailFailure` used, so an
+  operator's grep survives the move) and `mail_dispatch_error` for a template or programming fault.
+  The third exists so a code defect is not misreported as a provider outage and does not send an
+  operator to a provider status page for something the provider never saw. The message carries safe
+  facts only — the mail layer builds it from an HTTP status and a provider error name — so the reset
+  URL, which is a live credential, can never appear, and no `userId` is logged on this unauthenticated
+  path.
+
+## What did NOT change
+
+- **The `forgot-password` invariant.** One identical 202 to every caller, and `requestPasswordReset`
+  still returns `undefined` on every non-error path, so the controller has nothing it could reflect.
+- **`MAIL_NOT_CONFIGURED` is still a pre-lookup 503.** The `isMailConfigured()` and `resetUrl` guards
+  still precede `User.findOne`, so that answer is reachable identically for an unknown address and
+  distinguishes nothing about any account. The detach did **not** move this check.
+- **Token semantics.** Generation, SHA-256 hashing, the 30-minute TTL, the atomic single-use
+  `findOneAndUpdate` claim, fail-closed `usedAt`, and one-live-token `deleteMany` — all unchanged.
+- **Audit semantics, and the audit write still precedes dispatch.**
+- **Rate limiting**, including the deliberate omission of `skipSuccessfulRequests` on the three
+  recovery limiters.
+- **The `reset-password` flow**, the mobile client, deep-link behaviour, and the route inventory.
+- **The retained controller branch.** The `MailDeliveryError` branch in `forgotPassword` is now
+  **unreachable** — the service handles the rejection itself — and is kept deliberately. If a future
+  change reintroduces an awaited delivery path, the failure would arrive there again, and without the
+  branch it would fall through to `mapPasswordResetFailure` and answer a post-lookup `MAIL_*` 503 for
+  an address that exists: exactly the oracle decision D1 exists to avoid. **It must not be deleted as
+  dead code.** The `MailDeliveryError → 503 MAIL_UNAVAILABLE` row in `mapPasswordResetFailure` is
+  likewise retained as documented forward defence.
+
+## Partially mitigated, not closed
+
+**The oracle is NOT closed, and this phase does not claim it is.** What was removed is the outbound
+transport wait — the dominant, most separable term, a synchronous HTTPS request with up to a 10 s
+timeout against a sub-millisecond silent path. **What remains is database work**: the business
+existence check, the token insert, the `deleteMany` and the audit insert, against one indexed read for
+an unknown address. That difference still exists in principle and is **explicitly not claimed to be
+eliminated**. No delay is injected to mask it, because unmeasured timing noise is not a security
+control.
+
+## B2 remains open
+
+**B2 — distributed reset-mail flooding of one address is not bounded — was not implemented, not
+mitigated, and not touched.** The account bucket still keys on `ip|email` while a rotating attacker
+never trips the per-IP bucket, and the limiter stores are still in-memory and therefore per-process.
+Closing it needs a shared store (Redis), which is out of V1 scope by decision and requires its own
+owner decision. The rate limiters are byte-identical to Phase 26B.
+
+## Verified
+
+- **`npm run test:unit` — 209 passed, 20 skipped, 0 failed** (229 tests, 69 suites).
+- **`npm run test:db` — 398 passed, 15 skipped, 0 failed** (413 tests, 55 suites).
+- **`npm test` — 607 passed, 0 failed, 0 skipped** (87 suites, exit 0).
+- **Arithmetic: 209 + 398 = 607 passing**, with **35 skipped** across the two split runs.
+- **`npm run lint` — exit 0**, 0 errors and 0 warnings.
+- **Phase 26B HTTP recovery suite — 40 cases, 40 passing** (12 DB-free + 28 DB-backed; four cases
+  added by this phase).
+- **Phase 26B password-recovery service suite — 39 cases** (case 11 rewritten, not added).
+- **Phase 26B mail suite — 37 cases** (unchanged, DB-free).
+- **Route inventory unchanged at 65** — this phase added no route. The Phase 23 classifier's `PUBLIC`
+  bucket still declares exactly the same two recovery routes.
+- **The behavior is proven by ordering, not by measurement.** Cases 37-39 hold the transport open with
+  `fakeMailGate`, so "the 202 did not wait for delivery" is a fact about ordering rather than a latency
+  threshold that would be flaky on a loaded machine and prove nothing when green. Case 37 asserts the
+  response has arrived **while** `pendingMailCount() === 1` and `sentMessages().length === 1` — the
+  latter stopping it passing vacuously by the send never having been attempted. Case 38 proves the
+  detached send completes exactly once after release, with the token and audit preconditions asserted
+  before release. Case 39 proves the failure is logged strictly **after** the response and never goes
+  unhandled. Case 40 is a source-level structural guard pinning that no `await sendPasswordResetEmail(`
+  remains and that the `.catch(logDetachedMailFailure)` and the controller's guard are both present.
+- **Every new assertion was proven able to fail before being trusted — these are verification
+  observations, not implementation changes.** Two mutations were applied to the service and reverted:
+  restoring `await sendPasswordResetEmail({...})` reproduced case 11's named failure (`the request must
+  resolve — delivery is detached: The email provider is unavailable.`), and changing it to
+  `await ... .catch(...)` — awaited, but caught — **deadlocked the HTTP suite**, because case 37's
+  gated transport blocks the very request the test is waiting on. That deadlock is itself evidence that
+  case 37 detects blocking delivery rather than merely observing a fast local fake. The service was
+  then restored and confirmed byte-identical (`git hash-object` = `95e5fde4…` before and after).
+- **The committed diff is exactly the five approved files**, and `mobile/**` is untouched.
+
+## Definition of Done
+
+- The outbound mail transport is no longer on the `forgot-password` request path; the 202 does not wait
+  on a mail provider.
+- The detached promise has rejection handling attached in the same synchronous turn, the handler cannot
+  itself throw, and a background delivery failure never surfaces as an unhandled rejection.
+- Token and audit writes complete before dispatch, and the caller's response is the same constant
+  whichever way the detached send settles.
+- `MAIL_NOT_CONFIGURED` remains a pre-lookup 503, and the `forgot-password` response remains identical
+  across unknown, disabled, suspended, orphaned, delivered and delivery-failed cases.
+- **B1 is recorded as PARTIALLY MITIGATED, NOT CLOSED**; the residual database-work timing term is
+  documented as remaining and is not claimed to be eliminated.
+- **B2 is recorded as open and unimplemented**, with its reasoning unchanged.
+- The retained controller `MailDeliveryError` branch is preserved as an unreachable regression guard
+  and is documented as such, so that deleting it is a visible decision rather than a tidy-up.
 - Nothing pushed without explicit owner approval.
 
 ---

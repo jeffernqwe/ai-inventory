@@ -12,7 +12,7 @@ import categoryRoutes from './routes/categories.routes.js';
 import locationRoutes from './routes/locations.routes.js';
 import supplierRoutes from './routes/suppliers.routes.js';
 import purchaseOrderRoutes from './routes/purchase-orders.routes.js';
-import productRoutes from './routes/products.routes.js';
+import productRoutes from './routes/products.routes.ts';
 import inventoryRoutes from './routes/inventory.routes.js';
 import dashboardRoutes from './routes/dashboard.routes.js';
 import aiRoutes from './routes/ai.routes.js';

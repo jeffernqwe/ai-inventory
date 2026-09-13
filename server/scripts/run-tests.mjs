@@ -42,6 +42,7 @@ const PURE_UNIT = [
   'phase22-authorization-contract.test.mjs', // route↔permission bindings, catalogue coverage, CATALOGUE_ONLY declaration
   'phase23-authorization-contract.test.mjs', // route authorization classification, mobile RBAC mirror, requireRole inertness, client error-code contract
   'phase26b-mail-service.test.mjs',   // mail provider registry, Resend wire format via a stubbed fetch, template and error contract
+  'phase-ts-3-migration-guards.test.mjs', // module-graph guards: duplicate .js/.ts stems + stale relative specifiers, resolved against the filesystem
 ];
 const PURE_DB = [
   'phase03-auth.test.mjs',            // auth + RBAC over real routes + Mongo

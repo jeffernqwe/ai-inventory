@@ -6,7 +6,7 @@
   "type": "module",
   "main": "src/index.js",
   "engines": {
-    "node": ">=18.11.0"
+    "node": ">=24.0.0"
   },
   "scripts": {
     "start": "node src/index.js",
@@ -15,7 +15,9 @@
     "test:unit": "node scripts/run-tests.mjs unit",
     "test:db": "node scripts/run-tests.mjs db",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check:extensions": "node scripts/check-module-graph.mjs extensions",
+    "check:specifiers": "node scripts/check-module-graph.mjs specifiers"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

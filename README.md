@@ -619,3 +619,20 @@ Phase 07 (testing + production hardening) and Phase 08 (owner-directed hardening
   QA in Expo Go through `exp://…/--/reset-password` — the same route-resolution path a custom scheme
   uses, because Expo Go cannot be launched by a custom scheme, which leaves the literal
   `inventoryai://` handoff configuration-verified only.
+- **Phase 28 — Password Reset Mail Delivery Timing Hardening (B1 only):** implemented, verified, and
+  committed (`7185e5e`) — the outbound password-reset email send is detached from the HTTP request path,
+  so `POST /api/auth/forgot-password` no longer waits on a mail provider before answering. The send is
+  dispatched **unawaited**, strictly after the token insert, the one-live-token `deleteMany` and the
+  `PASSWORD_RESET_REQUESTED` audit row, with its rejection handled in the same synchronous turn by
+  `logDetachedMailFailure` — so a delivery failure cannot become an unhandled rejection, and the
+  handler itself is written so it cannot throw. **Nothing else moved:** `isMailConfigured()` and
+  `resetUrl` still guard *before* the account lookup, so `MAIL_NOT_CONFIGURED` is still a pre-lookup
+  `503`; the uniform `202` and the `undefined` return are unchanged; token semantics, audit ordering,
+  rate limiting, the reset flow, mobile and the route inventory (65 routes — none added) are untouched.
+  The controller's `MailDeliveryError` branch is **retained as an unreachable regression guard** and is
+  documented as such, so that deleting it is a visible decision rather than a tidy-up. **B1 is
+  PARTIALLY MITIGATED, NOT CLOSED:** the transport wait — the dominant, most separable term — is gone,
+  but the known-address path still does more **database** work (writes and an audit insert against one
+  indexed read), and that residual is not claimed to be eliminated. No delay is injected to mask it.
+  **B2 — distributed reset-mail flooding of one address — was not implemented and remains open.** No
+  backend route, permission, role grant, dependency or mobile file changed.

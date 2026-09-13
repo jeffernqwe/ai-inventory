@@ -1193,7 +1193,10 @@ it identically, so it distinguishes nothing about any account — and it is a `5
 see that recovery is broken. A message that *could* be sent but fails in transit is handled the
 opposite way: the failure is recorded server-side and the caller still receives the same `202`, because
 by then the account is already known to exist and any distinguishable answer would be an
-account-existence oracle.
+account-existence oracle. **Since Phase 28 B1 the send is dispatched without being awaited**, so that
+record is written from the detached background path (`logDetachedMailFailure` in the recovery service)
+after the response has already been sent — the caller's `202` is unaffected by it, and the transport
+failure remains invisible in the response either way.
 
 A reset link is valid for 30 minutes and can be used once.
 
@@ -1256,17 +1259,22 @@ wait on authentication.
 
 ### Known limits
 
-Two properties of this surface are documented, accepted and **not** fixed, because both need an owner
-decision and both were out of the scope that introduced them. They are recorded in
-`docs/DEVELOPMENT_ROADMAP.md` §27B "Accepted / Deferred Security Risks" and are open:
+Both properties below are documented and accepted, and neither is fully closed. They are recorded in
+`docs/DEVELOPMENT_ROADMAP.md` §27B "Accepted / Deferred Security Risks", with Phase 28 B1's own record
+in §27D.
 
-- `forgot-password` is a **practical timing oracle**: an unknown address costs one indexed lookup,
-  while a known one additionally costs writes, an audit row and an outbound mail request, so the two
-  are separable by latency even though the responses are identical. The responses are uniform; the
-  time taken is not.
-- **Distributed flooding of one address is not bounded.** The per-address limit is keyed by source
-  address *and* email, and the per-source limit never sees a rotating attacker, so mail volume to a
-  single victim is not capped across sources.
+- `forgot-password` is a **timing oracle** on account existence: the responses are uniform, but the
+  time taken is not. **Phase 28 B1 partially mitigated this, and it is NOT closed.** An unknown address
+  costs one indexed lookup; a known one additionally costs writes, an audit row and — until Phase 28 B1
+  — an outbound mail request, which was awaited before the response and was the dominant, most easily
+  separable term of the difference. That transport request is **no longer on the request path**: the
+  send is dispatched unawaited after the durable writes, so the largest and most measurable component
+  is gone. **What remains is database work**, and it is explicitly **not** claimed to be eliminated. No
+  delay is injected to mask it.
+- **Distributed flooding of one address is not bounded, and this is unchanged.** The per-address limit
+  is keyed by source address *and* email, and the per-source limit never sees a rotating attacker, so
+  mail volume to a single victim is not capped across sources. Closing it needs a shared store (Redis),
+  which is out of V1 scope by decision.
 
 Future authentication may include:
 

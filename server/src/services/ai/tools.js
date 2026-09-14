@@ -19,7 +19,7 @@
 import { dashboardService } from '../dashboard.service.ts';
 import { inventoryService } from '../inventory.service.ts';
 import { productService } from '../product.service.ts';
-import { transactionsService, TRANSACTION_TYPES } from '../transactions.service.js';
+import { transactionsService, TRANSACTION_TYPES } from '../transactions.service.ts';
 import { hasPermission, PERMISSIONS } from '../../constants/roles.ts';
 
 const objectId = { type: 'string', pattern: '^[0-9a-fA-F]{24}$' };

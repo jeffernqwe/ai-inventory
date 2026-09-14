@@ -2,8 +2,8 @@ import { Router } from 'express';
 
 import requireAuth from '../middlewares/authenticate.ts';
 import { requirePermission } from '../middlewares/authorize.ts';
-import inventoryController from '../controllers/inventory.controller.js';
-import transactionsController from '../controllers/transactions.controller.js';
+import inventoryController from '../controllers/inventory.controller.ts';
+import transactionsController from '../controllers/transactions.controller.ts';
 import { PERMISSIONS } from '../constants/roles.ts';
 
 const router = Router();

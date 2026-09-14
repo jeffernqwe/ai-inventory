@@ -1,19 +1,46 @@
 import mongoose from 'mongoose';
+import type { PipelineStage } from 'mongoose';
 
 import InventoryTransaction from '../models/inventoryTransaction.model.ts';
 import { transactionPublic } from './inventory.service.ts';
 
+/** The ledger filter this service builds, typed from the model itself. */
+type TransactionFilter = mongoose.QueryFilter<mongoose.HydratedDocFromModel<typeof InventoryTransaction>>;
+
+/** The filters `list` accepts, already validated by the caller. */
+type HistoryFilters = {
+  productId?: string;
+  locationId?: string;
+  type?: string;
+  from?: string;
+  to?: string;
+  skip: number;
+  limit: number;
+};
+
 const { ObjectId } = mongoose.Types;
-const oid = (id) => new ObjectId(id);
+const oid = (id: string | mongoose.Types.ObjectId) => new ObjectId(id);
 
 export const TRANSACTION_TYPES = Object.freeze(['STOCK_IN', 'STOCK_OUT', 'ADJUSTMENT', 'TRANSFER']);
 
-function ref(obj) {
+/** The `$lookup`-joined product/location document, read only for `_id`/`name`. */
+type RefSource = { _id?: unknown; name?: unknown };
+
+function ref(obj: RefSource | null | undefined) {
   return obj && obj._id ? { id: String(obj._id), name: obj.name } : null;
 }
 
+/**
+ * A ledger row after the `$lookup` stages, so it carries the joined product and
+ * location alongside the fields `transactionPublic` reads.
+ */
+type HistoryRow = Parameters<typeof transactionPublic>[0] & {
+  product?: RefSource | null;
+  location?: RefSource | null;
+};
+
 /** Transaction history item: transaction fields plus product/location names. */
-export function historyItemPublic(item) {
+export function historyItemPublic(item: HistoryRow) {
   return {
     ...transactionPublic(item),
     product: ref(item.product),
@@ -27,19 +54,19 @@ export function historyItemPublic(item) {
  * createdAt range. Every query is scoped by the server-derived businessId.
  */
 export const transactionsService = {
-  async list(businessId, { productId, locationId, type, from, to, skip, limit }) {
+  async list(businessId: string, { productId, locationId, type, from, to, skip, limit }: HistoryFilters) {
     const bizOid = oid(businessId);
-    const match = { businessId: bizOid };
+    const match: TransactionFilter = { businessId: bizOid };
     if (productId) match.productId = oid(productId);
     if (locationId) match.locationId = oid(locationId);
     if (type) match.type = type;
 
-    const created = {};
+    const created: { $gte?: Date; $lte?: Date } = {};
     if (from) created.$gte = new Date(from);
     if (to) created.$lte = new Date(to);
     if (created.$gte || created.$lte) match.createdAt = created;
 
-    const pipeline = [
+    const pipeline: PipelineStage[] = [
       { $match: match },
       { $sort: { createdAt: -1, _id: -1 } },
       {

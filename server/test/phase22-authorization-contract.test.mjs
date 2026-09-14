@@ -63,7 +63,7 @@ import requireAuth from '../src/middlewares/authenticate.ts';
 import productsRoutes from '../src/routes/products.routes.ts';
 import suppliersRoutes from '../src/routes/suppliers.routes.ts';
 import purchaseOrdersRoutes from '../src/routes/purchase-orders.routes.js';
-import inventoryRoutes from '../src/routes/inventory.routes.js';
+import inventoryRoutes from '../src/routes/inventory.routes.ts';
 
 // ---------------------------------------------------------------------------
 // Source access — every path is resolved from this file, never from cwd.

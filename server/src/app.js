@@ -11,7 +11,7 @@ import userRoutes from './routes/users.routes.ts';
 import categoryRoutes from './routes/categories.routes.ts';
 import locationRoutes from './routes/locations.routes.ts';
 import supplierRoutes from './routes/suppliers.routes.ts';
-import purchaseOrderRoutes from './routes/purchase-orders.routes.js';
+import purchaseOrderRoutes from './routes/purchase-orders.routes.ts';
 import productRoutes from './routes/products.routes.ts';
 import inventoryRoutes from './routes/inventory.routes.ts';
 import dashboardRoutes from './routes/dashboard.routes.ts';

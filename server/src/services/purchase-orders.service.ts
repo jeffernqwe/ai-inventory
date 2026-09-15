@@ -11,7 +11,19 @@ import { recordAudit } from './audit.service.ts';
 import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../constants/audit.ts';
 
 const { ObjectId } = mongoose.Types;
-const oid = (id) => new ObjectId(id);
+
+/**
+ * An identifier as it reaches this service. Both forms occur at real call sites:
+ * a hex string — the request layer stringifies `req.user.businessId` and
+ * `req.user.id` — and an ObjectId already loaded from a document, which `update`
+ * passes as `existing.supplierId._id` and `receive` as the PO's own
+ * `locationId`. `oid()` accepts either, so the alias names the pair rather than
+ * asserting which one a given caller holds. Same alias as
+ * `inventory.service.ts`, which documents the same two call shapes.
+ */
+type IdLike = string | mongoose.Types.ObjectId;
+
+const oid = (id: IdLike) => new ObjectId(id);
 
 const PO_NUMBER_PREFIX = 'PO-';
 const PO_NUMBER_PAD = 4;
@@ -21,11 +33,168 @@ const PO_NUMBER_MAX_ATTEMPTS = 10;
 // unchanged — receiving IS a stock-in, never a new movement type).
 const PO_RECEIVE_REASON = 'PO receipt';
 
-function isDuplicateKey(err) {
-  return err?.code === 11000;
+/**
+ * A reference field that has been populated by `fetchPo`/`list`: the referenced
+ * document. The fields are `unknown` rather than a declared document type for
+ * the reason `InventoryRowSource` gives — Mongoose types a populated field as the
+ * raw `ObjectId` it replaced, so at the type level `supplierId` is an ObjectId
+ * even though at runtime it is the whole supplier. The untyped code read
+ * `_id`/`name`/`status` off it either way, so each read is narrowed where it
+ * happens instead of asserting a shape the compiler cannot confirm.
+ */
+type SupplierRefSource = { _id?: unknown; name?: unknown; status?: unknown };
+type LocationRefSource = { _id?: unknown; name?: unknown };
+
+/**
+ * One stored order line — the fields `itemPublic`/`totalsOf` read. `quantityOrdered`
+ * is required (the schema requires it, min 1) because `itemPublic` subtracts it,
+ * and `unitCost` is an optional number because `totalsOf` multiplies it.
+ */
+type PoItemSource = {
+  productId?: unknown;
+  productName?: unknown;
+  sku?: unknown;
+  quantityOrdered: number;
+  quantityReceived?: number;
+  quantityCommitted?: number;
+  unitCost?: number;
+};
+
+/** One stored receipt line / receipt — the fields `receiptsPublic` reads. */
+type ReceiptLineSource = {
+  productId?: unknown;
+  quantity?: unknown;
+  inventoryTransactionId?: unknown;
+  previousQuantity?: unknown;
+  newQuantity?: unknown;
+};
+
+type ReceiptSource = {
+  receivedAt?: unknown;
+  userId?: unknown;
+  reference?: unknown;
+  lines?: ReceiptLineSource[];
+};
+
+/** One stored in-flight claim — the fields `pendingClaimsPublic` reads. */
+type ClaimSource = { productId?: unknown; quantity?: unknown; createdAt?: unknown };
+
+/**
+ * A purchase order as read back — the lean, optionally-populated result of
+ * `fetchPo` and `list`, and the snapshot `receive` plans against.
+ *
+ * `items` is required rather than optional because the schema defaults it to `[]`,
+ * so a stored order always carries the array; that is what lets `receive` iterate
+ * `po.items` directly, exactly as the untyped code did. `number` is a real string
+ * for the same reason — the schema requires it — and it is typed as one because
+ * `receive` passes it straight through as the stock-in's ledger `reference`, which
+ * is a string. The reference fields stay `unknown` for the reason
+ * `SupplierRefSource` documents.
+ */
+type PurchaseOrderSource = {
+  _id?: unknown;
+  businessId?: unknown;
+  number: string;
+  status?: unknown;
+  supplierId?: unknown;
+  locationId?: unknown;
+  expectedAt?: unknown;
+  notes?: unknown;
+  items: PoItemSource[];
+  receipts?: ReceiptSource[];
+  claims?: ClaimSource[];
+  createdAt?: unknown;
+  updatedAt?: unknown;
+};
+
+/**
+ * One order line as `resolveOperational` builds it and `$set.items` writes it —
+ * the product name/sku snapshot taken at order time. `productId` is the lean
+ * product's own `_id`, so it is an ObjectId by the time it reaches the document.
+ */
+type PoItemWrite = {
+  productId: IdLike;
+  productName: string;
+  sku: string | undefined;
+  quantityOrdered: number;
+  quantityReceived: number;
+  quantityCommitted: number;
+  unitCost: number | undefined;
+};
+
+/**
+ * The `$set` a PATCH builds. Only the keys the request actually supplied are
+ * present — that presence is what `changed` counts and what the audit row
+ * reports, so nothing here is defaulted.
+ */
+type PoUpdateSet = {
+  supplierId?: IdLike;
+  locationId?: IdLike;
+  expectedAt?: Date;
+  notes?: string;
+  items?: PoItemWrite[];
+};
+
+/** One validated order line (`parsePoLine`), asserted at the controller. */
+type PoLineInput = { productId: string; quantityOrdered: number; unitCost?: number };
+
+/** The validated create payload (`validatePurchaseOrder`). */
+type PoCreatePayload = {
+  supplierId: string;
+  locationId: string;
+  expectedAt?: Date;
+  notes?: string;
+  items: PoLineInput[];
+};
+
+/** The validated update payload (`validatePurchaseOrder` with `{ partial: true }`). */
+type PoUpdatePayload = {
+  supplierId?: string;
+  locationId?: string;
+  expectedAt?: Date;
+  notes?: string;
+  items?: PoLineInput[];
+};
+
+/** The validated list filters (`validatePurchaseOrderList`) plus pagination. */
+type PoListFilters = {
+  q?: string;
+  status?: string;
+  supplierId?: string;
+  skip: number;
+  limit: number;
+};
+
+/** One validated receive line (`parseReceiveLine`), asserted at the controller. */
+type ReceiveLine = { productId: string; quantity: number };
+
+/** The validated receive payload (`validateReceive`). */
+type ReceivePayload = { lines: ReceiveLine[]; reference?: string };
+
+/** One line the receive loop durably applied, as reported in a partial result. */
+type AppliedLine = {
+  productId: string;
+  quantity: number;
+  previousQuantity: number;
+  newQuantity: number;
+  inventoryTransactionId: string;
+};
+
+/**
+ * The movement `undoStockInMovement` has to reverse — derived from
+ * `inventoryService.stockIn` itself so the undo cannot drift from the shape the
+ * stock-in actually returns.
+ */
+type StockInMovement = Awaited<ReturnType<typeof inventoryService.stockIn>>;
+
+function isDuplicateKey(err: unknown) {
+  // `err?.code === 11000`, narrowed: the optional access reproduces the original
+  // short-circuit, so a thrown `null`/`undefined`/primitive still compares
+  // unequal rather than raising.
+  return (err as { code?: unknown } | null | undefined)?.code === 11000;
 }
 
-const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /**
  * Business-scoped sequential PO number. Reads the highest existing numeric
@@ -33,7 +202,7 @@ const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
  * unique (businessId, number) index is the final authority: the create loop
  * recomputes and retries if a concurrent create races this read.
  */
-async function nextPurchaseOrderNumber(businessId) {
+async function nextPurchaseOrderNumber(businessId: IdLike) {
   const docs = await PurchaseOrder.find(
     { businessId: oid(businessId), number: { $regex: /^PO-\d+$/ } },
     { number: 1 }
@@ -47,7 +216,7 @@ async function nextPurchaseOrderNumber(businessId) {
 }
 
 /** Supplier must exist in the business and not be archived (mirrors inventory asserts). */
-async function assertOperationalSupplier(businessId, supplierId) {
+async function assertOperationalSupplier(businessId: IdLike, supplierId: IdLike) {
   const supplier = await Supplier.findOne({ _id: oid(supplierId), businessId: oid(businessId) }).lean();
   if (!supplier) throw new ApiError(404, 'Supplier not found', 'SUPPLIER_NOT_FOUND');
   if (supplier.status === 'ARCHIVED') {
@@ -58,7 +227,13 @@ async function assertOperationalSupplier(businessId, supplierId) {
 
 /** A PO's own audit event; the PO document is authoritative, so a logging
  * failure is reported but never rolls a durable state change back. */
-async function recordPoAudit(businessId, userId, action, entityId, metadata) {
+async function recordPoAudit(
+  businessId: IdLike,
+  userId: IdLike,
+  action: string,
+  entityId: IdLike,
+  metadata: unknown
+) {
   try {
     await recordAudit({
       businessId,
@@ -69,23 +244,27 @@ async function recordPoAudit(businessId, userId, action, entityId, metadata) {
       metadata,
     });
   } catch (err) {
-    console.error(`[purchase-orders] audit record failed for ${action} ${String(entityId)}: ${err.message}`);
+    // `${err.message}`, narrowed. The template interpolation is left exactly as it
+    // was rather than wrapped in `String()`: interpolation performs the same
+    // ToString for every value the original could hold, and keeping it bare means
+    // the emitted JavaScript is unchanged.
+    console.error(`[purchase-orders] audit record failed for ${action} ${String(entityId)}: ${(err as { message?: unknown }).message}`);
   }
 }
 
-function supplierRef(po) {
-  const s = po.supplierId;
+function supplierRef(po: PurchaseOrderSource) {
+  const s = po.supplierId as SupplierRefSource | null | undefined;
   if (s && s._id) return { id: String(s._id), name: s.name, status: s.status };
   return { id: String(s), name: null, status: null };
 }
 
-function locationRef(po) {
-  const l = po.locationId;
+function locationRef(po: PurchaseOrderSource) {
+  const l = po.locationId as LocationRefSource | null | undefined;
   if (l && l._id) return { id: String(l._id), name: l.name };
   return { id: String(l), name: null };
 }
 
-function itemPublic(item) {
+function itemPublic(item: PoItemSource) {
   const quantityReceived = item.quantityReceived ?? 0;
   return {
     productId: String(item.productId),
@@ -99,7 +278,7 @@ function itemPublic(item) {
 }
 
 /** Totals are computed (never stored) so they cannot drift from the lines. */
-function totalsOf(items) {
+function totalsOf(items: PoItemSource[]) {
   const quantityOrdered = items.reduce((sum, i) => sum + (i.quantityOrdered || 0), 0);
   const quantityReceived = items.reduce((sum, i) => sum + (i.quantityReceived || 0), 0);
   const estimatedCost = items.reduce(
@@ -115,7 +294,7 @@ function totalsOf(items) {
 }
 
 /** List/header shape — no item lines, just the count + computed totals. */
-function headerPublic(po) {
+function headerPublic(po: PurchaseOrderSource) {
   const items = po.items || [];
   return {
     id: String(po._id),
@@ -139,7 +318,7 @@ function headerPublic(po) {
  * receipt can be traced to the ledger and back (the transaction's reference is
  * the PO number).
  */
-function receiptsPublic(po) {
+function receiptsPublic(po: PurchaseOrderSource) {
   return (po.receipts || []).map((receipt) => ({
     receivedAt: receipt.receivedAt,
     userId: String(receipt.userId),
@@ -160,7 +339,7 @@ function receiptsPublic(po) {
  * subtract pending from the offered receive quantity. Empty at rest; a ghost
  * claim left by a crash mid-receive stays visible here until cancel + re-create.
  */
-function pendingClaimsPublic(po) {
+function pendingClaimsPublic(po: PurchaseOrderSource) {
   return (po.claims || []).map((claim) => ({
     productId: String(claim.productId),
     quantity: claim.quantity,
@@ -169,7 +348,7 @@ function pendingClaimsPublic(po) {
 }
 
 /** Detail shape — header plus the full item lines and receiving records. */
-function detailPublic(po) {
+function detailPublic(po: PurchaseOrderSource) {
   return {
     ...headerPublic(po),
     items: (po.items || []).map(itemPublic),
@@ -178,11 +357,11 @@ function detailPublic(po) {
   };
 }
 
-async function fetchPo(businessId, id) {
+async function fetchPo(businessId: IdLike, id: IdLike) {
   const po = await PurchaseOrder.findOne({ _id: oid(id), businessId: oid(businessId) })
     .populate({ path: 'supplierId', select: 'name status' })
     .populate({ path: 'locationId', select: 'name' })
-    .lean();
+    .lean<PurchaseOrderSource>();
   if (!po) throw new ApiError(404, 'Purchase order not found', 'PO_NOT_FOUND');
   return po;
 }
@@ -194,10 +373,15 @@ async function fetchPo(businessId, id) {
  * behaviour matches stock movements exactly. Snapshot product name/sku at order
  * time; quantityReceived always starts at 0 (only receiving advances it).
  */
-async function resolveOperational(businessId, supplierId, locationId, lines) {
+async function resolveOperational(
+  businessId: IdLike,
+  supplierId: IdLike,
+  locationId: IdLike,
+  lines: PoLineInput[]
+) {
   const supplier = await assertOperationalSupplier(businessId, supplierId);
   const location = await inventoryService.assertOperationalLocation(businessId, locationId);
-  const items = [];
+  const items: PoItemWrite[] = [];
   for (const line of lines) {
     const product = await inventoryService.assertOperationalProduct(businessId, line.productId);
     items.push({
@@ -215,7 +399,7 @@ async function resolveOperational(businessId, supplierId, locationId, lines) {
 
 /** Create a PO in DRAFT. Allocates a business-scoped number under the unique
  * index and retries on a duplicate-key race (bounded). Never writes stock. */
-async function create(businessId, userId, payload) {
+async function create(businessId: IdLike, userId: IdLike, payload: PoCreatePayload) {
   const refs = await resolveOperational(businessId, payload.supplierId, payload.locationId, payload.items);
 
   for (let attempt = 0; attempt < PO_NUMBER_MAX_ATTEMPTS; attempt += 1) {
@@ -247,9 +431,18 @@ async function create(businessId, userId, payload) {
   throw new ApiError(409, 'Could not allocate a unique purchase order number; retry the request', 'PO_NUMBER_CONFLICT');
 }
 
+/**
+ * The list filter, derived from the model itself rather than hand-written —
+ * `audit.service.ts`'s `AuditFilter` is the same construction, and a local shape
+ * would not satisfy the driver's own filter type. Named (rather than inlined at
+ * the one `match` declaration) so that declaration stays on one line and emits
+ * exactly what the untyped original did.
+ */
+type PurchaseOrderFilter = mongoose.QueryFilter<mongoose.HydratedDocFromModel<typeof PurchaseOrder>>;
+
 /** List PO headers with optional status / supplier / number (q) filters. */
-async function list(businessId, { status, supplierId, q, skip, limit }) {
-  const match = { businessId: oid(businessId) };
+async function list(businessId: IdLike, { status, supplierId, q, skip, limit }: PoListFilters) {
+  const match: PurchaseOrderFilter = { businessId: oid(businessId) };
   // Phase 20D: both filters are validated at the controller, so whatever arrives
   // here is valid by construction. The guards are deliberately unconditional —
   // the old `PURCHASE_ORDER_STATUSES.includes(status)` / `isObjectId(supplierId)`
@@ -269,13 +462,13 @@ async function list(businessId, { status, supplierId, q, skip, limit }) {
       .sort({ createdAt: -1, _id: -1 })
       .skip(skip)
       .limit(limit)
-      .lean(),
+      .lean<PurchaseOrderSource[]>(),
   ]);
   return { items: rows.map(headerPublic), total };
 }
 
 /** Full detail (header + items). Any authenticated member of the business. */
-async function get(businessId, id) {
+async function get(businessId: IdLike, id: IdLike) {
   return detailPublic(await fetchPo(businessId, id));
 }
 
@@ -285,13 +478,13 @@ async function get(businessId, id) {
  * never received, so lines reset to quantityReceived 0 safely). Once OPEN the
  * order is frozen — fix a mistake by cancel + re-create.
  */
-async function update(businessId, id, userId, payload) {
+async function update(businessId: IdLike, id: IdLike, userId: IdLike, payload: PoUpdatePayload) {
   const existing = await fetchPo(businessId, id);
   if (existing.status !== 'DRAFT') {
     throw new ApiError(409, 'Only a DRAFT purchase order can be edited', 'PO_NOT_DRAFT');
   }
 
-  const set = {};
+  const set: PoUpdateSet = {};
   if (payload.supplierId !== undefined) {
     await assertOperationalSupplier(businessId, payload.supplierId);
     set.supplierId = oid(payload.supplierId);
@@ -303,7 +496,15 @@ async function update(businessId, id, userId, payload) {
   if (payload.expectedAt !== undefined) set.expectedAt = payload.expectedAt;
   if (payload.notes !== undefined) set.notes = payload.notes;
   if (payload.items !== undefined) {
-    const { items } = await resolveOperational(businessId, existing.supplierId._id, existing.locationId._id, payload.items);
+    // The PO being edited was fetched with both references populated, so the
+    // `_id` read off each is the referenced document's own id; the cast is the
+    // boundary that says so, exactly as `supplierRef`/`locationRef` do above.
+    const { items } = await resolveOperational(
+      businessId,
+      (existing.supplierId as SupplierRefSource)._id as IdLike,
+      (existing.locationId as LocationRefSource)._id as IdLike,
+      payload.items
+    );
     set.items = items;
   }
 
@@ -326,7 +527,7 @@ async function update(businessId, id, userId, payload) {
 }
 
 /** Issue a DRAFT -> OPEN. Only OPEN orders can be received (Phase 13C). */
-async function issue(businessId, id, userId) {
+async function issue(businessId: IdLike, id: IdLike, userId: IdLike) {
   const existing = await fetchPo(businessId, id);
   if (existing.status === 'CANCELED') {
     throw new ApiError(409, 'A canceled purchase order cannot be issued', 'PO_CANCELED');
@@ -354,7 +555,7 @@ async function issue(businessId, id, userId) {
 }
 
 /** Cancel a DRAFT or OPEN order. Blocks all further work on it. */
-async function cancel(businessId, id, userId) {
+async function cancel(businessId: IdLike, id: IdLike, userId: IdLike) {
   const existing = await fetchPo(businessId, id);
   if (existing.status === 'CANCELED') {
     throw new ApiError(409, 'This purchase order is already canceled', 'PO_ALREADY_CANCELED');
@@ -394,7 +595,7 @@ async function cancel(businessId, id, userId) {
  * the caller uses that to decide whether releasing its PO claim is safe (release
  * only when no orphan stock remains, otherwise keep the claim to block over-receiving).
  */
-async function undoStockInMovement(businessId, move) {
+async function undoStockInMovement(businessId: IdLike, move: StockInMovement) {
   const oidBiz = oid(businessId);
   const txnId = oid(move.transaction.id);
   const rowFilter = {
@@ -404,9 +605,12 @@ async function undoStockInMovement(businessId, move) {
   };
 
   let restored = false;
-  let failure = null;
+  // Only one of the two counts exists on either result, which is exactly what the
+  // `??` already relied on; the annotation names both as optional so the union of
+  // the two Mongoose result types can be read for each.
+  let failure: string | null = null;
   try {
-    const res = move.createdRow
+    const res: { deletedCount?: number; modifiedCount?: number } = move.createdRow
       ? await Inventory.deleteOne({ ...rowFilter, quantity: move.newQuantity, reservedQuantity: 0 })
       : await Inventory.updateOne(
           { ...rowFilter, quantity: move.newQuantity },
@@ -414,7 +618,9 @@ async function undoStockInMovement(businessId, move) {
         );
     restored = (res.deletedCount ?? res.modifiedCount) === 1;
   } catch (err) {
-    failure = err.message;
+    // The raw caught value, exactly as the untyped code stored it: it is only ever
+    // interpolated into the log line below, which stringifies it the same way.
+    failure = (err as { message?: unknown }).message as string;
   }
   if (!restored) {
     console.error(
@@ -426,7 +632,7 @@ async function undoStockInMovement(businessId, move) {
   try {
     await InventoryTransaction.deleteOne({ _id: txnId, businessId: oidBiz });
   } catch (err) {
-    console.error(`[purchase-orders] receive undo: transaction delete failed for txn ${String(txnId)}:`, err.message);
+    console.error(`[purchase-orders] receive undo: transaction delete failed for txn ${String(txnId)}:`, (err as { message?: unknown }).message);
   }
   try {
     await AuditLog.deleteOne({
@@ -435,7 +641,7 @@ async function undoStockInMovement(businessId, move) {
       'metadata.inventoryTransactionId': move.transaction.id,
     });
   } catch (err) {
-    console.error(`[purchase-orders] receive undo: audit delete failed for txn ${String(txnId)}:`, err.message);
+    console.error(`[purchase-orders] receive undo: audit delete failed for txn ${String(txnId)}:`, (err as { message?: unknown }).message);
   }
   return true;
 }
@@ -459,7 +665,17 @@ async function undoStockInMovement(businessId, move) {
  * concurrent claim (or the PO left OPEN, e.g. a racing CANCEL) — the caller then
  * must NOT move stock.
  */
-async function claimRemaining({ poId, oidBiz, productId, quantity, remainingBound, userId, claimId }) {
+type ClaimRemainingArgs = {
+  poId: IdLike;
+  oidBiz: IdLike;
+  productId: IdLike;
+  quantity: number;
+  remainingBound: number;
+  userId: IdLike;
+  claimId: mongoose.Types.ObjectId;
+};
+
+async function claimRemaining({ poId, oidBiz, productId, quantity, remainingBound, userId, claimId }: ClaimRemainingArgs) {
   return PurchaseOrder.findOneAndUpdate(
     {
       _id: poId,
@@ -496,7 +712,16 @@ async function claimRemaining({ poId, oidBiz, productId, quantity, remainingBoun
  * updated doc, or null when a concurrent CANCEL defeated it (the only status that
  * can, see receive()).
  */
-async function finalizeClaim({ poId, oidBiz, productId, quantity, claimId, receipt }) {
+type FinalizeClaimArgs = {
+  poId: IdLike;
+  oidBiz: IdLike;
+  productId: IdLike;
+  quantity: number;
+  claimId: mongoose.Types.ObjectId;
+  receipt: Record<string, unknown>;
+};
+
+async function finalizeClaim({ poId, oidBiz, productId, quantity, claimId, receipt }: FinalizeClaimArgs) {
   return PurchaseOrder.findOneAndUpdate(
     {
       _id: poId,
@@ -524,7 +749,15 @@ async function finalizeClaim({ poId, oidBiz, productId, quantity, claimId, recei
  * modifiedCount 1 = released; 0 = already gone (a finalize already pulled it, or a
  * double release) — a safe no-op either way.
  */
-async function releaseClaim({ poId, oidBiz, productId, quantity, claimId }) {
+type ReleaseClaimArgs = {
+  poId: IdLike;
+  oidBiz: IdLike;
+  productId: IdLike;
+  quantity: number;
+  claimId: mongoose.Types.ObjectId;
+};
+
+async function releaseClaim({ poId, oidBiz, productId, quantity, claimId }: ReleaseClaimArgs) {
   return PurchaseOrder.updateOne(
     {
       _id: poId,
@@ -565,7 +798,7 @@ async function releaseClaim({ poId, oidBiz, productId, quantity, claimId }) {
  * mid-receive can leave a visible ghost claim (see detailPublic pendingClaims),
  * recoverable by cancel + re-create.
  */
-async function receive(businessId, userId, id, { lines, reference }) {
+async function receive(businessId: IdLike, userId: IdLike, id: IdLike, { lines, reference }: ReceivePayload) {
   const po = await fetchPo(businessId, id);
   if (po.status === 'DRAFT') throw new ApiError(409, 'Issue the purchase order before receiving it', 'PO_NOT_ISSUED');
   if (po.status === 'RECEIVED') throw new ApiError(409, 'This purchase order has already been received', 'PO_ALREADY_RECEIVED');
@@ -573,10 +806,10 @@ async function receive(businessId, userId, id, { lines, reference }) {
 
   // Validate the whole batch against ONE fresh snapshot before anything moves:
   // every line must be an item on this PO and fit inside its remaining quantity.
-  const byProduct = new Map();
+  const byProduct = new Map<string, PoItemSource>();
   for (const item of po.items) byProduct.set(String(item.productId).toLowerCase(), item);
 
-  const plan = [];
+  const plan: { productId: string; quantity: number; ordered: number }[] = [];
   for (const line of lines) {
     const item = byProduct.get(String(line.productId).toLowerCase());
     if (!item) {
@@ -598,12 +831,21 @@ async function receive(businessId, userId, id, { lines, reference }) {
 
   const oidBiz = oid(businessId);
   const poId = oid(id);
-  const receivingAt = po.locationId && po.locationId._id ? oid(po.locationId._id) : oid(po.locationId);
-  const applied = [];
+  // `fetchPo` populates `locationId`, so it is normally the location document; the
+  // `oid(...)` fallback still covers the unpopulated-id case, exactly as before.
+  const receivingAt = po.locationId && (po.locationId as LocationRefSource)._id ? oid((po.locationId as LocationRefSource)._id as IdLike) : oid(po.locationId as IdLike);
+  const applied: AppliedLine[] = [];
 
   // Abort the batch with an explicit partial result. Lines already applied stay
   // durable and recorded on the PO; the client retries only the remainder.
-  const throwPartial = async () => {
+  // Annotated `Promise<never>` because every path through it ends in a throw.
+  // That annotation is a statement of fact, NOT a control-flow aid: the checker
+  // does not treat `await <never-returning arrow>()` as terminating (measured —
+  // an explicit `: never` on a function *declaration* would, but this is a `const`
+  // arrow because the original was, and its runtime shape is not ours to change),
+  // so each result the callers below read past a `throwPartial()` call carries the
+  // type-level assertion it needs instead.
+  const throwPartial = async (): Promise<never> => {
     if (applied.length > 0) {
       await recordPoAudit(businessId, userId, AUDIT_ACTIONS.PURCHASE_ORDER_RECEIVED, poId, {
         number: po.number,
@@ -622,7 +864,9 @@ async function receive(businessId, userId, id, { lines, reference }) {
       'Only part of this receive could be applied; refresh and retry the remaining lines',
       'RECEIVE_CONFLICT'
     );
-    err.applied = applied;
+    // `applied` is attached to the thrown error for the client; ApiError declares
+    // no such field, so the assertion names the extra property it is given.
+    (err as ApiError & { applied: AppliedLine[] }).applied = applied;
     throw err;
   };
 
@@ -650,7 +894,7 @@ async function receive(businessId, userId, id, { lines, reference }) {
         await releaseClaim({ poId, oidBiz, productId, quantity: step.quantity, claimId });
       } catch (releaseErr) {
         console.error(
-          `[purchase-orders] receive: could not release claim ${String(claimId)} after a failed claim: ${releaseErr.message} — PO may hold a ghost claim`
+          `[purchase-orders] receive: could not release claim ${String(claimId)} after a failed claim: ${(releaseErr as { message?: unknown }).message} — PO may hold a ghost claim`
         );
       }
       if (applied.length === 0) throw err;
@@ -663,7 +907,12 @@ async function receive(businessId, userId, id, { lines, reference }) {
     // (b) Op2 stock-in — the authoritative, atomic, self-compensating movement
     // (row + its InventoryTransaction + its INVENTORY_STOCK_IN audit), only after
     // the claim won. A durable-record failure restores its own row and rejects.
-    let move;
+    // The definite-assignment assertion states a runtime fact the checker cannot
+    // derive: the `catch` below either rethrows or ends in `throwPartial()`, which
+    // always throws, so every read of `move` after this statement — including the
+    // ones after the `catch` — happens only when the assignment completed. It is
+    // erased, so the declaration still emits the original `let move;`.
+    let move!: StockInMovement;
     try {
       move = await inventoryService.stockIn(businessId, userId, {
         productId: step.productId,
@@ -679,7 +928,7 @@ async function receive(businessId, userId, id, { lines, reference }) {
         await releaseClaim({ poId, oidBiz, productId, quantity: step.quantity, claimId });
       } catch (releaseErr) {
         console.error(
-          `[purchase-orders] receive: could not release claim ${String(claimId)} after a failed stock-in: ${releaseErr.message} — PO may hold a ghost claim`
+          `[purchase-orders] receive: could not release claim ${String(claimId)} after a failed stock-in: ${(releaseErr as { message?: unknown }).message} — PO may hold a ghost claim`
         );
       }
       if (applied.length === 0) throw err;
@@ -719,7 +968,7 @@ async function receive(businessId, userId, id, { lines, reference }) {
       // (that would delete a transaction a receipt references). Earlier applied
       // lines stay durable; the client refetches the PO to see the true state.
       console.error(
-        `[purchase-orders] receive: finalize threw for claim ${String(claimId)} — leaving the movement uncompensated (ambiguous; may be receipted). txn ${move ? String(move.transaction.id) : 'unknown'}: ${err.message}`
+        `[purchase-orders] receive: finalize threw for claim ${String(claimId)} — leaving the movement uncompensated (ambiguous; may be receipted). txn ${move ? String(move.transaction.id) : 'unknown'}: ${(err as { message?: unknown }).message}`
       );
       throw err;
     }
@@ -737,7 +986,7 @@ async function receive(businessId, userId, id, { lines, reference }) {
           await releaseClaim({ poId, oidBiz, productId, quantity: step.quantity, claimId });
         } catch (releaseErr) {
           console.error(
-            `[purchase-orders] receive: could not release claim ${String(claimId)} after a precise undo: ${releaseErr.message}`
+            `[purchase-orders] receive: could not release claim ${String(claimId)} after a precise undo: ${(releaseErr as { message?: unknown }).message}`
           );
         }
       } else {
@@ -760,8 +1009,10 @@ async function receive(businessId, userId, id, { lines, reference }) {
   // Whole batch landed. If every line is now complete, flip OPEN -> RECEIVED
   // (guarded and idempotent; a concurrent winner or a racing cancel is left
   // untouched — the fresh detail in the response shows the true state).
-  const fresh = await PurchaseOrder.findOne({ _id: poId, businessId: oidBiz }).lean();
-  const allReceived = fresh.items.every((item) => (item.quantityReceived || 0) >= item.quantityOrdered);
+  // `poId`/`oidBiz` name the order `fetchPo` loaded a moment ago, so the read is
+  // present; the assertion is what says so, since `.lean()` types it as nullable.
+  const fresh = await PurchaseOrder.findOne({ _id: poId, businessId: oidBiz }).lean<PurchaseOrderSource>();
+  const allReceived = fresh!.items.every((item) => (item.quantityReceived || 0) >= item.quantityOrdered);
   if (allReceived) {
     await PurchaseOrder.findOneAndUpdate(
       { _id: poId, businessId: oidBiz, status: 'OPEN' },

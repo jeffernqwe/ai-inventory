@@ -26,6 +26,7 @@
 
 import { MailNotConfigured, MailDeliveryError } from '../mailErrors.ts';
 import { mailConfig } from '../mailConfig.ts';
+import type { MailProvider } from './index.ts';
 
 const RESEND_ENDPOINT = 'https://api.resend.com/emails';
 
@@ -38,7 +39,24 @@ const RESEND_ENDPOINT = 'https://api.resend.com/emails';
  */
 const SAFE_ERROR_NAME = /^[a-z0-9_]{1,64}$/;
 
-export function createResendProvider() {
+/**
+ * The upstream JSON body, as far as anything here is allowed to assume: an object
+ * whose properties are probed and never trusted. `Response.json()` is typed
+ * `unknown`, and this local contract is the narrowest thing that permits the
+ * `data?.id` / `data?.name` reads below while leaving every `typeof` guard doing
+ * the real work — nothing is coerced and no default is introduced, so an array,
+ * a string or a body missing the property still behaves exactly as it did when
+ * the local was untyped.
+ */
+type UpstreamJsonBody = Record<string, unknown>;
+
+/**
+ * The return annotation is what types `send` below: the object literal is
+ * contextually checked against the registry's contract, so its destructured
+ * parameter needs no annotation of its own and the emitted method signature is
+ * unchanged.
+ */
+export function createResendProvider(): MailProvider {
   return {
     name: 'resend',
 
@@ -49,7 +67,7 @@ export function createResendProvider() {
       // selectProvider() already refuses to hand this provider out when these are
       // missing, so this is belt-and-braces for a direct construction. Names only
       // — never a value.
-      const missing = [];
+      const missing: string[] = [];
       if (!apiKey) missing.push('RESEND_API_KEY');
       if (!from) missing.push('MAIL_FROM');
       if (missing.length > 0) {
@@ -61,7 +79,11 @@ export function createResendProvider() {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
 
-      let res;
+      // The definite-assignment assertion is what replaces the untyped `let res;`
+      // without touching the flow: every path that reaches the read below has
+      // either assigned a response or thrown. Erased, so the declaration is still
+      // emitted as a bare `let res;`.
+      let res!: Response;
       try {
         res = await fetch(RESEND_ENDPOINT, {
           method: 'POST',
@@ -74,7 +96,10 @@ export function createResendProvider() {
           signal: controller.signal,
         });
       } catch (err) {
-        if (err?.name === 'AbortError') {
+        // `err` is `unknown`: a thrown value has no shape TypeScript may assume,
+        // and the assertion is the erasable way to read the one property this
+        // check has always read. Nothing is attached to the error that leaves.
+        if ((err as { name?: unknown })?.name === 'AbortError') {
           throw new MailDeliveryError('The email service took too long to respond. Please try again.');
         }
         throw new MailDeliveryError('The email service could not be reached. Please try again.');
@@ -88,9 +113,9 @@ export function createResendProvider() {
         );
       }
 
-      let data;
+      let data: UpstreamJsonBody;
       try {
-        data = await res.json();
+        data = await res.json() as UpstreamJsonBody;
       } catch {
         throw new MailDeliveryError('The email service returned an unexpected response.');
       }
@@ -110,9 +135,9 @@ export function createResendProvider() {
  * and an empty string otherwise. The body is read and discarded: it is never
  * attached to the error and never logged.
  */
-async function upstreamErrorSuffix(res) {
+async function upstreamErrorSuffix(res: Response) {
   try {
-    const data = await res.json();
+    const data = await res.json() as UpstreamJsonBody;
     const name = typeof data?.name === 'string' ? data.name.trim().toLowerCase() : '';
     return SAFE_ERROR_NAME.test(name) ? `, ${name}` : '';
   } catch {

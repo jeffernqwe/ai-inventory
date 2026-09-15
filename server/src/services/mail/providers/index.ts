@@ -13,28 +13,69 @@
  * missing key can never stop the server from booting.
  */
 
-import { createResendProvider } from './resendProvider.js';
+import { createResendProvider } from './resendProvider.ts';
 import { MailNotConfigured } from '../mailErrors.ts';
 
-const registry = new Map();
+/**
+ * What one message must carry. The transport is handed rendered strings and
+ * nothing else: no template input, no reset token, no user — so a provider
+ * cannot be asked to render, and the raw token has no route past the caller that
+ * put it in the URL.
+ */
+export interface MailMessage {
+  to: string;
+  subject: string;
+  text: string;
+  html: string;
+}
 
-const BUILTINS = {
+/**
+ * What the transport reports back. `id` is nullable because the contract is
+ * "the provider's own message id, when it named one"; `sendPasswordResetEmail`
+ * coerces the difference away for its caller.
+ */
+export interface MailSendResult {
+  id: string | null;
+}
+
+/**
+ * The provider contract. Both registries — here and services/ai/providers —
+ * resolve to one of these, and it is declared here because this is the module
+ * that hands providers out: `registerProvider`'s second argument and
+ * `selectProvider`'s return are the two ends of the same seam.
+ */
+export interface MailProvider {
+  name: string;
+  send(message: MailMessage): Promise<MailSendResult>;
+}
+
+export type MailProviderFactory = () => MailProvider;
+
+/** One built-in: how to build it, and what the environment must supply first. */
+interface MailProviderEntry {
+  factory: MailProviderFactory;
+  requiredEnv: readonly string[];
+}
+
+const registry = new Map<string, MailProviderFactory>();
+
+const BUILTINS: Record<string, MailProviderEntry> = {
   resend: {
     factory: createResendProvider,
     requiredEnv: ['RESEND_API_KEY', 'MAIL_FROM'],
   },
 };
 
-function hasValue(key) {
+function hasValue(key: string) {
   const raw = process.env[key];
   return typeof raw === 'string' && raw.trim() !== '';
 }
 
-export function registerProvider(name, factory) {
+export function registerProvider(name: unknown, factory: MailProviderFactory) {
   registry.set(String(name).toLowerCase(), factory);
 }
 
-export function deregisterProvider(name) {
+export function deregisterProvider(name: unknown) {
   registry.delete(String(name).toLowerCase());
 }
 
@@ -48,7 +89,7 @@ export function resetMailProviders() {
 }
 
 /** The env vars a built-in provider needs, or null when the name is not built in. */
-export function mailProviderRequiredEnv(name) {
+export function mailProviderRequiredEnv(name: unknown) {
   const entry = BUILTINS[String(name || '').trim().toLowerCase()];
   return entry ? [...entry.requiredEnv] : null;
 }
@@ -60,7 +101,7 @@ export function mailProviderRequiredEnv(name) {
  * seam the test fake uses. A built-in must have every one of its required env vars
  * set to a non-blank value before its factory is called.
  */
-export function selectProvider() {
+export function selectProvider(): MailProvider {
   const raw = (process.env.MAIL_PROVIDER || '').trim();
   const name = raw.toLowerCase();
 
@@ -70,7 +111,7 @@ export function selectProvider() {
     );
   }
 
-  if (registry.has(name)) return registry.get(name)();
+  if (registry.has(name)) return registry.get(name)!();
 
   const builtin = BUILTINS[name];
   if (!builtin) {

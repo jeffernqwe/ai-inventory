@@ -62,7 +62,7 @@ import {
   requestPasswordReset,
   resetPassword,
 } from '../src/services/passwordReset.service.js';
-import { MailNotConfigured, MailDeliveryError } from '../src/services/mail/index.js';
+import { MailNotConfigured, MailDeliveryError } from '../src/services/mail/index.ts';
 
 import {
   FAKE_MAIL_PROVIDER,

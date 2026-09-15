@@ -54,7 +54,7 @@ import Inventory from '../src/models/inventory.model.ts';
 import InventoryTransaction from '../src/models/inventoryTransaction.model.ts';
 import AuditLog from '../src/models/auditLog.model.ts';
 import PurchaseOrder from '../src/models/purchaseOrder.model.ts';
-import { purchaseOrderService, releaseClaim } from '../src/services/purchase-orders.service.js';
+import { purchaseOrderService, releaseClaim } from '../src/services/purchase-orders.service.ts';
 
 const { ObjectId } = mongoose.Types;
 const oid = (id) => new ObjectId(id);

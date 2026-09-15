@@ -1,6 +1,6 @@
 import { Router } from 'express';
 
-import { register, login, me, changePassword, updateMe, logout, listSessions, revokeSession } from '../controllers/auth.controller.js';
+import { register, login, me, changePassword, updateMe, logout, listSessions, revokeSession } from '../controllers/auth.controller.ts';
 import { forgotPassword, resetPassword as resetPasswordHandler } from '../controllers/passwordReset.controller.js';
 import requireAuth from '../middlewares/authenticate.ts';
 import {
@@ -11,6 +11,18 @@ import {
   createPasswordResetRequestIpLimiter,
   createPasswordResetConfirmLimiter,
 } from '../middlewares/rateLimit.ts';
+import type { AuthRateConfig } from '../middlewares/rateLimit.ts';
+
+/**
+ * The limiter overrides a router may be built with. Deliberately NOT a new
+ * type: `AuthRateConfig` is the complete set every limiter factory reads, and
+ * `Partial` of it is exactly what those factories already accept, so this names
+ * the existing contract rather than duplicating it. `createAuthRouter()` with no
+ * argument stays valid — every key is optional.
+ */
+type AuthRouterOptions = {
+  limits?: Partial<AuthRateConfig>;
+};
 
 /**
  * Factory. Each call returns a router whose public-auth rate limiters have
@@ -18,9 +30,9 @@ import {
  * tests build fresh routers (optionally with overridden limits) so rate-limit
  * behavior is deterministic and state never leaks between cases.
  *
- * @param {{ limits?: object }} [options] Optional per-limiter overrides.
+ * @param {AuthRouterOptions} [options] Optional per-limiter overrides.
  */
-export function createAuthRouter({ limits } = {}) {
+export function createAuthRouter({ limits }: AuthRouterOptions = {}) {
   const router = Router();
 
   // Public — protected from credential stuffing / mass registration (Phase 07B).

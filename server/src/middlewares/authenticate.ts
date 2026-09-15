@@ -4,13 +4,13 @@ import mongoose from 'mongoose';
 import User from '../models/user.model.ts';
 import ApiError from '../utils/ApiError.ts';
 import { verifyAccessToken } from '../config/jwt.ts';
-import { assertActiveBusiness } from '../services/business.service.js';
+import { assertActiveBusiness } from '../services/business.service.ts';
 import {
   findActiveSessionByJti,
   touchSession,
   SESSION_REVOKED_CODE,
   SESSION_REVOKED_MESSAGE,
-} from '../services/session.service.js';
+} from '../services/session.service.ts';
 
 /**
  * Authentication middleware. Extracts a Bearer token, verifies signature and

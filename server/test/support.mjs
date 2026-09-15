@@ -14,7 +14,7 @@ import Business from '../src/models/business.model.ts';
 import User from '../src/models/user.model.ts';
 import Session from '../src/models/session.model.ts';
 import { signAccessToken, decodeAccessToken } from '../src/config/jwt.ts';
-import { newSessionId } from '../src/services/session.service.js';
+import { newSessionId } from '../src/services/session.service.ts';
 import { ensureDb, disconnectDb } from './helpers.mjs';
 
 const { ObjectId } = mongoose.Types;

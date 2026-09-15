@@ -6,7 +6,7 @@ import express, { Router } from 'express';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 
-import authRouter from '../src/routes/auth.routes.js';
+import authRouter from '../src/routes/auth.routes.ts';
 import healthRouter from '../src/routes/health.routes.js';
 import notFound from '../src/middlewares/notFound.ts';
 import errorHandler from '../src/middlewares/errorHandler.ts';

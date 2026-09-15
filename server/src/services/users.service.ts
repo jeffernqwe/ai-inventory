@@ -6,7 +6,7 @@ import User from '../models/user.model.ts';
 import ApiError from '../utils/ApiError.ts';
 import { recordAudit } from './audit.service.ts';
 import { notFound } from '../utils/errors.ts';
-import { toPublicUser } from './auth.service.js';
+import { toPublicUser } from './auth.service.ts';
 import { ROLES, NON_OWNER_ROLES } from '../constants/roles.ts';
 import {
   AUDIT_ACTIONS,

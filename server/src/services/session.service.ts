@@ -22,6 +22,64 @@ import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../constants/audit.ts';
  * request body — a session is reachable only through its owner.
  */
 
+/**
+ * Local to this module, following `inventory.service.ts`, `product.service.ts`,
+ * `audit.service.ts` and `users.service.ts`: every caller passes either the
+ * string `req.user` carries or the ObjectId a document the server already loaded
+ * holds, and the model casts whichever arrives.
+ */
+type IdLike = string | mongoose.Types.ObjectId;
+
+/**
+ * The session document, taken from the model itself rather than restated: this
+ * is the SAME type `requireAuth` receives from `findActiveSessionByJti` and
+ * hands back to `touchSession`, so a session can never be typed as one shape
+ * where it is produced and another where it is consumed. Nothing is widened —
+ * `_id`, `jti`, `deviceLabel`, `lastUsedAt`, `revokedAt`, `expiresAt` and the
+ * timestamps are exactly the paths `models/session.model.ts` declares.
+ */
+type SessionDoc = mongoose.HydratedDocFromModel<typeof Session>;
+
+/** The best-effort audit row written for each session-lifecycle change. */
+type SessionAuditEvent = {
+  businessId: IdLike;
+  userId: IdLike;
+  action: string;
+  sessionId: IdLike | null;
+  metadata: unknown;
+};
+
+/** The inputs `createSessionForToken` takes from login. */
+type CreateSessionInput = {
+  userId: IdLike;
+  businessId: IdLike;
+  token: string;
+  deviceLabel?: unknown;
+};
+
+/** The owner-scoped input `revokeSessionById` takes from the HTTP layer. */
+type RevokeSessionByIdInput = {
+  userId: IdLike;
+  businessId: IdLike;
+  sessionId: unknown;
+  now?: Date;
+};
+
+/** The token-scoped input `revokeSessionByJti` takes from the HTTP layer. */
+type RevokeSessionByJtiInput = {
+  userId: IdLike;
+  businessId: IdLike;
+  jti: string;
+  now?: Date;
+};
+
+/** The user-scoped input `revokeAllSessions` takes. */
+type RevokeAllSessionsInput = {
+  userId: IdLike;
+  businessId: IdLike;
+  now?: Date;
+};
+
 /** 401 code for a token whose session is gone (revoked, expired, or unknown). */
 export const SESSION_REVOKED_CODE = 'SESSION_REVOKED';
 export const SESSION_REVOKED_MESSAGE = 'Session ended — please sign in again';
@@ -57,7 +115,7 @@ export function newSessionId() {
  * business, and a jti is the one value that could be replayed with a stolen
  * token. The session `_id` is the public identifier and is safe here.
  */
-async function auditSession({ businessId, userId, action, sessionId, metadata }) {
+async function auditSession({ businessId, userId, action, sessionId, metadata }: SessionAuditEvent) {
   try {
     await recordAudit({
       businessId,
@@ -68,7 +126,7 @@ async function auditSession({ businessId, userId, action, sessionId, metadata })
       metadata,
     });
   } catch (err) {
-    console.error(`[session] audit record failed for ${action} (session change preserved): ${err.message}`);
+    console.error(`[session] audit record failed for ${action} (session change preserved): ${(err as { message?: unknown }).message}`);
   }
 }
 
@@ -80,7 +138,7 @@ async function auditSession({ businessId, userId, action, sessionId, metadata })
  * a lockout. The value is only ever echoed back to the same user in the session
  * list, and it never reaches a query filter or an authorization decision.
  */
-export function normalizeDeviceLabel(value) {
+export function normalizeDeviceLabel(value: unknown) {
   if (typeof value !== 'string') return DEFAULT_DEVICE_LABEL;
   const trimmed = value.trim();
   if (!trimmed) return DEFAULT_DEVICE_LABEL;
@@ -98,7 +156,7 @@ export function normalizeDeviceLabel(value) {
  * `businessId` is used only for the audit row (sessions carry no tenant); it
  * comes from the user document login already loaded, never from a request.
  */
-export async function createSessionForToken({ userId, businessId, token, deviceLabel }) {
+export async function createSessionForToken({ userId, businessId, token, deviceLabel }: CreateSessionInput) {
   const payload = decodeAccessToken(token);
   if (!payload?.jti || !payload?.exp) {
     throw new ApiError(500, 'The access token carries no session id', 'SESSION_ID_REQUIRED');
@@ -125,7 +183,7 @@ export async function createSessionForToken({ userId, businessId, token, deviceL
  * single "no" answer; callers do not distinguish the reasons, so a caller cannot
  * accidentally leak which one applied.
  */
-export async function findActiveSessionByJti(jti, now = new Date()) {
+export async function findActiveSessionByJti(jti: unknown, now: Date = new Date()) {
   if (typeof jti !== 'string' || jti.length === 0) return null;
   return Session.findOne({ jti, revokedAt: null, expiresAt: { $gt: now } });
 }
@@ -136,7 +194,7 @@ export async function findActiveSessionByJti(jti, now = new Date()) {
  * The conditional filter also makes concurrent requests safe — whichever wins
  * writes, the rest match nothing.
  */
-export async function touchSession(session, now = new Date()) {
+export async function touchSession(session: SessionDoc, now: Date = new Date()) {
   const last = session.lastUsedAt ? session.lastUsedAt.getTime() : 0;
   if (now.getTime() - last < LAST_USED_WRITE_INTERVAL_MS) return;
   const staleBefore = new Date(now.getTime() - LAST_USED_WRITE_INTERVAL_MS);
@@ -146,7 +204,7 @@ export async function touchSession(session, now = new Date()) {
       { $set: { lastUsedAt: now } }
     );
   } catch (err) {
-    console.error(`[session] lastUsedAt update failed for session ${String(session._id)}: ${err.message}`);
+    console.error(`[session] lastUsedAt update failed for session ${String(session._id)}: ${(err as { message?: unknown }).message}`);
   }
 }
 
@@ -154,7 +212,7 @@ export async function touchSession(session, now = new Date()) {
  * This user's open sessions, newest first. Scoped to `userId` — another user's
  * sessions are not filtered out afterwards, they are never in the query.
  */
-export async function listActiveSessions(userId, now = new Date()) {
+export async function listActiveSessions(userId: IdLike, now: Date = new Date()) {
   return Session.find({ userId, revokedAt: null, expiresAt: { $gt: now } })
     // `_id` is the tiebreaker so two sessions opened in the same millisecond
     // still have a stable order.
@@ -171,12 +229,17 @@ export async function listActiveSessions(userId, now = new Date()) {
  *
  * `businessId` is used only for the audit row.
  */
-export async function revokeSessionById({ userId, businessId, sessionId, now = new Date() }) {
+export async function revokeSessionById({ userId, businessId, sessionId, now = new Date() }: RevokeSessionByIdInput) {
+  // The guard is the real check and is unchanged. The assertion below is only
+  // what tells the checker, and it is erased at runtime: reaching the filter
+  // means `isValidObjectId` already accepted this value, which is the one
+  // property a query on `_id` needs. `sessionId` itself stays `unknown` because
+  // it arrives straight from `req.params`, exactly as it did before.
   if (!mongoose.isValidObjectId(sessionId)) {
     throw new ApiError(404, 'Session not found', 'NOT_FOUND');
   }
   const session = await Session.findOneAndUpdate(
-    { _id: sessionId, userId, revokedAt: null },
+    { _id: sessionId as IdLike, userId, revokedAt: null },
     { $set: { revokedAt: now } },
     { returnDocument: 'after' }
   );
@@ -194,7 +257,7 @@ export async function revokeSessionById({ userId, businessId, sessionId, now = n
 }
 
 /** Ends the session the current request is authenticated with (sign out). */
-export async function revokeSessionByJti({ userId, businessId, jti, now = new Date() }) {
+export async function revokeSessionByJti({ userId, businessId, jti, now = new Date() }: RevokeSessionByJtiInput) {
   const session = await Session.findOneAndUpdate(
     { userId, jti, revokedAt: null },
     { $set: { revokedAt: now } },
@@ -218,7 +281,7 @@ export async function revokeSessionByJti({ userId, businessId, jti, now = new Da
  * Ends every open session for this user ("sign out everywhere"), the current one
  * included. Returns how many were ended.
  */
-export async function revokeAllSessions({ userId, businessId, now = new Date() }) {
+export async function revokeAllSessions({ userId, businessId, now = new Date() }: RevokeAllSessionsInput) {
   const result = await Session.updateMany({ userId, revokedAt: null }, { $set: { revokedAt: now } });
   const revoked = result.modifiedCount ?? 0;
   if (revoked > 0) {
@@ -240,7 +303,7 @@ export async function revokeAllSessions({ userId, businessId, now = new Date() }
  * client which row is its own, which is how it identifies itself without ever
  * seeing a session id it did not already hold.
  */
-export function toPublicSession(session, currentJti) {
+export function toPublicSession(session: SessionDoc, currentJti?: string) {
   return {
     id: String(session._id),
     current: Boolean(currentJti) && session.jti === currentJti,

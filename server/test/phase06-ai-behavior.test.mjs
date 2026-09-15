@@ -208,7 +208,7 @@ dbSuite('Phase 06 — AI chat behavior', dbOk, () => {
     assert.deepEqual(res.json.assistantMessage.toolsUsed.sort(), ['createProduct', 'stockOut', 'updateProduct']);
 
     // Every attempted write surfaces as a soft TOOL_NOT_FOUND (no crash, no effect).
-    const probe = await import('../src/services/ai/tools.js');
+    const probe = await import('../src/services/ai/tools.ts');
     for (const name of ['createProduct', 'stockOut', 'updateProduct']) {
       const out = await probe.executeTool(name, {}, { businessId: biz.businessId, role: 'OWNER' });
       assert.equal(out.ok, false);

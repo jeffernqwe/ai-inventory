@@ -15,7 +15,7 @@
 import { aiConfig } from './aiConfig.ts';
 import { AiProviderError, isAiError } from './aiErrors.ts';
 import { selectProvider } from './providers/index.ts';
-import { executeTool, AI_TOOL_DEFS } from './tools.js';
+import { executeTool, AI_TOOL_DEFS } from './tools.ts';
 
 function todayLabel() {
   return new Date().toISOString().slice(0, 10);

@@ -19,7 +19,7 @@ import {
 } from './support.mjs';
 import { dbSuite } from './testEnv.mjs';
 import { ROLES } from '../src/constants/roles.ts';
-import { executeTool, validateToolArgs, AI_TOOL_DEFS, aiToolsById } from '../src/services/ai/tools.js';
+import { executeTool, validateToolArgs, AI_TOOL_DEFS, aiToolsById } from '../src/services/ai/tools.ts';
 
 const { dbOk, baseUrl, server } = await startServer();
 const api = makeApi(baseUrl);

@@ -30,7 +30,7 @@ import {
 import { unitSuite, dbSuite } from './testEnv.mjs';
 import { ROLES } from '../src/constants/roles.ts';
 import { STOCK_STATUSES, classifyStockStatus } from '../src/constants/stockStatus.ts';
-import { executeTool } from '../src/services/ai/tools.js';
+import { executeTool } from '../src/services/ai/tools.ts';
 
 // ---------------------------------------------------------------------------
 // Unit — stock-status classifier (all DB-free)

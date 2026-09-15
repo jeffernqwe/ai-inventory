@@ -7,7 +7,7 @@ import requestId from './middlewares/requestId.ts';
 import requestLogger from './middlewares/httpLogger.ts';
 import healthRoutes from './routes/health.routes.js';
 import { createAuthRouter } from './routes/auth.routes.js';
-import userRoutes from './routes/users.routes.js';
+import userRoutes from './routes/users.routes.ts';
 import categoryRoutes from './routes/categories.routes.ts';
 import locationRoutes from './routes/locations.routes.ts';
 import supplierRoutes from './routes/suppliers.routes.ts';

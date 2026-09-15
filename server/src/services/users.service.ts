@@ -1,3 +1,5 @@
+import type mongoose from 'mongoose';
+
 import bcrypt from 'bcryptjs';
 
 import User from '../models/user.model.ts';
@@ -15,10 +17,67 @@ const BCRYPT_ROUNDS = 10;
 const ACTIVE_STATUS = 'ACTIVE';
 const EMAIL_IN_USE_MESSAGE = 'An account with this email already exists';
 
-const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/**
+ * Local to this module, following `inventory.service.ts`, `product.service.ts`
+ * and `audit.service.ts`: every caller passes the string `req.user` carries and
+ * the model casts whichever arrives. Declared here rather than in a shared
+ * module so this service stays free of a dependency it does not otherwise need.
+ */
+type IdLike = string | mongoose.Types.ObjectId;
 
-function isDuplicateKey(err) {
-  return err?.code === 11000;
+/**
+ * The authenticated actor a write is performed by (`req.user`). `role` is read
+ * for the cross-role rules below and is the database-loaded role for this
+ * request — never a token claim or a client-supplied value.
+ */
+type Actor = {
+  id: IdLike;
+  businessId: IdLike;
+  role: string;
+};
+
+/**
+ * The validated create payload (`validateUserCreate`). The service is reached
+ * only after that validator has reported no problems, so `name`/`email`/
+ * `password` are the strings it checked and `role` is one of the assignable
+ * roles; the catalogue re-check in `create` is the existing defence in depth,
+ * not a duplicate of validation.
+ */
+type UserCreatePayload = {
+  name: string;
+  email: string;
+  password: string;
+  role: string;
+};
+
+/** The validated update payload (`validateUserUpdate`) — role and/or status. */
+type UserUpdatePayload = {
+  role?: string;
+  status?: string;
+};
+
+/** The validated list filters (`validateUserList`) plus pagination. */
+type UserListFilters = {
+  q?: string;
+  status?: string;
+  skip: number;
+  limit: number;
+};
+
+/**
+ * The filter `list` builds. Derived from the model itself rather than declared
+ * as a structural shape, following `audit.service.ts`: `QueryFilter<Doc>` maps
+ * each field to that field's own condition type, so the filter is checked
+ * against the real schema at the `.countDocuments()`/`.find()` calls instead of
+ * drifting from it. The model exports only the model, so its document type is
+ * taken from it here and `user.model.ts` is left untouched.
+ */
+type UserFilter = mongoose.QueryFilter<mongoose.HydratedDocFromModel<typeof User>>;
+
+const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+function isDuplicateKey(err: unknown) {
+  return (err as { code?: unknown } | null | undefined)?.code === 11000;
 }
 
 /**
@@ -30,8 +89,8 @@ function isDuplicateKey(err) {
  * the ADMIN role.
  */
 export const usersService = {
-  async list(businessId, { q, status, skip, limit }) {
-    const filter = { businessId };
+  async list(businessId: IdLike, { q, status, skip, limit }: UserListFilters) {
+    const filter: UserFilter = { businessId };
     if (status) filter.status = status;
     if (q) {
       filter.$or = [
@@ -49,7 +108,7 @@ export const usersService = {
     return { items: docs.map(toPublicUser), total };
   },
 
-  async get(businessId, id) {
+  async get(businessId: IdLike, id: IdLike) {
     const user = await User.findOne({ _id: id, businessId });
     if (!user) notFound();
     return toPublicUser(user);
@@ -59,8 +118,16 @@ export const usersService = {
    * Create a non-OWNER user in the actor's business. The created user's
    * businessId always comes from the authenticated actor, never the body.
    */
-  async create(actor, payload) {
-    if (!NON_OWNER_ROLES.includes(payload.role)) {
+  async create(actor: Actor, payload: UserCreatePayload) {
+    // `NON_OWNER_ROLES` is inferred as a tuple of its literal members, so calling
+    // `includes` on it directly would demand a value already known to be one of
+    // them — which is the very thing this check is testing. The assertion is a
+    // widened, type-level view of the same frozen array, the same widening
+    // `ASSIGNABLE_ROLES` performs in `utils/validate.ts`: read-only, same values,
+    // same order, nothing added or removed, and no runtime effect. It is written
+    // inline rather than as a module-level alias so this migration adds no
+    // statement the original file did not have.
+    if (!(NON_OWNER_ROLES as readonly string[]).includes(payload.role)) {
       // Defense in depth — the controller already rejects this with field errors.
       throw new ApiError(400, 'role must be one of ADMIN, MANAGER, STAFF', 'VALIDATION_ERROR');
     }
@@ -109,7 +176,7 @@ export const usersService = {
    * order: tenant scoping (404 first), then self, then OWNER, then ADMIN
    * restrictions — so a cross-business id never leaks a more specific reason.
    */
-  async update(actor, id, payload) {
+  async update(actor: Actor, id: IdLike, payload: UserUpdatePayload) {
     const target = await User.findOne({ _id: id, businessId: actor.businessId });
     if (!target) notFound();
 
@@ -123,7 +190,7 @@ export const usersService = {
       throw new ApiError(403, 'Admins cannot modify or assign admins', 'ADMIN_RESTRICTED');
     }
 
-    const updated = [];
+    const updated: string[] = [];
     if (payload.role !== undefined && payload.role !== target.role) {
       target.role = payload.role;
       updated.push('role');

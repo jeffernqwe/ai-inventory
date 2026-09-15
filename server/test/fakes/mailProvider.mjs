@@ -20,7 +20,7 @@
  * since Phase 28 B1 happens after the HTTP response.
  */
 
-import { registerProvider, deregisterProvider } from '../../src/services/mail/providers/index.js';
+import { registerProvider, deregisterProvider } from '../../src/services/mail/providers/index.ts';
 import { MailDeliveryError } from '../../src/services/mail/mailErrors.ts';
 
 export const FAKE_MAIL_PROVIDER = 'fake-mail';

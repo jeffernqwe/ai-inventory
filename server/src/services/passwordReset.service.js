@@ -57,7 +57,7 @@ import { normalizeEmail } from '../utils/validate.ts';
 import { recordAudit } from './audit.service.ts';
 import { assertActiveBusiness } from './business.service.js';
 import { revokeAllSessions } from './session.service.js';
-import { sendPasswordResetEmail, isMailConfigured, MailNotConfigured, MailDeliveryError } from './mail/index.js';
+import { sendPasswordResetEmail, isMailConfigured, MailNotConfigured, MailDeliveryError } from './mail/index.ts';
 import { mailConfig } from './mail/mailConfig.ts';
 import { error as logError } from '../utils/logger.ts';
 import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../constants/audit.ts';

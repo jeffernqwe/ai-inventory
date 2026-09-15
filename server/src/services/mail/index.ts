@@ -29,11 +29,23 @@
  */
 
 import { mailConfig } from './mailConfig.ts';
-import { selectProvider } from './providers/index.js';
+import { selectProvider } from './providers/index.ts';
 import { passwordResetEmail } from './templates/passwordReset.ts';
 import { MailNotConfigured, MailDeliveryError, isMailError } from './mailErrors.ts';
 
 export { MailNotConfigured, MailDeliveryError, isMailError };
+
+/**
+ * Everything `sendPasswordResetEmail` needs. All three are required: the caller
+ * has already resolved the recipient, owns the reset URL and knows the lifetime
+ * the token store used, so there is no sensible default for any of them —
+ * `passwordResetEmail` has the defaults, and this layer only transports.
+ */
+interface PasswordResetEmailRequest {
+  to: string;
+  resetUrl: string;
+  expiresInMinutes: number;
+}
 
 export function mailProviderName() {
   return (process.env.MAIL_PROVIDER || '').trim().toLowerCase();
@@ -55,7 +67,7 @@ export function isMailConfigured() {
  * MailDeliveryError when the provider fails. Both codes are MAIL_* — neither is,
  * or may become, an authentication error.
  */
-export async function sendPasswordResetEmail({ to, resetUrl, expiresInMinutes }) {
+export async function sendPasswordResetEmail({ to, resetUrl, expiresInMinutes }: PasswordResetEmailRequest) {
   const provider = selectProvider();
   const { appName } = mailConfig();
   const { subject, text, html } = passwordResetEmail({ resetUrl, expiresInMinutes, appName });

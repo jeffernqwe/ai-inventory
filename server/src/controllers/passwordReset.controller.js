@@ -51,7 +51,7 @@ import {
   VALIDATION_ERROR_CODE,
 } from '../services/passwordReset.service.js';
 import { validateForgotPassword, validateResetPassword } from '../utils/validate.ts';
-import { MailNotConfigured, MailDeliveryError } from '../services/mail/index.js';
+import { MailNotConfigured, MailDeliveryError } from '../services/mail/index.ts';
 import { throwValidation } from '../utils/errors.ts';
 import { error as logError } from '../utils/logger.ts';
 import ApiError from '../utils/ApiError.ts';

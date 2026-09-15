@@ -27,7 +27,7 @@ import { dbSuite, unitSuite } from './testEnv.mjs';
 import { ROLES } from '../src/constants/roles.ts';
 import { AIConversation, AIMessage } from '../src/models/index.ts';
 import { runAiChat } from '../src/services/ai/ai.service.js';
-import { toAnthropicMessages } from '../src/services/ai/providers/anthropicWire.js';
+import { toAnthropicMessages } from '../src/services/ai/providers/anthropicWire.ts';
 import { AiProviderError } from '../src/services/ai/aiErrors.ts';
 import {
   registerFakeProvider,

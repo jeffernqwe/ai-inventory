@@ -17,9 +17,10 @@
  * Returns { model, text, toolCalls: [{ id, name, input }], usage }.
  */
 
-import { createAnthropicCompatibleProvider } from './anthropicWire.js';
+import { createAnthropicCompatibleProvider } from './anthropicWire.ts';
+import type { AIProvider } from './index.ts';
 
-export function createClaudeProvider() {
+export function createClaudeProvider(): AIProvider {
   return createAnthropicCompatibleProvider({
     name: 'claude',
     apiKeyEnv: 'ANTHROPIC_API_KEY',

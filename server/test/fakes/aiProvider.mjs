@@ -8,7 +8,7 @@
  * build those responses and read back what the loop sent.
  */
 
-import { registerProvider, deregisterProvider } from '../../src/services/ai/providers/index.js';
+import { registerProvider, deregisterProvider } from '../../src/services/ai/providers/index.ts';
 
 let current = null;
 

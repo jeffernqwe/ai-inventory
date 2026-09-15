@@ -16,10 +16,18 @@
 
 import { aiConfig } from '../aiConfig.ts';
 import { AiNotConfigured, AiProviderError } from '../aiErrors.ts';
-import { postJson } from './http.js';
+import { postJson, type UpstreamJsonBody } from './http.ts';
+import type {
+  AIProvider,
+  ProviderMessage,
+  ProviderResponse,
+  ProviderUsage,
+  ToolCall,
+  ToolDefinition,
+} from './index.ts';
 
 /** Neutral tools -> Anthropic tools (they expect `input_schema`). */
-export function toAnthropicTools(tools) {
+export function toAnthropicTools(tools: ToolDefinition[]) {
   return tools.map((t) => ({
     name: t.name,
     description: t.description,
@@ -34,13 +42,16 @@ export function toAnthropicTools(tools) {
  * tool_result block; it must follow the assistant message whose tool_use it
  * answers, which our orchestration loop always guarantees.
  */
-export function toAnthropicMessages(messages) {
-  const out = [];
+export function toAnthropicMessages(messages: ProviderMessage[]) {
+  // `content` is annotated rather than inferred because the filter below has
+  // always tested it against null: the neutral contract never produces one, but
+  // the check is the drop-empty-turns guard and must stay live.
+  const out: { role: string; content: string | unknown[] | null }[] = [];
   for (const m of messages) {
     if (m.role === 'user') {
       out.push({ role: 'user', content: m.content });
     } else if (m.role === 'assistant') {
-      const content = [];
+      const content: unknown[] = [];
       if (m.content) content.push({ type: 'text', text: m.content });
       for (const call of m.toolCalls || []) {
         content.push({ type: 'tool_use', id: String(call.id), name: String(call.name), input: call.input ?? {} });
@@ -59,24 +70,69 @@ export function toAnthropicMessages(messages) {
   return out.filter((m) => m.content !== null && !(Array.isArray(m.content) && m.content.length === 0));
 }
 
-export function parseAnthropicResponse(data, fallbackModel = 'anthropic') {
-  const content = Array.isArray(data.content) ? data.content : [];
+/**
+ * The slice of an Anthropic Messages response this layer reads. It is declared
+ * so the parser has something to narrow against at each level it descends;
+ * every field is optional and untrusted, and the body below — not this
+ * declaration — is what validates them: `Array.isArray` for `content`, `typeof`
+ * for each block's `text`, and `??` for the token counts, which is also what
+ * tolerates a provider that reports no usage. `usage` is an object of untrusted
+ * counts rather than a pair of numbers, so the counts are asserted into the
+ * neutral shape rather than assumed to be well-typed.
+ */
+interface AnthropicResponse extends UpstreamJsonBody {
+  content?: unknown;
+  usage?: Record<string, unknown>;
+  stop_reason?: unknown;
+  model?: unknown;
+}
+
+export function parseAnthropicResponse(data: AnthropicResponse, fallbackModel = 'anthropic'): ProviderResponse {
+  const content: unknown[] = Array.isArray(data.content) ? data.content : [];
   let text = '';
-  const toolCalls = [];
-  for (const block of content) {
+  const toolCalls: ToolCall[] = [];
+  for (const block of content as UpstreamJsonBody[]) {
     if (block?.type === 'text' && typeof block.text === 'string') text += block.text;
     else if (block?.type === 'tool_use') {
-      const input = block.input && typeof block.input === 'object' && !Array.isArray(block.input) ? block.input : {};
+      const input = block.input && typeof block.input === 'object' && !Array.isArray(block.input) ? block.input as UpstreamJsonBody : {} as UpstreamJsonBody;
       toolCalls.push({ id: String(block.id), name: String(block.name), input });
     }
   }
   const usage = data.usage
-    ? { inputTokens: data.usage.input_tokens ?? 0, outputTokens: data.usage.output_tokens ?? 0 }
+    ? { inputTokens: data.usage.input_tokens ?? 0, outputTokens: data.usage.output_tokens ?? 0 } as ProviderUsage
     : null;
   if (data.stop_reason === 'max_tokens' && toolCalls.length === 0 && !text) {
     throw new AiProviderError('The AI service response was cut off. Please try a shorter question.');
   }
-  return { model: data.model ?? fallbackModel, text, toolCalls, usage };
+  // `?? fallbackModel` is the only guard on `model`, exactly as before; the
+  // assertion is what says the neutral contract reports it as a string.
+  return { model: data.model as string ?? fallbackModel, text, toolCalls, usage };
+}
+
+/**
+ * What a factory built on this wire layer must be told. `modelKey` names the
+ * aiConfig() field holding the model, so each provider keeps its own environment
+ * variable without this module knowing the variable's name.
+ */
+export interface AnthropicCompatibleOptions {
+  /** provider id used in logs and the instance name */
+  name?: string;
+  /** env var holding the API key (server-side only) */
+  apiKeyEnv: string;
+  /** AiNotConfigured message when the key is absent */
+  apiKeyMissingMessage?: string;
+  /** full /v1/messages URL to POST to */
+  messagesUrl: string;
+  /** aiConfig() key holding the model name */
+  modelKey: keyof ReturnType<typeof aiConfig>;
+  /** fallback when the model env var is empty */
+  defaultModel: string;
+  /** label used when the response omits a model */
+  fallbackModel?: string;
+  /** header map for the key */
+  authHeaders?: (apiKey: string) => Record<string, string>;
+  /** static headers merged over authHeaders (e.g. a gateway-mandated User-Agent / beta header) */
+  extraHeaders?: Record<string, string>;
 }
 
 /**
@@ -94,7 +150,7 @@ export function parseAnthropicResponse(data, fallbackModel = 'anthropic') {
  * @param {object} [opts.extraHeaders] static headers merged over authHeaders
  *   (e.g. a gateway-mandated User-Agent / beta header)
  */
-export function createAnthropicCompatibleProvider(opts = {}) {
+export function createAnthropicCompatibleProvider(opts: AnthropicCompatibleOptions = {} as AnthropicCompatibleOptions): AIProvider {
   const {
     name = 'anthropic',
     apiKeyEnv,
@@ -131,7 +187,7 @@ export function createAnthropicCompatibleProvider(opts = {}) {
           tools: toAnthropicTools(tools),
         },
       });
-      return parseAnthropicResponse(data, fallbackModel);
+      return parseAnthropicResponse(data as AnthropicResponse, fallbackModel);
     },
   };
 }

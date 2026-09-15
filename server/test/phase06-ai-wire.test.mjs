@@ -12,7 +12,7 @@ import http from 'node:http';
 
 import { aiConfig } from '../src/services/ai/aiConfig.ts';
 import { AiProviderError } from '../src/services/ai/aiErrors.ts';
-import { createAgentrouterProvider } from '../src/services/ai/providers/agentrouterProvider.js';
+import { createAgentrouterProvider } from '../src/services/ai/providers/agentrouterProvider.ts';
 
 const TEST_KEY = 'ar_wire_test_key';
 const TEST_TOOLS = [

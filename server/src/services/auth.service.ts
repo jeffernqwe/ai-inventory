@@ -1,3 +1,5 @@
+import type mongoose from 'mongoose';
+
 import bcrypt from 'bcryptjs';
 
 import Business from '../models/business.model.ts';
@@ -5,8 +7,8 @@ import User from '../models/user.model.ts';
 import ApiError from '../utils/ApiError.ts';
 import { signAccessToken } from '../config/jwt.ts';
 import { normalizeEmail } from '../utils/validate.ts';
-import { assertActiveBusiness } from './business.service.js';
-import { createSessionForToken, newSessionId } from './session.service.js';
+import { assertActiveBusiness } from './business.service.ts';
+import { createSessionForToken, newSessionId } from './session.service.ts';
 
 const BCRYPT_ROUNDS = 10;
 const OWNER_ROLE = 'OWNER';
@@ -16,8 +18,49 @@ const ACTIVE_STATUS = 'ACTIVE';
 // roughly the same time (reduces account-enumeration via timing).
 const DUMMY_HASH = bcrypt.hashSync('timing-equalizer-placeholder', BCRYPT_ROUNDS);
 
+/**
+ * Local to this module, following `inventory.service.ts`, `product.service.ts`,
+ * `audit.service.ts` and `users.service.ts`: every caller passes either the
+ * string `req.user` carries or the ObjectId a document the server already loaded
+ * holds, and the model casts whichever arrives.
+ */
+type IdLike = string | mongoose.Types.ObjectId;
+
+/**
+ * The user document, derived from the model itself rather than restated: this is
+ * the same type `users.service.ts` receives from its own queries and hands to
+ * `toPublicUser` below, so the public DTO cannot be checked against one shape
+ * where it is produced and another where it is consumed.
+ */
+type UserDoc = mongoose.HydratedDocFromModel<typeof User>;
+
+/** The validated registration payload (`validateRegister`). */
+type RegisterPayload = {
+  businessName: string;
+  name: string;
+  email: string;
+  password: string;
+};
+
+/**
+ * The validated login payload (`validateLogin`). `deviceLabel` stays `unknown`
+ * because it is deliberately NOT validated — `normalizeDeviceLabel` coerces
+ * anything it is given, and a malformed label must never be able to fail a login.
+ */
+type LoginPayload = {
+  email: string;
+  password: string;
+  deviceLabel?: unknown;
+};
+
+/** The validated password-change payload (`validateChangePassword`). */
+type ChangePasswordPayload = {
+  currentPassword: string;
+  newPassword: string;
+};
+
 /** Public shape of a user document. Never includes passwordHash. */
-export function toPublicUser(user) {
+export function toPublicUser(user: UserDoc) {
   return {
     id: String(user._id),
     businessId: String(user.businessId),
@@ -29,8 +72,8 @@ export function toPublicUser(user) {
   };
 }
 
-function isDuplicateKey(err) {
-  return err?.code === 11000;
+function isDuplicateKey(err: unknown) {
+  return (err as { code?: unknown } | null | undefined)?.code === 11000;
 }
 
 /**
@@ -38,7 +81,7 @@ function isDuplicateKey(err) {
  * Register -> Create Business -> Create OWNER user). The businessId on the user
  * always comes from the server-created Business document.
  */
-export async function registerBusinessOwner({ businessName, name, email, password }) {
+export async function registerBusinessOwner({ businessName, name, email, password }: RegisterPayload) {
   const normEmail = normalizeEmail(email);
 
   const alreadyRegistered = await User.exists({ email: normEmail });
@@ -83,7 +126,7 @@ export async function registerBusinessOwner({ businessName, name, email, passwor
  * if the write fails the login fails, because a token naming no session would be
  * unusable anyway, and handing one out would be a silent half-login.
  */
-export async function loginWithPassword({ email, password, deviceLabel }) {
+export async function loginWithPassword({ email, password, deviceLabel }: LoginPayload) {
   const normEmail = normalizeEmail(email);
   const user = await User.findOne({ email: normEmail }).select('+passwordHash');
 
@@ -124,7 +167,7 @@ export async function loginWithPassword({ email, password, deviceLabel }) {
  * issued here — the client signs in again with the new password, and that
  * fresh token's iat is at or after changedAtSec, so it is never rejected.
  */
-export async function changePassword(userId, { currentPassword, newPassword }) {
+export async function changePassword(userId: IdLike, { currentPassword, newPassword }: ChangePasswordPayload) {
   const user = await User.findById(userId).select('+passwordHash');
   if (!user) {
     throw new ApiError(401, 'Authentication required', 'AUTH_REQUIRED');
@@ -145,7 +188,7 @@ export async function changePassword(userId, { currentPassword, newPassword }) {
  * authenticated session (req.user.id) — never from the client. Returns the
  * updated user document for the public DTO.
  */
-export async function updateMyName(userId, name) {
+export async function updateMyName(userId: IdLike, name: string) {
   const user = await User.findByIdAndUpdate(
     userId,
     { name },

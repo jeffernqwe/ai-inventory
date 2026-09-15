@@ -1,3 +1,5 @@
+import type { Request, Response } from 'express';
+
 import {
   validateRegister,
   validateLogin,
@@ -11,23 +13,45 @@ import {
   changePassword as changePasswordService,
   updateMyName,
   toPublicUser,
-} from '../services/auth.service.js';
+} from '../services/auth.service.ts';
 import {
   listActiveSessions,
   revokeSessionById,
   revokeSessionByJti,
   revokeAllSessions,
   toPublicSession,
-} from '../services/session.service.js';
+} from '../services/session.service.ts';
 import ApiError from '../utils/ApiError.ts';
 import env from '../config/env.ts';
+
+/**
+ * The request context this controller reads, following `users.controller.ts`,
+ * `products.controller.ts` and `audit.controller.ts`: declaring these fields on
+ * Express's global `Request` would let any module read an authoritative-looking
+ * `req.user` on a public route.
+ *
+ * `user` and `auth` are optional for the same reason they are optional in
+ * `middlewares/authenticate.ts`: a handler is registered against Express's
+ * `RequestHandler`, whose parameter is a plain `Request`; required fields would
+ * make that `Request` unassignable and every route registration a type error.
+ * The reads below assert them with `!` instead, which is justified by the route
+ * table — every route below the public block in `routes/auth.routes.ts` is
+ * registered `requireAuth, controller`, so the middleware has always run by the
+ * time these handlers execute. Optional chaining was NOT used: it would silently
+ * pass `undefined` on where the code would previously have thrown, which is a
+ * behaviour change.
+ */
+type AuthenticatedRequest = Request & {
+  user?: { id: string; businessId: string };
+  auth?: { sessionId: string; jti: string };
+};
 
 /**
  * POST /api/auth/register
  * Creates a Business + OWNER user. Returns 201 with public user/business.
  * No token is issued here — the client logs in next (spec §45 flow).
  */
-export async function register(req, res) {
+export async function register(req: AuthenticatedRequest, res: Response) {
   const body = req.body ?? {};
   const problems = validateRegister(body);
   if (problems.length > 0) {
@@ -57,7 +81,7 @@ export async function register(req, res) {
  * back in the session list so a user can tell their devices apart. It is coerced
  * rather than validated: a malformed label must never be able to fail a login.
  */
-export async function login(req, res) {
+export async function login(req: AuthenticatedRequest, res: Response) {
   const body = req.body ?? {};
   const problems = validateLogin(body);
   if (problems.length > 0) {
@@ -84,7 +108,7 @@ export async function login(req, res) {
  * GET /api/auth/me
  * Protected by requireAuth. req.user is the server-authoritative current user.
  */
-export async function me(req, res) {
+export async function me(req: AuthenticatedRequest, res: Response) {
   return res.status(200).json({ user: req.user });
 }
 
@@ -94,7 +118,7 @@ export async function me(req, res) {
  * which revokes every previously issued token (401 SESSION_INVALIDATED). The
  * client signs in again with the new password.
  */
-export async function changePassword(req, res) {
+export async function changePassword(req: AuthenticatedRequest, res: Response) {
   const body = req.body ?? {};
   const problems = validateChangePassword(body);
   if (problems.length > 0) {
@@ -102,7 +126,7 @@ export async function changePassword(req, res) {
     err.fields = problems;
     throw err;
   }
-  await changePasswordService(req.user.id, {
+  await changePasswordService(req.user!.id, {
     currentPassword: body.currentPassword,
     newPassword: body.newPassword,
   });
@@ -114,7 +138,7 @@ export async function changePassword(req, res) {
  * caller's name; identity is taken exclusively from the authenticated session.
  * Unknown fields are rejected by the validator, never silently ignored.
  */
-export async function updateMe(req, res) {
+export async function updateMe(req: AuthenticatedRequest, res: Response) {
   const body = req.body ?? {};
   const { problems, name } = validateMeUpdate(body);
   if (problems.length > 0) {
@@ -122,7 +146,12 @@ export async function updateMe(req, res) {
     err.fields = problems;
     throw err;
   }
-  const user = await updateMyName(req.user.id, name);
+  // `name` is `string | undefined` (the `requiredString` shape), so `!` is the
+  // assertion, exactly as `users.controller.ts` asserts the same field from the
+  // same helper: reaching this line means `problems` was empty, and therefore
+  // that `requiredString` reported no problem with the value it returned. It is
+  // erased at runtime.
+  const user = await updateMyName(req.user!.id, name!);
   return res.status(200).json({ user: toPublicUser(user) });
 }
 
@@ -136,7 +165,7 @@ export async function updateMe(req, res) {
  * Idempotent by design: signing out an already-ended session still answers 200,
  * because the caller's goal (that session is dead) is satisfied either way.
  */
-export async function logout(req, res) {
+export async function logout(req: AuthenticatedRequest, res: Response) {
   const body = req.body ?? {};
   const { problems, all } = validateLogout(body);
   if (problems.length > 0) {
@@ -147,16 +176,16 @@ export async function logout(req, res) {
 
   if (all) {
     const sessionsRevoked = await revokeAllSessions({
-      userId: req.user.id,
-      businessId: req.user.businessId,
+      userId: req.user!.id,
+      businessId: req.user!.businessId,
     });
     return res.status(200).json({ message: 'Signed out on all devices', sessionsRevoked });
   }
 
   await revokeSessionByJti({
-    userId: req.user.id,
-    businessId: req.user.businessId,
-    jti: req.auth.jti,
+    userId: req.user!.id,
+    businessId: req.user!.businessId,
+    jti: req.auth!.jti,
   });
   return res.status(200).json({ message: 'Signed out' });
 }
@@ -169,10 +198,10 @@ export async function logout(req, res) {
  * filtered out here, they are never queried. The DTO is a strict allowlist and
  * never carries a token or a jti.
  */
-export async function listSessions(req, res) {
-  const sessions = await listActiveSessions(req.user.id);
+export async function listSessions(req: AuthenticatedRequest, res: Response) {
+  const sessions = await listActiveSessions(req.user!.id);
   return res.status(200).json({
-    sessions: sessions.map((session) => toPublicSession(session, req.auth.jti)),
+    sessions: sessions.map((session) => toPublicSession(session, req.auth!.jti)),
   });
 }
 
@@ -182,10 +211,10 @@ export async function listSessions(req, res) {
  * another user's session is unreachable and answers the same 404 as an unknown
  * id. Nothing is read from the request body.
  */
-export async function revokeSession(req, res) {
+export async function revokeSession(req: AuthenticatedRequest, res: Response) {
   const session = await revokeSessionById({
-    userId: req.user.id,
-    businessId: req.user.businessId,
+    userId: req.user!.id,
+    businessId: req.user!.businessId,
     sessionId: req.params.id,
   });
   return res.status(200).json({ message: 'Session ended', id: String(session._id) });

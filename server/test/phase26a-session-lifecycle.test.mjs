@@ -49,7 +49,7 @@ import {
 } from './support.mjs';
 import { dbSuite } from './testEnv.mjs';
 import { verifyAccessToken, signAccessToken } from '../src/config/jwt.ts';
-import { newSessionId } from '../src/services/session.service.js';
+import { newSessionId } from '../src/services/session.service.ts';
 import env from '../src/config/env.ts';
 import Business from '../src/models/business.model.ts';
 import User from '../src/models/user.model.ts';
@@ -57,7 +57,7 @@ import Session from '../src/models/session.model.ts';
 import AuditLog from '../src/models/auditLog.model.ts';
 import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../src/constants/audit.ts';
 import requireAuth from '../src/middlewares/authenticate.ts';
-import { createAuthRouter } from '../src/routes/auth.routes.js';
+import { createAuthRouter } from '../src/routes/auth.routes.ts';
 
 const { dbOk, baseUrl, server } = await startServer();
 const api = makeApi(baseUrl);

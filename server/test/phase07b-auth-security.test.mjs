@@ -33,7 +33,7 @@ import User from '../src/models/user.model.ts';
 import Product from '../src/models/product.model.ts';
 import Session from '../src/models/session.model.ts';
 
-import { createAuthRouter } from '../src/routes/auth.routes.js';
+import { createAuthRouter } from '../src/routes/auth.routes.ts';
 import categoryRoutes from '../src/routes/categories.routes.ts';
 import locationRoutes from '../src/routes/locations.routes.ts';
 import productRoutes from '../src/routes/products.routes.ts';

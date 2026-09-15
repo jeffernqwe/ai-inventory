@@ -17,7 +17,7 @@
  */
 import Business from '../models/business.model.ts';
 import ApiError from '../utils/ApiError.ts';
-import { assertActiveBusiness } from './business.service.js';
+import { assertActiveBusiness } from './business.service.ts';
 import {
   DEFAULT_PLAN_CODE,
   PLAN_FEATURES,

@@ -14,6 +14,13 @@
  *
  * Result payloads deliberately reuse the existing read services (products,
  * inventory, transactions, dashboard) so the numbers match the app exactly.
+ *
+ * Typing note: the JSON Schemas below are runtime DATA — they are handed to the
+ * model verbatim — so they stay plain objects described by schema shapes, never
+ * replaced by interfaces that could not be sent. Argument typing is a boundary
+ * annotation only: the model's arguments arrive as `unknown`, and the runtime
+ * checks in `validateToolArgs` (unchanged) are what admit them. Each tool's
+ * argument interface documents what survives that check; it never performs it.
  */
 
 import { dashboardService } from '../dashboard.service.ts';
@@ -22,11 +29,125 @@ import { productService } from '../product.service.ts';
 import { transactionsService, TRANSACTION_TYPES } from '../transactions.service.ts';
 import { hasPermission, PERMISSIONS } from '../../constants/roles.ts';
 
+/** The authenticated session context a tool runs under — always server-derived. */
+interface ToolContext {
+  businessId: string;
+  userId: string;
+  role: string;
+}
+
+/**
+ * Arguments as the model produced them: an unvalidated bag of JSON values.
+ * Nothing may read a field before `validateToolArgs` has checked it.
+ */
+type ToolArguments = Record<string, unknown>;
+
+/** The JSON Schema keywords these tool schemas use, and that validation reads. */
+interface PropertySchema {
+  type?: string;
+  enum?: unknown[];
+  pattern?: string;
+  format?: string;
+  maxLength?: number;
+  minimum?: number;
+  maximum?: number;
+  description?: string;
+}
+
+/**
+ * A tool's `parameters`. The index signature is what keeps a schema assignable
+ * to the provider layer's `Record<string, unknown>`, because the model — not
+ * TypeScript — is what consumes it.
+ */
+interface ToolSchema extends Record<string, unknown> {
+  type?: string;
+  additionalProperties?: boolean;
+  required?: string[];
+  properties?: Record<string, PropertySchema>;
+  description?: string;
+}
+
+/** A product row this module formats: a hydrated document or an aggregate row. */
+type ProductDTOSource = Parameters<typeof productService.toProductDTO>[0];
+
+/** The same row plus the summed availability the stock lists attach to it. */
+type StockCardSource = ProductDTOSource & { available?: number | null };
+
+/** One inventory row, exactly as `listRows` returns it. */
+type InventoryRow = Awaited<ReturnType<typeof inventoryService.listRows>>['items'][number];
+
+/**
+ * Per-tool argument shapes: what each tool's schema admits, and therefore what
+ * `validateToolArgs` has already enforced by the time its executor runs. Each
+ * extends `ToolArguments` so it stays assignable to the single executor
+ * signature the tool table declares.
+ */
+interface SearchProductsArgs extends ToolArguments {
+  q?: string;
+  status?: string;
+  categoryId?: string;
+  limit?: number;
+}
+
+interface GetProductArgs extends ToolArguments {
+  id?: string;
+  sku?: string;
+  barcode?: string;
+}
+
+interface GetInventoryArgs extends ToolArguments {
+  productId?: string;
+  locationId?: string;
+  q?: string;
+  status?: string;
+  lowStock?: boolean;
+  outOfStock?: boolean;
+  limit?: number;
+}
+
+interface LimitArgs extends ToolArguments {
+  limit?: number;
+}
+
+interface ReorderArgs extends ToolArguments {
+  q?: string;
+  categoryId?: string;
+  limit?: number;
+}
+
+interface HistoryArgs extends ToolArguments {
+  productId?: string;
+  locationId?: string;
+  type?: string;
+  from?: string;
+  to?: string;
+  limit?: number;
+}
+
+interface ProductsByLocationArgs extends ToolArguments {
+  locationId: string;
+  limit?: number;
+}
+
+/**
+ * One entry of the tool table. `executor` is declared with method syntax so the
+ * per-tool argument interfaces above stay assignable to it, while the call site
+ * still hands it the validated argument bag `validateToolArgs` produced.
+ */
+interface Tool {
+  name: string;
+  description: string;
+  permission: string;
+  defaultLimit?: number;
+  parameters?: ToolSchema;
+  executor(ctx: ToolContext, args: ToolArguments): Promise<unknown>;
+}
+
 const objectId = { type: 'string', pattern: '^[0-9a-fA-F]{24}$' };
 const statusEnum = { type: 'string', enum: ['ACTIVE', 'ARCHIVED'] };
-const limitParam = (def, max) => ({ type: 'integer', minimum: 1, maximum: max, description: `Maximum rows (default ${def}, up to ${max}).` });
+const limitParam = (def: number, max: number) => ({ type: 'integer', minimum: 1, maximum: max, description: `Maximum rows (default ${def}, up to ${max}).` });
 
-function productCore(doc) {
+function productCore(doc: ProductDTOSource) {
   const dto = productService.toProductDTO(doc);
   return {
     id: dto.id,
@@ -41,11 +162,11 @@ function productCore(doc) {
   };
 }
 
-function stockCard(doc) {
+function stockCard(doc: StockCardSource) {
   return { ...productCore(doc), availableQuantity: Number.isFinite(doc.available) ? doc.available : null };
 }
 
-function rowResult(r) {
+function rowResult(r: InventoryRow) {
   return {
     id: r.id,
     product: r.product,
@@ -58,7 +179,7 @@ function rowResult(r) {
   };
 }
 
-const tools = [
+const tools: Tool[] = [
   {
     name: 'searchProducts',
     description:
@@ -75,7 +196,7 @@ const tools = [
         limit: limitParam(15, 25),
       },
     },
-    async executor(ctx, args) {
+    async executor(ctx: ToolContext, args: SearchProductsArgs) {
       const { items, total } = await productService.list(ctx.businessId, {
         q: args.q,
         status: args.status,
@@ -102,7 +223,7 @@ const tools = [
       },
       description: 'Provide exactly one of id, sku, or barcode.',
     },
-    async executor(ctx, args) {
+    async executor(ctx: ToolContext, args: GetProductArgs) {
       if (!args.id && !args.sku && !args.barcode) {
         return { found: false, error: 'Provide one of id, sku, or barcode.' };
       }
@@ -143,7 +264,7 @@ const tools = [
         limit: limitParam(15, 25),
       },
     },
-    async executor(ctx, args) {
+    async executor(ctx: ToolContext, args: GetInventoryArgs) {
       const { items, total } = await inventoryService.listRows(ctx.businessId, {
         productId: args.productId,
         locationId: args.locationId,
@@ -169,7 +290,7 @@ const tools = [
       additionalProperties: false,
       properties: { limit: limitParam(20, 50) },
     },
-    async executor(ctx, args) {
+    async executor(ctx: ToolContext, args: LimitArgs) {
       const { items, total } = await productService.list(ctx.businessId, {
         lowStock: true,
         skip: 0,
@@ -190,7 +311,7 @@ const tools = [
       additionalProperties: false,
       properties: { limit: limitParam(20, 50) },
     },
-    async executor(ctx, args) {
+    async executor(ctx: ToolContext, args: LimitArgs) {
       const { items, total } = await productService.list(ctx.businessId, {
         outOfStock: true,
         skip: 0,
@@ -215,7 +336,7 @@ const tools = [
         limit: limitParam(20, 50),
       },
     },
-    async executor(ctx, args) {
+    async executor(ctx: ToolContext, args: ReorderArgs) {
       const { items, total } = await productService.listReorder(ctx.businessId, {
         q: args.q,
         categoryId: args.categoryId,
@@ -232,7 +353,7 @@ const tools = [
       'Business-wide inventory-health counts: active products, healthy in-stock products (available above their minimum stock), total on-hand quantity, low-stock and out-of-stock product counts, and the most recent stock movements — one entry per logical event, so a transfer between locations appears once with its source and destination rather than as two rows. Use for "how is my inventory doing".',
     permission: PERMISSIONS.DASHBOARD_VIEW,
     parameters: { type: 'object', additionalProperties: false, properties: {} },
-    async executor(ctx) {
+    async executor(ctx: ToolContext) {
       return dashboardService.summary(ctx.businessId);
     },
   },
@@ -255,7 +376,7 @@ const tools = [
         limit: limitParam(15, 50),
       },
     },
-    async executor(ctx, args) {
+    async executor(ctx: ToolContext, args: HistoryArgs) {
       const { items, total } = await transactionsService.list(ctx.businessId, {
         productId: args.productId,
         locationId: args.locationId,
@@ -281,7 +402,7 @@ const tools = [
       required: ['locationId'],
       properties: { locationId: objectId, limit: limitParam(20, 50) },
     },
-    async executor(ctx, args) {
+    async executor(ctx: ToolContext, args: ProductsByLocationArgs) {
       const { items, total } = await productService.list(ctx.businessId, {
         locationId: args.locationId,
         skip: 0,
@@ -294,14 +415,14 @@ const tools = [
 
 export const AI_TOOLS = Object.freeze(tools);
 
-export const aiToolsById = new Map(tools.map((t) => [t.name, t]));
+export const aiToolsById = new Map(tools.map((t) => [t.name, t] as const));
 
 /** The tool catalog exposed to the AI model (name/description/JSON Schema). */
 export const AI_TOOL_DEFS = Object.freeze(
   tools.map((t) => ({ name: t.name, description: t.description, parameters: t.parameters }))
 );
 
-function typeMatches(value, spec) {
+function typeMatches(value: unknown, spec: PropertySchema) {
   switch (spec.type) {
     case 'string':
       return typeof value === 'string';
@@ -321,8 +442,13 @@ function typeMatches(value, spec) {
  * wrong type, out-of-range value, or malformed identifier produces a problem —
  * this is what makes an AI-supplied businessId, Mongo operator, or arbitrary
  * filter impossible to smuggle into the executors.
+ *
+ * `rawArgs` is `unknown` on purpose: it is model output, so the undefined/null
+ * and non-object guards below are the contract, not a formality. The assertions
+ * further down only tell the compiler what `typeMatches` has already proven at
+ * runtime — they never stand in for it.
  */
-export function validateToolArgs(tool, rawArgs) {
+export function validateToolArgs(tool: Tool, rawArgs: unknown) {
   if (rawArgs === undefined || rawArgs === null) rawArgs = {};
   if (typeof rawArgs !== 'object' || Array.isArray(rawArgs)) {
     return { problems: ['arguments must be an object'], cleaned: {} };
@@ -330,14 +456,17 @@ export function validateToolArgs(tool, rawArgs) {
 
   const schema = tool.parameters ?? {};
   const props = schema.properties ?? {};
-  const problems = [];
-  const cleaned = {};
+  const problems: string[] = [];
+  const cleaned: ToolArguments = {};
 
   for (const key of schema.required ?? []) {
-    if (!(key in rawArgs)) problems.push(`missing required argument "${key}"`);
+    // The assertion is only about `null`: narrowing `unknown` through
+    // `typeof … === 'object'` admits it again, though the guard above has
+    // already replaced a null with `{}`. The check itself is unchanged.
+    if (!(key in (rawArgs as ToolArguments))) problems.push(`missing required argument "${key}"`);
   }
 
-  for (const [key, value] of Object.entries(rawArgs)) {
+  for (const [key, value] of Object.entries(rawArgs as ToolArguments)) {
     const spec = props[key];
     if (!spec) {
       problems.push(`unknown argument "${key}" is not allowed`);
@@ -356,25 +485,25 @@ export function validateToolArgs(tool, rawArgs) {
         problems.push(`argument "${key}" must be one of: ${spec.enum.join(', ')}`);
         continue;
       }
-      if (spec.pattern && !new RegExp(spec.pattern).test(value)) {
+      if (spec.pattern && !new RegExp(spec.pattern).test(value as string)) {
         problems.push(`argument "${key}" has an invalid value`);
         continue;
       }
-      if (typeof spec.maxLength === 'number' && value.length > spec.maxLength) {
+      if (typeof spec.maxLength === 'number' && (value as string).length > spec.maxLength) {
         problems.push(`argument "${key}" is too long (max ${spec.maxLength} characters)`);
         continue;
       }
-      if (spec.format === 'date-time' && Number.isNaN(Date.parse(value))) {
+      if (spec.format === 'date-time' && Number.isNaN(Date.parse(value as string))) {
         problems.push(`argument "${key}" must be an ISO date-time`);
         continue;
       }
     }
     if ((spec.type === 'integer' || spec.type === 'number')) {
-      if (typeof spec.minimum === 'number' && value < spec.minimum) {
+      if (typeof spec.minimum === 'number' && (value as number) < spec.minimum) {
         problems.push(`argument "${key}" must be at least ${spec.minimum}`);
         continue;
       }
-      if (typeof spec.maximum === 'number' && value > spec.maximum) {
+      if (typeof spec.maximum === 'number' && (value as number) > spec.maximum) {
         problems.push(`argument "${key}" must be at most ${spec.maximum}`);
         continue;
       }
@@ -388,8 +517,12 @@ export function validateToolArgs(tool, rawArgs) {
  * Run one tool call for the authenticated context. Never throws for model-
  * driven problems — invalid/unauthorized/unknown calls become structured
  * results the assistant can see and explain.
+ *
+ * A permission check is repeated here, at execution time, because the tool table
+ * is the last gate before a query runs: the model cannot reach an executor by
+ * presenting a role, and `businessId` is only ever the one from `ctx`.
  */
-export async function executeTool(name, rawArgs, ctx) {
+export async function executeTool(name: string, rawArgs: unknown, ctx: ToolContext) {
   const tool = aiToolsById.get(name);
   if (!tool) {
     return { ok: false, code: 'TOOL_NOT_FOUND', error: `The tool "${name}" is not available.` };
@@ -409,7 +542,10 @@ export async function executeTool(name, rawArgs, ctx) {
     const value = await tool.executor(ctx, cleaned);
     return { ok: true, result: value };
   } catch (err) {
-    console.error('[ai] tool execution failed', name, err?.message ?? err);
+    // `err` is `unknown`: a thrown value has no shape TypeScript may assume, and
+    // the assertion is the erasable way to read the message this log has always
+    // read. Nothing is attached to the error that leaves.
+    console.error('[ai] tool execution failed', name, (err as { message?: unknown })?.message ?? err);
     return { ok: false, code: 'TOOL_ERROR', error: 'The tool failed to run. Please try again.' };
   }
 }

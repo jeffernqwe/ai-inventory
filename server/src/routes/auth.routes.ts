@@ -1,7 +1,7 @@
 import { Router } from 'express';
 
 import { register, login, me, changePassword, updateMe, logout, listSessions, revokeSession } from '../controllers/auth.controller.ts';
-import { forgotPassword, resetPassword as resetPasswordHandler } from '../controllers/passwordReset.controller.js';
+import { forgotPassword, resetPassword as resetPasswordHandler } from '../controllers/passwordReset.controller.ts';
 import requireAuth from '../middlewares/authenticate.ts';
 import {
   createLoginAccountLimiter,

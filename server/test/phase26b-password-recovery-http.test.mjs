@@ -71,7 +71,7 @@ import {
   validateResetPassword,
   validateChangePassword,
 } from '../src/utils/validate.ts';
-import { hashResetToken, INVALID_RESET_TOKEN_CODE } from '../src/services/passwordReset.service.js';
+import { hashResetToken, INVALID_RESET_TOKEN_CODE } from '../src/services/passwordReset.service.ts';
 
 import {
   FAKE_MAIL_PROVIDER,

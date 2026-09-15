@@ -1,3 +1,5 @@
+import type { Request, Response } from 'express';
+
 /**
  * Phase 26B-3 — the password-recovery HTTP surface.
  *
@@ -49,7 +51,7 @@ import {
   resetPassword as resetPasswordService,
   PasswordResetError,
   VALIDATION_ERROR_CODE,
-} from '../services/passwordReset.service.js';
+} from '../services/passwordReset.service.ts';
 import { validateForgotPassword, validateResetPassword } from '../utils/validate.ts';
 import { MailNotConfigured, MailDeliveryError } from '../services/mail/index.ts';
 import { throwValidation } from '../utils/errors.ts';
@@ -104,8 +106,12 @@ const RESET_COMPLETED_MESSAGE = 'Password changed. Please sign in again.';
  * a replacement code — `INVALID_RESET_TOKEN`, `VALIDATION_ERROR`,
  * `MAIL_NOT_CONFIGURED` and `MAIL_UNAVAILABLE` are the codes 26B-1/26B-2 emit,
  * passed through as-is.
+ *
+ * `err` is `unknown` because its only caller is a `catch` clause: nothing about a
+ * thrown value is known until the `instanceof` tests below decide, which is what
+ * `mapAiFailure` does too.
  */
-function mapPasswordResetFailure(err) {
+function mapPasswordResetFailure(err: unknown) {
   if (err instanceof PasswordResetError) {
     if (err.code === VALIDATION_ERROR_CODE) {
       const mapped = new ApiError(400, 'Validation failed', VALIDATION_ERROR_CODE);
@@ -143,8 +149,11 @@ function mapPasswordResetFailure(err) {
  * account the failure concerned is not recorded either: a log naming it would be
  * the enumeration oracle the HTTP response refuses to be, and logs travel
  * further than responses do.
+ *
+ * Both callers have already narrowed the value to one of the two mail error
+ * classes, so `Error` is the honest parameter type here.
  */
-function logMailFailure(err, type) {
+function logMailFailure(err: Error, type: string) {
   logError({
     type,
     message: `[password-reset] the recovery email could not be sent: ${err.message}`,
@@ -162,7 +171,7 @@ function logMailFailure(err, type) {
  * construction: the validator reads only `email`, and the service takes only
  * `{ email }`. The account is found from the submitted address alone.
  */
-export async function forgotPassword(req, res) {
+export async function forgotPassword(req: Request, res: Response) {
   const body = req.body ?? {};
   const { problems, email } = validateForgotPassword(body);
   if (problems.length > 0) throwValidation(problems);
@@ -207,7 +216,7 @@ export async function forgotPassword(req, res) {
  * never spend a valid reset token, and there is no variable here to pass by
  * mistake. The service sees `{ token, newPassword }` and nothing else.
  */
-export async function resetPassword(req, res) {
+export async function resetPassword(req: Request, res: Response) {
   const body = req.body ?? {};
   const { problems, token, newPassword } = validateResetPassword(body);
   if (problems.length > 0) throwValidation(problems);

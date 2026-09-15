@@ -47,6 +47,8 @@
  * cannot reach a provider, so the transport boundary is intact either way.
  */
 
+import type mongoose from 'mongoose';
+
 import crypto from 'node:crypto';
 
 import bcrypt from 'bcryptjs';
@@ -61,6 +63,40 @@ import { sendPasswordResetEmail, isMailConfigured, MailNotConfigured, MailDelive
 import { mailConfig } from './mail/mailConfig.ts';
 import { error as logError } from '../utils/logger.ts';
 import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../constants/audit.ts';
+
+// ---------------------------------------------------------------------------
+// Local types
+// ---------------------------------------------------------------------------
+
+/**
+ * Local to this module, following `auth.service.ts`, `session.service.ts` and
+ * `business.service.ts`: every caller passes either the string a request
+ * carries or the ObjectId a document the server already loaded holds, and the
+ * model casts whichever arrives.
+ */
+type IdLike = string | mongoose.Types.ObjectId;
+
+/** A single field-level problem, the shape every validator in this project reports. */
+type ResetProblem = { field: string; message: string };
+
+/**
+ * The `{ email }` a caller submits. `email` stays `unknown` because it is NOT
+ * validated here: `normalizeEmail` coerces anything it is given (a non-string
+ * address simply normalises to `''` and matches no account), and that totality is
+ * the request path's own behaviour, not a caller's obligation.
+ */
+type ResetRequestInput = { email?: unknown };
+
+/**
+ * The `{ token, newPassword }` a caller submits. Both stay `unknown` for the same
+ * reason — this service is where they are validated, so it cannot assume the
+ * caller already did: `token` is coerced to `''` unless it is a string, and the
+ * password policy below is total over every other type.
+ */
+type ResetPasswordInput = { token?: unknown; newPassword?: unknown };
+
+/** The audit fields a recovery event records. Never carries a token or a hash. */
+type PasswordResetAuditEvent = { businessId: IdLike; userId: IdLike; action: string };
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -103,9 +139,20 @@ const ACTIVE_STATUS = 'ACTIVE';
  * A password-recovery failure. Carries `code` and, when the failure is a bad
  * password rather than a bad token, a `problems` array in the same
  * `{ field, message }` shape every other validator in this project produces.
+ *
+ * `problems` is declared rather than initialised: the constructor still assigns
+ * it only when one was supplied, so it stays ABSENT (not `undefined`) on the
+ * token-rejection paths, exactly as before the migration. A field declaration
+ * would have defined it as `undefined` up front and changed the key order.
+ * `code` is declared for the same reason `ApiError` declares its own: both are
+ * erased entirely, so the constructor assignments remain the only thing that
+ * creates the fields at runtime.
  */
 export class PasswordResetError extends Error {
-  constructor(code, message, { problems } = {}) {
+  declare code: string;
+  declare problems: ResetProblem[] | undefined;
+
+  constructor(code: string, message: string, { problems }: { problems?: ResetProblem[] } = {}) {
     super(message);
     this.name = 'PasswordResetError';
     this.code = code;
@@ -127,7 +174,7 @@ export function generateResetToken() {
 }
 
 /** The only form of the token that may ever be persisted or compared. */
-export function hashResetToken(rawToken) {
+export function hashResetToken(rawToken: unknown) {
   return crypto.createHash('sha256').update(String(rawToken)).digest('hex');
 }
 
@@ -137,7 +184,7 @@ export function hashResetToken(rawToken) {
  * still produces a valid link. base64url needs no escaping; encoding anyway
  * costs nothing and keeps the URL correct if the token alphabet ever changes.
  */
-export function buildResetUrl(base, rawToken) {
+export function buildResetUrl(base: string, rawToken: string) {
   const separator = base.includes('?') ? '&' : '?';
   return `${base}${separator}token=${encodeURIComponent(rawToken)}`;
 }
@@ -146,7 +193,7 @@ export function buildResetUrl(base, rawToken) {
  * The shared password policy, reported under `newPassword`. Exported so the
  * boundary test can hold it against utils/validate.js's public validator.
  */
-export function newPasswordProblems(password) {
+export function newPasswordProblems(password: unknown) {
   const problems = [];
   if (typeof password !== 'string' || password.length === 0) {
     problems.push({ field: 'newPassword', message: 'password is required' });
@@ -179,7 +226,7 @@ export function newPasswordProblems(password) {
  * remaining fact worth recording that is not either redundant or a credential.
  * The raw token, its hash and the new password are never in scope here.
  */
-async function auditPasswordReset({ businessId, userId, action }) {
+async function auditPasswordReset({ businessId, userId, action }: PasswordResetAuditEvent) {
   try {
     await recordAudit({
       businessId,
@@ -190,7 +237,7 @@ async function auditPasswordReset({ businessId, userId, action }) {
     });
   } catch (err) {
     console.error(
-      `[password-reset] audit record failed for ${action} (the reset itself is unaffected): ${err.message}`,
+      `[password-reset] audit record failed for ${action} (the reset itself is unaffected): ${(err as { message?: unknown }).message}`,
     );
   }
 }
@@ -234,12 +281,15 @@ const MAIL_DISPATCH_ERROR_LOG_TYPE = 'mail_dispatch_error';
  * unauthenticated and naming the account would be the enumeration oracle the
  * response refuses to be.
  */
-function logDetachedMailFailure(err) {
+function logDetachedMailFailure(err: unknown) {
   let type = MAIL_DISPATCH_ERROR_LOG_TYPE;
   if (err instanceof MailNotConfigured) type = MAIL_NOT_CONFIGURED_LOG_TYPE;
   else if (err instanceof MailDeliveryError) type = MAIL_DELIVERY_FAILURE_LOG_TYPE;
 
-  const reason = err && typeof err.message === 'string' ? err.message : String(err);
+  // `err` is `unknown` here because a rejection value is not guaranteed to be an
+  // Error at all; the assertion is erased and the runtime test below is what
+  // decides, exactly as it did before the migration.
+  const reason = err && typeof (err as { message?: unknown }).message === 'string' ? (err as { message?: unknown }).message : String(err);
   logError({
     type,
     message: `[password-reset] the recovery email could not be sent: ${reason}`,
@@ -278,7 +328,7 @@ function logDetachedMailFailure(err) {
  * but unused argument is exactly what later gets persisted "because it was
  * there".
  */
-export async function requestPasswordReset({ email } = {}) {
+export async function requestPasswordReset({ email }: ResetRequestInput = {}) {
   const now = new Date();
   const { resetUrl } = mailConfig();
 
@@ -388,7 +438,7 @@ export async function requestPasswordReset({ email } = {}) {
  * user must request another link. A failed reset is recoverable by asking again;
  * a replayable token after a partial failure is not recoverable at all.
  */
-export async function resetPassword({ token, newPassword } = {}) {
+export async function resetPassword({ token, newPassword }: ResetPasswordInput = {}) {
   const now = new Date();
 
   // ★ 1. Policy FIRST, before the token is touched. Claiming and then rejecting
@@ -431,7 +481,11 @@ export async function resetPassword({ token, newPassword } = {}) {
     throw invalidResetToken();
   }
 
-  user.passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
+  // The assertion is erased and restates what step 1 already proved: reaching
+  // this line means `newPasswordProblems` returned nothing, and the only branch
+  // that does so for a non-string is the one that reports "password is
+  // required". The emitted call is unchanged.
+  user.passwordHash = await bcrypt.hash(newPassword as string, BCRYPT_ROUNDS);
   // The same `now` the token was stamped with, read once, so `usedAt`,
   // `passwordChangedAt` and the revocation are coherent.
   user.passwordChangedAt = now;

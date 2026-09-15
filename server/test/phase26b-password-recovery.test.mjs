@@ -61,7 +61,7 @@ import {
   newPasswordProblems,
   requestPasswordReset,
   resetPassword,
-} from '../src/services/passwordReset.service.js';
+} from '../src/services/passwordReset.service.ts';
 import { MailNotConfigured, MailDeliveryError } from '../src/services/mail/index.ts';
 
 import {

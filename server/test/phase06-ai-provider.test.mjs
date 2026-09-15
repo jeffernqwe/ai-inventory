@@ -17,7 +17,7 @@ import { dbSuite, unitSuite } from './testEnv.mjs';
 import Product from '../src/models/product.model.ts';
 import { ROLES } from '../src/constants/roles.ts';
 import { AiNotConfigured, AiProviderError } from '../src/services/ai/aiErrors.ts';
-import { selectProvider, registeredProviders } from '../src/services/ai/providers/index.js';
+import { selectProvider, registeredProviders } from '../src/services/ai/providers/index.ts';
 import { runAiChat } from '../src/services/ai/ai.service.js';
 import {
   registerFakeProvider,

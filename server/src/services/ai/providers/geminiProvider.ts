@@ -11,15 +11,22 @@
 
 import { aiConfig } from '../aiConfig.ts';
 import { AiNotConfigured, AiProviderError } from '../aiErrors.ts';
-import { postJson } from './http.js';
+import { postJson, type UpstreamJsonBody } from './http.ts';
+import type { AIProvider, ProviderMessage, ProviderResponse, ProviderUsage, ToolCall } from './index.ts';
 
-function geminiEndpoint(model) {
+function geminiEndpoint(model: string) {
   return `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
 }
 
+/** One top-level turn, as mergeAdjacent and toGeminiContents build it. */
+interface GeminiContent {
+  role: string;
+  parts: unknown[];
+}
+
 /** Merge consecutive same-role top-level contents (the API requires alternation). */
-function mergeAdjacent(contents) {
-  const out = [];
+function mergeAdjacent(contents: GeminiContent[]) {
+  const out: GeminiContent[] = [];
   for (const content of contents) {
     const last = out[out.length - 1];
     if (last && last.role === content.role) last.parts.push(...content.parts);
@@ -29,13 +36,13 @@ function mergeAdjacent(contents) {
 }
 
 /** Neutral messages -> Gemini contents. */
-function toGeminiContents(messages) {
-  const contents = [];
+function toGeminiContents(messages: ProviderMessage[]) {
+  const contents: GeminiContent[] = [];
   for (const m of messages) {
     if (m.role === 'user') {
       contents.push({ role: 'user', parts: [{ text: m.content }] });
     } else if (m.role === 'assistant') {
-      const parts = [];
+      const parts: unknown[] = [];
       if (m.content) parts.push({ text: m.content });
       for (const call of m.toolCalls || []) {
         const args = call.input && typeof call.input === 'object' && !Array.isArray(call.input) ? call.input : {};
@@ -44,7 +51,9 @@ function toGeminiContents(messages) {
       if (parts.length === 0) parts.push({ text: '' });
       contents.push({ role: 'model', parts });
     } else if (m.role === 'tool') {
-      let response;
+      // `unknown`, not `any`: JSON.parse returns whatever the string held, and
+      // the guard below is what narrows it to the response object Gemini expects.
+      let response: unknown;
       try {
         response = JSON.parse(m.content);
       } catch {
@@ -62,10 +71,34 @@ function toGeminiContents(messages) {
   return mergeAdjacent(contents);
 }
 
-function parseResponse(data) {
+/**
+ * The paths this layer reads out of a generateContent response, declared so the
+ * parser has something to narrow against at each level it descends. Every field
+ * is optional and untrusted; the body below — not this declaration — is what
+ * validates them, via `Array.isArray` for the part list, `typeof` for each
+ * part's text, the truthiness test for `functionCall`, and `??` for the token
+ * counts, which is also what tolerates a provider that reports no usage.
+ */
+interface GeminiPart extends UpstreamJsonBody {
+  text?: unknown;
+  functionCall?: { name?: unknown; args?: unknown };
+}
+
+interface GeminiCandidate extends UpstreamJsonBody {
+  finishReason?: unknown;
+  content?: { parts?: unknown };
+}
+
+interface GeminiResponse extends UpstreamJsonBody {
+  candidates?: GeminiCandidate[];
+  usageMetadata?: Record<string, unknown>;
+  modelVersion?: unknown;
+}
+
+function parseResponse(data: GeminiResponse): ProviderResponse {
   const candidate = data?.candidates?.[0];
   const finishReason = candidate?.finishReason ?? null;
-  const parts = Array.isArray(candidate?.content?.parts) ? candidate.content.parts : [];
+  const parts: unknown[] = Array.isArray(candidate?.content?.parts) ? candidate.content.parts : [];
 
   if (!candidate) {
     // e.g. a prompt block from safety filters with no candidate.
@@ -73,14 +106,14 @@ function parseResponse(data) {
   }
 
   let text = '';
-  const toolCalls = [];
-  for (const part of parts) {
+  const toolCalls: ToolCall[] = [];
+  for (const part of parts as GeminiPart[]) {
     if (typeof part?.text === 'string') text += part.text;
     else if (part?.functionCall) {
       const args =
         part.functionCall.args && typeof part.functionCall.args === 'object' && !Array.isArray(part.functionCall.args)
-          ? part.functionCall.args
-          : {};
+          ? part.functionCall.args as UpstreamJsonBody
+          : {} as UpstreamJsonBody;
       toolCalls.push({
         id: `gemini-call-${toolCalls.length + 1}`,
         name: String(part.functionCall.name),
@@ -93,17 +126,19 @@ function parseResponse(data) {
     ? {
         inputTokens: data.usageMetadata.promptTokenCount ?? 0,
         outputTokens: data.usageMetadata.candidatesTokenCount ?? data.usageMetadata.totalTokenCount ?? 0,
-      }
+      } as ProviderUsage
     : null;
 
   if (finishReason === 'MAX_TOKENS' && toolCalls.length === 0 && !text) {
     throw new AiProviderError('The AI service response was cut off. Please try a shorter question.');
   }
-  return { model: data?.modelVersion ?? 'gemini', text, toolCalls, usage };
+  // `?? 'gemini'` is the only guard on the model label, exactly as before; the
+  // assertion is what says the neutral contract reports it as a string.
+  return { model: data?.modelVersion as string ?? 'gemini', text, toolCalls, usage };
 }
 
 /** Create a Gemini provider instance. Throws AiNotConfigured when the key is missing. */
-export function createGeminiProvider() {
+export function createGeminiProvider(): AIProvider {
   const apiKey = (process.env.GEMINI_API_KEY || '').trim();
   if (!apiKey) {
     throw new AiNotConfigured('GEMINI_API_KEY is not set, so the Gemini AI provider is unavailable.');
@@ -134,7 +169,7 @@ export function createGeminiProvider() {
           generationConfig: { temperature: 0.1, maxOutputTokens: cfg.maxOutputTokens },
         },
       });
-      return parseResponse(data);
+      return parseResponse(data as GeminiResponse);
     },
   };
 }

@@ -25,7 +25,7 @@
 import jwt from 'jsonwebtoken';
 import type { SignOptions } from 'jsonwebtoken';
 
-import { providerRequiredEnv } from '../services/ai/providers/index.js';
+import { providerRequiredEnv } from '../services/ai/providers/index.ts';
 
 /**
  * One problem with the production configuration. `message` names the VARIABLE

@@ -29,7 +29,8 @@
 
 import { aiConfig } from '../aiConfig.ts';
 import { AiNotConfigured } from '../aiErrors.ts';
-import { createAnthropicCompatibleProvider } from './anthropicWire.js';
+import { createAnthropicCompatibleProvider } from './anthropicWire.ts';
+import type { AIProvider } from './index.ts';
 
 /** Default claude-cli identity the gateway recognises. Bump on rotation. */
 const DEFAULT_CLAUDE_CLI_UA = 'claude-cli/2.1.263 (external, sdk-cli)';
@@ -37,13 +38,13 @@ const DEFAULT_CLAUDE_CLI_UA = 'claude-cli/2.1.263 (external, sdk-cli)';
 const CLAUDE_CODE_BETA = 'claude-code-20250219';
 
 /** Turn an origin/base URL into the Anthropic messages endpoint. */
-function messagesUrlFromBase(base) {
+function messagesUrlFromBase(base: string) {
   const trimmed = base.trim().replace(/\/+$/, '');
   if (trimmed.endsWith('/v1/messages')) return trimmed;
   return `${trimmed}/v1/messages`;
 }
 
-export function createAgentrouterProvider() {
+export function createAgentrouterProvider(): AIProvider {
   const cfg = aiConfig();
 
   const apiKey = (process.env.AGENTROUTER_API_KEY || '').trim();

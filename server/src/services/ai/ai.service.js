@@ -14,7 +14,7 @@
 
 import { aiConfig } from './aiConfig.ts';
 import { AiProviderError, isAiError } from './aiErrors.ts';
-import { selectProvider } from './providers/index.js';
+import { selectProvider } from './providers/index.ts';
 import { executeTool, AI_TOOL_DEFS } from './tools.js';
 
 function todayLabel() {

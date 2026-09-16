@@ -14,10 +14,43 @@
 
 import { aiConfig } from './aiConfig.ts';
 import { AiProviderError, isAiError } from './aiErrors.ts';
-import { selectProvider } from './providers/index.ts';
+import { selectProvider, type ProviderMessage, type ProviderResponse, type ProviderUsage, type ToolDefinition } from './providers/index.ts';
 import { executeTool, AI_TOOL_DEFS } from './tools.ts';
 
-function todayLabel() {
+/**
+ * One prior turn as this service replays it to the provider. The controller
+ * builds these from served USER/ASSISTANT messages, so tool turns never appear
+ * in history — the neutral message list is this service's to own. Exported
+ * because the controller's history loader returns exactly this shape.
+ */
+export interface ChatTurn {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+/** One user turn's input. Every field is server-derived, never client-supplied. */
+interface ChatParams {
+  businessId: string;
+  userId: string;
+  role: string;
+  message: string;
+  history?: ChatTurn[];
+}
+
+/**
+ * The normalised result of one turn. `model` and `usage` are optional because a
+ * provider is allowed to report neither; `iterations` counts provider calls
+ * made, so a single-call answer is 1.
+ */
+interface ChatResult {
+  content: string;
+  model?: string;
+  toolsUsed: string[];
+  usage?: ProviderUsage;
+  iterations: number;
+}
+
+function todayLabel(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
@@ -27,7 +60,7 @@ function todayLabel() {
  * actual guarantee is the tool layer: every fact goes through a read-only,
  * business-scoped tool — the prompt only tells the model how to behave.
  */
-export function systemPrompt() {
+export function systemPrompt(): string {
   return [
     'You are the read-only inventory assistant for "Inventory AI", helping one authorized member of one business understand their inventory.',
     '',
@@ -43,7 +76,7 @@ export function systemPrompt() {
   ].join('\n');
 }
 
-function truncate(str, max) {
+function truncate(str: string, max: number): string {
   if (str.length <= max) return str;
   return `${str.slice(0, max - 1)}…`;
 }
@@ -59,29 +92,33 @@ function truncate(str, max) {
  * @param {string} params.message     the new user message
  * @returns {Promise<{content:string, model?:string, toolsUsed:string[], usage?:object, iterations:number}>}
  */
-export async function runAiChat({ businessId, userId, role, history = [], message }) {
+export async function runAiChat({ businessId, userId, role, history = [], message }: ChatParams): Promise<ChatResult> {
   const cfg = aiConfig();
   const provider = selectProvider();
 
-  const messages = history
+  const messages: ProviderMessage[] = history
     .slice(-cfg.contextMessages)
     .map((m) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content }));
   messages.push({ role: 'user', content: message });
 
-  let finalText = null;
-  const toolsUsed = new Set();
-  let model = null;
-  let usage = null;
+  let finalText: string | null = null;
+  const toolsUsed = new Set<string>();
+  let model: string | null = null;
+  let usage: ProviderUsage | null = null;
   let steps = 0;
 
   for (let i = 0; i < cfg.maxToolIterations; i += 1) {
     steps = i + 1;
-    let response;
+    let response: ProviderResponse;
     try {
-      response = await provider.complete({ system: systemPrompt(), messages, tools: AI_TOOL_DEFS });
+      // AI_TOOL_DEFS is the frozen tool catalog; the provider contract wants the
+      // neutral `ToolDefinition` shape, which the frozen entries already satisfy
+      // (their `parameters` are JSON Schema objects). The assertion is
+      // compiler-only — no runtime conversion, no copy of the array.
+      response = await provider.complete({ system: systemPrompt(), messages, tools: AI_TOOL_DEFS as ToolDefinition[] });
     } catch (err) {
       if (isAiError(err)) throw err;
-      console.error('[ai] provider call failed', err?.message ?? err);
+      console.error('[ai] provider call failed', (err as { message?: unknown })?.message ?? err);
       throw new AiProviderError('The AI service failed unexpectedly. Please try again.');
     }
 

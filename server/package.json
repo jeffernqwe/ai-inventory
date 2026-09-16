@@ -4,13 +4,13 @@
   "description": "Inventory AI backend REST API (Express, ES Modules)",
   "private": true,
   "type": "module",
-  "main": "src/index.js",
+  "main": "src/index.ts",
   "engines": {
     "node": ">=24.0.0"
   },
   "scripts": {
-    "start": "node src/index.js",
-    "dev": "node --watch src/index.js",
+    "start": "node src/index.ts",
+    "dev": "node --watch src/index.ts",
     "test": "node scripts/run-tests.mjs full",
     "test:unit": "node scripts/run-tests.mjs unit",
     "test:db": "node scripts/run-tests.mjs db",

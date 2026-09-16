@@ -16,7 +16,7 @@
  * dev-leniency, and readiness deterministically without real sockets or exits.
  */
 
-import app from '../app.js';
+import app from '../app.ts';
 import env from './env.ts';
 import { connectDatabase, disconnectDatabase } from './db.ts';
 import {

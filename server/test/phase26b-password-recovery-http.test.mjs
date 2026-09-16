@@ -54,7 +54,7 @@ import {
 import { dbSuite, unitSuite } from './testEnv.mjs';
 import { readSource } from './sourceFiles.mjs';
 
-import { createApp } from '../src/app.js';
+import { createApp } from '../src/app.ts';
 import { createAuthRouter } from '../src/routes/auth.routes.ts';
 import notFound from '../src/middlewares/notFound.ts';
 import errorHandler from '../src/middlewares/errorHandler.ts';

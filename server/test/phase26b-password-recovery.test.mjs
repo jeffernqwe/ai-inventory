@@ -1266,7 +1266,7 @@ dbSuite('Phase 26B-2 — password recovery over a real database', dbOk, () => {
 
     // app.js mounts the auth router once and no second recovery router. Phase
     // 26B-3 added no mount of its own: /api/auth was already there.
-    const appSource = readSource(new URL('../src/app.js', import.meta.url));
+    const appSource = readSource(new URL('../src/app.ts', import.meta.url));
     assert.equal(
       (appSource.match(/createAuthRouter\(/g) || []).length,
       1,

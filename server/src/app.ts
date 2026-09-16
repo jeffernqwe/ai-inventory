@@ -5,7 +5,7 @@ import env from './config/env.ts';
 import { createCors } from './middlewares/cors.ts';
 import requestId from './middlewares/requestId.ts';
 import requestLogger from './middlewares/httpLogger.ts';
-import healthRoutes from './routes/health.routes.js';
+import healthRoutes from './routes/health.routes.ts';
 import { createAuthRouter } from './routes/auth.routes.ts';
 import userRoutes from './routes/users.routes.ts';
 import categoryRoutes from './routes/categories.routes.ts';
@@ -19,6 +19,25 @@ import aiRoutes from './routes/ai.routes.ts';
 import auditRoutes from './routes/audit.routes.ts';
 import notFound from './middlewares/notFound.ts';
 import errorHandler from './middlewares/errorHandler.ts';
+import type { AuthRateConfig } from './middlewares/rateLimit.ts';
+
+/**
+ * The knobs `createApp` can be built with. Every one has a production default
+ * read from `env` (or, for `requestLogging`, from `LOG_REQUESTS`), so the
+ * shipped call is `createApp()` and tests override only what they must.
+ *
+ * `authLimits` names the EXISTING `AuthRateConfig` contract rather than
+ * restating it: `createAuthRouter` already accepts exactly `Partial` of that
+ * type, so this is the same shape the auth router validates against — not a
+ * second copy that could drift.
+ */
+type AppOptions = {
+  trustProxy?: number;
+  corsOrigins?: readonly string[];
+  jsonBodyLimit?: string;
+  authLimits?: Partial<AuthRateConfig>;
+  requestLogging?: boolean;
+};
 
 /**
  * Build a fully wired Express app. Exported as a factory so tests can exercise
@@ -41,7 +60,7 @@ export function createApp({
   jsonBodyLimit = env.jsonBodyLimit,
   authLimits,
   requestLogging = process.env.LOG_REQUESTS !== '0',
-} = {}) {
+}: AppOptions = {}) {
   const app = express();
 
   // H6: never advertise the framework. Express-level config, not per-route

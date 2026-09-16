@@ -18,7 +18,7 @@ import mongoose from 'mongoose';
 
 import { ensureDb, disconnectDb } from './helpers.mjs';
 import { dbSuite, unitSuite } from './testEnv.mjs';
-import { createApp } from '../src/app.js';
+import { createApp } from '../src/app.ts';
 import errorHandler from '../src/middlewares/errorHandler.ts';
 import { isDatabaseDownError } from '../src/config/db.ts';
 import ApiError from '../src/utils/ApiError.ts';

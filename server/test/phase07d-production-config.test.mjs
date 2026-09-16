@@ -17,7 +17,7 @@ import jwt from 'jsonwebtoken';
 import { validateProductionConfig, JWT_SECRET_MIN_LENGTH } from '../src/config/validateConfig.ts';
 import { signAccessToken, verifyAccessToken } from '../src/config/jwt.ts';
 import env from '../src/config/env.ts';
-import { createHealthRouter } from '../src/routes/health.routes.js';
+import { createHealthRouter } from '../src/routes/health.routes.ts';
 import { createShutdownHandler, registerSignalHandlers } from '../src/config/shutdown.ts';
 import { startServer } from '../src/config/startup.ts';
 
@@ -369,7 +369,7 @@ describe('startup gating (Phase 07D)', () => {
 
   it('development/test stays reachable but reports not-ready when MongoDB is down', async () => {
     // Default shipped app (real /api/health/ready reads the real driver state).
-    const { default: app } = await import('../src/app.js');
+    const { default: app } = await import('../src/app.ts');
     const { codes, exit } = captureExit();
     const result = await startServer({
       nodeEnv: 'development',

@@ -284,7 +284,7 @@ const AUTH_LIMITS = { loginAccount: 5, loginIp: 20, register: 5 };
 
 // The mount table is read from app.js rather than hard-coded, so a router added
 // to the app is covered automatically — it cannot be mounted and forgotten.
-const APP_SRC = readSrc('app.js');
+const APP_SRC = readSrc('app.ts');
 
 const ROUTE_FILE_BY_IDENT = new Map(
   [
@@ -332,7 +332,7 @@ async function collectRoutes() {
 
   // Routes registered directly on the app (app.get('/'), and anything a future
   // phase adds the same way) are not behind a mount, so walk the app itself.
-  const app = (await import('../src/app.js')).createApp({ requestLogging: false, authLimits: AUTH_LIMITS });
+  const app = (await import('../src/app.ts')).createApp({ requestLogging: false, authLimits: AUTH_LIMITS });
   for (const layer of app.router.stack) {
     if (!layer.route) continue;
     const routePath = layer.route.path;

@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 
-import app from '../src/app.js';
+import app from '../src/app.ts';
 import Business from '../src/models/business.model.ts';
 import User from '../src/models/user.model.ts';
 import Session from '../src/models/session.model.ts';

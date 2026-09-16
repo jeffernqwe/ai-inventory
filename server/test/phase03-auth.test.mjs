@@ -7,7 +7,7 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 
 import authRouter from '../src/routes/auth.routes.ts';
-import healthRouter from '../src/routes/health.routes.js';
+import healthRouter from '../src/routes/health.routes.ts';
 import notFound from '../src/middlewares/notFound.ts';
 import errorHandler from '../src/middlewares/errorHandler.ts';
 import requireAuth from '../src/middlewares/authenticate.ts';

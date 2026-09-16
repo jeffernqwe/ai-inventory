@@ -25,7 +25,7 @@ import bcrypt from 'bcryptjs';
 import { ensureDb, disconnectDb } from './helpers.mjs';
 import { issueSessionToken } from './support.mjs';
 import { dbSuite, unitSuite } from './testEnv.mjs';
-import { createApp } from '../src/app.js';
+import { createApp } from '../src/app.ts';
 import errorHandler from '../src/middlewares/errorHandler.ts';
 import Business from '../src/models/business.model.ts';
 import User from '../src/models/user.model.ts';

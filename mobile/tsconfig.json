@@ -1,0 +1,25 @@
+{
+  // MOD-01 — mobile TypeScript foundation. Extends Expo's own base config,
+  // which supplies the React Native / Metro essentials (jsx: react-jsx,
+  // moduleResolution: bundler, customConditions: ["react-native"], allowJs,
+  // noEmit). `strict` is the only checking option added.
+  //
+  // `include` lists .js/.jsx because the project is still JavaScript: with
+  // checkJs off they are parsed but never checked, so they raise no false
+  // errors and keep the program non-empty during the migration. `checkJs` is
+  // pinned so an SDK bump that changes expo/tsconfig.base cannot silently
+  // start checking them. MOD-02 renames files to .ts/.tsx; this config does
+  // not need to change when it does.
+  // MOD-05 — Jest globals (`describe`/`it`/`expect`) come from @types/jest.
+  // TypeScript 6 no longer pulls `node_modules/@types/*` into the program on
+  // its own, so the test runner's types are named explicitly. Verified to be
+  // the only entry needed: nothing else in the app depends on an ambient
+  // @types package (`@types/react` is reached by importing `react`).
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "checkJs": false,
+    "types": ["jest"]
+  },
+  "include": ["**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx"]
+}

@@ -3,7 +3,7 @@
 An AI-powered inventory management system for Android and iOS.
 
 - **Mobile:** React Native + Expo + Expo Router (JavaScript)
-- **Backend:** Node.js + Express (JavaScript, ES Modules)
+- **Backend:** Node.js + Express (TypeScript, ES Modules)
 - **Database (Phase 02+):** MongoDB Atlas + Mongoose
 - **AI (Phase 06):** read-only assistant via a provider abstraction
 
@@ -52,6 +52,18 @@ Express API using ES Modules. Mongoose provides the MongoDB data layer (Phase 02
 models, schema validation, and indexes. A health endpoint and centralized 404/error
 handling are in place. Authentication and role-based authorization (Phase 03) use
 JWT + bcrypt with server-authoritative role/business context on every request.
+
+### TypeScript migration (campaign complete)
+
+The backend source is **TypeScript**, and the server TypeScript migration campaign
+(**TS-1** … **TS-2F-p**) is **complete and closed**. `server/src` holds 94 `.ts` modules and
+exactly one intentionally deferred `.js` module, `server/src/services/entitlement.service.js`;
+`.ts` is canonical for all new and modified server code.
+
+There is no build, transpile or bundle step — `tsc` is configured as a checker only
+(`noEmit`), and the runtime executes the sources directly (see "Prerequisites").
+`docs/TS-MIGRATION-MANIFEST.md` records the full campaign: the commit history, the deferred
+exception, and the verification baseline.
 
 ```sh
 cd server
@@ -113,7 +125,7 @@ test runner forces `LOG_REQUESTS=0` so suites stay quiet.
 
 ### Commercialization foundation (Phase 10)
 
-`Business.planCode`, the centralized plan catalog (`server/src/constants/plans.js`), and
+`Business.planCode`, the centralized plan catalog (`server/src/constants/plans.ts`), and
 `server/src/services/entitlement.service.js` provide the SaaS foundation. Every business carries a
 plan code — default `FOUNDATION`, the unlimited V1 baseline — and business-level entitlement checks
 are available through `getBusinessPlan` / `assertBusinessEntitled`. This is groundwork only: actual
@@ -496,7 +508,7 @@ Phase 07 (testing + production hardening) and Phase 08 (owner-directed hardening
   existing or permitted), and an inventory record depends on a live product in the same business, with
   that dependency held by application lifecycle rules and write-path validation rather than by any
   database-level foreign key — Mongoose `ref` enforces nothing, and read-path filters such as
-  `inventory.service.js`'s `{'product.0': {$exists: true}}` guard are defensive query hygiene, not
+  `inventory.service.ts`'s `{'product.0': {$exists: true}}` guard are defensive query hygiene, not
   integrity enforcement. `docs/SYSTEM_SPECIFICATION.md` gains `## Product Lifecycle`, `## Inventory
   and Product Integrity` and a transaction-permanence note, and the previously illustrative
   `DELETE /api/products/:id` is replaced by the implemented archive/restore endpoints. The new DB-free
@@ -505,7 +517,7 @@ Phase 07 (testing + production hardening) and Phase 08 (owner-directed hardening
   `productId` required on both inventory and the ledger), and three DB-backed cases in
   `phase04-inventory.test.mjs` prove an archived product keeps its inventory row, quantity and full
   transaction history while all four movement paths reject it with `PRODUCT_ARCHIVED`. No model, route,
-  index, migration or AI tool changed, and `inventory.service.js` is byte-identical. Suite 419 → 429.
+  index, migration or AI tool changed, and `inventory.service.ts` is byte-identical. Suite 419 → 429.
 - **Phase 22 — Authorization Contract Enforcement & RBAC Coverage Guards:** implemented, verified, and
   committed (`dc341dd`) — hardens the **route→capability binding** without changing who may do what.
   The read routes for products, suppliers and purchase orders had been protected by authentication
@@ -526,11 +538,11 @@ Phase 07 (testing + production hardening) and Phase 08 (owner-directed hardening
   production behavior change.** Closes the three authorization surfaces Phase 22 left held by
   convention, entirely as one DB-free guard suite plus documentation: no permission key added, no role
   grant changed, and no route, controller, service, model, middleware or mobile file modified. It
-  classifies every route reachable from `app.js` into exactly one declared authorization bucket
+  classifies every route reachable from `app.ts` into exactly one declared authorization bucket
   (`PERMISSION_GATED`, `AUTHENTICATED`, `PUBLIC`, `ROLE_GATED`), so a route added without a gate now
   fails instead of passing unnoticed — with **no route-count assertion**, so a future phase adds a
   route by declaring it rather than by editing a number. It pins `mobile/lib/permissions.js` to
-  `server/src/constants/roles.js` (roles, the 21 catalogue keys *and values*, and every role's grant
+  `server/src/constants/roles.ts` (roles, the 21 catalogue keys *and values*, and every role's grant
   set), which had been kept in step by hand since Phase 13A. It recognises `requireRole(` as a gate so
   a role-name route cannot silently bypass the contract, and pins `requireRole`'s **inertness** —
   retained, still exported, referenced by no route module. And it requires every error code the mobile
@@ -547,7 +559,7 @@ Phase 07 (testing + production hardening) and Phase 08 (owner-directed hardening
   consolidated matrix over **real** routes. Its expectations are **derived, never transcribed**: the
   tier a route belongs to is computed by asking the shipped `hasPermission(role, permission)` who
   holds its capability, so the file holds no second copy of the role matrix and cannot silently
-  disagree with `constants/roles.js`. Admitted cells deliberately depend on nothing else — a gate is
+  disagree with `constants/roles.ts`. Admitted cells deliberately depend on nothing else — a gate is
   the second handler, so it decides before validation runs, and an admitted cell asserts only "not
   401, not 403, and not the code-less global 404" (the global handler answers with no `code`, every
   `ApiError` 404 with one, so a mistyped path cannot pass as admitted). It also closes the one

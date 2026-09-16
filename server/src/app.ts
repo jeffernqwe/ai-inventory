@@ -43,7 +43,7 @@ type AppOptions = {
  * Build a fully wired Express app. Exported as a factory so tests can exercise
  * the real middleware chain (headers, CORS, body limit, trust proxy, auth rate
  * limiters) deterministically, without mutating process.env. The module's
- * default export is the singleton the server boots (see index.js).
+ * default export is the singleton the server boots (see index.ts).
  *
  * @param {object}  [options]
  * @param {number}  [options.trustProxy]    Reverse-proxy hops (Phase 07B/M4).
@@ -77,7 +77,7 @@ export function createApp({
   // M4: only trust a known number of reverse-proxy hops when explicitly
   // configured (TRUST_PROXY, numeric hop count). Default 0 = trust no proxy:
   // forwarded headers are ignored, so spoofed X-Forwarded-For cannot bypass
-  // the IP-based auth rate limiters. See config/env.js parseTrustProxy.
+  // the IP-based auth rate limiters. See config/env.ts parseTrustProxy.
   if (trustProxy > 0) {
     app.set('trust proxy', trustProxy);
   }
@@ -94,7 +94,7 @@ export function createApp({
     })
   );
 
-  // M3: explicit browser CORS allow-list (see middlewares/cors.js). Native
+  // M3: explicit browser CORS allow-list (see middlewares/cors.ts). Native
   // mobile sends no Origin and is unaffected; browsers only get a grant for
   // allow-listed origins — never '*'.
   app.use(createCors(corsOrigins));

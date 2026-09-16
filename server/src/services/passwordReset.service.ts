@@ -40,10 +40,10 @@
  * failure can never be mistaken for an authentication failure.
  *
  * The mail layer is reached through its public interface only
- * (`services/mail/index.js`), which is the boundary that keeps Resend — or any
+ * (`services/mail/index.ts`), which is the boundary that keeps Resend — or any
  * other transport — out of this file. The one exception is `mailConfig`, the
- * config reader of the same layer: the reset URL lives there and `index.js`
- * deliberately does not re-export it (approved decision D2). `mailConfig.js`
+ * config reader of the same layer: the reset URL lives there and `index.ts`
+ * deliberately does not re-export it (approved decision D2). `mailConfig.ts`
  * cannot reach a provider, so the transport boundary is intact either way.
  */
 
@@ -118,11 +118,11 @@ const INVALID_RESET_TOKEN_MESSAGE =
 /** 256 bits of entropy. base64url so the token is URL-safe with no escaping. */
 const TOKEN_BYTES = 32;
 
-// Duplicated per service, exactly as services/auth.service.js and
-// services/users.service.js already do.
+// Duplicated per service, exactly as services/auth.service.ts and
+// services/users.service.ts already do.
 const BCRYPT_ROUNDS = 10;
 
-// Mirrors utils/validate.js passwordProblems, which is module-private there and
+// Mirrors utils/validate.ts passwordProblems, which is module-private there and
 // cannot be imported. The drift is closed by a boundary test that compares this
 // against the PUBLIC validateChangePassword output at 7/8/72/73 — see
 // test/phase26b-password-recovery.test.mjs.
@@ -191,7 +191,7 @@ export function buildResetUrl(base: string, rawToken: string) {
 
 /**
  * The shared password policy, reported under `newPassword`. Exported so the
- * boundary test can hold it against utils/validate.js's public validator.
+ * boundary test can hold it against utils/validate.ts's public validator.
  */
 export function newPasswordProblems(password: unknown) {
   const problems = [];
@@ -220,7 +220,7 @@ export function newPasswordProblems(password: unknown) {
  *
  * By the time this runs the token is issued or the password is already changed;
  * neither can be un-done by a failed audit write, so failing the request over it
- * would be strictly worse — the same idiom session.service.js uses. `metadata`
+ * would be strictly worse — the same idiom session.service.ts uses. `metadata`
  * is deliberately omitted: `entityType: USER` plus `entityId`/`userId` already
  * identify the account, the audit viewer populates the actor, and there is no
  * remaining fact worth recording that is not either redundant or a credential.

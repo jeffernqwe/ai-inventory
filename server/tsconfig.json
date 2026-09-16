@@ -3,7 +3,7 @@
 // The server does NOT have a build step and this file does not add one:
 // `noEmit` is set, so `tsc` is a *checker* here, never a compiler. The server
 // keeps running its sources directly under Node's native type stripping
-// (`node src/index.ts` from Phase TS-8), which is why the flags below are
+// (`node src/index.ts` from Phase TS-2F-p), which is why the flags below are
 // chosen to keep the compiler and the runtime in exact agreement:
 //
 //   * `erasableSyntaxOnly`  — rejects precisely the syntax Node cannot strip

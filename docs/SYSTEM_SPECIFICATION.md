@@ -81,7 +81,7 @@ These may be considered in future versions.
 
 - Node.js
 - Express.js
-- JavaScript
+- TypeScript
 - REST API
 - JWT authentication
 - bcrypt password hashing
@@ -1129,13 +1129,13 @@ every request (§30), and a session record holds no authorization data either �
 session grants nothing except continued authentication, so a stolen or forged one
 cannot escalate anything.
 
-`middlewares/authenticate.js` is the single authentication choke point and
+`middlewares/authenticate.ts` is the single authentication choke point and
 requires all of the following before a request proceeds: a valid HS256 signature,
 an unexpired token, a `sub` that is a real user, a **`jti` that names a session
 which exists, belongs to that user, is not revoked and has not expired**, an
 ACTIVE user, and an ACTIVE business. A token with no `jti` is rejected outright.
 
-The session record (`server/src/models/session.model.js`) stores the user, the
+The session record (`server/src/models/session.model.ts`) stores the user, the
 `jti`, a cosmetic device label, `createdAt`, `lastUsedAt`, `revokedAt` and
 `expiresAt`, and is removed by a TTL index once it expires. Because the record is
 consulted on every authenticated request, a session can be ended server-side:
@@ -1309,7 +1309,7 @@ The backend remains the authority.
 
 ## Permission Catalogue and Route Bindings
 
-`server/src/constants/roles.js` is the single source of truth for capabilities.
+`server/src/constants/roles.ts` is the single source of truth for capabilities.
 It holds the permission catalogue (`PERMISSIONS`), the grants per role
 (`ROLE_PERMISSIONS`), and `hasPermission(role, permission)`. The role and the
 grant are derived from the authenticated `req.user`, which is loaded from the
@@ -1325,7 +1325,7 @@ implied by "any authenticated member of the business".
 A capability in the catalogue that no endpoint implements is declared in
 `CATALOGUE_ONLY_PERMISSIONS`, beside the catalogue, with the reason it is
 unimplemented. That list is **metadata for the regression guard only**: it is
-not consumed by `middlewares/authorize.js` and takes no part in any runtime
+not consumed by `middlewares/authorize.ts` and takes no part in any runtime
 authorization decision. It exists so the catalogue cannot silently accumulate
 capabilities that are granted to roles but attached to nothing. As of Phase 22
 it contains:
@@ -1363,7 +1363,7 @@ and that all four roles still hold every capability a route now requires.
 ## Route Authorization Classification
 
 Authorization is a property of **every** route, not only of the routes that happen to be gated. Each
-route reachable from `server/src/app.js` therefore falls into exactly one declared class:
+route reachable from `server/src/app.ts` therefore falls into exactly one declared class:
 
 - **Permission-gated** — the route carries a capability gate as its first handler after
   `requireAuth`, and its declaration names the catalogue key. This is the default and the expectation
@@ -1388,7 +1388,7 @@ A route in no class is a defect. Declaring a route in a class it no longer belon
 defect. Nothing in this section is a route inventory: no count is fixed, so a later phase adds a
 route by classifying it, never by amending a number.
 
-`requireRole(...roles)` in `server/src/middlewares/authorize.js` is the role-name allowlist behind
+`requireRole(...roles)` in `server/src/middlewares/authorize.ts` is the role-name allowlist behind
 the fourth class. It is retained and tested but has **no production call site**; its inertness is
 pinned by the guard rather than being removed by it.
 
@@ -1405,7 +1405,7 @@ and all three are in scope.
 ## Cross-Layer RBAC Mirror
 
 `mobile/lib/permissions.js` mirrors the catalogue and the role grants in
-`server/src/constants/roles.js` because the UI needs to know what to show. The mirror is **not** an
+`server/src/constants/roles.ts` because the UI needs to know what to show. The mirror is **not** an
 authorization boundary — the backend remains the sole authority, and every request is decided
 server-side. The two copies are required to agree exactly: a grant present only on the server makes
 the app offer an action the server refuses, and a grant present only in the mirror makes a role never
@@ -1435,7 +1435,7 @@ over real endpoints, role by role.
 
 The matrix is **derived, never transcribed**. The tier a route belongs to is computed by asking the
 shipped `hasPermission(role, permission)` who holds the route's capability, so the suite holds no
-second copy of the role matrix and cannot silently disagree with `src/constants/roles.js`; a grant
+second copy of the role matrix and cannot silently disagree with `src/constants/roles.ts`; a grant
 change flows straight through to the cells. The matrix resolves to three invoked tiers:
 
 | Tier | Holders | Representative capabilities |
@@ -1456,7 +1456,7 @@ Two properties keep the matrix honest and cheap to maintain:
   401, not 403, and not the code-less global 404" — no request body, no seeded resource, no provider
   availability, no success payload — which keeps the suite immune to unrelated validation changes. The
   distinction between the two 404 shapes is what catches a mistyped path: the global handler
-  (`middlewares/notFound.js`) answers `{error, message}` with **no `code`**, while every `ApiError` 404
+  (`middlewares/notFound.ts`) answers `{error, message}` with **no `code`**, while every `ApiError` 404
   carries one.
 * **Denial is asserted exactly.** A refused cell asserts HTTP 403 with `code: 'FORBIDDEN'`; an
   unauthenticated request to a gated route asserts 401 with `code: 'AUTH_REQUIRED'`, sampled per tier
@@ -1467,7 +1467,7 @@ Two properties keep the matrix honest and cheap to maintain:
 
 Authorization is decided per request from current database state, never from token contents. An access
 token carries only `sub`, `jti` plus the standard `iat`/`exp` — no role and no `businessId` claim —
-and `middlewares/authenticate.js` reloads the user (and therefore the role and business) from the
+and `middlewares/authenticate.ts` reloads the user (and therefore the role and business) from the
 database on every request. A hand-forged `role` claim therefore neither grants a capability nor
 escalates one.
 
@@ -1483,7 +1483,7 @@ read and write is filtered by the `businessId` taken from the authenticated sess
 another tenant's resource resolves to nothing and surfaces as an ordinary 404 `NOT_FOUND`. Client
 supplied `businessId` values are never trusted and never influence a query.
 
-`src/utils/businessAccess.js` (`assertBusinessAccess`, which emits the `FORBIDDEN_BUSINESS` code) has
+`src/utils/businessAccess.ts` (`assertBusinessAccess`, which emits the `FORBIDDEN_BUSINESS` code) has
 **no production call site** — it is referenced only by tests, one of which exercises it inside a
 test-only router. It is retained unmodified, wired to nothing, and no client behaviour depends on it;
 the `FORBIDDEN_BUSINESS` code is consequently not reachable at runtime in production. The presence of

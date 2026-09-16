@@ -7,7 +7,7 @@
  *
  * Checks:
  *   - MONGODB_URI   present (never logged; "usable" is verified by the startup
- *                   database connection — see config/startup.js).
+ *                   database connection — see config/startup.ts).
  *   - JWT_SECRET    present and long enough to be a credible signing secret.
  *   - JWT_EXPIRES_IN, when set, is a timespan jsonwebtoken can parse (probed
  *                   with a throwaway signature so a malformed value fails at
@@ -70,12 +70,12 @@ export function validateProductionConfig(
     });
   }
 
-  // Phase 07G: env.js passes JWT_EXPIRES_IN straight to jsonwebtoken, so a
+  // Phase 07G: env.ts passes JWT_EXPIRES_IN straight to jsonwebtoken, so a
   // malformed value today only fails on the FIRST login — as a 500 — instead of
   // at boot. Probe it with a throwaway signature (never transmitted, nothing
   // persisted) reusing jsonwebtoken's own parser, so this check can never
   // disagree with signAccessToken about what is valid. An empty value is left
-  // alone: env.js already treats it as absent and applies the "7d" default.
+  // alone: env.ts already treats it as absent and applies the "7d" default.
   const jwtExpiresIn = get('JWT_EXPIRES_IN');
   if (jwtSecret && jwtExpiresIn) {
     try {

@@ -8,12 +8,25 @@
  * no billing system). Expired windows are pruned so memory stays bounded.
  */
 
+import type { NextFunction, Request, Response } from 'express';
+
 import { aiConfig } from './aiConfig.ts';
 
-function createAiRateLimiter() {
-  const hits = new Map(); // userId -> number[] (timestamps within the current window)
+/**
+ * The request context this middleware reads, following the other migrated
+ * middleware: `user` is optional because a handler is registered against
+ * Express's `RequestHandler`, whose parameter is a plain `Request`; a required
+ * `user` would make that `Request` unassignable and the route registration a
+ * type error. The read below uses `?.` exactly as the original did, so a request
+ * that somehow reached this limiter unauthenticated still falls back to the IP
+ * bucket rather than throwing.
+ */
+type AuthenticatedRequest = Request & { user?: { id: string } };
 
-  function prune(now, windowMs) {
+function createAiRateLimiter() {
+  const hits = new Map<string, number[]>(); // userId -> number[] (timestamps within the current window)
+
+  function prune(now: number, windowMs: number) {
     for (const [key, stamps] of hits) {
       const kept = stamps.filter((t) => now - t < windowMs);
       if (kept.length) hits.set(key, kept);
@@ -21,7 +34,7 @@ function createAiRateLimiter() {
     }
   }
 
-  return function aiRateLimit(req, res, next) {
+  return function aiRateLimit(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     const cfg = aiConfig();
     const key = req.user?.id || `ip:${req.ip || 'unknown'}`;
     const now = Date.now();

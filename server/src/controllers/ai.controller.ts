@@ -8,6 +8,9 @@
  * secrets ever stored.
  */
 
+import type { Request, Response } from 'express';
+import type mongoose from 'mongoose';
+
 import { AIConversation, AIMessage } from '../models/index.ts';
 import { parsePagination, pageResult } from '../utils/pagination.ts';
 import { optionalObjectId, requiredString, isObjectId } from '../utils/validate.ts';
@@ -15,11 +18,37 @@ import { invalidId, notFound, throwValidation } from '../utils/errors.ts';
 import ApiError from '../utils/ApiError.ts';
 import { aiConfig } from '../services/ai/aiConfig.ts';
 import { AiNotConfigured, AiProviderError } from '../services/ai/aiErrors.ts';
-import { runAiChat } from '../services/ai/ai.service.js';
+import { runAiChat, type ChatTurn } from '../services/ai/ai.service.ts';
+
+/**
+ * The request context this controller reads, following `audit.controller.ts`,
+ * `auth.controller.ts` and `users.controller.ts`: declaring these fields on
+ * Express's global `Request` would let any module read an authoritative-looking
+ * `req.user` on a public route.
+ *
+ * `user` is optional for the same reason it is optional in
+ * `middlewares/authenticate.ts`: a handler is registered against Express's
+ * `RequestHandler`, whose parameter is a plain `Request`; a required `user`
+ * would make that `Request` unassignable and every route registration a type
+ * error. The reads below assert it with `!` instead, which is justified by the
+ * route table — every route in `routes/ai.routes.ts` is registered
+ * `requireAuth, requirePermission(PERMISSIONS.AI_USE), controller`, so the
+ * middleware has always run by the time these handlers execute. Optional
+ * chaining was NOT used: it would silently pass `undefined` where the code
+ * would previously have thrown, which is a behaviour change.
+ *
+ * `role` is read as well as `id`/`businessId` because `sendMessage` forwards it
+ * to the AI service, which passes it to the tool layer's permission check.
+ */
+type AuthenticatedRequest = Request & { user?: { id: string; businessId: string; role: string } };
+
+/** The stored conversation / message documents, derived from their models. */
+type ConversationDoc = mongoose.HydratedDocFromModel<typeof AIConversation>;
+type MessageDoc = mongoose.HydratedDocFromModel<typeof AIMessage>;
 
 const TITLE_MAX = 120;
 
-function conversationPublic(conv) {
+function conversationPublic(conv: ConversationDoc) {
   return {
     id: String(conv._id),
     title: conv.title || null,
@@ -28,7 +57,7 @@ function conversationPublic(conv) {
   };
 }
 
-function messagePublic(msg) {
+function messagePublic(msg: MessageDoc) {
   const usage = msg.usage
     ? { inputTokens: msg.usage.inputTokens ?? undefined, outputTokens: msg.usage.outputTokens ?? undefined }
     : undefined;
@@ -44,14 +73,14 @@ function messagePublic(msg) {
   };
 }
 
-function titleFrom(message) {
+function titleFrom(message: string) {
   const trimmed = message.trim();
   if (trimmed.length <= 60) return trimmed;
   return `${trimmed.slice(0, 57)}…`;
 }
 
 /** Map AI-layer failures to safe, secret-free client responses. */
-function mapAiFailure(err) {
+function mapAiFailure(err: unknown) {
   if (err instanceof AiNotConfigured) {
     return new ApiError(
       503,
@@ -72,7 +101,7 @@ function mapAiFailure(err) {
  * appends that message itself, and persisting/loading it first would send it
  * twice (Phase 07E / M6).
  */
-async function priorTurnHistory(conversationId, limit) {
+async function priorTurnHistory(conversationId: ConversationDoc['_id'], limit: number): Promise<ChatTurn[]> {
   const historyFilter = { conversationId, role: { $in: ['USER', 'ASSISTANT'] } };
   const historyCount = await AIMessage.countDocuments(historyFilter);
   const skip = Math.max(0, historyCount - limit);
@@ -85,20 +114,20 @@ async function priorTurnHistory(conversationId, limit) {
 
 const aiController = {
   /** POST /api/ai/conversations -> start an (empty) conversation. */
-  async createConversation(req, res) {
+  async createConversation(req: AuthenticatedRequest, res: Response) {
     const title = typeof req.body?.title === 'string' ? req.body.title.trim().slice(0, TITLE_MAX) : '';
     const conversation = await AIConversation.create({
-      businessId: req.user.businessId,
-      userId: req.user.id,
+      businessId: req.user!.businessId,
+      userId: req.user!.id,
       title: title || undefined,
     });
     res.status(201).json({ conversation: conversationPublic(conversation) });
   },
 
   /** GET /api/ai/conversations -> the user's conversations, newest first. */
-  async listConversations(req, res) {
+  async listConversations(req: AuthenticatedRequest, res: Response) {
     const { page, limit, skip } = parsePagination(req.query);
-    const filter = { businessId: req.user.businessId, userId: req.user.id };
+    const filter = { businessId: req.user!.businessId, userId: req.user!.id };
     const [total, docs] = await Promise.all([
       AIConversation.countDocuments(filter),
       AIConversation.find(filter).sort({ updatedAt: -1, _id: -1 }).skip(skip).limit(limit),
@@ -107,13 +136,13 @@ const aiController = {
   },
 
   /** GET /api/ai/conversations/:id/messages -> one conversation's messages. */
-  async listMessages(req, res) {
+  async listMessages(req: AuthenticatedRequest, res: Response) {
     const id = req.params.id;
     if (!isObjectId(id)) invalidId();
     const conversation = await AIConversation.findOne({
       _id: id,
-      businessId: req.user.businessId,
-      userId: req.user.id,
+      businessId: req.user!.businessId,
+      userId: req.user!.id,
     });
     if (!conversation) notFound('Conversation not found');
     const { page, limit, skip } = parsePagination(req.query);
@@ -140,7 +169,7 @@ const aiController = {
    *     request: prior history is loaded BEFORE this turn exists, and the AI
    *     service appends the current message once (Phase 07E / M6).
    */
-  async sendMessage(req, res) {
+  async sendMessage(req: AuthenticatedRequest, res: Response) {
     const cfg = aiConfig();
     const problems = [];
     const convId = optionalObjectId(req.body?.conversationId, 'conversationId');
@@ -148,14 +177,17 @@ const aiController = {
     const msg = requiredString(req.body?.message, 'message', cfg.maxMessageChars);
     problems.push(...msg.problems);
     if (problems.length) throwValidation(problems);
-    const message = msg.value;
+    // `requiredString` reports a problem instead of a value when the input is
+    // unusable, and the throw above has already fired on that path, so the value
+    // is a string here. The assertion is erased at runtime.
+    const message = msg.value as string;
 
-    const { businessId, id: userId, role } = req.user;
+    const { businessId, id: userId, role } = req.user!;
 
     // Resolve an existing conversation (never created client-side, always under
     // the authenticated session). A new conversation is created lazily below.
-    let conversation = null;
-    let history = [];
+    let conversation: ConversationDoc | null = null;
+    let history: ChatTurn[] = [];
     if (convId.value) {
       conversation = await AIConversation.findOne({
         _id: convId.value,

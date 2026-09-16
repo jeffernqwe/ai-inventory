@@ -2,8 +2,8 @@ import { Router } from 'express';
 
 import requireAuth from '../middlewares/authenticate.ts';
 import { requirePermission } from '../middlewares/authorize.ts';
-import aiController from '../controllers/ai.controller.js';
-import { aiRateLimiter } from '../services/ai/rateLimiter.js';
+import aiController from '../controllers/ai.controller.ts';
+import { aiRateLimiter } from '../services/ai/rateLimiter.ts';
 import { PERMISSIONS } from '../constants/roles.ts';
 
 const router = Router();

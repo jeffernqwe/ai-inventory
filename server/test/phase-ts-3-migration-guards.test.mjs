@@ -129,6 +129,69 @@ describe('Phase TS-3 — the CLI entry point', () => {
 });
 
 // ---------------------------------------------------------------------------
+// The runtime entry point (Phase TS-2F-p)
+// ---------------------------------------------------------------------------
+// The entry point was the last module to migrate, and it is the one module no specifier
+// points at: `package.json` addresses it by string, so the module-graph guards above are
+// blind to it by construction. A `.js` here is therefore not a stale specifier that tsc or
+// the resolver would eventually surface — it is the server failing to boot.
+//
+// Checked as a pure diff against the expected contract rather than as three equality
+// assertions, so the same function can be driven against a `.js` clone and proved able to
+// fail. A contract that cannot fail is not a guard.
+const serverRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const packageJsonPath = path.join(serverRoot, 'package.json');
+const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+
+/** The three strings that address the entry point. An empty array means no drift. */
+function entryPointDrift(pkg) {
+  const expected = {
+    main: 'src/index.ts',
+    'scripts.start': 'node src/index.ts',
+    'scripts.dev': 'node --watch src/index.ts',
+  };
+  const actual = {
+    main: pkg.main,
+    'scripts.start': pkg.scripts?.start,
+    'scripts.dev': pkg.scripts?.dev,
+  };
+  return Object.entries(expected)
+    .filter(([key, wanted]) => actual[key] !== wanted)
+    .map(([key, wanted]) => `${key}: expected ${JSON.stringify(wanted)}, found ${JSON.stringify(actual[key])}`);
+}
+
+describe('Phase TS-2F-p — the package.json entry point', () => {
+  it('addresses the TypeScript entry point from main, start and dev', () => {
+    assert.deepEqual(entryPointDrift(packageJson), []);
+  });
+
+  it('would catch every one of the three strings drifting back to .js', () => {
+    const predecessor = {
+      main: 'src/index.js',
+      scripts: { start: 'node src/index.js', dev: 'node --watch src/index.js' },
+    };
+    assert.deepEqual(entryPointDrift(predecessor), [
+      'main: expected "src/index.ts", found "src/index.js"',
+      'scripts.start: expected "node src/index.ts", found "node src/index.js"',
+      'scripts.dev: expected "node --watch src/index.ts", found "node --watch src/index.js"',
+    ]);
+  });
+
+  it('names an entry point that exists on disk', () => {
+    assert.ok(
+      fs.existsSync(path.resolve(serverRoot, packageJson.main)),
+      `main names a file that is not there: ${packageJson.main}`,
+    );
+  });
+
+  it('has left no .js entry point behind that package.json could resolve to', () => {
+    // The duplicate-stem failure mode, at the one path where it would be silent: the
+    // guards' own duplicate check covers src/, and this asserts the entry point directly.
+    assert.equal(fs.existsSync(path.resolve(serverRoot, 'src/index.js')), false);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Duplicate-extension guard — detection, and its false-positive boundary
 // ---------------------------------------------------------------------------
 describe('Phase TS-3 — duplicate-extension detection', () => {

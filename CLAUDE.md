@@ -25,8 +25,21 @@ That document is the primary source of truth for the system.
 
 - Node.js
 - Express.js
-- JavaScript
+- TypeScript
 - REST API
+
+The backend is **TypeScript-first and has no build step**. It runs its `.ts` sources
+directly through Node's native type stripping — `npm start` is `node src/index.ts` — so
+Node **24**, pinned by `.nvmrc` and `engines.node`, is both the development and the runtime
+target, and an older runtime cannot start the server. `tsconfig.json` sets `noEmit` and
+`erasableSyntaxOnly`, so `tsc` acts purely as a checker and any syntax Node could not strip
+is a compile error rather than a runtime `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`.
+
+The server TypeScript migration campaign (**TS-1** … **TS-2F-p**) is **complete and
+closed**. `server/src` holds 94 `.ts` modules and exactly one intentionally deferred `.js`
+module, `server/src/services/entitlement.service.js`. `.ts` is canonical: new and modified
+server code is written in TypeScript. `docs/TS-MIGRATION-MANIFEST.md` records the campaign
+history, the deferred exception and the verification baseline.
 
 ### Database
 
@@ -250,7 +263,7 @@ increment's scope and verified status.
 Phase 10 is an owner-directed commercialization extension delivered in approved lettered increments
 (10A, 10B, …) beyond the V1 completion gate. It prepares the backend for future SaaS
 subscriptions/paid plans WITHOUT implementing payments: 10A added `Business.planCode`, a centralized
-plan catalog with feature limits (`server/src/constants/plans.js`), and business-level entitlement
+plan catalog with feature limits (`server/src/constants/plans.ts`), and business-level entitlement
 checks (`server/src/services/entitlement.service.js`). Actual subscriptions, the billing lifecycle,
 payment providers, AI usage metering, and paid-plan enforcement remain deferred (V4) and are NOT
 implemented.
@@ -309,7 +322,7 @@ delete route, delete service method or product-deletion audit action exists and 
 archived product keeps its inventory row, quantity and transaction history while all four
 movement paths (stock-in, stock-out, adjust, transfer) reject it with `PRODUCT_ARCHIVED`.
 No delete/purge/cascade/`deletedAt`/`PRODUCT_DELETED`/soft-delete was introduced, no model,
-route, index, migration or AI tool changed, and `inventory.service.js` — including the
+route, index, migration or AI tool changed, and `inventory.service.ts` — including the
 `{'product.0': {$exists: true}}` list guard — is byte-identical.
 
 Phase 22 is an owner-directed authorization-contract increment delivered as a single approved
@@ -324,10 +337,10 @@ capability at all. **No role grant was added, removed or changed** for OWNER, AD
 STAFF. Categories and locations read routes were deliberately left on `requireAuth` because no
 `categories.view`/`locations.view` key exists, and inventing one was out of scope.
 
-The phase also makes the permission **catalogue** self-checking. `server/src/constants/roles.js`
+The phase also makes the permission **catalogue** self-checking. `server/src/constants/roles.ts`
 gains `CATALOGUE_ONLY_PERMISSIONS`, which names the capabilities that are granted to roles but
 implemented by no endpoint: `business.manage`, `roles.manage` and `transactions.view`. This is
-**metadata for the regression guard only** — it is not imported by `middlewares/authorize.js` and
+**metadata for the regression guard only** — it is not imported by `middlewares/authorize.ts` and
 takes no part in any runtime authorization decision. The ledger read stays on
 `GET /api/inventory/history` under `inventory.history.view`; it was deliberately **not** moved to
 `transactions.view`, because only OWNER/ADMIN/MANAGER hold that key while every role holds
@@ -351,7 +364,7 @@ is one DB-free guard suite plus documentation.
 The core addition is **route authorization classification**. Phase 22 proved that eight named read
 routes carry their view permission; it did not pin the complement — which routes are deliberately
 *not* gated — so a route added without a gate would have passed every test in the suite. The guard
-now discovers every route reachable from `app.js` (reading the mount table out of `app.js` source,
+now discovers every route reachable from `app.ts` (reading the mount table out of `app.ts` source,
 so a newly mounted router is covered automatically and cannot be mounted and forgotten), plus the
 routes registered directly on the app, and requires each to land in exactly one declared bucket:
 `PERMISSION_GATED` (the default — a gate as the second handler, with the declaration naming the
@@ -368,13 +381,13 @@ were kept in step by hand (Phases 13A, 17 and 19 each did so) — and drift is s
 directions: a grant removed server-side makes the app offer an action the server 403s, and one added
 makes a role never see an action it may perform. The guard dynamically imports the mirror and
 compares roles, the 21 catalogue keys *and values*, and every role's grant set against
-`server/src/constants/roles.js`, which stays authoritative. The comparison is factored into a pure
+`server/src/constants/roles.ts`, which stays authoritative. The comparison is factored into a pure
 function so it can be negative-tested in memory: perturbed clones prove a removed grant, an added
 grant, a renamed key, a changed value and a missing role are each detected, and a further case proves
 the guard's own `assert.deepEqual(drift, [])` shape throws on a diverged mirror. No mobile file was
 modified and no mobile test runner was added.
 
-**`requireRole` inertness.** `middlewares/authorize.js` exports `requireRole(...roles)`, a role-name
+**`requireRole` inertness.** `middlewares/authorize.ts` exports `requireRole(...roles)`, a role-name
 allowlist that bypasses the permission catalogue. It has **no production call site** and is exercised
 only by the Phase 03 suites, but it was also a blind spot: a route written `requireAuth,
 requireRole('OWNER'), controller` carries no permission, so a scan looking only for `requirePermission`
@@ -419,17 +432,17 @@ middleware, not shipped endpoints. `server/test/phase24-runtime-authorization-ma
 outcome for all four roles. Its expectations are **derived, never transcribed**: the tier a route
 belongs to is computed by asking the shipped `hasPermission(role, permission)` who holds its
 capability, so the file contains no second copy of the role matrix and cannot silently disagree with
-`constants/roles.js` — a grant change flows straight through to the cells. Admitted cells deliberately
+`constants/roles.ts` — a grant change flows straight through to the cells. Admitted cells deliberately
 depend on nothing else: a gate is the second handler, so it decides before validation or lookup runs,
 and an admitted cell asserts only "not 401, not 403, and not the code-less global 404", which means no
 request body, no seeded resource, no provider availability and no success payload. The typo guard works
-because the global handler (`middlewares/notFound.js`) answers `{error, message}` with **no `code`**
+because the global handler (`middlewares/notFound.ts`) answers `{error, message}` with **no `code`**
 while every `ApiError` 404 carries one. Denied cells assert 403 `FORBIDDEN`; unauthenticated requests
 are sampled per tier rather than repeated per route, since Phase 23 already proves structurally that
 `requireAuth` is `handlers[0]` on all 47 gated routes.
 
 **Role mutation now has an authorization-effect proof.** Phase 14A asserted only the response payload
-of a role change, although `authenticate.js` reloads the user — and therefore the role — from the
+of a role change, although `authenticate.ts` reloads the user — and therefore the role — from the
 database on every request. Four tests close that, always using the **same pre-existing token**: STAFF →
 MANAGER grants a MANAGER-gated capability; MANAGER → STAFF revokes it (de-escalation being the sharper
 security property); STAFF → ADMIN → STAFF crosses tiers and grants then revokes `users.manage`; and a
@@ -438,7 +451,7 @@ into a real run. This is safe by construction rather than merely asserted: an ac
 `sub`/`iat`/`exp`, so there is no role claim that can go stale, and a hand-forged `role` claim neither
 grants nor escalates anything.
 
-**Accurate tenant-isolation documentation.** `assertBusinessAccess` (`src/utils/businessAccess.js`,
+**Accurate tenant-isolation documentation.** `assertBusinessAccess` (`src/utils/businessAccess.ts`,
 emitting `FORBIDDEN_BUSINESS`) has no `src/` importer — its only callers are tests, one of them inside
 the `/guard` router. It is therefore **production-dead and was left byte-identical**, neither wired,
 modified nor deleted. Real tenant isolation is enforced by `businessId` query scoping and surfaces as a
@@ -519,7 +532,7 @@ a token or a `jti`** (the `current` flag identifies the caller's own row instead
 `DELETE /api/auth/sessions/:id` puts `req.user.id` inside the query filter rather than checking
 ownership afterwards, so another user's session is unreachable and answers the same `404` as an
 unknown id. Four audit events are written through the existing best-effort `recordAudit` path from
-`session.service.js`; no `jti` is ever written to the trail, since that viewer is readable by every
+`session.service.ts`; no `jti` is ever written to the trail, since that viewer is readable by every
 ADMIN and a `jti` is the one value that could be replayed with a stolen token.
 
 Two consequences were reviewed and accepted by the owner before implementation: **every pre-26A token
@@ -545,12 +558,12 @@ role grant changed, and no mobile file was touched.
 **26B-1 — the mail service.** `server/src/services/mail/` is a provider-agnostic boundary the rest of
 the application reaches through three functions — `isMailConfigured()`, `mailProviderName()` and
 `sendPasswordResetEmail({ to, resetUrl, expiresInMinutes })` — and it is the only mail module anything
-imports. `mailConfig.js` reads `MAIL_PROVIDER`, `MAIL_FROM`, `PASSWORD_RESET_URL`, `MAIL_APP_NAME` and
+imports. `mailConfig.ts` reads `MAIL_PROVIDER`, `MAIL_FROM`, `PASSWORD_RESET_URL`, `MAIL_APP_NAME` and
 `MAIL_REQUEST_TIMEOUT_MS` lazily at call time, so tests can switch providers between files and a
 misconfiguration can never stop the server booting — password recovery simply answers a clean 503
 until an operator fixes it. The Resend API key is deliberately **not** a field of that object:
-`mailConfig()` is the value most likely to be spread into a log line, so `resendProvider.js` reads the
-key itself. `providers/index.js` holds the registry (`resend` is the only builtin, requiring
+`mailConfig()` is the value most likely to be spread into a log line, so `resendProvider.ts` reads the
+key itself. `providers/index.ts` holds the registry (`resend` is the only builtin, requiring
 `RESEND_API_KEY` + `MAIL_FROM`) and `selectProvider()` throws `MailNotConfigured` for an empty,
 unknown or under-configured provider. Provider failures become `MailDeliveryError` carrying safe facts
 only — an HTTP status and, when the provider names one, an error name matching `^[a-z0-9_]{1,64}$` —
@@ -586,7 +599,7 @@ written through the existing best-effort path and carry **no metadata**, so a to
 the audit trail.
 
 **26B-3 — the HTTP surface.** Two **public** (unauthenticated), POST-only routes under `/api/auth`,
-both rate-limited: `forgot-password` and `reset-password`. `passwordReset.controller.js` is the only
+both rate-limited: `forgot-password` and `reset-password`. `passwordReset.controller.ts` is the only
 place a recovery domain failure becomes an HTTP status — 26B-2's errors carry a stable `code` and no
 status, mirroring `mapAiFailure` in the AI layer. **The request path is an enumeration-resistant
 invariant**: `requestPasswordReset` returns `undefined` on every non-error path, so the controller has
@@ -625,7 +638,7 @@ recovery is now implemented, consuming the **existing** backend endpoints unchan
 added — `/forgot-password` and `/reset-password` — together with a "Forgot password?" entry point on
 login, two tokenless wrappers in `lib/api.js` (`forgotPassword`, `resetPassword`), and one additive
 `success` tone on `Banner`. **No backend file changed**: `PASSWORD_RESET_URL` already accepted a
-custom scheme, so `mailConfig.js` needed no edit, and **no dependency was added**.
+custom scheme, so `mailConfig.ts` needed no edit, and **no dependency was added**.
 
 Both routes are **public** and deliberately sit outside the `(app)` group, whose layout redirects
 anyone who is not signed in and would discard the incoming token before the screen could read it.

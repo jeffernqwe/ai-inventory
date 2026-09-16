@@ -12,7 +12,7 @@
  *     error handler), and
  *   * returned to the caller on EVERY response via the `X-Request-ID` header.
  *
- * Registered first in app.js so the whole chain — including body-parser and
+ * Registered first in app.ts so the whole chain — including body-parser and
  * error handling — operates under a stable id.
  */
 

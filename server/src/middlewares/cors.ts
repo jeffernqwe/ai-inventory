@@ -33,12 +33,12 @@ function normalizeOrigin(origin: string) {
  *
  * `origins` is declared `readonly string[]` rather than left to inference: the
  * default `[]` used to infer `never[]`, so this function's public contract said
- * "an empty array and nothing else". Every real caller passes a list of
- * configured origins — `createCors(corsOrigins)` in `app.js` — and that call was
- * only ever un-checked because `app.js` is still JavaScript. Typing the
- * parameter states the contract the runtime already has; nothing about the
- * behaviour changes, and `readonly` is the honest modifier because the function
- * only ever maps over the list.
+ * "an empty array and nothing else". Its one real caller passes the configured
+ * allow-list — `createCors(corsOrigins)` in `app.ts` — and that call is
+ * type-checked, so the declared parameter type is load-bearing rather than
+ * merely documentation. Typing it states the contract the runtime already has;
+ * nothing about the behaviour changes, and `readonly` is the honest modifier
+ * because the function only ever maps over the list.
  */
 export function createCors(origins: readonly string[] = []) {
   const allowed = new Set(origins.map(normalizeOrigin));

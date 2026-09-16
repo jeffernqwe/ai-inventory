@@ -1,5 +1,5 @@
 /**
- * Mail provider registry, mirroring services/ai/providers/index.js.
+ * Mail provider registry, mirroring services/ai/providers/index.ts.
  *
  * A module-level registry sits in front of a small BUILTINS table so tests can
  * swap the transport through a seam rather than through the network. `resend` is

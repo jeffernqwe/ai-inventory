@@ -41,7 +41,9 @@ function withEnv(key, value) {
 let server;
 let port;
 const requests = [];
-let respond = { status: 200, json: {} };
+// `raw` (a verbatim body) and `contentType` exist so the non-JSON branch is
+// reachable from a test at all; unset, the stub behaves exactly as before.
+let respond = { status: 200, json: {}, raw: undefined, contentType: 'application/json' };
 
 async function listen() {
   server = http.createServer((req, res) => {
@@ -55,8 +57,8 @@ async function listen() {
         body = { _raw: raw };
       }
       requests.push({ method: req.method, url: req.url, headers: req.headers, body });
-      res.writeHead(respond.status, { 'content-type': 'application/json' });
-      res.end(JSON.stringify(respond.json));
+      res.writeHead(respond.status, { 'content-type': respond.contentType });
+      res.end(respond.raw !== undefined ? respond.raw : JSON.stringify(respond.json));
     });
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -88,8 +90,27 @@ after(async () => {
 
 beforeEach(() => {
   requests.length = 0;
-  respond = { status: 200, json: {} };
+  respond = { status: 200, json: {}, raw: undefined, contentType: 'application/json' };
 });
+
+/** Run a provider call with console.error captured, returning logs + the error. */
+async function completeCapturingLogs(provider) {
+  const original = console.error;
+  const lines = [];
+  console.error = (...args) => lines.push(args.map((a) => String(a)).join(' '));
+  try {
+    await provider.complete({ system: 's', messages: [{ role: 'user', content: 'hi' }], tools: TEST_TOOLS });
+    return { lines, err: null };
+  } catch (err) {
+    return { lines, err };
+  } finally {
+    console.error = original;
+  }
+}
+
+function diagnosticsLine(lines) {
+  return lines.find((l) => l.includes('upstream non-JSON diagnostics'));
+}
 
 describe('Phase 06 — AgentRouter (Anthropic-compatible) wire mapping', () => {
   it('posts an Anthropic /v1/messages request with Bearer auth and the configured model', async () => {
@@ -226,5 +247,94 @@ describe('Phase 06 — AgentRouter (Anthropic-compatible) wire mapping', () => {
         return true;
       }
     );
+  });
+
+  // --- Phase 31D.3 temporary non-JSON diagnostics ---------------------------
+
+  it('classifies an HTML non-JSON body and still rejects with AiProviderError', async () => {
+    const provider = providerFor(`http://127.0.0.1:${port}`);
+    const html = '<!DOCTYPE html><html><body>gateway</body></html>';
+    respond.status = 200;
+    respond.contentType = 'text/html';
+    respond.raw = html;
+
+    const { lines, err } = await completeCapturingLogs(provider);
+
+    assert.ok(err instanceof AiProviderError, 'non-JSON still becomes an AiProviderError');
+    assert.match(err.message, /unexpected response/);
+
+    const line = diagnosticsLine(lines);
+    assert.ok(line, 'diagnostics are generated');
+    assert.match(line, /status=200/);
+    assert.match(line, /contentType=text\/html/);
+    assert.ok(line.includes(`bodyLength=${html.length}`));
+    assert.match(line, /classification=HTML/);
+    assert.match(line, /bodyPrefix="<!DOCTYPE html>/);
+  });
+
+  it('classifies an empty 2xx body as EMPTY', async () => {
+    const provider = providerFor(`http://127.0.0.1:${port}`);
+    respond.status = 200;
+    respond.contentType = 'application/json';
+    respond.raw = '';
+
+    const { lines, err } = await completeCapturingLogs(provider);
+
+    assert.ok(err instanceof AiProviderError);
+    const line = diagnosticsLine(lines);
+    assert.match(line, /bodyLength=0/);
+    assert.match(line, /classification=EMPTY/);
+  });
+
+  it('classifies an SSE body as SSE', async () => {
+    const provider = providerFor(`http://127.0.0.1:${port}`);
+    respond.status = 200;
+    respond.contentType = 'text/event-stream';
+    respond.raw = 'data: {"type":"message_start"}\n\n';
+
+    const { lines, err } = await completeCapturingLogs(provider);
+
+    assert.ok(err instanceof AiProviderError);
+    assert.match(diagnosticsLine(lines), /classification=SSE/);
+  });
+
+  it('withholds a body prefix that looks like credential material', async () => {
+    const provider = providerFor(`http://127.0.0.1:${port}`);
+    const body = '<html>Authorization: Bearer sk-live-abc123XYZ</html>';
+    respond.status = 200;
+    respond.contentType = 'text/html';
+    respond.raw = body;
+
+    const { lines, err } = await completeCapturingLogs(provider);
+
+    assert.ok(err instanceof AiProviderError);
+    const line = diagnosticsLine(lines);
+    assert.match(line, /WITHHELD/);
+    assert.ok(!line.includes('abc123XYZ'), 'secret material must never be logged');
+    assert.ok(!line.includes('sk-live'), 'secret material must never be logged');
+    // The non-secret classifications survive the withholding.
+    assert.match(line, /classification=HTML/);
+    assert.ok(line.includes(`bodyLength=${body.length}`));
+  });
+
+  it('parses a BOM-prefixed JSON body exactly as res.json() did', async () => {
+    const provider = providerFor(`http://127.0.0.1:${port}`);
+    respond.status = 200;
+    respond.contentType = 'application/json';
+    respond.raw =
+      String.fromCharCode(0xfeff) +
+      JSON.stringify({
+        model: 'deepseek-v4-flash',
+        content: [{ type: 'text', text: 'ok' }],
+        stop_reason: 'end_turn',
+      });
+
+    const out = await provider.complete({
+      system: 's',
+      messages: [{ role: 'user', content: 'hi' }],
+      tools: TEST_TOOLS,
+    });
+
+    assert.equal(out.text, 'ok');
   });
 });

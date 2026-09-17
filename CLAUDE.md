@@ -254,6 +254,7 @@ Phase 26B — Password Recovery (email reset link: provider-agnostic mail layer 
 Phase 27 — Mobile Password Recovery (`/forgot-password` and `/reset-password` public screens consuming the existing Phase 26B endpoints; custom-scheme reset link `inventoryai://reset-password`; a successful reset clears the client session before returning to Login; ZERO backend changes and no new dependency; Universal Links / Android App Links deferred; iOS verification export-only)
 Phase 28 — Password Reset Mail Delivery Timing Hardening (B1 ONLY — the outbound password-reset email send is detached from the HTTP request path, so the 202 no longer waits on a mail provider: the send is dispatched unawaited after the durable token and audit writes, with an explicit rejection handler attached in the same synchronous turn; the pre-lookup `MAIL_NOT_CONFIGURED` 503, the uniform 202, token semantics, audit ordering, rate limiting and mobile are unchanged; PARTIALLY MITIGATED, NOT CLOSED — the residual database-work timing term is NOT eliminated; B2 was NOT implemented and remains open)
 Phase 29 — Residual Security-Risk Decision Record & Documentation Reconciliation (documentation only; records the owner's dispositions of the three remaining open security items — B1's residual database-work timing term ACCEPTED FOR V1 and DEFERRED, still PARTIALLY MITIGATED and NOT CLOSED; B2 and E3 DEFERRED TO V4 as related shared-infrastructure work, both still open — and reconciles the roadmap Phase Overview, the missing README Phase 26B entry, and the specification's §48 future-roadmap list with what has already shipped; no production code, test, dependency, configuration, limiter or password-reset behavior changed, no shared store introduced, and no historical verification snapshot back-updated)
+Phase 30A — EAS Development Build & iOS Readiness Foundation (EAS foundation only: the Expo Continuous Native Generation architecture is retained and no `ios/` or `android/` directory exists or is committed; the project is linked to EAS project `@jeffernqwes-team/inventory-ai` — `607eca05-1175-43ed-86a0-1829e91c9531`; `mobile/eas.json` defines `development`, `ios-simulator`, `preview` and `production` with `cli.appVersionSource: "remote"` and no update channel; `expo-dev-client` added and `expo-updates` deliberately not installed; bundle/package identifier `com.inventoryai.app` on both platforms; NO EAS build, submit or prebuild has been executed, so the phase is statically validated only and NOT runtime-verified; F-1 is NOT fixed and NOT closed; Phase 30B has NOT started)
 ```
 
 Phase 08 is an owner-directed hardening extension delivered in approved lettered increments
@@ -758,6 +759,39 @@ cases and 209 + 394 = 603 even though the current figures are 40, 39 and 209 + 3
 snapshot was rewritten to match today's totals — the snapshot is the record of the phase that measured
 it. The retained controller `MailDeliveryError` branch was not deleted, and no roadmap section was
 renumbered: §27E is a new lettered subsection and sections 28–36 keep their numbers.
+
+Phase 30A is an owner-directed release-engineering increment delivered as the first half of Phase 30,
+and it is **infrastructure only**: no application code, no test, no backend file and no behavioural
+change. It keeps the **Expo Continuous Native Generation (CNG)** architecture — nothing under
+`mobile/ios/` or `mobile/android/` exists or is committed, and every native setting continues to flow
+from `app.json` plus config plugins — and it lays the EAS foundation a future development build would
+need. Three things landed. `expo-dev-client` was added at the SDK-57-matched `~57.0.19` (the installed
+tree is dev-client 57.0.19 / dev-launcher 57.0.20 / dev-menu 57.0.18); **`expo-updates` was deliberately
+not installed**, so the project remains OTA-free — the `expo-updates-interface` that arrives as a
+dev-client transitive dependency is not OTA. `mobile/eas.json` was created with four build profiles:
+`development` (development client, internal distribution, APK), `ios-simulator` (extending `development`
+with `ios.simulator`), `preview` (internal-distribution APK) and `production` (auto-increment), under
+`cli.appVersionSource: "remote"` — so EAS tracks build numbers server-side and `app.json` is never
+dirtied by a version bump — and with **no `channel` key anywhere**, since update channels are meaningless
+without `expo-updates`. And the project was linked: `eas init` created **`@jeffernqwes-team/inventory-ai`**
+(project ID `607eca05-1175-43ed-86a0-1829e91c9531`), writing `extra.eas.projectId` and `owner` into
+`app.json`. Both platforms carry the hyphen-free identifier `com.inventoryai.app` — the slug
+`inventory-ai` would be an invalid Java package segment — and `ios.bundleIdentifier` / `android.package`
+must stay in lock-step with it.
+
+`eas init` writes back the **plugin-resolved** config rather than only the keys it owns, and on this
+project it additionally injected `extra.router: {}` and `android.permissions:
+["android.permission.CAMERA"]`. Both were removed by owner decision, because both are derived values
+rather than intent: expo-router's own plugin regenerates `extra.router` on every config resolution, and
+expo-camera's plugin injects the CAMERA manifest permission independently — confirmed with
+`expo config --type introspect`, whose resolved package, permissions and URL schemes are identical with
+and without them. The committed `app.json` diff is therefore four intentional additions.
+
+**Nothing in Phase 30A is runtime-verified.** No `eas build`, no `eas submit`, no `expo prebuild`, no
+simulator or device run and no APK install was performed. The phase is **statically** validated only:
+`jest` 11 suites / 88 tests, `tsc --noEmit`, `eslint .` and `expo-doctor` 21/21, all identical before and
+after, plus config introspection for the resolved native surface. **F-1 (PDF sharing) is NOT fixed and
+NOT closed**, and **Phase 30B has NOT started**.
 
 Phase 18 is an owner-directed mobile UI extension delivered in approved lettered increments (18A,
 18B, …) after Phase 17. It turns the app into a modern SaaS-style product surface WITHOUT changing

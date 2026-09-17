@@ -687,3 +687,16 @@ Phase 07 (testing + production hardening) and Phase 08 (owner-directed hardening
   management and stock transfers — all long since shipped. The retained `MailDeliveryError` regression
   guard is untouched, no roadmap section was renumbered, and historical verification snapshots were
   deliberately **not** back-updated.
+- **Phase 30A — EAS Development Build & iOS Readiness Foundation (EAS foundation only):** implemented and
+  **statically verified** — the Expo Continuous Native Generation architecture is retained, so
+  `mobile/ios/` and `mobile/android/` do not exist and remain gitignored, and every native setting still
+  flows from `app.json` plus config plugins. The project is linked to EAS project
+  **`@jeffernqwes-team/inventory-ai`** (`607eca05-1175-43ed-86a0-1829e91c9531`), which `eas init` recorded
+  as `extra.eas.projectId` plus `owner`. `expo-dev-client` was added at the SDK-57-matched `~57.0.19`;
+  **`expo-updates` was deliberately not installed**, so there is no OTA path and no update channel
+  anywhere in the config. `mobile/eas.json` defines four profiles — `development`, `ios-simulator`,
+  `preview` and `production` — under `cli.appVersionSource: "remote"`. Both platforms use the hyphen-free
+  identifier `com.inventoryai.app`. **No `eas build`, `eas submit` or `expo prebuild` has been run, so
+  nothing in this phase is runtime-verified:** the evidence is the local toolchain (jest 11 suites / 88
+  tests, `tsc --noEmit`, `eslint .`, `expo-doctor` 21/21) plus config introspection. **F-1 (PDF sharing)
+  is not fixed and not closed**, and **Phase 30B has not started**.

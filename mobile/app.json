@@ -8,9 +8,11 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "ios": {
+      "bundleIdentifier": "com.inventoryai.app",
       "supportsTablet": true
     },
     "android": {
+      "package": "com.inventoryai.app",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -33,6 +35,12 @@
           "barcodeScannerEnabled": true
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "607eca05-1175-43ed-86a0-1829e91c9531"
+      }
+    },
+    "owner": "jeffernqwes-team"
   }
 }

@@ -35,3 +35,6 @@ Desktop.ini
 
 # Local tooling artifacts (Playwright MCP browser console/page captures)
 .playwright-mcp/
+
+# Local smoke-test artifacts (UIAutomator dumps, screenshots) — never commit
+.smoke/

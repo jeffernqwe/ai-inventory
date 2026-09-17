@@ -1,0 +1,73 @@
+# EAS build archive exclusions (Phase 31B.2)
+#
+# WHY THIS FILE EXISTS
+# EAS CLI uses `.easignore` INSTEAD OF `.gitignore` when deciding what to upload.
+# So this file must carry the *union* of the rules that currently exclude files
+# from the mobile tree — both `mobile/.gitignore` and the relevant rules from the
+# repository-root `.gitignore` — and not merely the additions.
+#
+# The explicit `.smoke/` rule at the bottom is the point of the file: local
+# smoke-test artifacts (UIAutomator dumps, screenshots, capture logs). They were
+# previously excluded only by the repo-root `.gitignore`, and EAS's archive root
+# for a project sitting one level below the git root is not documented. Excluding
+# it here makes the exclusion independent of that unresolved behaviour.
+#
+# MAINTENANCE: when `mobile/.gitignore` changes, change this file too.
+
+# dependencies (mobile/.gitignore)
+node_modules/
+
+# environment — never upload secrets
+.env
+.env.*
+!.env.example
+
+# logs
+logs/
+*.log
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+pnpm-debug.log*
+
+# Expo (mobile/.gitignore)
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Native (mobile/.gitignore)
+.kotlin/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+/ios
+/android
+
+# Metro (mobile/.gitignore)
+.metro-health-check*
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editor
+.vscode/*
+.idea/
+*.swp
+
+# macOS certs (mobile/.gitignore)
+*.pem
+
+# typescript (mobile/.gitignore)
+*.tsbuildinfo
+
+# local tooling artifacts (repo-root .gitignore)
+.playwright-mcp/
+
+# Local smoke-test artifacts — never upload to EAS
+.smoke/

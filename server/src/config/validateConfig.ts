@@ -16,6 +16,11 @@
  *                   are present (respecting the provider abstraction: the
  *                   provider layer declares its own requirements). An empty
  *                   AI_PROVIDER is the supported "AI disabled" state.
+ *   - Firebase      when a service account IS configured, it must be complete and
+ *                   usable. An entirely unset Firebase configuration is the
+ *                   supported "Firebase disabled" state and is NOT a problem —
+ *                   which is what keeps an existing deployment bootable when
+ *                   Firebase is added but not yet used (Phase 32B adds no route).
  *
  * Problems are returned as { variable, message } objects. Messages name the
  * VARIABLE that is wrong — they never contain the variable's value, so no
@@ -26,6 +31,7 @@ import jwt from 'jsonwebtoken';
 import type { SignOptions } from 'jsonwebtoken';
 
 import { providerRequiredEnv } from '../services/ai/providers/index.ts';
+import { serviceAccountProblems } from './firebase.ts';
 
 /**
  * One problem with the production configuration. `message` names the VARIABLE
@@ -115,6 +121,23 @@ export function validateProductionConfig(
       }
     }
   }
+
+  // Phase 32B: Firebase Admin credentials.
+  //
+  // ALL-OR-NOTHING, and the empty case is deliberately not a problem. Firebase is
+  // an identity provider this server can run without — Phase 32B adds no route
+  // that uses it — so requiring these variables in production would make every
+  // existing deployment fail to boot the moment the code shipped. A partially
+  // supplied service account IS a problem, because a half-configured credential
+  // fails later, at the first token exchange, where the error is far harder to
+  // trace back to a missing variable.
+  //
+  // The check itself lives in config/firebase.ts, shared with the runtime
+  // resolver, so validation and use can never disagree about what "configured"
+  // means. It reports variable NAMES only and never a value — including on a JSON
+  // parse failure, where a parser's own message could quote the credential it
+  // rejected.
+  problems.push(...serviceAccountProblems(values));
 
   return problems;
 }

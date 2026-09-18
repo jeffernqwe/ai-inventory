@@ -147,6 +147,9 @@ Residual Security-Risk Decision Record & Documentation Reconciliation
         ↓
 Phase 30A
 EAS Development Build & iOS Readiness Foundation
+        ↓
+Phase 32A
+Firebase Authentication Architecture & Console Runbook
 ```
 
 ---
@@ -3376,6 +3379,83 @@ this phase is **statically** validated.
 - F-1 is recorded as **not fixed and not closed**.
 - Phase 30B is **not** started.
 - Nothing committed or pushed without explicit owner approval.
+
+---
+
+# 27G. Phase 32A — Firebase Authentication Architecture & Console Runbook
+
+## Objective
+
+Decide and record **how** Firebase Authentication will enter Inventory AI, before any of it is built.
+
+## Coding
+
+**None.** This phase is documentation only. No source file, dependency, package manifest, environment
+variable, database record, Firebase project, EAS or Render configuration, commit or push is changed.
+
+## Scope
+
+The phase deliberately does **not** create a Firebase project, does not generate a service account,
+does not install a package, does not migrate a user, and does not alter authentication behaviour.
+
+## Design authority
+
+The design itself lives in **`docs/superpowers/specs/2026-09-18-firebase-auth-design.md`**, which is the
+authoritative document. This section records only the decision and its load-bearing constraints.
+
+## What was decided
+
+**Option B — Firebase is the external identity provider; the existing MongoDB `User` + JWT + `Session`
+system remains the application's authentication and session layer.** The Firebase ID token is exchanged
+**once**, by a new public endpoint, for an Inventory AI access token; it never becomes the API bearer
+credential. Options A (complete replacement) and C (Firebase ID tokens used directly as API credentials)
+were evaluated against this codebase and rejected: both discard Phase 26A's per-device server-enforced
+revocation — a granularity Firebase does not offer — while still requiring the same MongoDB user lookup
+per request, making them strictly more work for less security.
+
+Three constraints follow, and each is a security property rather than a preference:
+
+- **`requireAuth` changes by zero lines.** Its 10-step check order, its error codes (`AUTH_REQUIRED`,
+  `INVALID_TOKEN`, `ACCOUNT_DISABLED`, `SESSION_INVALIDATED`, `SESSION_REVOKED`) and the
+  `req.user`/`req.auth` shapes stay as Phases 23 and 24 pin them.
+- **`businessId` and `role` continue to come from the MongoDB `User` record** — never from a request
+  body, query, header or token claim. `firebaseUid` is read only from a verified token payload.
+- **RBAC is untouched.** 4 roles, 21 permission keys, `ROLE_PERMISSIONS`, `CATALOGUE_ONLY_PERMISSIONS`
+  and the Phase 23 mobile mirror all stay exactly as they are. Nothing about permissions migrates to
+  Firebase, and Firestore is not introduced.
+
+The legacy path is **preserved, not deprecated in place**: `POST /api/auth/login`, `passwordHash`,
+`passwordChangedAt` and Phases 26B/27's recovery surface all survive Phase 32, which is what makes the
+mobile work revertible. Two additive `users` fields carry the mapping — `firebaseUid` (String,
+**`sparse: true`** unique, so legacy users without one remain valid) and `emailVerified` (Boolean,
+persisted but **not enforced** in this phase) — plus `passwordHash.required: false`.
+
+## Verification gates
+
+**Two facts are marked UNVERIFIED and are load-bearing.** Neither may be asserted from memory, and the
+authoritative documentation pages returned truncated content when checked:
+
+1. **Firebase `auth:import` support for our existing bcrypt rounds-10 hashes** — affects bulk migration
+   only; lazy migration is unaffected. If it fails, the fallback is lazy migration plus a forced-reset
+   campaign.
+2. **The exact React Native Firebase Expo config-plugin configuration for Expo SDK 57** — affects any
+   phase touching native mobile configuration.
+
+A related constraint: Phase 30A records that **no EAS build has ever been executed**, so the M1 path
+forces the project's first build, its first keystore, and a two-build SHA-1/SHA-256 fingerprint bootstrap.
+
+## Definition of Done
+
+- The design document exists at `docs/superpowers/specs/2026-09-18-firebase-auth-design.md`.
+- Option B is recorded as selected, with A and C recorded as rejected and why.
+- Every non-negotiable invariant is stated, and every preserved subsystem is named.
+- Both unverifiable facts are marked **UNVERIFIED**, each with a concrete route to settling it.
+- The open owner decisions — password-reset authority, email-verification enforcement, admin-created
+  users, Google account linking, M1 vs M2, native config-file storage, `passwordChangedAt` semantics
+  for Firebase-native accounts, Expo Go, lazy migration, and the stale "JavaScript" stack note in
+  CLAUDE.md §2 — are listed as decisions, **none resolved silently**.
+- **No source code, package, environment variable, database record, Firebase project, Render
+  configuration, commit or push is changed.**
 
 ---
 

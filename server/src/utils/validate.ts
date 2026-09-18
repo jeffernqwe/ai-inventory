@@ -251,6 +251,78 @@ export function validateResetPassword(body: Body) {
 }
 
 // ---------------------------------------------------------------------------
+// Firebase authentication (Phase 32C)
+// ---------------------------------------------------------------------------
+
+/** Same bound `validateRegister` applies to businessName and name. */
+const ACCOUNT_NAME_MAX = 100;
+
+/**
+ * A generous ceiling on a Firebase ID token, not a format check.
+ *
+ * A real ID token is roughly 1–2 KB; 4096 leaves room for a longer claim set
+ * without letting an unauthenticated caller post an arbitrarily large string to a
+ * route that hands it to the crypto layer — the same reason the reset token is
+ * bounded. Its SHAPE is deliberately not validated: any client-side rule could
+ * only ever reject a token the server would have accepted or accepted one it
+ * would have rejected, and the verifier is the only thing that can decide. A token
+ * that merely looks wrong becomes the verifier's single rejection, not a 400 that
+ * would imply the server knows what a real token looks like.
+ */
+const MAX_ID_TOKEN = 4096;
+
+/**
+ * Exchange payload. Reads `idToken` and `deviceLabel` and nothing else.
+ *
+ * Every other key — `firebaseUid`, `email`, `businessId`, `role`, `status`,
+ * whatever — is IGNORED rather than rejected, matching the other
+ * unauthenticated credential payloads (validateLogin, validateRegister,
+ * validateForgotPassword) rather than the strict allowlists on the
+ * self-service ones. Reading only these two is what makes those keys inert:
+ * there is no field in the returned object for a caller to forward.
+ *
+ * `deviceLabel` is returned UNVALIDATED. It is cosmetic, `normalizeDeviceLabel`
+ * coerces anything it is given, and a malformed label must never be able to fail
+ * a sign-in — exactly the contract `validateLogin` already has for it.
+ */
+export function validateFirebaseExchange(body: Body) {
+  const problems = [];
+  const idToken = requiredString(body?.idToken, 'idToken', MAX_ID_TOKEN);
+  problems.push(...idToken.problems);
+  return { problems, idToken: idToken.value, deviceLabel: body?.deviceLabel };
+}
+
+/**
+ * Registration payload. Reads `idToken`, `businessName` and `name`.
+ *
+ * `businessName` and `name` are PROFILE TEXT — the values a user types — and carry
+ * the same bounds `validateRegister` applies to them, so the two registration
+ * routes cannot disagree about what a valid business name is. Neither is an
+ * identity or an authorization input: the OWNER role, the ACTIVE status, the
+ * `businessId` and the `firebaseUid` are all assigned server-side, and the email
+ * comes from the verified token.
+ *
+ * `name` is OPTIONAL here, unlike on POST /api/auth/register, because the identity
+ * may come from a provider that supplies no display name; the service falls back
+ * to the email's local-part so the required field is always populated
+ * (Phase 32A §7.3). An empty or absent value is therefore not a problem to report.
+ */
+export function validateFirebaseRegister(body: Body) {
+  const problems = [];
+
+  const idToken = requiredString(body?.idToken, 'idToken', MAX_ID_TOKEN);
+  problems.push(...idToken.problems);
+
+  const businessName = requiredString(body?.businessName, 'businessName', ACCOUNT_NAME_MAX);
+  problems.push(...businessName.problems);
+
+  const name = optionalString(body?.name, 'name', ACCOUNT_NAME_MAX);
+  problems.push(...name.problems);
+
+  return { problems, idToken: idToken.value, businessName: businessName.value, name: name.value };
+}
+
+// ---------------------------------------------------------------------------
 // User management (Phase 14A)
 // ---------------------------------------------------------------------------
 

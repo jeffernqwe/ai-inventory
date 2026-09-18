@@ -79,6 +79,7 @@ const MIXED = [
   'phase26b-password-recovery.test.mjs', // unit: token generation/hashing/reset URL + password-policy drift guard; db: token store + recovery service over real MongoDB
   'phase26b-password-recovery-http.test.mjs', // unit: recovery validators + limiter 429 shape/keying; db: forgot/reset over the real app incl. the mail-failure enumeration guard
   'phase32b-firebase-admin.test.mjs', // unit: Firebase config parsing, error leak boundary, ID-token narrowing via the seam, admin-app lifecycle, production-config integration; db: User firebaseUid/emailVerified schema + the sparse unique index against real MongoDB
+  'phase32c-firebase-exchange.test.mjs', // unit: exchange/registration validators + limiter keying and the absent skipSuccessfulRequests; db: POST /api/auth/firebase/exchange + /register over the real app (session shape, JWT sub/jti, REGISTRATION_REQUIRED, ACCOUNT_DISABLED, inactive business, body-identity injection ignored, registration + orphan retry)
 ];
 
 const FILE_LISTS = {

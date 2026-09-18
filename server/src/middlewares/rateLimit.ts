@@ -52,6 +52,10 @@ export type AuthRateConfig = {
   passwordResetIpMax: number;
   passwordResetConfirmWindowMs: number;
   passwordResetConfirmMax: number;
+  firebaseExchangeWindowMs: number;
+  firebaseExchangeMax: number;
+  firebaseRegisterWindowMs: number;
+  firebaseRegisterMax: number;
 };
 
 function positiveInt(raw: string | undefined, fallback: number): number {
@@ -100,6 +104,25 @@ export function authRateConfig(overrides: Partial<AuthRateConfig> = {}): AuthRat
       15 * 60 * 1000
     ),
     passwordResetConfirmMax: positiveInt(process.env.AUTH_PASSWORD_RESET_CONFIRM_RATE_LIMIT_MAX, 20),
+    // Firebase authentication (Phase 32C). The exchange window is the same length
+    // as login's and its cap is STRICTER (30 vs 60), because each accepted request
+    // costs a signature verification against Google's keys while a login attempt
+    // that fails early costs a bcrypt comparison. A legitimate client exchanges
+    // once per sign-in and again only when its application JWT expires or is
+    // revoked, so 30 per 15 minutes per address is far above real use and well
+    // below what makes an unthrottled verification endpoint worth abusing.
+    firebaseExchangeWindowMs: positiveInt(
+      process.env.AUTH_FIREBASE_EXCHANGE_RATE_LIMIT_WINDOW_MS,
+      15 * 60 * 1000
+    ),
+    firebaseExchangeMax: positiveInt(process.env.AUTH_FIREBASE_EXCHANGE_RATE_LIMIT_MAX, 30),
+    // Registration mirrors the password register limiter: mass account creation is
+    // the same attack whichever route performs it, so the limits match (30/hour).
+    firebaseRegisterWindowMs: positiveInt(
+      process.env.AUTH_FIREBASE_REGISTER_RATE_LIMIT_WINDOW_MS,
+      60 * 60 * 1000
+    ),
+    firebaseRegisterMax: positiveInt(process.env.AUTH_FIREBASE_REGISTER_RATE_LIMIT_MAX, 30),
     ...overrides,
   };
 }
@@ -284,6 +307,82 @@ export function createPasswordResetConfirmLimiter(overrides: Partial<AuthRateCon
   });
 }
 
+// ---------------------------------------------------------------------------
+// Firebase authentication (Phase 32C)
+// ---------------------------------------------------------------------------
+//
+// The exchange route MINTS SESSIONS on an unauthenticated endpoint, which makes it
+// the highest-value target Phase 32 introduces, so it is limited from the day it
+// ships (Phase 32A §15) using the existing factories' mechanism and nothing new.
+//
+// `skipSuccessfulRequests` is OMITTED, and on this route that is the whole point
+// rather than a detail: a successful exchange is a 2xx, so counting only failures
+// would exempt precisely the traffic the limiter exists to bound — an attacker
+// with a pile of valid tokens. The option appears on the two Phase 07B login
+// limiters (where it stops users locking themselves out with their own correct
+// passwords) and on nothing else; both facts are asserted in the suites.
+//
+// TWO THINGS PHASE 32A §15 ASKED FOR ARE DELIBERATELY NOT HERE, and the reason is
+// structural rather than an omission:
+//
+//   * AN IDENTITY-KEYED BUCKET. The spec says "if a stable key exists". At the
+//     middleware layer none does: the identity is only known AFTER verification,
+//     and the only pre-verification key the caller supplies is the ID token
+//     itself — which an attacker rotates freely and a legitimate client replaces
+//     every hour, so keying on it would bound nothing while giving every rotation
+//     a fresh budget. A per-identity cap therefore needs a counter written AFTER
+//     verification, inside the request, which is new mechanism rather than the
+//     reuse §15 asks for. It is left out rather than faked, and the per-IP buckets
+//     below are the address-rotation backstop the same section names.
+//   * `REGISTRATION_REQUIRED` IS COUNTED, NOT SKIPPED — which is why the omission
+//     above matters here too. It is a legitimate outcome and a 403, so a limiter
+//     that skipped 4xx, or that counted only successes, would leave the
+//     "which Firebase identities exist" surface §15 names unbounded.
+//
+// SHARED CODE: both answer FIREBASE_RATE_LIMITED, the way LOGIN_RATE_LIMITED
+// already spans the two login limiters. A client needs to know "you are being
+// throttled signing in with Firebase", not which bucket caught it.
+const FIREBASE_RATE_LIMITED = 'FIREBASE_RATE_LIMITED';
+const FIREBASE_RATE_LIMITED_MESSAGE =
+  'Too many sign-in attempts. Please wait a moment and try again.';
+
+/**
+ * Exchange limiter — per IP.
+ *
+ * Same explicit `request.ip` keying rationale as createLoginIpLimiter: never the
+ * library default, which turns a spoofed X-Forwarded-For into a 500 until the
+ * operator sets TRUST_PROXY.
+ */
+export function createFirebaseExchangeLimiter(overrides: Partial<AuthRateConfig> = {}) {
+  const { firebaseExchangeWindowMs, firebaseExchangeMax } = authRateConfig(overrides);
+  return rateLimit({
+    windowMs: firebaseExchangeWindowMs,
+    limit: firebaseExchangeMax,
+    keyGenerator(request) {
+      return ipKeyGenerator(clientIp(request));
+    },
+    ...limitResponse(FIREBASE_RATE_LIMITED, FIREBASE_RATE_LIMITED_MESSAGE),
+  });
+}
+
+/**
+ * Registration limiter — per IP, counting every attempt, mirroring
+ * createRegisterLimiter. Keying on the email would let bots bypass it by cycling
+ * addresses, which for federated signup is even easier than for the password path
+ * because a throwaway Firebase account is cheap.
+ */
+export function createFirebaseRegisterLimiter(overrides: Partial<AuthRateConfig> = {}) {
+  const { firebaseRegisterWindowMs, firebaseRegisterMax } = authRateConfig(overrides);
+  return rateLimit({
+    windowMs: firebaseRegisterWindowMs,
+    limit: firebaseRegisterMax,
+    keyGenerator(request) {
+      return ipKeyGenerator(clientIp(request));
+    },
+    ...limitResponse(FIREBASE_RATE_LIMITED, FIREBASE_RATE_LIMITED_MESSAGE),
+  });
+}
+
 export default {
   authRateConfig,
   createLoginAccountLimiter,
@@ -292,4 +391,6 @@ export default {
   createPasswordResetRequestAccountLimiter,
   createPasswordResetRequestIpLimiter,
   createPasswordResetConfirmLimiter,
+  createFirebaseExchangeLimiter,
+  createFirebaseRegisterLimiter,
 };

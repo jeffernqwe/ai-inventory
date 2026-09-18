@@ -2,6 +2,7 @@ import { Router } from 'express';
 
 import { register, login, me, changePassword, updateMe, logout, listSessions, revokeSession } from '../controllers/auth.controller.ts';
 import { forgotPassword, resetPassword as resetPasswordHandler } from '../controllers/passwordReset.controller.ts';
+import { firebaseExchange, firebaseRegister } from '../controllers/firebaseAuth.controller.ts';
 import requireAuth from '../middlewares/authenticate.ts';
 import {
   createLoginAccountLimiter,
@@ -10,6 +11,8 @@ import {
   createPasswordResetRequestAccountLimiter,
   createPasswordResetRequestIpLimiter,
   createPasswordResetConfirmLimiter,
+  createFirebaseExchangeLimiter,
+  createFirebaseRegisterLimiter,
 } from '../middlewares/rateLimit.ts';
 import type { AuthRateConfig } from '../middlewares/rateLimit.ts';
 
@@ -54,6 +57,24 @@ export function createAuthRouter({ limits }: AuthRouterOptions = {}) {
     forgotPassword
   );
   router.post('/reset-password', createPasswordResetConfirmLimiter(limits), resetPasswordHandler);
+
+  // Public — Firebase authentication (Phase 32C). Both routes are reachable ONLY
+  // by a caller who does not hold an Inventory AI JWT, which is why they carry no
+  // requireAuth: the exchange exists to turn a Firebase ID token into a session
+  // precisely when there is no session yet, and requiring one would make it able
+  // to mint only sessions that already exist. Naming a permission is equally
+  // impossible — the caller has no role here, and the role they end up with comes
+  // from the MongoDB User the verified uid resolves to, never from this request.
+  //
+  // The ID token travels in the POST body, never a URL, so it cannot reach the
+  // access log (httpLogger records req.path only) or a Referer header — the same
+  // reasoning the recovery routes use for the reset token.
+  //
+  // Both are per-IP limited from the day they ship: the exchange mints sessions
+  // on an unauthenticated endpoint, and registration creates a Business. Neither
+  // limiter sets skipSuccessfulRequests — see middlewares/rateLimit.ts.
+  router.post('/firebase/exchange', createFirebaseExchangeLimiter(limits), firebaseExchange);
+  router.post('/firebase/register', createFirebaseRegisterLimiter(limits), firebaseRegister);
 
   // Protected
   router.get('/me', requireAuth, me);

@@ -29,7 +29,8 @@
 //
 //        PERMISSION_GATED — carries a permission gate. The default.
 //        AUTHENTICATED    — requireAuth + controller only (self-service routes).
-//        PUBLIC           — no authentication at all (health, login/register).
+//        PUBLIC           — no authentication at all (health, login/register,
+//                           password recovery, Firebase exchange/registration).
 //        ROLE_GATED       — a requireRole() gate. DECLARED LIST IS EMPTY: there
 //                           are no role-name-gated routes, and adding one
 //                           requires declaring it here and saying why.
@@ -226,6 +227,14 @@ const PUBLIC_ROUTES = [
   {
     route: 'POST /api/auth/reset-password',
     why: 'Phase 26B-3: spends a reset link — reachable only by a caller with no working password; rate-limited per IP',
+  },
+  {
+    route: 'POST /api/auth/firebase/exchange',
+    why: 'Phase 32C: turns a verified Firebase ID token into an application session — the caller holds no Inventory AI JWT by definition, which is what the exchange exists to remedy; rate-limited per IP',
+  },
+  {
+    route: 'POST /api/auth/firebase/register',
+    why: 'Phase 32C: creates the Business + OWNER user for a Firebase-verified identity that has no tenant yet — the caller holds no Inventory AI JWT and no role, both of which are assigned server-side; rate-limited per IP',
   },
 ];
 

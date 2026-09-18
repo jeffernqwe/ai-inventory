@@ -78,6 +78,7 @@ const MIXED = [
   'phase16-audit-viewer.test.mjs', // db: read-only audit trail over GET /api/audit (RBAC, isolation, filters, pagination, actor population, DTO hygiene)
   'phase26b-password-recovery.test.mjs', // unit: token generation/hashing/reset URL + password-policy drift guard; db: token store + recovery service over real MongoDB
   'phase26b-password-recovery-http.test.mjs', // unit: recovery validators + limiter 429 shape/keying; db: forgot/reset over the real app incl. the mail-failure enumeration guard
+  'phase32b-firebase-admin.test.mjs', // unit: Firebase config parsing, error leak boundary, ID-token narrowing via the seam, admin-app lifecycle, production-config integration; db: User firebaseUid/emailVerified schema + the sparse unique index against real MongoDB
 ];
 
 const FILE_LISTS = {

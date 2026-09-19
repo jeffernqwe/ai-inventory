@@ -27,6 +27,10 @@ const createStyles = (colors: Palette) =>
     // Margin rather than a `gap` on the wrapper: the two lines are separate
     // Text nodes precisely so each centres on its own when it wraps.
     footerSpaced: { marginTop: spacing.md },
+    // The registration action, directly under the info banner that asks for it.
+    // Same alignment as the footer lines, and no negative margin to claw back the
+    // banner's own spacing — the two read as one block.
+    actionRow: { ...type.bodySmall, alignSelf: 'stretch', textAlign: 'center' },
     link: { color: colors.link, fontWeight: '700' },
   });
 
@@ -38,6 +42,22 @@ function fieldMap(err: unknown): Record<string, string> {
   return out;
 }
 
+/**
+ * Phase 32E — the one server outcome this screen must do more than print.
+ *
+ * `POST /api/auth/firebase/exchange` answers `REGISTRATION_REQUIRED` when the
+ * identity authenticated with Firebase but has no Inventory AI account yet. The
+ * server's message tells the user to create a business account, and this is the
+ * screen that has to make that actionable — the message names a journey, so the
+ * journey needs a control. It is rendered in the INFO tone rather than the error
+ * tone: the credentials were accepted, and nothing the user did was wrong.
+ *
+ * Every other refusal (ACCOUNT_DISABLED, BUSINESS_NOT_ACTIVE,
+ * FIREBASE_SIGN_IN_REQUIRED, INVALID_CREDENTIALS) is a statement with nothing to
+ * press and is shown as an ordinary error banner.
+ */
+const REGISTRATION_REQUIRED = 'REGISTRATION_REQUIRED';
+
 export default function LoginScreen() {
   const { status, user, signIn } = useSession();
   const { colors } = useTheme();
@@ -46,6 +66,7 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
+  const [needsAccount, setNeedsAccount] = useState(false);
   const [busy, setBusy] = useState(false);
 
   if (status === 'signedIn') return <Redirect href={defaultHomePath(user)} />;
@@ -54,13 +75,17 @@ export default function LoginScreen() {
     setBusy(true);
     setFormError(null);
     setFieldErrors({});
+    setNeedsAccount(false);
     try {
       await signIn({ email, password });
       // Navigation: on success the signedIn guard redirects this screen away.
     } catch (err) {
       const fields = fieldMap(err);
       if (Object.keys(fields).length) setFieldErrors(fields);
-      else setFormError((err as { message?: string } | null)?.message || 'Unable to sign in. Please try again.');
+      else {
+        setNeedsAccount(err instanceof ApiError && err.code === REGISTRATION_REQUIRED);
+        setFormError((err as { message?: string } | null)?.message || 'Unable to sign in. Please try again.');
+      }
     } finally {
       setBusy(false);
     }
@@ -86,7 +111,14 @@ export default function LoginScreen() {
         </View>
       }
     >
-      <Banner type="error" text={formError} />
+      {needsAccount ? <Banner type="info" text={formError} /> : <Banner type="error" text={formError} />}
+      {needsAccount ? (
+        <Text style={styles.actionRow}>
+          <Link href="/register" style={styles.link}>
+            Create a business account
+          </Link>
+        </Text>
+      ) : null}
       <Input
         name="email"
         label="Email"

@@ -19,6 +19,69 @@ const ACTIVE_STATUS = 'ACTIVE';
 const DUMMY_HASH = bcrypt.hashSync('timing-equalizer-placeholder', BCRYPT_ROUNDS);
 
 /**
+ * Phase 32E — the legacy password route refusing an account that Firebase owns.
+ *
+ * WHY THIS EXISTS. Inventory AI is mid-migration: `passwordHash` is still written
+ * by registration and still verified here, while `firebaseUid` marks an account
+ * whose credential is held by Firebase. An account can carry BOTH — the Phase 32A
+ * §9.1 lazy migration writes `firebaseUid` onto an account that keeps its hash —
+ * and from that moment the bcrypt hash is a second, independently valid credential
+ * for the same identity. Nothing keeps the two in step: `changePassword` below
+ * rewrites the hash without telling Firebase anything, so a user who changes their
+ * password here leaves a Firebase password behind that still works.
+ *
+ * THE BYPASS THIS CLOSES. Without the guard, the mobile client's legacy fallback
+ * (which fires whenever Firebase refuses the credentials) would authenticate a
+ * Firebase-linked account through that retained hash — so a wrong Firebase password
+ * would not matter, and the Firebase credential would be decorative. The client
+ * cannot be trusted to prevent this and is not asked to: it cannot even SEE the
+ * difference, because `auth/invalid-credential` is deliberately ambiguous — Firebase
+ * returns it for "no such user" and "wrong password" alike, to stop enumeration. The
+ * distinction is therefore made here, where the `firebaseUid` is readable.
+ *
+ * PLACEMENT IS THE WHOLE DESIGN, and every line below it depends on the order:
+ *
+ *   1. AFTER the password comparison. A caller who has not proved the legacy
+ *      password gets the ordinary 401 and learns nothing — so this is NOT an
+ *      account-enumeration oracle. Only someone who already holds a working
+ *      credential for the account is told that the account is Firebase-linked.
+ *   2. AFTER the status check. A disabled account answers ACCOUNT_DISABLED on this
+ *      route exactly as it always has, so the migration changes nothing about how
+ *      disablement is reported.
+ *   3. BEFORE `assertActiveBusiness` and the session write. No session is created,
+ *      so the refusal cannot leave a half-login behind. Without a session there is
+ *      nothing to revoke and nothing for `requireAuth` to admit.
+ *
+ * 403, not 401: the credential WAS correct — the caller authenticated, and is
+ * being told they must present it through a different door. It is also the status
+ * the adjacent "you authenticated but may not proceed" outcomes already use
+ * (`ACCOUNT_DISABLED`, `BUSINESS_NOT_ACTIVE`, `REGISTRATION_REQUIRED`), so a client
+ * needs one branch for the family rather than a second one for this case.
+ *
+ * THE LEGACY ROUTE IS NOT REMOVED, AND NOBODY IS LOCKED OUT. The route keeps
+ * working for every account that has no `firebaseUid` — which today is every
+ * account — and a Firebase-linked account signs in through
+ * `POST /api/auth/firebase/exchange`, the route that already exists for it. What
+ * the account loses is only the second, unmanaged credential.
+ */
+export const FIREBASE_SIGN_IN_REQUIRED_CODE = 'FIREBASE_SIGN_IN_REQUIRED';
+
+/**
+ * THE COPY NAMES NO SCREEN, deliberately. It is tempting to write "use the
+ * Firebase sign-in button", but Phase 32E signs in through this same email and
+ * password form — there is no separate control to point at — and the later
+ * provider phases will add one. Naming a credential rather than a control is
+ * therefore accurate in both worlds: the caller typed a password that verified
+ * against this account's retained hash, so the actionable fact is that the
+ * password that owns the account is Firebase's, not this one.
+ */
+const FIREBASE_SIGN_IN_REQUIRED_MESSAGE =
+  'This account signs in with Firebase. Enter your Firebase password to continue.';
+
+const INVALID_CREDENTIALS_MESSAGE = 'Invalid email or password';
+const ACCOUNT_DISABLED_MESSAGE = 'This account is disabled. Contact an administrator.';
+
+/**
  * Local to this module, following `inventory.service.ts`, `product.service.ts`,
  * `audit.service.ts` and `users.service.ts`: every caller passes either the
  * string `req.user` carries or the ObjectId a document the server already loaded
@@ -120,6 +183,12 @@ export async function registerBusinessOwner({ businessName, name, email, passwor
  * DISABLED accounts are rejected with 403. On success returns a signed access
  * token, the public user, and the session row the token names.
  *
+ * Phase 32E: DISABLED and FIREBASE-LINKED accounts are rejected with 403. The
+ * Firebase refusal is the one thing this phase changes here — the guard sits
+ * after both checks above it, so nothing about how a wrong password or a
+ * disabled account is reported has moved. See
+ * {@link FIREBASE_SIGN_IN_REQUIRED_CODE}.
+ *
  * Phase 26A: the token is no longer the whole session. A login opens a
  * server-side session first and embeds its id as the token's `jti`, so the
  * token can be withdrawn. The session is written BEFORE the token is returned —
@@ -136,10 +205,17 @@ export async function loginWithPassword({ email, password, deviceLabel }: LoginP
   );
 
   if (!user || !passwordOk) {
-    throw new ApiError(401, 'Invalid email or password', 'INVALID_CREDENTIALS');
+    throw new ApiError(401, INVALID_CREDENTIALS_MESSAGE, 'INVALID_CREDENTIALS');
   }
   if (user.status !== ACTIVE_STATUS) {
-    throw new ApiError(403, 'This account is disabled. Contact an administrator.', 'ACCOUNT_DISABLED');
+    throw new ApiError(403, ACCOUNT_DISABLED_MESSAGE, 'ACCOUNT_DISABLED');
+  }
+  // Phase 32E: the credentials are valid, but this account's credential is held by
+  // Firebase, so the retained bcrypt hash must not be a second way in. Sits after
+  // the two checks above and before every side effect — see the constant's comment
+  // for why each position is load-bearing.
+  if (user.firebaseUid) {
+    throw new ApiError(403, FIREBASE_SIGN_IN_REQUIRED_MESSAGE, FIREBASE_SIGN_IN_REQUIRED_CODE);
   }
   // Phase 07B / H2: the credentials are valid, but the tenant must be present
   // and ACTIVE. SUSPENDED / ARCHIVED / deleted businesses cannot log in. This

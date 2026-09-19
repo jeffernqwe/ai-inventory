@@ -19,7 +19,7 @@ That document is the primary source of truth for the system.
 - React Native
 - Expo
 - Expo Router
-- JavaScript
+- TypeScript
 
 ### Backend
 
@@ -255,6 +255,10 @@ Phase 27 — Mobile Password Recovery (`/forgot-password` and `/reset-password` 
 Phase 28 — Password Reset Mail Delivery Timing Hardening (B1 ONLY — the outbound password-reset email send is detached from the HTTP request path, so the 202 no longer waits on a mail provider: the send is dispatched unawaited after the durable token and audit writes, with an explicit rejection handler attached in the same synchronous turn; the pre-lookup `MAIL_NOT_CONFIGURED` 503, the uniform 202, token semantics, audit ordering, rate limiting and mobile are unchanged; PARTIALLY MITIGATED, NOT CLOSED — the residual database-work timing term is NOT eliminated; B2 was NOT implemented and remains open)
 Phase 29 — Residual Security-Risk Decision Record & Documentation Reconciliation (documentation only; records the owner's dispositions of the three remaining open security items — B1's residual database-work timing term ACCEPTED FOR V1 and DEFERRED, still PARTIALLY MITIGATED and NOT CLOSED; B2 and E3 DEFERRED TO V4 as related shared-infrastructure work, both still open — and reconciles the roadmap Phase Overview, the missing README Phase 26B entry, and the specification's §48 future-roadmap list with what has already shipped; no production code, test, dependency, configuration, limiter or password-reset behavior changed, no shared store introduced, and no historical verification snapshot back-updated)
 Phase 30A — EAS Development Build & iOS Readiness Foundation (EAS foundation only: the Expo Continuous Native Generation architecture is retained and no `ios/` or `android/` directory exists or is committed; the project is linked to EAS project `@jeffernqwes-team/inventory-ai` — `607eca05-1175-43ed-86a0-1829e91c9531`; `mobile/eas.json` defines `development`, `ios-simulator`, `preview` and `production` with `cli.appVersionSource: "remote"` and no update channel; `expo-dev-client` added and `expo-updates` deliberately not installed; bundle/package identifier `com.inventoryai.app` on both platforms; NO EAS build, submit or prebuild has been executed, so the phase is statically validated only and NOT runtime-verified; F-1 is NOT fixed and NOT closed; Phase 30B has NOT started)
+Phase 32B — Firebase Admin SDK Foundation (server-only verify boundary: Admin SDK dependency, `config/firebase.ts`, ID-token verifier wrapper, environment validation + production fail-fast, `.env.example` names, and three additive `users` fields — `firebaseUid` String `sparse: true` unique, `emailVerified` Boolean persisted but NOT enforced, `passwordHash.required: false`; NO routes)
+Phase 32C — Firebase Authentication Session Exchange (two PUBLIC routes `POST /api/auth/firebase/exchange` and `POST /api/auth/firebase/register`, their service and rate limiters; the Firebase ID token is exchanged ONCE for an existing Inventory AI access token and never becomes the API bearer credential; `REGISTRATION_REQUIRED` for a verified identity with no MongoDB user; a colliding email is refused with `EMAIL_IN_USE` — linking is REFUSED, not implemented; `requireAuth`, RBAC and the legacy path unchanged)
+Phase 32D — Firebase JS SDK Boundary (mobile `lib/firebase.ts` ONLY: SDK version, initialization order, the `inMemoryPersistence` decision and the `EXPO_PUBLIC_FIREBASE_*` gate that leaves the SDK uninitialized; infrastructure only — no screen reaches Firebase, no API call is made, no authentication state is touched)
+Phase 32E — Firebase Email/Password Authentication Flow (mobile Firebase-first sign-in exchanging its ID token through the 32C endpoint, with the legacy password route reached ONLY for the two codes that mean "no Firebase identity answers to these credentials" — `auth/invalid-credential` and `auth/user-not-found` — never for a Firebase or backend failure, so an outage cannot become a downgrade; plus the server-side `firebaseUid` guard refusing the legacy route with 403 `FIREBASE_SIGN_IN_REQUIRED`; Google Sign-In NOT implemented; account linking and migration NOT implemented)
 ```
 
 Phase 08 is an owner-directed hardening extension delivered in approved lettered increments
@@ -792,6 +796,62 @@ simulator or device run and no APK install was performed. The phase is **statica
 `jest` 11 suites / 88 tests, `tsc --noEmit`, `eslint .` and `expo-doctor` 21/21, all identical before and
 after, plus config introspection for the resolved native surface. **F-1 (PDF sharing) is NOT fixed and
 NOT closed**, and **Phase 30B has NOT started**.
+
+Phase 32B and 32C are the server half of the Firebase migration, and both are additive by construction.
+32B installs the Admin SDK and the ID-token verify boundary behind `server/src/services/firebase/` and
+changes three things on the `users` model; 32C exposes the exchange. Two constraints make the design
+acceptable, and both are structural rather than asserted: **`requireAuth` changed by zero lines** — the
+Firebase ID token is exchanged ONCE for an ordinary Inventory AI JWT, so Phase 26A's per-device session
+revocation, `authenticate.ts`'s check order and every one of its error codes stay exactly as Phases
+23/24 pin them — and **`businessId`/`role` still come from the MongoDB `User`**, never from a request
+body, query, header or token claim, with `firebaseUid` read only from a verified payload. RBAC is
+untouched: 4 roles, 21 permission keys, `ROLE_PERMISSIONS`, `CATALOGUE_ONLY_PERMISSIONS` and the Phase 23
+mobile mirror are unchanged. `sparse: true` on `firebaseUid` is **mandatory, not decorative** — without
+it the second legacy user without a uid collides with the first, breaking the legacy registration path
+outright. 32C's registration route **refuses to link accounts**: a verified identity whose email already
+belongs to a MongoDB user answers `409 EMAIL_IN_USE`, and account linking/migration was deliberately not
+implemented.
+
+Phase 32D then 32E are the mobile half, in that order deliberately: 32D establishes the SDK boundary and
+signs nobody in, and 32E is the first phase that calls it. 32E's central property is that the legacy
+password route is a **migration path, not a fallback** — it is reached only when Firebase reports that
+no identity answers to the credentials, and never when Firebase or the backend failed, because treating
+an outage as "try the other door" would let anyone who can break Firebase choose the weaker door. Both
+codes that carry that meaning are handled, `auth/invalid-credential` and `auth/user-not-found`, because
+they are the same signal under different project settings and handling only the first would hard-fail
+every legacy account on a project with email-enumeration protection disabled. The session the flow
+produces is the same Inventory AI JWT the app has always stored, so no session rule changed, and the
+`EXPO_PUBLIC_FIREBASE_*` gate keeps an unconfigured build on its pre-Firebase path.
+
+Four things Phase 32E decided or recorded, and they must not be lost. **The linked-account login guard:**
+`loginWithPassword` refuses an account carrying a `firebaseUid` with 403 `FIREBASE_SIGN_IN_REQUIRED`,
+placed after the password comparison and the status check — so it is not an enumeration oracle and
+`ACCOUNT_DISABLED` still reports as it always has — and before `assertActiveBusiness` and the session
+write, so no half-login can be left behind. **Its rollback consequence:** reverting the mobile build
+alone no longer restores access for a linked account, because a reverted build has no Firebase path at
+all, so rollback requires reverting the server behaviour too or disabling the guard. **The closed
+password-authority decision** (design document §14.1): for a linked account Firebase owns the password
+and the retained bcrypt hash is not a second way in, with the consequence recorded rather than glossed —
+`change-password` and the 26B/27 reset flow then stop changing the credential that actually
+authenticates the user. **One known limitation:** a legacy MongoDB account can have a Firebase identity
+created for the same email without ever being linked to it (the client creates the identity first, the
+server then answers `409 EMAIL_IN_USE`), and because the exchange resolves a user by `firebaseUid` only
+and never by email, that identity is permanently unhealable. It is **not an account takeover and not a
+lockout**, and no fix is implemented. The migration/linking phase is bound by the constraint recorded
+with it: when it creates the Firebase user for an existing account it will receive
+`auth/email-already-exists`, and that **MUST NOT be allowed to fail the legacy password login**.
+
+**Verification status.** 32B, 32C and 32D are committed (`982284a`, `d4d9f19`, `ad26d60`). 32E is
+implemented on branch `agent/phase-32e-firebase-auth` and **was not committed when this entry was
+written**. The 32E review verified its own surface by targeted runs only — the new
+`phase32e-firebase-legacy-guard.test.mjs` together with the modified
+`phase32c-firebase-exchange.test.mjs` (42 passed, 0 failed, with that file's unit half run separately:
+14 passed) and the three new mobile suites (3 suites / 46 tests) — and **no full suite was re-run for
+it**. No EAS build, no prebuild, no emulator or device run and **no live Firebase project** has been
+exercised for any of these phases, so the design document's two verification gates (bcrypt `auth:import`
+support; the Expo SDK 57 React Native Firebase config-plugin configuration) remain **UNVERIFIED**. The
+design authority is `docs/superpowers/specs/2026-09-18-firebase-auth-design.md`; the shipped record is
+`docs/DEVELOPMENT_ROADMAP.md` §27H.
 
 Phase 18 is an owner-directed mobile UI extension delivered in approved lettered increments (18A,
 18B, …) after Phase 17. It turns the app into a modern SaaS-style product surface WITHOUT changing

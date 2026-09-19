@@ -164,6 +164,68 @@ export function resetPassword({ token, newPassword, confirmPassword }: ResetPass
 }
 
 // ---------------------------------------------------------------------------
+// Firebase authentication (Phase 32C backend / 32E mobile)
+// ---------------------------------------------------------------------------
+// BOTH WRAPPERS ARE TOKENLESS, and that is structural rather than incidental.
+// `lib/client.ts` reports session loss only for a request that CARRIED a token
+// (`if (token && (res.status === 401 || res.status === 403))`), so a 401 or 403
+// from either route here cannot reach the session-lost handler and clear a
+// session that these routes never had. The caller is proving an identity with a
+// Firebase credential precisely BECAUSE they hold no Inventory AI JWT yet, so
+// passing one would make the endpoint able to mint only sessions that already
+// exist.
+//
+// The response of `firebaseExchange` is byte-for-byte the shape `login` returns
+// (token/tokenType/expiresIn/user), which is what lets `lib/auth.tsx` store it
+// exactly as it stores a password-login token. The Firebase ID token is consumed
+// server-side and is never a field of anything returned.
+
+export interface FirebaseExchangePayload {
+  /** A Firebase ID token from `lib/firebase-auth`. Consumed once, never stored. */
+  idToken: string;
+  /** Cosmetic device hint, exactly as `login` takes it. */
+  deviceLabel?: string;
+}
+
+/**
+ * POST /api/auth/firebase/exchange -> { token, tokenType, expiresIn, user } (200).
+ * PUBLIC — no session token is sent.
+ *
+ * 403 `REGISTRATION_REQUIRED` when the verified identity has no Inventory AI
+ * account yet; 403 `ACCOUNT_DISABLED` / `BUSINESS_NOT_ACTIVE`; 401
+ * `FIREBASE_TOKEN_INVALID` for a token the server would not accept; 503
+ * `FIREBASE_NOT_CONFIGURED` when the server has no service account.
+ */
+export function firebaseExchange({ idToken, deviceLabel }: FirebaseExchangePayload): Promise<ApiResponse> {
+  return apiFetch('/api/auth/firebase/exchange', {
+    method: 'POST',
+    body: { idToken, deviceLabel },
+  });
+}
+
+export interface FirebaseRegisterPayload {
+  idToken: string;
+  businessName: string;
+  name?: string;
+}
+
+/**
+ * POST /api/auth/firebase/register -> { user, business } (201, no token).
+ * PUBLIC — no session token is sent.
+ *
+ * Issues no token, exactly like `register`: the caller exchanges next. 409
+ * `EMAIL_IN_USE` when the verified identity's email already belongs to an
+ * Inventory AI account — the server refuses to link the two rather than merging
+ * them, so this is a real dead end and not a transient one.
+ */
+export function firebaseRegister({ idToken, businessName, name }: FirebaseRegisterPayload): Promise<ApiResponse> {
+  return apiFetch('/api/auth/firebase/register', {
+    method: 'POST',
+    body: { idToken, businessName, name },
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Users (Phase 14A backend / 14B mobile)
 // ---------------------------------------------------------------------------
 // OWNER/ADMIN only (users.manage). Create/assign never includes OWNER; the
@@ -489,6 +551,8 @@ export default {
   changePassword,
   forgotPassword,
   resetPassword,
+  firebaseExchange,
+  firebaseRegister,
   updateMe,
   logout,
   sessions,

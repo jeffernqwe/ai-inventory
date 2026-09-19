@@ -162,6 +162,9 @@ Firebase JS SDK Boundary (Client Initialization)
         ↓
 Phase 32E
 Firebase Email/Password Authentication & Legacy Fallback Guard
+        ↓
+Phase 32F
+Firebase Multi-Provider Authentication Architecture — Decision Record & Documentation Close-out
 ```
 
 ---
@@ -3566,6 +3569,127 @@ implementation itself.
 
 ---
 
+# 27I. Phase 32F — Firebase Multi-Provider Authentication Architecture (decision record & documentation close-out)
+
+## Design authority
+
+`docs/superpowers/specs/2026-09-18-firebase-auth-design.md` remains authoritative. **§14A is the
+decision register this phase created and is authoritative for the current state of the multi-provider
+architecture** — what is resolved, what is open, and what is implemented. This section records only
+what the phase shipped.
+
+## Objective
+
+Convert the multi-provider architecture from **open questions** into **recorded owner decisions**, so
+that Google Sign-In, Facebook Login, identity linking and legacy migration can each be implemented
+later without inventing policy in code — and reconcile the documentation drift found during the
+architecture investigation.
+
+## Coding
+
+NO implementation. This phase is documentation only.
+
+## What landed
+
+- **Eleven decisions recorded as RESOLVED** in design document §14A.3, each with its consequence:
+  - **R-1** Password authority for Firebase-linked accounts — Firebase is the authority, the retained
+    bcrypt hash is not a second door. The Phase 32E `FIREBASE_SIGN_IN_REQUIRED` guard is **retained
+    unchanged**.
+  - **R-2** A provider identity is **never** trusted from the request body; the provider UID comes
+    only from the verified credential.
+  - **R-3** A Firebase ID token is exchanged and does not become the application's bearer credential.
+  - **R-4** **Email is not an identity-linking join key.**
+  - **R-5** Lazy migration on successful legacy password login remains accepted.
+  - **R-6** Email / UID collision handling follows the existing documented behaviour (§7.4) — email →
+    `409 EMAIL_IN_USE`, UID → hard error, never auto-resolved.
+  - **R-7** Sessions remain **provider-neutral**; no provider field on the session model.
+  - **R-8** Account linking requires **explicit ownership proof**.
+  - **R-9** Provider linking must **not** silently happen on email equality.
+  - **R-10** Facebook missing-email cases require **explicit handling** — never invent an address,
+    never derive one from the UID.
+  - **R-11** **Subscription ownership is business-level**, never Firebase-user-level.
+- **The linking policy written out in full** (§14A.4): the prohibited automatic path, the approved
+  explicit-link flow for an already-authenticated user, and the requirement that linking *during a
+  sign-in attempt* needs an ownership/recovery proof flow.
+- **The open register kept separate** (§14A.5, O-1…O-11): unlink and last-method protection, the
+  linked-account `change-password`/reset disposition, `emailVerified` enforcement, M1 vs M2, the
+  Facebook missing-email flow, the unhealable-orphan remedy, credential-file storage, whether Firebase
+  takes over password reset, `passwordChangedAt` semantics for Firebase-native accounts, invitation
+  implementation, and the Expo Go policy. **None of these is settled, and none was settled in code.**
+- **Documentation reconciliation** across four documents, all of it additive or corrective to the
+  *current* state and none of it rewriting a historical phase record:
+  - `docs/SYSTEM_SPECIFICATION.md` — **§9** gained `planCode` in the Business model and a
+    *Subscription Ownership Is Business-Level* subsection; **§10** gained `firebaseUid`, `emailVerified`
+    and optional `passwordHash` in the conceptual User model plus an *Identity Linkage vs.
+    Authorization* subsection; **§29** gained the Firebase identity-provider boundary, the exchange
+    contract, password authority, the provider linking policy, the Facebook missing-email rule, the
+    unlink/revocation limits, provider-neutral sessions, and an explicit **Open Items** table; **§30**
+    gained the *User Creation Hierarchy* and *Invitation-Based Onboarding* subsections; **§35** gained
+    the `FIREBASE_*` **names** (never values); and the future-authentication list and **§48 V2** were
+    corrected to mark Google and Facebook as **planned but unimplemented**, Apple and MFA as future
+    scope, and Firebase itself as **shipped**.
+  - `README.md` — the **missing Phase 32A–32E entries were added to the Phase Status list** (it had
+    stopped at Phase 30A), and the Environment Configuration section gained the Firebase variable
+    **names** and the server-side-only rule.
+  - `CLAUDE.md` — §2 now records Firebase as the identity provider alongside the application-session
+    JWT, and §7 carries the Phase 32F entry.
+  - The **design document itself** — §14 gained a status header and per-item annotations (14.3 partly
+    resolved, 14.4 resolved, 14.9 confirmed, 14.10 resolved by the mobile TypeScript migration), §14A
+    was added, §20 gained the multi-provider invariants, §21 gained the shipped 32F row and a second
+    reconciliation note, and the header gained a current-status block.
+
+## The 32F number was reassigned, and that is recorded rather than smoothed over
+
+Design document §21's plan had **32F as "MongoDB sync"**. The owner reassigned the number to this
+decision record. Rather than renumber the unbuilt rows — which would silently restate a plan as a
+schedule — the planned rows are now marked *(planned)* and a second reconciliation note in §21 records
+the change. **No phase beyond 32F is authorised** by this work.
+
+## Scope
+
+**No** Google Sign-In, Facebook Login, Apple Sign-In, account linking, account unlinking, invitation
+functionality, provider SDK, OAuth client, schema change, route change, migration or backfill. **No**
+change to authentication behaviour, and in particular **no change to the Firebase exchange, to the
+Phase 32E `firebaseUid` guard, to `authenticate.ts`, to the session model, or to any RBAC artefact**.
+**No** payment or billing code touched. **No** EAS build, submit or prebuild created.
+
+## Implementation status (stated so it cannot be assumed)
+
+- **Google Sign-In: NOT started. Facebook Login: NOT started. Apple Sign-In: future scope.**
+- **Account linking: NOT implemented. Account unlinking: NOT implemented. Invitations: NOT
+  implemented.** The `users.manage` create route still exists unchanged and still accepts a password.
+- **No provider SDK is installed.** No OAuth client was created.
+- **No EAS build has been created.** The first EAS development build remains a **prerequisite** for
+  validating the selected mobile provider integration path, and until it exists **no provider
+  integration has been tested — and none is claimed to have been.**
+- Both **UNVERIFIED gates** are unchanged: Firebase `auth:import` bcrypt support (bulk migration) and
+  the React Native Firebase + Expo SDK 57 config-plugin configuration (M1 viability).
+
+## Verified
+
+Documentation-only phase. No application source file, test, dependency, package manifest, `.env` file,
+schema or route was changed; the changed-file set is documentation only, and the verification is the
+`git status` / `git diff --stat` review recorded with the phase. **No test suite was re-run for a
+documentation change**, and the existing suites are unaffected by it.
+
+## Definition of Done
+
+- Design document §14A exists and separates **resolved** decisions from **open** ones, with the eleven
+  approved decisions recorded and no implementation-specific detail marked resolved.
+- **Email auto-linking is explicitly prohibited** in both the design document (§14A.4) and the
+  specification (§29).
+- **The Firebase exchange remains documented as UID-authoritative**, and the Phase 32E password
+  authority remains documented as in force.
+- **Owner/ADMIN/MANAGER/STAFF creation hierarchy** and **invitation onboarding as future work** are
+  documented in the specification.
+- **Business-level subscription ownership** is documented in the specification.
+- **Google and Facebook are documented as planned providers; Apple remains future scope.**
+- **No provider implementation was performed**, and **no EAS build was created**.
+- **No source code, test, dependency, `.env` file or schema is changed**, and no commit beyond this
+  phase's own documentation commit is made.
+
+---
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.
@@ -3768,6 +3892,14 @@ Potential V2:
 - Document upload
 - RAG
 - MongoDB Vector Search
+- Google Sign-In (Firebase provider) — **approved, not implemented**
+- Facebook Login (Firebase provider) — **approved, not implemented**
+
+Firebase Authentication itself is **not** future work: it shipped as the identity provider in Phases
+32B–32E (§27H). The two provider entries are the approved-but-unimplemented part, each bound by the
+Phase 32F linking policy — **no automatic linking on an email match** — and by the open register in
+design document §14A.5. **Apple Sign-In remains future scope** and is not scheduled. No provider SDK
+is installed, and the first EAS development build remains a prerequisite (§27F).
 
 Shipped since this list was written, and no longer future work: the barcode/QR scanner (Phase 12B–12D),
 supplier management (Phase 13A, Phase 17), and stock transfers (Phase 19) — see their sections above.
@@ -3787,6 +3919,13 @@ Potential V4:
 - Billing
 - Team management
 - AI usage quotas
+
+Subscription and billing state belongs to the **business (tenant)**, never to an individual Firebase
+identity or user account: a change of Owner, or a change of authentication provider, must not
+transfer, destroy or recreate a business's subscription (specification §9). The Phase 10A foundation
+(`Business.planCode`, `server/src/constants/plans.ts`, the entitlement service) already keys entitlement
+off the business rather than the person; payments, the billing lifecycle and paid-plan enforcement
+remain unimplemented and deferred here.
 
 Future functionality must not be implemented during V1 unless explicitly approved.
 

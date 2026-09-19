@@ -6,6 +6,15 @@
 **Scope:** Documentation only. This phase changes no source code, no dependency, no configuration,
 no environment variable, no database record, and no authentication behaviour.
 
+> **Current status (2026-09-20).** This document is still the design authority, and its scope line
+> above describes **Phase 32A**, not the phases that followed. **Option B** (§5) is the selected
+> architecture, and Phases 32B–32E have since implemented it for email/password (§21, roadmap §27H).
+> **Phase 32F** recorded the multi-provider decisions in **§14A**, which is **authoritative for the
+> current state of the register** — what is resolved, what is open, and what is implemented. Where §14
+> and §14A differ in emphasis, §14A is current. **Google Sign-In, Facebook Login, Apple Sign-In,
+> account linking, account unlinking and invitations remain unimplemented**, and no provider SDK is
+> installed.
+
 ---
 
 # 1. Purpose
@@ -31,6 +40,11 @@ It does not reopen it.
 Everything in this section describes code that exists today and was read directly from the
 repository while writing this document. Nothing here is aspirational.
 
+> **Updated by Phase 32F (2026-09-20).** This section is the **pre-Firebase** baseline as Phase 32A
+> recorded it. Phases 32B–32E have since changed two things it states, marked inline below: the three
+> additive `users` fields, and `passwordHash` becoming optional. The superseded wording is kept beside
+> the correction rather than overwritten, so the delta stays visible.
+
 ## 2.1 Identity — MongoDB `users` collection
 
 `server/src/models/user.model.ts`.
@@ -40,17 +54,21 @@ repository while writing this document. Nothing here is aspirational.
 | `businessId` | ObjectId → `Business` | **required**, indexed. The tenant key. |
 | `name` | String | **required**, trimmed |
 | `email` | String | **required**, `unique`, lowercased, trimmed, regex-validated. A single global person identity — login is platform-wide, not per-business. |
-| `passwordHash` | String | **required**, `select: false` — never returned by default |
+| `passwordHash` | String | **`required: false`** (Phase 32B — was `required`), `select: false` — never returned by default |
+| `firebaseUid` | String | **added by Phase 32B.** `unique`, **`sparse: true`**. At most one account per Firebase identity; any number may have none. Sparse is mandatory — the index cannot be built once two accounts lack the field. |
+| `emailVerified` | Boolean | **added by Phase 32B.** `default: false`, persisted from the verified Firebase token claim and **not enforced** — no authorization decision reads it. |
 | `role` | String | enum `OWNER` \| `ADMIN` \| `MANAGER` \| `STAFF`, default `STAFF` |
 | `status` | String | enum `ACTIVE` \| `DISABLED`, default `ACTIVE` |
 | `passwordChangedAt` | Date | default `null`; the Phase 15 token-invalidation anchor |
 
 Indexes: `{businessId, role}`, `{businessId, status}`, `{businessId, createdAt: -1, _id: -1}`,
-plus the unique index on `email`.
+plus the unique index on `email` and the **sparse unique index on `firebaseUid`**.
 
 Credentials are bcrypt via `bcryptjs` at `BCRYPT_ROUNDS = 10`
 (`server/src/services/auth.service.ts`). The hash is produced in exactly two places:
-`registerBusinessOwner()` and the admin-side create in `server/src/services/users.service.ts`.
+`registerBusinessOwner()` and the admin-side create in `server/src/services/users.service.ts`. An
+account created through Firebase receives **no hash at all** — the API accepts no password on that
+path — which is why `required` had to become `false` in Phase 32B.
 
 ## 2.2 Session — MongoDB `sessions` collection
 
@@ -138,10 +156,16 @@ set.
 
 ## 2.6 Route inventory
 
-Phase 23 classifies **60 routes**: **47 permission-gated**, **7 authenticated**, **6 public**,
+Phase 23 classifies **67 routes**: **47 permission-gated**, **10 authenticated**, **10 public**,
 **0 role-gated**. The `PUBLIC` and `AUTHENTICATED` buckets are explicit lists that each carry a
 written reason; a route in no bucket fails the guard, and a declared exemption that has stopped being
 true also fails. There is deliberately **no route-count assertion**.
+
+> **Updated by Phase 32F (2026-09-20).** Phase 32A recorded this as "60 routes: 47 gated, 7
+> authenticated, 6 public". Phase 26A added three authenticated routes, Phase 26B-3 added two public
+> ones and **Phase 32C added the two Firebase public routes below** — 47 + 10 + 10 = 67. The gated
+> tier is unchanged at 47 throughout, which is the property that matters: no provider work has added
+> or moved a permission-gated route.
 
 The auth surface (`server/src/routes/auth.routes.ts`):
 
@@ -151,12 +175,19 @@ The auth surface (`server/src/routes/auth.routes.ts`):
 | POST | `/api/auth/login` | account limiter → IP limiter → controller |
 | POST | `/api/auth/forgot-password` | account limiter → IP limiter → controller |
 | POST | `/api/auth/reset-password` | confirm limiter → controller |
+| POST | `/api/auth/firebase/exchange` | firebase exchange limiter → controller |
+| POST | `/api/auth/firebase/register` | firebase register limiter → controller |
 | GET | `/api/auth/me` | `requireAuth` |
 | PATCH | `/api/auth/me` | `requireAuth` |
 | POST | `/api/auth/change-password` | `requireAuth` |
 | POST | `/api/auth/logout` | `requireAuth` (sign-out-everywhere is this route with `{all:true}`) |
 | GET | `/api/auth/sessions` | `requireAuth` |
 | DELETE | `/api/auth/sessions/:id` | `requireAuth` |
+
+Both Firebase routes are **public** and declared with their reasons in the Phase 23 guard: a caller
+exchanging an ID token holds no Inventory AI JWT by definition, which is what the exchange exists to
+remedy, and registration assigns `businessId` and `role` server-side. **Neither takes a provider
+identity from the request body** — the UID comes from the verified token (§14A, R-2).
 
 Rate limiting lives in `server/src/middlewares/rateLimit.ts`. The two **login** limiters are the only
 ones carrying `skipSuccessfulRequests: true`. The three recovery limiters deliberately **omit** it,
@@ -704,14 +735,20 @@ keystore's SHA-1 registered, and a Play-distributed build needs the Play App Sig
 
 ---
 
-# 14. Owner decisions (explicitly open)
+# 14. Owner decisions
 
-None of the following is decided by this document. Each is recorded here so it cannot be settled
-silently in code.
+This section is the **decision register**. It records what was once undecided, so nothing could be
+settled silently in code. The current state of every entry, and the register of decisions the owner
+approved in Phase 32F, are in **§14A** immediately below; the per-item history that follows here is
+kept in place rather than deleted, so the question each entry answered stays readable.
 
-**Status after Phase 32E (2026-09-20):** 14.1 is **resolved**, and 14.9 is **confirmed** subject to the
-§10 qualification. Both are annotated in place below rather than deleted, so the question each answered
-stays readable. The remaining eight are still open, and none of them has been settled in code.
+**Status after Phase 32F (2026-09-20):** the register is now split explicitly between **resolved**
+decisions and **open** ones — see §14A, which is authoritative for the current state. In summary:
+14.1 (password authority), 14.4 (linking policy) and 14.9 (lazy migration) are **resolved**; 14.3 is
+**partly resolved** (invitation-based onboarding is the approved direction, its implementation is
+open); 14.10 is **resolved** by the mobile TypeScript migration, which post-dated this document; and
+14.2, 14.5, 14.6, 14.7 and 14.8 remain **open**. No entry was removed, and no implementation-specific
+detail is marked resolved.
 
 **14.1 Password-reset authority. — PARTLY RESOLVED by Phase 32E (2026-09-20).**
 
@@ -745,15 +782,49 @@ for a custom action URL. This choice also closes or preserves the B1/B2/E3 risk 
 Phase 32. Enforcing it later is a behaviour change: today `signUp` logs the owner straight in, so
 gating API access on verification would strand new users on a screen the app does not yet have.
 
-**14.3 Admin-created users (Phase 14A).** When an ADMIN creates a user over `users.manage`, does the
-server create the Firebase account with the ADMIN-typed password (minimum change — the mobile
-`UserForm` already collects one), or does Firebase send an invite / password-reset email (better UX,
-but `password` becomes optional in the API contract)?
+**14.3 Admin-created users (Phase 14A). — PARTLY RESOLVED by Phase 32F (2026-09-20).**
 
-**14.4 Google account linking.** When a Google identity's email matches an existing password account,
-does the system link them automatically, require a prior password sign-in to prove ownership, or
-refuse? Firebase's default is to raise `auth/account-exists-with-different-credential`; auto-linking
-without proof is an account-takeover vector. **This must be decided before Google Sign-In ships.**
+**Resolved (direction):** the owner has approved **invitation-based onboarding** as the intended
+mechanism, rather than having the creator establish another person's Firebase password. An invitation
+is bound to the intended business and role, the invitee authenticates with an allowed Firebase
+provider, the server validates the invitation, and `businessId` and `role` are assigned **server-side**
+from the invitation — never from the invitee's request. The creator's own password is therefore never
+another person's credential, which removes the weakest part of the original options below.
+
+**Still open (implementation):** the invitation model, its lifetime and single-use semantics, the
+route surface, revocation, whether an invitation may change business, and how it interacts with the
+existing `users.manage` create route — which **still exists and still accepts a password**, unchanged.
+**No invitation model, route, service or screen exists**, and none may be added without an approved
+phase.
+
+The original question is retained below so the reasoning stays readable: when an ADMIN creates a user
+over `users.manage`, does the server create the Firebase account with the ADMIN-typed password
+(minimum change — the mobile `UserForm` already collects one), or does Firebase send an invite /
+password-reset email (better UX, but `password` becomes optional in the API contract)? The invitation
+direction answers the *intent*; the shipped route has not been changed to match it.
+
+**14.4 Google account linking. — RESOLVED by Phase 32F (2026-09-20).**
+
+**Resolved: the system does NOT link automatically.** When a provider identity's email matches an
+existing password account, the identities are **not** merged. **Email is not an account-linking join
+key**, and authenticating a provider identity is **not** proof of ownership of an existing Inventory
+AI account. The server stays **UID-authoritative**.
+
+The reasoning, recorded rather than asserted: if an identity asserting `john@example.com` were merged
+into an existing `john@example.com` account on the strength of the address, then anyone able to obtain
+a provider account bearing a victim's address would receive that victim's session — their `businessId`,
+their role, and their entire tenant's data. A provider that does not verify addresses, or that permits
+an address to be changed later, makes that reachable in practice. Firebase's own default here is to
+raise `auth/account-exists-with-different-credential`, which is the same refusal.
+
+**Linking is instead an explicit account operation** (§14A, "Safe account linking"), performed by an
+already-authenticated user, with the provider UID taken from the verified credential and never from a
+request body. **Linking during a sign-in attempt requires an explicit ownership/recovery proof flow**
+before it may attach to an existing account. **Neither flow is implemented.**
+
+The original question is retained below: does the system link automatically, require a prior password
+sign-in to prove ownership, or refuse? The answer is *refuse the automatic path*, and require proof on
+any explicit path — but the phase that implements it is not this one.
 
 **14.5 M1 vs M2** (§12).
 
@@ -773,11 +844,155 @@ it requires explicit acceptance or a compensating design.
 **14.8 Expo Go.** M1 forfeits Expo Go for day-to-day development. This affects every future mobile
 phase, not just Phase 32.
 
-**14.9 Acceptance of lazy migration** — that `POST /api/auth/login` and `passwordHash` survive all of
-Phase 32 (§9, §10).
+**14.9 Acceptance of lazy migration — CONFIRMED by Phase 32F (2026-09-20).** That
+`POST /api/auth/login` and `passwordHash` survive all of Phase 32 (§9, §10). Re-confirmed with the
+qualification below, which remains binding.
 
-**14.10 Documentation reconciliation.** CLAUDE.md §2 records the mobile stack as "JavaScript"; the
-app is TypeScript. Unrelated to Firebase, but it will mislead anyone planning mobile work.
+**14.10 Documentation reconciliation. — RESOLVED (not by a phase).**
+
+CLAUDE.md §2 recorded the mobile stack as "JavaScript" while the app is TypeScript. This was
+unrelated to Firebase, and it has since been corrected by the mobile TypeScript migration: CLAUDE.md
+§2 now reads **TypeScript** for the mobile stack, alongside the server's completed TypeScript
+campaign. No action remains. Retained here only so the entry is not silently dropped from the register.
+
+---
+
+# 14A. Phase 32F — Multi-provider decision record
+
+**Phase:** 32F
+**Date:** 2026-09-20
+**Scope:** Documentation only. This phase changes no source code, no dependency, no package manifest,
+no environment variable, no database record, no schema, no route, no authentication behaviour, no
+payment code, and creates no EAS build.
+
+This section is **authoritative for the current state of the multi-provider architecture**. It records
+the owner's decisions, separates what is **resolved** from what remains **open or future**, and states
+plainly what is **not implemented**. It does not authorise implementation of anything.
+
+## 14A.1 Architecture — Firebase as identity provider
+
+Firebase Authentication is the **identity provider**. It answers *who is this person?* — nothing more.
+The Inventory AI backend answers *which Inventory AI account and business does this person belong to,
+and what are they allowed to do?*
+
+MongoDB / Inventory AI remains authoritative for: `userId`, `businessId`, `role`, account status,
+permissions, business status, subscription/billing state, application sessions, and audit records.
+**Firebase UID is an identity linkage field, not an authorization source.**
+
+| Method | Status |
+| --- | --- |
+| Email/password via Firebase Authentication | **Implemented** (32B–32E) |
+| Google via Firebase Authentication | **Approved · NOT implemented** |
+| Facebook via Firebase Authentication | **Approved · NOT implemented** |
+| Apple Sign-In | **Future scope · NOT part of the current implementation** |
+
+## 14A.2 Security boundary
+
+The following are **server-controlled** and are never read from the mobile client: `businessId`,
+`role`, `status`, Firebase linkage, permissions, and subscription/business access. This is the
+existing Phase 03 / 14A / 22–24 contract, restated here because the provider work is where it would be
+most tempting to widen.
+
+- Firebase ID tokens are accepted **only** at the exchange boundary.
+- A Firebase ID token **must not** become the application's long-lived API bearer credential.
+- The backend exchanges a verified ID token for the existing Inventory AI JWT/session model.
+- **One unified Inventory AI session representation** exists regardless of provider. There are **no
+  provider-specific session types**, and **no provider field may be added to the session model** merely
+  because Google and Facebook are being added.
+
+## 14A.3 Resolved decisions (approved by the owner, Phase 32F)
+
+Each is a decision that was open and is now settled. **"Resolved" means the policy is decided — not
+that any code implements it.**
+
+| # | Decision | Consequence |
+| --- | --- | --- |
+| **R-1** | **Password authority for Firebase-linked accounts.** Firebase is the authority; the retained bcrypt hash is **not** a second authentication door. `loginWithPassword` continues to refuse with `403 FIREBASE_SIGN_IN_REQUIRED`. | The §14.1 guard is **retained unchanged** and must not be removed or weakened. |
+| **R-2** | **Provider identity is never trusted from the request body.** A provider UID is taken only from the verified Firebase credential/token. | Same standing as `businessId`, `role` and `status`. |
+| **R-3** | **A Firebase ID token is exchanged and does not become the application's bearer credential.** | Option B, unchanged. |
+| **R-4** | **Email is not an identity-linking join key.** A provider identity is never linked to an existing account solely because the email matches. | Binds every future provider phase. |
+| **R-5** | **Lazy migration on successful legacy password login is accepted** (§9.1). | Subject to the §10 qualification and the §16.6 binding constraint. |
+| **R-6** | **Email / Firebase UID collision handling follows the existing documented behaviour** (§7.4): email → `409 EMAIL_IN_USE`; UID → **hard error**, never auto-resolved. | Already implemented; unchanged. |
+| **R-7** | **Sessions remain provider-neutral.** | No schema change; no provider field on `sessions`. |
+| **R-8** | **Account linking requires explicit ownership proof.** | A sign-in is evidence about an identity, not about an account. |
+| **R-9** | **Provider linking must not silently happen based on email equality.** | Auto-linking on an address match is **prohibited**. |
+| **R-10** | **Facebook missing-email cases require explicit handling.** Never invent an email; never derive one from the Facebook UID; require email completion before creating the user. | Binds the future Facebook phase. |
+| **R-11** | **Subscription ownership is business-level, not Firebase-user-level.** | A change of Owner or provider must not transfer, destroy or recreate a business subscription. |
+
+**R-2, R-4, R-7, R-8, R-9, R-10 and R-11 are new decisions recorded by this phase.** R-1, R-3 and
+R-6 restate decisions already in force; R-5 confirms §14.9. Recording them here does not change any
+behaviour: **none of the eleven is implemented by this phase**, and four of them (R-4, R-8, R-9, R-10)
+constrain phases that do not exist yet.
+
+## 14A.4 The linking policy, in full
+
+**Prohibited:** linking a provider identity to an existing Inventory AI account because the email
+addresses match. **Email is not an account-linking join key.** Authenticating a provider identity is
+**not** equivalent to proving ownership of an existing Inventory AI account.
+
+**Approved design for explicit linking** — an operation performed by an **already-authenticated**
+Inventory AI user:
+
+```text
+Inventory AI authenticated session
+        ↓
+user explicitly chooses "Connect Google" / "Connect Facebook"
+        ↓
+provider authentication
+        ↓
+verified Firebase credential
+        ↓
+Firebase account linking
+        ↓
+the existing Inventory AI account is unchanged
+        ↓
+businessId / role / status remain authoritative
+```
+
+**Approved constraint on linking during sign-in:** it must require an **explicit ownership/recovery
+proof flow** before it may attach a provider to an existing account. A user who signs in with a
+provider whose address matches an existing account is **not** thereby shown that account.
+
+**Not implemented:** there is no link route, no unlink route, no linking service, no provider field on
+any model, and no ownership-proof flow. **This phase implements none of it.**
+
+## 14A.5 Open decisions (not resolved — do not settle these in code)
+
+| # | Open question | Blocks |
+| --- | --- | --- |
+| **O-1** | The **unlink policy** and last-authentication-method protection, accounting for both Firebase's own provider set and the app-side `firebaseUid` password refusal. | Any unlink capability |
+| **O-2** | The **linked-account disposition** of `change-password` and the 26B/27 reset flow, which today would change an inert hash and revoke every session as a side effect. | Any phase that writes `firebaseUid` onto password accounts |
+| **O-3** | Whether **`emailVerified` is enforced** (§14.2). | Provider sign-in relying on a provider-asserted address |
+| **O-4** | **M1 vs M2** (§14.5). | All Google/Facebook mobile work |
+| **O-5** | The **Facebook missing-email onboarding flow** — the policy is R-10, the flow is undecided. | Facebook Login |
+| **O-6** | The **remedy, if any, for the unhealable orphan** (§16.6). | The legacy migration/linking phase |
+| **O-7** | **`google-services.json` / `GoogleService-Info.plist` storage** (§14.6). | Native provider configuration |
+| **O-8** | Whether **Firebase takes over the password reset flow**, and the disposition of the 26B/27 artefacts if it does (§14.1, still open). | Password recovery |
+| **O-9** | **`passwordChangedAt` semantics for Firebase-native accounts** (§14.7) — `SESSION_INVALIDATED` does not fire for them. | Explicit acceptance or a compensating design |
+| **O-10** | **Invitation implementation** — model, lifetime, single-use semantics, routes, revocation (§14.3). | Invitation onboarding |
+| **O-11** | **Expo Go policy** (§14.8), which M1 would forfeit. | Every future mobile phase |
+
+## 14A.6 Unverified gates (unchanged)
+
+Neither is settled by this phase, and both gate **later** work rather than this one:
+
+1. **Firebase `auth:import` bcrypt support** — decides whether a bulk migration is possible at all.
+2. **React Native Firebase + Expo SDK 57 config-plugin configuration** — decides whether M1 is viable.
+
+## 14A.7 Implementation status (stated so it cannot be assumed)
+
+- **Google Sign-In: NOT started.** No provider SDK, no OAuth client, no route, no screen.
+- **Facebook Login: NOT started.** Same.
+- **Apple Sign-In: future scope**, not scheduled.
+- **Account linking: NOT implemented. Account unlinking: NOT implemented.**
+- **Invitations: NOT implemented.** The `users.manage` create route still exists unchanged.
+- **No provider SDK is installed** on either platform.
+- **No EAS build, submit or prebuild has been created.** The first EAS development build remains a
+  **prerequisite** for validating the selected mobile provider integration path; until it exists, no
+  provider integration has been tested — and none is claimed to have been.
+- **The Firebase exchange is unchanged**: it verifies the ID token, uses the verified UID, resolves by
+  `firebaseUid`, **never by email**, rejects an unknown UID with the existing registration-required
+  behaviour, applies the existing user/business status checks, and mints the existing JWT/session.
 
 ---
 
@@ -1009,6 +1224,24 @@ commit as the rewire.
 - `assertBusinessAccess` — production-dead, byte-identical (Phase 24 pinned its inertness)
 - No secret in git; `.env.example` carries names only
 
+**Added by Phase 32F (§14A) — the multi-provider invariants.** These bind every future provider phase
+and are listed here so they sit with the rest of the frozen surface:
+
+- **The Firebase exchange stays UID-authoritative.** It resolves a user by `firebaseUid` and **never by
+  email**; an unresolved UID keeps the existing registration-required behaviour.
+- **The `firebaseUid` login guard stays.** `loginWithPassword` continues to refuse a linked account
+  with `403 FIREBASE_SIGN_IN_REQUIRED`, in the same position (after the password comparison and the
+  status check, before the session write). It is not to be removed or weakened.
+- **Sessions stay provider-neutral.** `models/session.model.ts` gains **no provider field** and no
+  provider-specific session type may be introduced.
+- **`businessId`, `role`, `status`, Firebase linkage, permissions and subscription access are
+  server-controlled** and are never read from the mobile client.
+- **Email is not an account-linking join key.** No provider identity may be linked to an existing
+  account because the addresses match (§14A.4).
+- **Subscription ownership is business-level**, never keyed to a Firebase UID.
+- **The 4 roles, 21 permission keys, `ROLE_PERMISSIONS` and the Phase 23 mobile mirror are unchanged**
+  by any provider work.
+
 ---
 
 # 21. Phase outline (not authorised by this document)
@@ -1024,11 +1257,12 @@ otherwise.
 | **32C** ✅ | **Shipped.** Exchange + registration routes, service, limiters, Phase 23 classifier update. | 32B |
 | **32D** ✅ | **Shipped.** Firebase JS SDK boundary on mobile: `mobile/lib/firebase.ts`, the SDK version, initialization order, the `inMemoryPersistence` decision and the `EXPO_PUBLIC_FIREBASE_*` gate. Infrastructure only — no screen reached Firebase. | 32C |
 | **32E** ✅ | **Shipped.** Firebase email/password authentication flow: Firebase-first sign-in, the legacy fallback confined to the two codes that mean "no Firebase identity answers to these credentials", `ensureFirebaseAccount`'s orphan adoption, and the server-side `firebaseUid` login guard (§10, §11, §14.1). | 32D |
-| *(deferred)* | Google Sign-In: fingerprints, URL scheme, the second build, credential-collision handling. **A later phase, not yet numbered — it is not part of 32D or 32E.** Requires §14.4 first. | — |
-| **32F** | MongoDB sync: `firebaseUid` backfill, admin-created users, reconciliation. | 32E, §14.3 |
-| **32G** | Migration/compat: legacy path retained, lazy link-on-login, bulk import **if Gate 1 permits**. | 32F, Gate 1, §14.7, §14.9 |
-| **32H** | Test suites + emulator smoke. | 32G |
-| **32I** | Production readiness: Render secrets, monitoring, runbook, rollback rehearsal. | 32H |
+| **32F** ✅ | **Shipped as something other than this table planned** — see the note below. Decision record and documentation close-out: the eleven resolved owner decisions (§14A.3), the linking policy (§14A.4), the open register (§14A.5), and reconciliation of the specification, README, roadmap and CLAUDE.md. **Documentation only — no code, schema, dependency, route, configuration, payment or EAS change.** | 32E |
+| *(deferred)* | Google Sign-In: fingerprints, URL scheme, the second build, credential-collision handling. **A later phase, still not numbered.** §14.4 is now **resolved** (§14A, R-4/R-8/R-9): no automatic linking, and explicit linking requires ownership proof. Still requires **§14.5 (M1 vs M2)** and the first EAS build. | — |
+| *(planned)* | MongoDB sync: `firebaseUid` backfill, admin-created users, reconciliation. **This was the row this table called "32F"; the number has since been used for the decision record above, so this work is now unnumbered.** | 32E, §14.3 |
+| *(planned)* | Migration/compat: legacy path retained, lazy link-on-login, bulk import **if Gate 1 permits**. | Gate 1, §14.7, §14.9 |
+| *(planned)* | Test suites + emulator smoke. | Migration phase |
+| *(planned)* | Production readiness: Render secrets, monitoring, runbook, rollback rehearsal. | Test phase |
 
 **Reconciled 2026-09-20 (Phase 32E).** This table is the **plan** Phase 32A recorded, not the shipped
 sequence, and the two diverged deliberately. The mobile work was re-split by the owner as it shipped:
@@ -1037,6 +1271,14 @@ legacy-path guard, while **Google Sign-In moved to a later, unnumbered phase** a
 either. Rows for unbuilt phases (32F–32I) are left as planned rather than renumbered, so this remains a
 plan and not a second, competing schedule. The shipped record is
 `docs/DEVELOPMENT_ROADMAP.md` **§27H**.
+
+**Reconciled again 2026-09-20 (Phase 32F).** The owner reassigned the number **32F** to the
+multi-provider **decision record and documentation close-out** (§14A), which is not the "MongoDB sync"
+row this table planned for it. Rather than renumber the unbuilt rows — which would silently restate a
+plan as a schedule — the planned rows above are now marked *(planned)* and left in their original
+order, and the note is the record of the change. **No phase beyond 32F is authorised**, the planned
+rows are not a commitment to build in that order, and the decision record does not authorise any of
+them. The shipped record is `docs/DEVELOPMENT_ROADMAP.md` **§27I**.
 
 ---
 

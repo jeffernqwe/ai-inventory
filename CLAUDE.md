@@ -48,8 +48,23 @@ history, the deferred exception and the verification baseline.
 
 ### Authentication
 
-- JWT
-- bcrypt
+- Firebase Authentication — the **identity provider** (answers "who is this person?")
+- JWT — the Inventory AI **application session**, exchanged from a verified Firebase ID token
+- bcrypt — legacy password hashes, retained for accounts that predate Firebase
+- Server-side session records named by a mandatory `jti` (Phase 26A)
+
+Firebase identity and Inventory AI authorization are **separate systems**. A verified Firebase ID
+token is exchanged **once** at `POST /api/auth/firebase/exchange` for an ordinary Inventory AI
+access token; it never becomes the API bearer credential. `firebaseUid` is an **identity linkage
+field, not an authorization source** — `businessId`, `role`, `status` and permissions always come
+from the MongoDB `User`, loaded per request. The Firebase exchange is **UID-authoritative**: it
+resolves a user by `firebaseUid` only and never by email.
+
+Provider architecture (Google / Facebook / Apple) and the account-linking security policy are
+documented in `docs/SYSTEM_SPECIFICATION.md` §29 and in the design authority
+`docs/superpowers/specs/2026-09-18-firebase-auth-design.md` §14/§14A. **Google Sign-In, Facebook
+Login, Apple Sign-In, account linking and account unlinking are NOT implemented** — they are
+planned and require an owner-approved phase each.
 
 ### AI
 
@@ -852,6 +867,44 @@ exercised for any of these phases, so the design document's two verification gat
 support; the Expo SDK 57 React Native Firebase config-plugin configuration) remain **UNVERIFIED**. The
 design authority is `docs/superpowers/specs/2026-09-18-firebase-auth-design.md`; the shipped record is
 `docs/DEVELOPMENT_ROADMAP.md` §27H.
+
+Phase 32F is an owner-directed **decision-record and documentation close-out** increment delivered
+after Phase 32E, and it is **documentation only**: no production code, test, dependency, schema,
+route, configuration or authentication behaviour changed. Its purpose is to convert the multi-provider
+architecture from "open questions" into **recorded owner decisions**, so that Google Sign-In,
+Facebook Login, identity linking and legacy migration can each be implemented later without inventing
+policy in code. Eleven decisions are now recorded as **RESOLVED**: Firebase is the identity provider
+while MongoDB remains authoritative for `userId`, `businessId`, `role`, `status`, permissions,
+business status, billing state, sessions and audit; the security boundary is server-controlled
+(`businessId`, `role`, `status`, Firebase linkage, permissions and subscription access are never read
+from the client); **a provider identity is NEVER automatically linked to an existing Inventory AI
+account because the email address matches — email is not an account-linking join key**, and
+authenticating a provider identity is not proof of ownership of an existing account; provider linking
+is an explicit account operation performed by an already-authenticated user, whose provider UID comes
+from the verified Firebase credential and never from a request body; provider linking **during a
+sign-in attempt** requires an explicit ownership/recovery proof flow before it may attach to an
+existing account; the Firebase exchange stays UID-authoritative with the existing
+`REGISTRATION_REQUIRED` behaviour; the Phase 32E password-authority guard is retained unchanged; the
+Inventory AI session representation stays **provider-neutral** (no provider field on the session model,
+no provider-specific session types); Facebook identities without a usable email require explicit email
+completion rather than an invented or UID-derived address; subscription/billing belongs to the
+**business/tenant**, never to a Firebase identity; and lazy migration on successful legacy password
+login remains accepted. The owner/ADMIN/MANAGER/STAFF creation hierarchy is documented, with
+**invitation-based onboarding recorded as future implementation**, and **no invitation functionality
+exists**. Open items are kept explicitly separated from resolved ones: the unlink policy and
+last-authentication-method protection, the linked-account `change-password`/reset disposition,
+`emailVerified` enforcement, M1 vs M2, Facebook's missing-email onboarding flow, the unhealable
+orphan remedy and the `google-services.json` / `GoogleService-Info.plist` storage question all remain
+**OPEN**. **Google Sign-In, Facebook Login, Apple Sign-In, account linking, account unlinking and
+invitations were NOT implemented**; **Apple Sign-In is future scope**, and **no provider SDK was
+installed**. The first EAS development build remains a **prerequisite** for validating the selected
+mobile provider integration path, and **no EAS build was created**. Documentation drift was reconciled
+across `CLAUDE.md`, `README.md`, `docs/SYSTEM_SPECIFICATION.md` and `docs/DEVELOPMENT_ROADMAP.md`,
+including the previously undocumented `FIREBASE_*` environment variables (names only, never values)
+and the missing Phase 32B–32E entries in the README phase list; no historical phase record was
+rewritten. The design authority is
+`docs/superpowers/specs/2026-09-18-firebase-auth-design.md` §14/§14A; the shipped record is
+`docs/DEVELOPMENT_ROADMAP.md` §27I.
 
 Phase 18 is an owner-directed mobile UI extension delivered in approved lettered increments (18A,
 18B, …) after Phase 17. It turns the app into a modern SaaS-style product surface WITHOUT changing

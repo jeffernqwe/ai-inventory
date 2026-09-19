@@ -330,6 +330,19 @@ committed.
   and add the matching `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, or
   `AGENTROUTER_API_KEY` + `AGENTROUTER_BASE_URL`. AI credentials stay server-side —
   they are never sent to the mobile app.
+- **Firebase Authentication (Phases 32B–32E):** the server verifies Firebase ID tokens and
+  needs a service account, supplied either as `FIREBASE_PROJECT_ID`,
+  `FIREBASE_CLIENT_EMAIL` and `FIREBASE_PRIVATE_KEY`, or — preferred, because it removes
+  the newline-mangling failure class — as a single base64-encoded
+  `FIREBASE_SERVICE_ACCOUNT_JSON`. These are **server-side only** and are never sent to
+  the mobile app. Production fails fast if some but not all are set; in development the
+  server boots without them, and the Firebase routes answer their own not-configured
+  error. The **names only** are listed in `server/.env.example`. The mobile app holds no
+  Firebase secret; under the M2 path it uses only the public `EXPO_PUBLIC_FIREBASE_*`
+  client configuration (apiKey, authDomain, projectId, appId), which is not a credential
+  and cannot authorize anything on its own — the API accepts Inventory AI tokens only.
+- **Password recovery / mail (Phases 26B, 28):** see the Phase 26B and 28 sections below and
+  the mail block in `server/.env.example`.
 
 ---
 
@@ -700,3 +713,60 @@ Phase 07 (testing + production hardening) and Phase 08 (owner-directed hardening
   nothing in this phase is runtime-verified:** the evidence is the local toolchain (jest 11 suites / 88
   tests, `tsc --noEmit`, `eslint .`, `expo-doctor` 21/21) plus config introspection. **F-1 (PDF sharing)
   is not fixed and not closed**, and **Phase 30B has not started**.
+- **Phase 32A — Firebase Authentication Architecture & Console Runbook:** documentation only. The
+  design authority is `docs/superpowers/specs/2026-09-18-firebase-auth-design.md`. It records the
+  selected architecture (**Option B**: Firebase is the identity provider, while the existing MongoDB
+  `User` + JWT + server-side `Session` remains the application's session layer), the non-negotiable
+  invariants, the identity mapping, the migration strategy, the two UNVERIFIED gates, and the open
+  owner decisions. **No implementation was authorised by it.**
+- **Phase 32B — Firebase Admin SDK Foundation (server verify boundary):** the Admin SDK dependency,
+  `config/firebase.ts`, the ID-token verifier wrapper, environment validation with production
+  fail-fast, the `.env.example` names, and three **additive** `users` fields — `firebaseUid` (String,
+  **`sparse: true`** unique), `emailVerified` (Boolean, persisted but **not enforced**) and
+  `passwordHash.required: false`. **No routes.** Sparse is mandatory rather than decorative: without
+  it the index cannot be built once two users lack the field.
+- **Phase 32C — Firebase Authentication Session Exchange:** two **public** routes,
+  `POST /api/auth/firebase/exchange` and `POST /api/auth/firebase/register`, their service and rate
+  limiters. The Firebase ID token is exchanged **once** for an ordinary Inventory AI access token and
+  **never becomes the API bearer credential**. A verified identity with no MongoDB user answers
+  `REGISTRATION_REQUIRED`; an email that already belongs to a MongoDB user answers `409 EMAIL_IN_USE`
+  — **account linking is refused, not implemented**. `requireAuth`, RBAC and the legacy path are
+  unchanged.
+- **Phase 32D — Firebase JS SDK Boundary (mobile):** `mobile/lib/firebase.ts` only — the SDK version,
+  initialization order, the `inMemoryPersistence` decision and the `EXPO_PUBLIC_FIREBASE_*` gate that
+  leaves the SDK uninitialized so an unconfigured build behaves as it did before Firebase existed.
+  Infrastructure only: no screen reached Firebase, no API call was made, no authentication state was
+  touched.
+- **Phase 32E — Firebase Email/Password Authentication Flow:** mobile Firebase-first sign-in
+  exchanging its ID token through the 32C endpoint, with the legacy password route reached **only**
+  for the two codes that mean "no Firebase identity answers to these credentials"
+  (`auth/invalid-credential`, `auth/user-not-found`) — **never** for a Firebase or backend failure, so
+  an outage cannot become a downgrade. Adds the server-side `firebaseUid` guard refusing the legacy
+  route with `403 FIREBASE_SIGN_IN_REQUIRED`, placed after the password comparison and the status
+  check (so it is not an enumeration oracle) and before the session write (so no half-login is left
+  behind). **Google Sign-In NOT implemented; account linking and migration NOT implemented.**
+- **Phase 32F — Firebase Multi-Provider Authentication Architecture Decision Record & Documentation
+  Close-out:** **documentation only** — no production code, test, dependency, schema, route,
+  configuration, payment or authentication behaviour changed, and no EAS build created. It converts the
+  multi-provider architecture from open questions into **recorded owner decisions**, and reconciles
+  the documentation drift found during the architecture investigation. **Eleven decisions are
+  RESOLVED**: Firebase is the identity provider while MongoDB stays authoritative for account,
+  business, role, status, permission, billing, session and audit state; the security boundary is
+  server-controlled; a Firebase ID token is exchanged once and never becomes the bearer credential;
+  **a provider identity is never automatically linked to an existing account because the email
+  matches — email is not an account-linking join key**, since authenticating a provider identity is not
+  proof of ownership of an existing account; provider linking is an explicit operation by an
+  already-authenticated user whose provider UID comes from the verified credential and never from a
+  request body; linking **during a sign-in attempt** requires an explicit ownership/recovery proof
+  flow; the exchange remains **UID-authoritative**; the Phase 32E password-authority guard is retained
+  unchanged; sessions remain **provider-neutral** with no provider field on the session model;
+  Facebook identities without a usable email require explicit email completion rather than an invented
+  or UID-derived address; and subscription ownership is **business-level**, never Firebase-user-level.
+  The owner/ADMIN/MANAGER/STAFF creation hierarchy is documented with **invitation-based onboarding
+  recorded as future implementation** (none exists). Open items are kept explicitly separate:
+  unlink/last-method protection, the linked-account `change-password`/reset disposition,
+  `emailVerified` enforcement, M1 vs M2, the Facebook missing-email flow, the unhealable-orphan remedy
+  and credential-file storage all remain **OPEN**. **Google Sign-In, Facebook Login, Apple Sign-In,
+  account linking, account unlinking and invitations were NOT implemented; Apple remains future scope;
+  no provider SDK was installed; and the first EAS development build remains a prerequisite for
+  validating the mobile provider path.** No historical phase record was rewritten.

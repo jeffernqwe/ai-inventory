@@ -150,6 +150,18 @@ EAS Development Build & iOS Readiness Foundation
         ↓
 Phase 32A
 Firebase Authentication Architecture & Console Runbook
+        ↓
+Phase 32B
+Firebase Admin SDK Foundation (Server Verify Boundary)
+        ↓
+Phase 32C
+Firebase Authentication Session Exchange
+        ↓
+Phase 32D
+Firebase JS SDK Boundary (Client Initialization)
+        ↓
+Phase 32E
+Firebase Email/Password Authentication & Legacy Fallback Guard
 ```
 
 ---
@@ -3456,6 +3468,101 @@ forces the project's first build, its first keystore, and a two-build SHA-1/SHA-
   CLAUDE.md §2 — are listed as decisions, **none resolved silently**.
 - **No source code, package, environment variable, database record, Firebase project, Render
   configuration, commit or push is changed.**
+
+---
+
+# 27H. Phases 32B–32E — Firebase Implementation (server boundary, client boundary, email/password auth)
+
+## Design authority
+
+`docs/superpowers/specs/2026-09-18-firebase-auth-design.md` remains authoritative. This section records
+only what shipped and the decisions that shipped with it. **It also reconciles the phase names**: the
+design document's §21 outline is the *plan* Phase 32A recorded, and the mobile work was re-split by the
+owner as it landed (reconciled in §21 on 2026-09-20). Google Sign-In, which §21 had placed at 32E,
+remains a **later, unnumbered phase** and is not implemented.
+
+## What landed
+
+- **32B — Firebase Admin SDK foundation** (`982284a`). Server-only verify boundary: the Admin SDK
+  dependency, `config/firebase.ts`, the ID-token verifier wrapper, environment validation and
+  production fail-fast, the `.env.example` names, and the three additive `users` changes —
+  `firebaseUid` (String, **`sparse: true`** unique), `emailVerified` (Boolean, persisted and **not
+  enforced**), `passwordHash.required: false`. **No routes.**
+- **32C — Authentication session exchange** (`d4d9f19`). The two public routes
+  `POST /api/auth/firebase/exchange` and `POST /api/auth/firebase/register`, the service behind them, and
+  their rate limiters. The Firebase ID token is exchanged **once** for an Inventory AI access token and
+  never becomes the API bearer credential. A verified identity with no MongoDB user answers
+  `REGISTRATION_REQUIRED`; an email that already belongs to a MongoDB user answers `409 EMAIL_IN_USE` —
+  **account linking is refused, not implemented**.
+- **32D — Firebase JS SDK boundary on mobile** (`ad26d60`). `mobile/lib/firebase.ts` only: the SDK
+  version, initialization order, the `inMemoryPersistence` decision, and the
+  `EXPO_PUBLIC_FIREBASE_*` gate that keeps the SDK uninitialized and the app behaving as it did before
+  Firebase existed. Infrastructure only — no screen reached Firebase, and no API call was made.
+- **32E — Firebase email/password authentication flow**, with the legacy fallback and its server-side
+  guard. The mobile sign-in path asks Firebase first and hands the ID token to the 32C exchange; the
+  legacy password route is reached **only** when Firebase reports that no identity answers to the
+  credentials — never when Firebase or the backend failed, so an outage cannot become a downgrade.
+
+## Decisions recorded by 32E (all now written into the design document)
+
+- **A linked account may no longer use the legacy password login** (§10, §14.1). `loginWithPassword`
+  refuses an account carrying a `firebaseUid` with `403 FIREBASE_SIGN_IN_REQUIRED`, after the password
+  comparison and the status check so the refusal is not an enumeration oracle, and before the session
+  write so no half-login can be left behind. **Rollback consequence:** reverting the mobile build is no
+  longer sufficient for a linked account — a reverted build has no Firebase path at all — so rollback
+  requires reverting the server behaviour too, or disabling the guard (§11).
+- **Password authority is closed** (§14.1). For a linked account, Firebase owns the password; the
+  retained bcrypt hash is not a second way in. Recorded with its consequence: for a linked account,
+  `change-password` and the 26B/27 reset flow no longer change the credential that actually
+  authenticates the user. Inert today, live in the phase that links accounts. The disposition of the
+  26B/27 artefacts remains open, and **nothing was removed**.
+- **The two Firebase codes that open the legacy route are both handled** — `auth/invalid-credential` and
+  `auth/user-not-found`, the same signal under different project settings. Handling only the first would
+  hard-fail every legacy account on a project with email-enumeration protection off, which §9.2's
+  "no user is ever unable to sign in" forbids.
+- **Orphan adoption is implemented** (§8.2, §16.6). A registration whose Firebase identity was created
+  before the server step failed is adopted on retry — which requires the same password, so it proves the
+  credential rather than merely the address.
+
+## Known limitation recorded by 32E — the unhealable orphan (§16.6)
+
+A **legacy MongoDB account** can have a Firebase identity created for the same email without ever being
+linked to it: the client creates the Firebase identity first, and the server then refuses registration
+with `409 EMAIL_IN_USE`. Because the exchange resolves a user by `firebaseUid` **only, never by email**,
+that identity can never resolve to the existing account, and §8.2's self-healing path does not apply.
+**It is not an account takeover and not a lockout** — the legacy account carries no `firebaseUid`, so the
+guard does not fire and its password login keeps working. **No fix is implemented**: §8.2 rejects
+client-side deletion as racy, and a server pre-check would be a new public route needing its own Phase 23
+classification.
+
+**Binding constraint on the migration/linking phase.** When lazy link-on-login (§9.1) creates the
+Firebase user for an existing account, it will receive `auth/email-already-exists` for exactly these
+addresses. That **MUST NOT be allowed to fail the legacy password login**; the linking phase must handle
+the collision explicitly instead of treating it as a login error.
+
+## Scope
+
+No Google Sign-In, no provider federation, no account linking or migration, no `firebaseUid` backfill,
+no admin-created-user work, no `emailVerified` enforcement, and no change to the legacy path's
+availability for unlinked accounts. The four roles, 21 permission keys, `ROLE_PERMISSIONS`,
+`CATALOGUE_ONLY_PERMISSIONS`, the Phase 23 route classification and the mobile RBAC mirror are
+unchanged.
+
+## Verification
+
+Documentation only in this increment: **no application source file, test, dependency or `.env` file was
+changed**, and no test suite was re-run for it. The 32E code verification is recorded with the 32E
+implementation itself.
+
+## Definition of Done
+
+- The design document records the linked-account login guard, its rollback consequence and the closed
+  §14.1 decision.
+- The unhealable-orphan limitation is recorded, with the binding constraint on the migration/linking
+  phase, and **no fix is implemented**.
+- The roadmap and design document §21 agree on what 32D and 32E actually are, and Google Sign-In is
+  recorded as a later, unnumbered phase.
+- **No source code, test, dependency, `.env` file, commit or push is changed.**
 
 ---
 

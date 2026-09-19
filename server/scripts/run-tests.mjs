@@ -59,6 +59,7 @@ const PURE_DB = [
   'phase20-filter-contract.test.mjs', // list filter contract (invalid status/supplierId/blank q rejected, valid filters still narrow)
   'phase24-runtime-authorization-matrix.test.mjs', // runtime role x real-route matrix + role-change effect on an existing JWT
   'phase26a-session-lifecycle.test.mjs', // server-side sessions: mandatory jti, revocation, per-device logout, sign out everywhere
+  'phase32e-firebase-legacy-guard.test.mjs', // the legacy password guard: a Firebase-linked account is refused on /api/auth/login, in the approved order, with no session and no lockout
 ];
 const MIXED = [
   'phase06-ai-provider.test.mjs',     // unit: provider selection; db: loop + mapping

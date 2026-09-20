@@ -906,6 +906,87 @@ rewritten. The design authority is
 `docs/superpowers/specs/2026-09-18-firebase-auth-design.md` §14/§14A; the shipped record is
 `docs/DEVELOPMENT_ROADMAP.md` §27I.
 
+Phase 32G — First EAS Development Build / Native Runtime Validation (validation only: a `development`
+profile Android build was produced, installed on the emulator and run OUTSIDE Expo Go, with API
+communication proven end-to-end; **no production or configuration file changed** — Phase 30A's EAS
+foundation was verified correct as committed; **M1 vs M2 NOT chosen**; no provider SDK installed;
+**it is the THIRD EAS build and the second development-profile build, not the first** — see the
+correction below)
+
+Phase 32G is an owner-directed validation increment delivered as a single approved increment after
+Phase 32F, and it is **validation only**: no provider was implemented, no schema, authentication
+server behaviour, payment or billing behaviour was modified, no MongoDB schema changed, M1 and M2 were
+**not** chosen between, and no provider SDK was installed. **No production or configuration file
+changed at all** — §3's instruction to verify the EAS configuration rather than assume Phase 30A had
+got it right resolved to the finding that it was already correct, so the minimum change set was empty
+and the phase's single commit carries a `build:` subject over a documentation-only diff.
+
+**The recorded build history is corrected here, because Phase 32G's own framing as "the first EAS
+development build" is not accurate.** `CLAUDE.md`'s Phase 30A entry above ("NO EAS build, submit or
+prebuild has been executed"), the Phase 30A narrative beneath it, and Phase 32F's "no EAS build was
+created" are all **contradicted by EAS's own build list**, which holds **three** Android builds, every
+one `finished`: **`94ecae78-35b6-46d8-b2e1-035cf36740a0`** (development profile, 2026-09-17 13:15,
+from the Phase 30A commit `0a5d973` itself — precisely the claim Phase 30A denies),
+**`b1447408-106f-4bd4-a5ac-ef17434fe1c4`** (preview, 2026-09-17 18:19, from `4998827`), and
+**`60b0a916-1325-478f-b4fb-86fe3e7c3f07`** (development, 2026-09-21 00:33, from `5d7d1df` — this
+phase). The `InventoryAI` AVD corroborates it: `com.inventoryai.app` reports
+`firstInstallTime=2026-09-17 10:40:43` (emulator clock is UTC, so 18:40:43 local — a minute after
+preview build `b1447408` finished) with `lastUpdateTime=2026-09-20 16:48:09`. Phase 32G is therefore
+the **third** EAS build and the **second** development-profile build. The commit subject is the
+owner's prescribed string and is used verbatim; roadmap §27J carries the accurate history. **No
+historical phase record was rewritten** — those statements should be read as superseded, not as
+still-true.
+
+**What was proven.** The build is `development` profile (`developmentClient: true`,
+`distribution: internal`, `android.buildType: apk`), Android, `finished` in 12 min 11 s, artifact
+`https://expo.dev/artifacts/eas/4BpCsxZ-l5ikL4p3h-03UlhkZh_bxxR-q9LUELWgHXw.apk`, fingerprint
+`eafbd98898e2064076677151c721472d1382486b` — **identical to preview build `b1447408`'s**, which is
+consistent with Phase 32B–32E having added no native surface at all, since the Firebase SDK is
+JavaScript-only. The EAS-managed keystore was **reused, not created**, and the version code was minted
+server-side by `cli.appVersionSource: "remote"`, so `app.json` was never dirtied. Installed and
+launched on the emulator, Metro served `expo-router/entry.js` (**1,525 modules in 11,051 ms**) into the
+installed native APK with `topResumedActivity=com.inventoryai.app/.MainActivity` — which is exactly
+what "runs outside Expo Go" means, because a development build is an installed native APK loading its
+JavaScript from a bundler. The signed-out root renders, the auth UI loads, no `FATAL` /
+`AndroidRuntime` / `E ReactNativeJS` entry appears in logcat, and **Firebase is never initialized** —
+all four `EXPO_PUBLIC_FIREBASE_*` values are unset, so `isFirebaseConfigured()` is `false` and
+`lib/firebase.ts` returns `null` without calling `initializeApp` (the lone `firebase` logcat string is
+Google Play Services' own dynamic-links broker, not the JS SDK). **API communication is proven
+end-to-end rather than inferred**: invalid credentials were submitted and the screen showed
+**"Invalid email or password"**, which is `INVALID_CREDENTIALS_MESSAGE` at
+`server/src/services/auth.service.ts:81` and exists nowhere in the app outside a test mock, with the
+backend logging `POST /api/auth/login → 401` (395.9 ms) and `GET /api/auth/me → 401` (163 ms). That
+also settles the platform question the build could have failed on: the app requests
+`http://10.0.2.2:4000` — cleartext HTTP against `targetSdk 36` — and the development build's
+debuggable manifest permits it.
+
+**What was NOT verified, stated rather than glossed.** There was **no physical device**: every runtime
+observation is from the `InventoryAI` Android **emulator**, and no device test is claimed. **iOS was
+neither built nor run** — no iOS build exists for this project and the host is Windows, so the
+`ios-simulator` profile stays unexercised. The `preview` and `production` profiles were not exercised.
+Nothing beyond the signed-out root was navigated, since reaching an authenticated screen requires
+valid credentials this phase deliberately did not supply. **No test suite was re-run**, because the
+change set is documentation only. **No blocker was hit** — but one real limitation is recorded: the
+`development` profile sets no `env`, so `EXPO_PUBLIC_API_URL` is unset and `mobile/lib/config.ts`
+falls back to the emulator-only `http://10.0.2.2:4000`, meaning **physical-device API validation would
+require setting it to the host's LAN address**; no change was made, because any value added would have
+been emulator-wrong and would have broken the path this phase verified.
+
+**M1 vs M2 findings were documented and NOT chosen.** For **M1** (native provider libraries) the
+pipeline it needs is now proven — a config-plugin-driven CNG development build compiles, installs and
+runs — and config-plugin auto-discovery is confirmed on this project, so an added native provider
+module's plugin would run without hand-registration; its open cost is unchanged (`google-services.json`
+and `GoogleService-Info.plist` storage) plus a changed fingerprint, and **its runtime behaviour is
+unproven because no provider SDK was installed**. For **M2** (`expo-auth-session` / `expo-web-browser`)
+the `inventoryai` scheme is configured and Phase 27 exercised a custom-scheme deep link — but only
+configuration-verified, since a real custom-scheme launch needs a development build. **This phase
+produced such a build but did not test a redirect**, so **M2's redirect capability remains unproven**,
+and the question it must answer is recorded: a development build installs the dev launcher's own
+activity and URL scheme alongside the app's, so a provider redirect handing control back must be
+verified rather than assumed. The design authority remains
+`docs/superpowers/specs/2026-09-18-firebase-auth-design.md` §14/§14A; the shipped record is
+`docs/DEVELOPMENT_ROADMAP.md` §27J. **Phase 32H, 32I and 32J were NOT started.**
+
 Phase 18 is an owner-directed mobile UI extension delivered in approved lettered increments (18A,
 18B, …) after Phase 17. It turns the app into a modern SaaS-style product surface WITHOUT changing
 navigation (the existing native-stack stays; a tab bar would require touching the owner-held

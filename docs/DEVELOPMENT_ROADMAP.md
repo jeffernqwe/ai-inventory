@@ -165,6 +165,9 @@ Firebase Email/Password Authentication & Legacy Fallback Guard
         ↓
 Phase 32F
 Firebase Multi-Provider Authentication Architecture — Decision Record & Documentation Close-out
+        ↓
+Phase 32G
+First EAS Development Build / Native Runtime Validation
 ```
 
 ---
@@ -3687,6 +3690,195 @@ documentation change**, and the existing suites are unaffected by it.
 - **No provider implementation was performed**, and **no EAS build was created**.
 - **No source code, test, dependency, `.env` file or schema is changed**, and no commit beyond this
   phase's own documentation commit is made.
+
+---
+
+# 27J. Phase 32G — First EAS Development Build / Native Runtime Validation
+
+## Objective
+
+Produce an EAS **development build** of the mobile app, install it on an Android device or emulator,
+and establish whether the project can run **outside Expo Go**. Phase 32G is a validation phase: it
+does **not** implement Google Sign-In, Facebook Login, Apple Sign-In, account linking or account
+unlinking; it does **not** modify MongoDB schemas, authentication server behaviour, payment or billing
+behaviour; it does **not** select M1 over M2; and it does **not** install a provider SDK. It does not
+proceed to Phase 32H, 32I or 32J.
+
+## Coding
+
+**NO production or configuration change.** No application source file, test, dependency, package
+manifest, schema, route, limiter or `.env` file was modified — and **`mobile/eas.json` was not
+changed**. §3's instruction to verify the EAS configuration rather than assume Phase 30A had got it
+right resolved to the finding that **Phase 30A's foundation was already correct**; the build recorded
+below is the empirical proof of that, so §4's "minimum changes necessary" resolved to an empty set.
+The changed-file set is documentation only, which is why the phase's single commit carries a `build:`
+subject over a documentation diff.
+
+## Correction to the recorded build history
+
+Phase 32G's framing as "the first EAS development build" is **not accurate**, and the discrepancy is
+recorded rather than smoothed over. Several documents state that no EAS build had ever been executed —
+`CLAUDE.md`'s Phase 30A entry ("NO EAS build, submit or prebuild has been executed"), the Phase 30A
+narrative beneath it, and Phase 32F's "no EAS build was created" in both `CLAUDE.md` and `README.md`.
+**EAS's own build list contradicts all of them.** The project `@jeffernqwes-team/inventory-ai` holds
+**three** builds, every one of them Android and every one `finished`:
+
+| Build ID | Profile | Commit | Started |
+| --- | --- | --- | --- |
+| `94ecae78-35b6-46d8-b2e1-035cf36740a0` | **development** | `0a5d973` — "feat: establish EAS development build foundation" (Phase 30A) | 2026-09-17 13:15 |
+| `b1447408-106f-4bd4-a5ac-ef17434fe1c4` | preview | `4998827` — "chore: secure local smoke and EAS artifacts" | 2026-09-17 18:19 |
+| `60b0a916-1325-478f-b4fb-86fe3e7c3f07` | development | `5d7d1df` (Phase 32F) | 2026-09-21 00:33 |
+
+The first is a **development** build taken from the Phase 30A commit itself — precisely the claim
+Phase 30A's record denies. The second is consistent with Phase 31C's preview-profile work against the
+Render API. On-device evidence agrees: `com.inventoryai.app` on the `InventoryAI` AVD reports
+`firstInstallTime=2026-09-17 10:40:43` with `lastUpdateTime=2026-09-20 16:48:09`, so an APK of this
+app was already on this emulator two days before this phase ran. (The emulator clock runs UTC, so
+`10:40:43` is `18:40:43` local — about a minute after preview build `b1447408` finished at 18:39:29,
+which identifies the first install on this AVD as the **preview** build.)
+
+**Phase 32G is therefore the third EAS build and the second development-profile build, not the
+first.** The commit subject is the owner's prescribed string and is used verbatim; this section
+carries the accurate history. The historical statements were **not rewritten**, in keeping with the
+convention Phase 29 established and Phase 32F followed — but they should be read as superseded by the
+table above.
+
+## Build record
+
+- **Profile:** `development` — `developmentClient: true`, `distribution: internal`,
+  `android.buildType: apk`, as Phase 30A defined it. **Not modified by this phase.**
+- **Platform:** Android. **Result:** `finished`, 2026-09-21 00:33:06 → 00:45:17 (12 min 11 s).
+- **Artifact:** `https://expo.dev/artifacts/eas/4BpCsxZ-l5ikL4p3h-03UlhkZh_bxxR-q9LUELWgHXw.apk`
+  (257,427,086 bytes, sha256 `2e9686ac9b727cd8be9a65a13d5f3b1d00d41605cae22c279bf078353387c2d8`).
+- **Fingerprint:** `eafbd98898e2064076677151c721472d1382486b` — **identical to preview build
+  `b1447408`'s**, which is consistent with Phase 32B–32E having added no native surface at all: the
+  Firebase SDK is JavaScript-only, so nothing between the 2026-09-17 preview build and this one changed
+  the native project. (Build `94ecae78`'s fingerprint, `c18f0d77…`, differs.)
+- **Version:** SDK 57.0.0, versionName 1.0.0, versionCode 1 — the version code is minted server-side by
+  `cli.appVersionSource: "remote"`, so `app.json` was never dirtied by a version bump.
+- **Native surface:** minSdk 24, targetSdk 36, identifier `com.inventoryai.app`.
+- **Signing:** the EAS-managed Android keystore was **reused**, not created —
+  `Using Keystore from configuration: Build Credentials 84JNqqnITp (default)`. No credential was
+  generated, exported or committed.
+- **Source:** the working tree at HEAD `5d7d1df`, which carried the pre-existing uncommitted
+  `mobile/eas.json` preview-URL edit. That edit sets `env` on the **`preview`** profile only and
+  cannot affect a `development` build.
+
+## Runtime smoke test
+
+Installed with `adb install` (`Success`, versionCode 1). Metro served `expo-router/entry.js` —
+**1,525 modules bundled in 11,051 ms** — into the installed native APK, and
+`topResumedActivity=com.inventoryai.app/.MainActivity`. This is the phase's central result: **the app
+runs outside Expo Go.** A development build is an installed native APK that loads its JavaScript from
+a Metro bundler, so a bundle serving into it and a resumed activity is exactly the evidence that the
+Expo Go shell is no longer involved.
+
+- **App launches, signed-out root renders** — the login screen displays fully.
+- **Auth UI loads** — Email, Password, Sign In, "Forgot password?" and "Create an account" all render.
+- **Firebase initialization does not crash** — and, more precisely, the SDK is **never initialized**:
+  all four `EXPO_PUBLIC_FIREBASE_*` values are unset in this build, so `isFirebaseConfigured()` is
+  `false` and `lib/firebase.ts` returns `null` without ever calling `initializeApp`. The only
+  `firebase` string in logcat is `BoundBrokerSvc: onUnbind … com.google.firebase.dynamiclinks.service.START`
+  (pid 1696), which is a **Google Play Services** platform component and has nothing to do with the
+  Firebase JS SDK. This is the Phase 32D boundary behaving exactly as designed.
+- **Server configuration causes no startup failure.**
+- **API communication is functional, proven end-to-end rather than inferred.** Deliberately-invalid
+  credentials were submitted (`nobody@example.com` and a wrong password) and the screen displayed
+  **"Invalid email or password"**. That string is `INVALID_CREDENTIALS_MESSAGE` at
+  `server/src/services/auth.service.ts:81` and appears nowhere in the app outside a **test mock**
+  (`mobile/__tests__/login-registration-required.test.tsx:121`), so it can only have come from the
+  server. The backend's own structured log confirms the round trip:
+  - `POST /api/auth/login → 401`, 395.9 ms, `2026-09-20T16:51:46.640Z`
+  - `GET /api/auth/me → 401`, 163 ms, `2026-09-20T16:48:43.139Z` (the session probe on launch)
+
+  This also settles the one platform question the build could plausibly have failed on. The app
+  requests `http://10.0.2.2:4000` — plain cleartext HTTP against `targetSdk 36`, where cleartext is
+  denied by default — and Android did **not** block it: the development build's debuggable manifest
+  permits cleartext, and logcat contains no `CLEARTEXT` rejection.
+- **No fatal errors.** Logcat contains no `FATAL`, `AndroidRuntime`, `E ReactNativeJS` or React Native
+  exception entries.
+
+## Not verified
+
+- **No physical device.** Every piece of runtime evidence above comes from the `InventoryAI` Android
+  **emulator** (AVD). No phone or tablet was connected, and no physical-device test is claimed.
+- **iOS was not built and was not run.** No iOS EAS build exists for this project, and this host is
+  Windows, so no simulator run was possible either. The `ios-simulator` profile remains unexercised.
+- The `preview` and `production` profiles were not exercised by this phase.
+- **Nothing beyond the signed-out root was navigated.** No authenticated screen was reached, because
+  reaching one requires valid credentials and this phase deliberately submitted none.
+
+## M1 vs M2 findings (§8) — documented, NOT chosen
+
+**M1 — native provider libraries.** The pipeline M1 depends on is now proven end to end: a
+config-plugin-driven, CNG-based development build compiles, installs and runs on Android, and the
+`development` profile is a working vehicle for a build that carries native modules. Config-plugin
+auto-discovery is confirmed on this project — plugins for *installed* modules run even when absent from
+`app.json`'s `plugins` array (verified with `expo config --type introspect` → `pluginHistory`) — so an
+added native provider module's plugin would run without hand-registration, though registering it
+explicitly remains the clearer choice. The cost M1 carries is unchanged and still **OPEN**: it needs
+`google-services.json` (Android) and `GoogleService-Info.plist` (iOS), whose storage the design
+document leaves undecided, and it would change the native surface — and therefore the fingerprint.
+**No provider SDK was installed, so M1's runtime behaviour is unproven here.**
+
+**M2 — browser-based flows (`expo-auth-session` / `expo-web-browser`).** The custom scheme M2 depends
+on is configured (`scheme: "inventoryai"` in `app.json`) and Phase 27 already exercised a
+custom-scheme deep link through the same `fromDeepLink()` path — but only **configuration-verified**,
+since a real custom-scheme launch needs a development build and Phase 27 had none. **This phase
+produced such a build but did not test a custom-scheme or web-browser redirect**, because doing so
+would mean exercising a provider flow; `expo-auth-session` and `expo-web-browser` are not installed and
+were not. So **M2's redirect capability remains unproven**, and the specific question M2 must answer is
+recorded here rather than left implicit: a development build installs the dev launcher's own activity
+and URL scheme alongside the app's, so a provider redirect handing control back must be verified
+rather than assumed.
+
+## Blockers and limitations
+
+- **No blocker was hit.** The pipeline worked exactly as committed, and no unrelated configuration was
+  modified to hide anything.
+- **The `development` profile cannot reach the API on a physical device as configured.** It
+  deliberately sets no `env`, so `EXPO_PUBLIC_API_URL` is unset and `mobile/lib/config.ts` falls back
+  to `http://10.0.2.2:4000` — the emulator's host-loopback alias. That is correct by design for a
+  Metro-served dev client, but it means **physical-device API validation requires
+  `EXPO_PUBLIC_API_URL` to be set to the host's LAN address**. No change was made: adding one would
+  have had to be emulator-wrong, breaking the path this phase verified.
+- The emulator image has no shell HTTP client (toybox provides no `curl`/`wget`), so reachability
+  could not be probed from the shell. It was proven through the app's own request instead.
+- `mobile/eas.json`'s `preview` profile points at the Render origin and `production` at the placeholder
+  `https://REPLACE-WITH-PRODUCTION-ORIGIN` — both pre-existing and untouched.
+
+## Verification
+
+- `git status --porcelain` reports exactly the five entries it reported before the phase began — three
+  modified (`mobile/eas.json`, `server/src/services/ai/providers/http.ts`,
+  `server/test/phase06-ai-wire.test.mjs`) and two untracked plan documents — **none of them created,
+  modified or reverted by this phase**, as §1 required. This phase's own diff is documentation only.
+- **No secret or credential is committed.** The Android keystore is held by EAS and was reused, never
+  exported; no `google-services.json`, `GoogleService-Info.plist`, `.env` file or Firebase provider
+  credential exists in the tree.
+- **No Google or Facebook provider SDK implementation exists** — none was installed.
+- **No server authentication behaviour changed**: `git diff` over `server/` reports only the
+  pre-existing unrelated `http.ts` and `phase06-ai-wire.test.mjs` edits.
+- **No test suite was re-run for this phase**, because the change set is documentation only and no
+  production file was touched; the existing suites are unaffected by it.
+
+## Definition of Done
+
+- An EAS **development** build exists, **finished**, recorded with build ID, profile, platform,
+  artifact URL, fingerprint and version.
+- The build was installed on an Android emulator and **launched**: the app runs **outside Expo Go**,
+  proven by a Metro-served dev-client bundle loading into an installed native APK.
+- The signed-out root renders, the auth UI loads, Firebase initialization does not crash, and API
+  communication is proven end to end against the local backend.
+- **No physical-device test is claimed**, because none occurred; **no iOS run is claimed**, because
+  none was possible on this host.
+- **M1 vs M2 is NOT chosen**, and neither is implemented.
+- **Google Sign-In, Facebook Login, Apple Sign-In, account linking and account unlinking were NOT
+  implemented**, and no provider SDK was installed.
+- **The build history is corrected**: EAS holds three builds, two of them predating this phase,
+  superseding the "no EAS build has ever been executed" statements in the Phase 30A and Phase 32F
+  records.
+- **Phase 32H, 32I and 32J were NOT started.**
 
 ---
 

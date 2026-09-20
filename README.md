@@ -770,3 +770,26 @@ Phase 07 (testing + production hardening) and Phase 08 (owner-directed hardening
   account linking, account unlinking and invitations were NOT implemented; Apple remains future scope;
   no provider SDK was installed; and the first EAS development build remains a prerequisite for
   validating the mobile provider path.** No historical phase record was rewritten.
+- **Phase 32G — First EAS Development Build / Native Runtime Validation:** **validation only** — no
+  provider was implemented (no Google Sign-In, Facebook Login, Apple Sign-In, account linking or
+  unlinking), no MongoDB schema, authentication server behaviour, payment or billing behaviour was
+  modified, **M1 vs M2 was NOT chosen**, and no provider SDK was installed. **No production or
+  configuration file changed**: the EAS configuration was verified against the project rather than
+  assumed correct, and Phase 30A's foundation turned out to be correct as committed, so the phase's
+  diff is documentation only. A `development` profile Android build was produced (`finished` in
+  12 min 11 s), installed on the emulator and **launched — the app runs outside Expo Go**, proven by
+  Metro serving `expo-router/entry.js` (1,525 modules) into the installed native APK with
+  `topResumedActivity=com.inventoryai.app/.MainActivity`. The signed-out root renders, the auth UI
+  loads, Firebase is never initialized (all four `EXPO_PUBLIC_FIREBASE_*` unset) and does not crash,
+  and **API communication is proven end-to-end**: invalid credentials produced the server's own
+  "Invalid email or password" copy, with the backend logging `POST /api/auth/login → 401`. **No
+  physical device was used and no device test is claimed** — all evidence is from the Android
+  **emulator**; **iOS was neither built nor run** (no iOS build exists and the host is Windows); the
+  `preview` and `production` profiles were not exercised; and nothing beyond the signed-out root was
+  navigated. **The build history is corrected:** EAS holds **three** Android builds — two of them
+  predating this phase, including a development build from the Phase 30A commit itself — which
+  supersede the "no EAS build has ever been executed" statements in the Phase 30A and Phase 32F
+  records; Phase 32G is the third build, not the first. **M1 and M2 findings were documented, not
+  chosen:** M1's pipeline is now proven and its plugin auto-discovery confirmed, while M2's redirect
+  capability remains unproven because no redirect was tested. **Phase 32H, 32I and 32J were NOT
+  started.**

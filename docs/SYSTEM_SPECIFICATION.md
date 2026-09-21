@@ -1176,22 +1176,40 @@ sessions and audit records.
 
 ### The Exchange Boundary
 
-Firebase ID tokens are accepted at **one** boundary and nowhere else:
+Firebase ID tokens are accepted at **two** boundaries and nowhere else:
 
 ```text
-POST /api/auth/firebase/exchange
-POST /api/auth/firebase/register
+POST /api/auth/firebase/exchange     PUBLIC         verified token -> Inventory AI session
+POST /api/auth/firebase/register     PUBLIC         verified token -> new Business + OWNER user
+POST /api/auth/firebase/link         AUTHENTICATED  verified identity -> the CALLER'S OWN account
 ```
 
-The server verifies the ID token, uses the verified Firebase UID, resolves the MongoDB user **by
-`firebaseUid`**, applies the existing user and business status checks, and mints the existing
-Inventory AI JWT and session. An unresolved UID answers the existing registration-required behaviour.
+The two public routes are the exchange boundary proper: the caller holds no Inventory AI JWT, which
+is why they must prove an identity instead. The server verifies the ID token, uses the verified
+Firebase UID, resolves the MongoDB user **by `firebaseUid`**, applies the existing user and business
+status checks, and mints the existing Inventory AI JWT and session. An unresolved UID answers the
+existing registration-required behaviour.
 
-Two invariants govern this boundary:
+`POST /api/auth/firebase/link` accepts an ID token for the opposite purpose and in the opposite
+direction: the caller is **already** authenticated, and the token names an identity to be attached to
+the account the caller's own session already resolves to. It creates no session, resolves no account
+from the token, and cannot name an account. See *Safe Account Linking* below.
+
+Three invariants govern these boundaries:
 
 - **A Firebase ID token must never become the application's long-lived API bearer credential.** It is
   exchanged **once** for an Inventory AI access token. The API accepts Inventory AI tokens only.
 - **The exchange is UID-authoritative. It never resolves an account by email.**
+- **The link boundary never resolves an account from an identity.** The account is the authenticated
+  caller's and the identity is the verified token's, so neither side of the association is read from
+  a request body.
+
+**On the link route, a rejected ID token is answered `400`, not `401`, and the distinction is
+load-bearing.** The mobile client treats a `401` or `403` response to a request that carried a token
+as session loss and clears the session. The link route is authenticated, so a `401` there would mean
+"the Firebase credential was bad" and be acted on as "your Inventory AI session is gone" — signing a
+user out over an unrelated failure. `400` states what actually happened and falls outside that rule.
+The error `code` is unchanged, so a client branching on codes needs no second branch.
 
 ### Password Authority for Linked Accounts
 
@@ -1202,8 +1220,12 @@ the refusal does not reveal whether the account exists — and before any sessio
 half-login can be left behind. This guard is **not to be removed or weakened**.
 
 Its recorded consequence: for a linked account, `POST /api/auth/change-password` and the password
-reset flow no longer change the credential that actually authenticates the user. The disposition of
-those endpoints for linked accounts is **open** — see the open items at the end of this section.
+reset flow no longer change the credential that actually authenticates the user. **Phase 32H made that
+population reachable for the first time** — it added the only operation that writes `firebaseUid` onto
+an existing password account — so the state this consequence describes is no longer hypothetical. The
+disposition of those endpoints for linked accounts is **still open** and was deliberately not decided
+by that phase; see the open items at the end of this section. Nothing about the guard itself changed:
+it is intact and unweakened, and the link route does not offer a second way in.
 
 ## Provider Identity Linking Policy
 
@@ -1220,7 +1242,7 @@ that reachable in practice rather than in theory.
 The server therefore stays **UID-authoritative**, and linking is a deliberate act with an explicit
 proof of ownership, never a side effect of matching an address.
 
-### Safe Account Linking (approved design — not implemented)
+### Safe Account Linking (server-side boundary implemented — Phase 32H)
 
 Linking is an **explicit account operation performed by an already-authenticated user**:
 
@@ -1249,8 +1271,48 @@ Two constraints apply:
   may attach a provider to an existing Inventory AI account. A sign-in is evidence about an identity;
   it is not evidence about an account.
 
-**Neither flow is implemented.** There is no link route, no unlink route, no linking service, and no
-provider field on any model.
+**The diagram's first half is implemented; its last step is not.** `POST /api/auth/firebase/link`
+records that a verified Firebase identity belongs to an account that has already proved itself, and
+that is the entire server-side boundary:
+
+```text
+POST /api/auth/firebase/link     authenticated, 200
+body: { idToken }
+-> { linked: boolean, user }
+```
+
+What it does, and what it deliberately does not:
+
+- **The account comes from the caller's session** (`req.user.id`), never from the request. There is no
+  `userId`, `businessId`, `firebaseUid`, `role` or `status` field in the accepted payload, so a body
+  naming any of them is inert rather than rejected — the handler holds no client-supplied identity to
+  forward.
+- **The identity comes from the verified token's UID.** It is never compared with the account's email,
+  never used to find an account, and never used to resolve a conflict. A provider that supplies no
+  address links exactly as well as one that does.
+- **It writes exactly two fields: `firebaseUid` and `emailVerified`.** It cannot move an account
+  between businesses or change its role, because no code path writes `businessId`, `role` or `status`.
+- **Four lifecycle cases, in an order that matters.** The same identity on the same account is an
+  idempotent success (`linked: false`, no write, no audit row). An account that already owns a
+  *different* identity is refused. An identity that already belongs to *another* account is refused
+  and never transferred, merged or re-pointed. An identity belonging to nobody is attached — which is
+  safe only because the caller has already proved they own this account.
+- **Both refusals are one `409`** with one code and one generic message that names no account, tenant,
+  role or Firebase UID, so the two are indistinguishable to the caller. The precise reason and the UID
+  go to the audit trail and the server log, where the reader is the tenant's own operator rather than
+  the caller — and the UID itself is kept out of the audit row, because that row is readable by every
+  ADMIN of the business while a conflicting UID may name a person in a different one.
+- **Concurrency is resolved by the database, not by a check.** The attachment is one conditional
+  update that applies only while the account is still unlinked, and the `firebaseUid` unique index is
+  the last line of defence behind the pre-check, so two accounts racing for one identity cannot both
+  win.
+
+**Still not implemented:** the provider half. There is no "Connect Google" or "Connect Facebook" UI, no
+provider credential acquisition, no OAuth redirect flow, no `unlink` route, and no provider field on
+any model. Firebase's own provider linking is performed by the Firebase client SDK against the
+signed-in Firebase user; the server neither performs it nor has an API for it, and attaching a
+provider is not a server-side operation at all — the UID does not change, so from the Inventory AI
+side a Firebase account with several providers is simply one `firebaseUid`.
 
 ### Facebook and Missing Email
 
@@ -1272,7 +1334,9 @@ Unlinking is a client-side Firebase operation, so the **server cannot observe it
 unlink a user's last provider, but its notion of "last method" covers only Firebase methods and is
 unaware of a retained `passwordHash`. The application, meanwhile, refuses password login for any
 account carrying a `firebaseUid`. **An unlink policy and last-authentication-method protection that
-account for both sides are OPEN** and must be settled before an unlink capability ships.
+account for both sides are OPEN** and must be settled before an unlink capability ships. Phase 32H
+implemented **no** unlink capability of any kind, server-side or otherwise, and left this open rather
+than deciding it.
 
 Ending an Inventory AI session revokes that session only. It never revokes the Firebase identity, and
 disabling an Inventory AI user does not disable the corresponding Firebase user — the exchange refuses
@@ -1297,7 +1361,7 @@ requires an explicit owner decision before the phase that would implement it:
 | Open item | Blocks |
 | --- | --- |
 | The unlink policy and last-authentication-method protection | Any unlink capability |
-| The linked-account disposition of `change-password` and the password reset flow | Any phase that starts writing `firebaseUid` onto password accounts |
+| The linked-account disposition of `change-password` and the password reset flow | **A live defect, not a gate.** Phase 32H implemented the operation that writes `firebaseUid` onto password accounts, so a linked account can now exist — and for it, those two endpoints change a credential that no longer authenticates anyone, while reporting success. The decision is owed by a hardening phase; it no longer blocks anything, because the state is reachable now. |
 | Whether `emailVerified` is enforced | Provider sign-in that relies on a provider-asserted address |
 | M1 (native SDK) vs M2 (`expo-auth-session`) for the mobile provider integration | All Google/Facebook mobile work |
 | The Facebook missing-email onboarding flow | Facebook Login |
@@ -1482,9 +1546,14 @@ Future authentication may include:
 - MFA — future scope
 
 Firebase Authentication **is** implemented as the identity provider (§29). Google and Facebook are
-approved providers reachable through it, and neither is implemented: **no provider SDK is installed,
-no provider route exists, and no account linking exists.** Apple Sign-In is future scope and is not
-part of the current implementation. Enforcing `emailVerified` is likewise not implemented.
+approved providers reachable through it, and neither is implemented: **no provider SDK is installed
+and no provider route exists.** Apple Sign-In is future scope and is not part of the current
+implementation. Enforcing `emailVerified` is likewise not implemented.
+
+Account linking is **half** implemented, and the half matters: since Phase 32H the **server-side
+boundary** exists (`POST /api/auth/firebase/link`, authenticated — see §29), while the provider side
+does not. There is no "Connect Google", no OAuth redirect, no unlink, and no provider field on any
+model. The boundary is what Google and Facebook will converge on; it is not Google or Facebook.
 
 ---
 
@@ -1623,7 +1692,10 @@ route reachable from `server/src/app.ts` therefore falls into exactly one declar
   caller's own account (`GET`/`PATCH /api/auth/me`, `POST /api/auth/change-password`, and the
   session-lifecycle routes `POST /api/auth/logout`, `GET /api/auth/sessions`,
   `DELETE /api/auth/sessions/:id` — a user's own sessions are self-service, so no capability is
-  involved) and for the categories/locations reads, which have no view capability in the catalogue.
+  involved). Phase 32H's `POST /api/auth/firebase/link` belongs here for the same reason: it attaches
+  an identity to the caller's own account and names no other account, and no catalogue key could
+  express "may link an identity" without inventing an authorization concept the catalogue does not
+  have. Also here are the categories/locations reads, which have no view capability in the catalogue.
   Each is listed explicitly, with its reason, so that the deferral is visible and cannot be extended
   by accident.
 - **Public** — no authentication at all. The health probes must answer before a token can exist,

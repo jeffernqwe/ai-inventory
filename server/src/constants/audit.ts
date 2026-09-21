@@ -43,6 +43,26 @@ export const AUDIT_ACTIONS = Object.freeze({
   // was added.
   PASSWORD_RESET_REQUESTED: 'PASSWORD_RESET_REQUESTED',
   PASSWORD_RESET_COMPLETED: 'PASSWORD_RESET_COMPLETED',
+  // Phase 32H — Firebase identity linking. TWO events, not four, and the
+  // omission is deliberate rather than an oversight.
+  //
+  // LINKED records the one durable outcome: the caller's own account adopted a
+  // verified Firebase identity. LINK_CONFLICT records the refusal — a verified
+  // identity that already belongs to another account, or an account that
+  // already owns a different identity. They are the two facts an investigator
+  // needs to tell apart: an adoption, and a blocked adoption.
+  //
+  // The brief's other candidates are absent for a structural reason rather than
+  // a policy one. "Attempted cross-business linking" and "attempted role
+  // manipulation" cannot be observed here at all: `validateFirebaseLink` returns
+  // only `idToken`, so a body carrying `businessId` or `role` is indistinguishable
+  // from a body carrying any other unknown key, and there is no value to detect.
+  // "Unauthenticated linking" is refused by `requireAuth` before any handler runs,
+  // so no `businessId` exists to attribute a row to — and `recordAudit` requires
+  // one. The control for all three is structural, and an audit row is not what
+  // makes it hold.
+  FIREBASE_IDENTITY_LINKED: 'FIREBASE_IDENTITY_LINKED',
+  FIREBASE_IDENTITY_LINK_CONFLICT: 'FIREBASE_IDENTITY_LINK_CONFLICT',
 });
 
 export const AUDIT_ENTITY_TYPES = Object.freeze({

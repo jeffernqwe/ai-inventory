@@ -81,6 +81,7 @@ const MIXED = [
   'phase26b-password-recovery-http.test.mjs', // unit: recovery validators + limiter 429 shape/keying; db: forgot/reset over the real app incl. the mail-failure enumeration guard
   'phase32b-firebase-admin.test.mjs', // unit: Firebase config parsing, error leak boundary, ID-token narrowing via the seam, admin-app lifecycle, production-config integration; db: User firebaseUid/emailVerified schema + the sparse unique index against real MongoDB
   'phase32c-firebase-exchange.test.mjs', // unit: exchange/registration validators + limiter keying and the absent skipSuccessfulRequests; db: POST /api/auth/firebase/exchange + /register over the real app (session shape, JWT sub/jti, REGISTRATION_REQUIRED, ACCOUNT_DISABLED, inactive business, body-identity injection ignored, registration + orphan retry)
+  'phase32h-firebase-linking.test.mjs', // unit: the link payload returns only {problems, idToken} and a planted identity/tenant/role is inert; db: POST /api/auth/firebase/link over the real app (CASE A-D, conflict indistinguishability, email is not a join key, unauthenticated 401, 400-not-401 on a bad Firebase token, 503 unconfigured, 32E guard intact, race outcomes)
 ];
 
 const FILE_LISTS = {

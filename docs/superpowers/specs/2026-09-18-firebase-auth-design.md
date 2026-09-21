@@ -954,7 +954,11 @@ proof flow** before it may attach a provider to an existing account. A user who 
 provider whose address matches an existing account is **not** thereby shown that account.
 
 **Not implemented:** there is no link route, no unlink route, no linking service, no provider field on
-any model, and no ownership-proof flow. **This phase implements none of it.**
+any model, and no ownership-proof flow. **This phase implements none of it.** (Recorded by Phase 32F
+and accurate as of it. **Phase 32H later added the link *route* and the linking service — see §14B.**
+There is still no unlink route, no provider field on any model, and no ownership-proof flow beyond the
+authenticated session itself; the statement above is left as the Phase 32F record rather than
+rewritten.)
 
 ## 14A.5 Open decisions (not resolved — do not settle these in code)
 
@@ -984,15 +988,156 @@ Neither is settled by this phase, and both gate **later** work rather than this 
 - **Google Sign-In: NOT started.** No provider SDK, no OAuth client, no route, no screen.
 - **Facebook Login: NOT started.** Same.
 - **Apple Sign-In: future scope**, not scheduled.
-- **Account linking: NOT implemented. Account unlinking: NOT implemented.**
+- **Account linking: NOT implemented. Account unlinking: NOT implemented.** (**Superseded in part by
+  §14B** — as of Phase 32H the server-side linking *boundary* is implemented. Every provider-side
+  statement in this section still holds: no provider SDK, no provider route, no provider screen, and
+  no unlinking. The sentence above is the Phase 32F record and is not rewritten.)
 - **Invitations: NOT implemented.** The `users.manage` create route still exists unchanged.
 - **No provider SDK is installed** on either platform.
 - **No EAS build, submit or prebuild has been created.** The first EAS development build remains a
   **prerequisite** for validating the selected mobile provider integration path; until it exists, no
-  provider integration has been tested — and none is claimed to have been.
+  provider integration has been tested — and none is claimed to have been. (**Superseded by Phase 32G**,
+  which produced one; the claim that no *provider* integration has been tested still holds.)
 - **The Firebase exchange is unchanged**: it verifies the ID token, uses the verified UID, resolves by
   `firebaseUid`, **never by email**, rejects an unknown UID with the existing registration-required
   behaviour, applies the existing user/business status checks, and mints the existing JWT/session.
+
+---
+
+## 14B. Phase 32H — the server-side linking boundary (implemented)
+
+Phase 32H implements the **server half** of §14A.4 and deliberately nothing else. The question it
+answers is exactly one: *may this authenticated Inventory AI account carry this verified Firebase
+identity?* The provider half — obtaining a Google or Facebook credential, and Firebase's own
+`linkWithCredential` against the signed-in Firebase user — is performed by the **Firebase client SDK**
+and is not a server operation at all. No fake server-side provider-linking call was invented to
+"complete" it.
+
+### 14B.1 The route
+
+```text
+POST /api/auth/firebase/link          AUTHENTICATED (requireAuth + controller, no permission)
+body:  { idToken }                    -> 200 { linked: boolean, user }
+```
+
+`validateFirebaseLink` reads `idToken` and **returns only `{ problems, idToken }`**, which is the
+structural half of the whole design: the handler holds no variable that could carry a client-supplied
+`userId`, `businessId`, `firebaseUid`, `role` or `status`, so those keys are inert rather than
+validated-and-rejected. There is no check that could be deleted.
+
+- **The account is `req.user.id`** — put there by `requireAuth` from the MongoDB document the caller's
+  own session resolves to. The authenticated session *is* the ownership proof (§14A.4); requiring it
+  is not a convenience, it is the evidence that was missing in the exchange's email-collision refusal.
+- **The identity is `verifyFirebaseIdToken(idToken).uid`** — narrowed from a token whose signature
+  Google verified. It is never read from the body.
+- **`businessId` comes from `req.user`**, and the service never writes the field, so the route can
+  neither reach across tenants nor move an account between them.
+- **No rate limiter.** No authenticated route in the application is rate-limited today; adding one
+  would mean a new limiter factory and config entry, which is out of this phase's scope. The route is
+  bounded by the session it requires.
+
+### 14B.2 The four lifecycle cases, in the order that matters
+
+Decided in `server/src/services/firebaseLink.service.ts`. CASE A and CASE D are answered from the
+**account's own** `firebaseUid` before the identity is looked up at all, so an account that already
+owns an identity never has its own mapping queried, compared or replaced.
+
+| Case | Condition | Outcome |
+| --- | --- | --- |
+| **A** | same identity, same account | **Idempotent success.** `linked: false`. No write, and **no audit row** — recording an event that did not happen is a false trail. |
+| **D** | this account already owns a *different* identity | `409 FIREBASE_IDENTITY_CONFLICT`. Never silently replaced: swapping the mapping would hand the incoming account's holder a sign-in to this user. Decided before the lookup, so it costs no query. |
+| **B** | the identity belongs to *another* MongoDB user | `409 FIREBASE_IDENTITY_CONFLICT`. **Never merged, never transferred.** The account that holds it keeps it untouched. |
+| **C** | the identity belongs to nobody | Attached — safe only because the caller has already proved they own this account. |
+
+**The email is never a join key in any of the four.** It is not compared against the account's, not
+used to find an account, and not used to resolve a conflict. R-4/R-9 in force — and it is what makes
+R-10 work: a provider that supplies no address links exactly as well as one that does.
+
+**Concurrency is the database's problem, not the check's.** Attachment is ONE conditional update
+(`{ _id, firebaseUid: null }` — which matches null or absent), so a second link racing the first
+matches nothing rather than replacing an identity set microseconds earlier. The `firebaseUid` unique
+index is the last line of defence behind the CASE B pre-check: the loser of a race sees E11000 and is
+mapped to the *same* conflict, because reporting it as anything else would be the "auto-resolve a
+compromised mapping" behaviour §7.4 forbids. A lost race re-reads and re-dispatches to CASE A or CASE D
+rather than assuming.
+
+### 14B.3 Error and audit hygiene
+
+- **One `409` for CASE B and CASE D**, one code (`FIREBASE_IDENTITY_CONFLICT`), one generic message
+  naming no account, tenant, role or Firebase UID. Telling the two apart would describe a mapping the
+  caller may not be entitled to see.
+- **The conflicting UID never enters the audit row.** The audit viewer is readable by every ADMIN of
+  the business, and in CASE B that UID may name a person in a *different* tenant. The audit records a
+  `reason` from a closed set; the UID goes to the server-side structured log, which no tenant can read
+  — the standing `firebase_identity_collision` precedent.
+- **The success row records `{ passwordCredentialRetained: boolean }`** and no UID. That flag is
+  informational only: it marks the exact state whose `change-password` / reset disposition is O-2
+  below, so an operator investigating has a start point.
+- **A refused link does not revoke sessions.** Revoking would not undo the link (the attacker simply
+  signs in again), so it would be behaviour invented for no security benefit.
+- Two audit actions were added: `FIREBASE_IDENTITY_LINKED` and `FIREBASE_IDENTITY_LINK_CONFLICT`. The
+  brief's other candidates — attempted cross-business linking, attempted role manipulation,
+  unauthenticated linking — have **no emission site and cannot have one**: the payload carries no
+  `businessId` or `role` to attempt them with, and `requireAuth` refuses an unauthenticated caller
+  before any handler, so there is no `businessId` in scope to attribute a row to. Inventing rows for
+  them would mean recording events the code cannot produce.
+
+### 14B.4 What is deliberately NOT in Phase 32H
+
+Google Sign-In UI · Facebook Login UI · Apple Sign-In · provider SDKs (none installed) · OAuth redirect
+flows · Expo provider configuration changes · provider buttons · invitation UI · payment or
+subscription changes · bulk Firebase migration · `auth:import` · unlink (any form) · any change to the
+Firebase exchange contract · any weakening of the §14.1 password-authority guard.
+
+### 14B.5 §15 finding — the password reset / `change-password` defect
+
+**Inspected, documented, and deliberately not changed.** For an account carrying a `firebaseUid`, the
+§14.1 guard means the retained bcrypt hash no longer authenticates anyone. Consequences, stated
+exactly:
+
+| Endpoint | Behaviour on a linked account |
+| --- | --- |
+| `POST /api/auth/change-password` | Validates the *current* password against the bcrypt hash, writes a new hash, stamps `passwordChangedAt` — which revokes every session. The user is signed out and the credential that authenticates them (Firebase's) is untouched. Reports success. |
+| `POST /api/auth/forgot-password` / `reset-password` | Mails a link and rewrites the bcrypt hash. Same outcome: a successful-looking reset that does not change what signs the user in. |
+
+**Whether the linking boundary interacts with this defect: it does, and only by making the population
+reachable.** Before Phase 32H no code path wrote `firebaseUid` onto an existing password account, so
+the state was theoretical. It now exists. **No behaviour was changed**, because the brief forbids
+inventing a new password-reset policy and the disposition is already recorded as open (O-2). Changing
+these endpoints without deciding the policy would settle by accident what is meant to be decided on
+purpose. **O-2 is escalated by this phase from "blocks a future phase" to "a live defect", and the
+final decision remains a separate explicit hardening item.**
+
+### 14B.6 §16 finding — unlink and last-authentication-method
+
+**Nothing was implemented and nothing was changed.** Unlinking remains client-side Firebase-only, the
+server still cannot observe it, and Firebase's "last provider" protection is still unaware of a
+retained `passwordHash` — so an account can be password-linked (Firebase refuses no unlink that matters
+here) only insofar as Firebase's own rules allow. **O-1 is unchanged and still open**, and Phase 32L
+remains the phase that owns it. Phase 32H added no unlink route, no unlink service and no unlink
+audit action.
+
+### 14B.7 Verification
+
+`server/test/phase32h-firebase-linking.test.mjs` — one unit suite (no database) and one DB-backed
+suite over the real `app.ts`, **25 tests**, registered in `MIXED` in `scripts/run-tests.mjs`. The
+brief's twelve required invariants are covered, including the ones that are easy to assert vacuously:
+the payload returns only `{problems, idToken}`; a planted identity/tenant/role is inert; the token
+email is never compared; CASE B and CASE D are indistinguishable to the caller; a rejected Firebase
+token is a **400** and the caller's session survives it; an unconfigured server answers 503; the §14.1
+guard is intact and is made *live* by linking; and two accounts racing for one identity produce exactly
+one winner. `phase23-authorization-contract.test.mjs` declares the new route in its `AUTHENTICATED`
+bucket.
+
+**Every assertion was proven able to fail before being trusted**, by a mutation pass over the service,
+the controller and the validator: seven mutations — removing each of the two doubly-enforced guards
+(CASE D, CASE B), flipping the link route's 400 to a 401, making email a join key, adding the UID to
+the success audit row, making CASE A non-idempotent, and making the validator return a client-supplied
+`businessId` — were each applied to a pristine copy and each produced a red test. Two of those were
+**doubly enforced** and only fell when *both* layers were removed: CASE D by the guard and by the
+conditional update's `firebaseUid: null` filter, CASE B by the pre-check and by the unique index's
+E11000. That is a finding worth keeping: removing either layer alone leaves the property intact, which
+is what "defence in depth" means here rather than a redundancy to be tidied away.
 
 ---
 

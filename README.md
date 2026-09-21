@@ -792,4 +792,43 @@ Phase 07 (testing + production hardening) and Phase 08 (owner-directed hardening
   records; Phase 32G is the third build, not the first. **M1 and M2 findings were documented, not
   chosen:** M1's pipeline is now proven and its plugin auto-discovery confirmed, while M2's redirect
   capability remains unproven because no redirect was tested. **Phase 32H, 32I and 32J were NOT
-  started.**
+  started** (Phase 32H subsequently shipped — see its entry below; this sentence is the Phase 32G
+  record and is not rewritten).
+- **Phase 32H — Server-Side Account Linking Boundary & Authentication Ownership:** the **server half of
+  linking, and nothing else.** One route, `POST /api/auth/firebase/link`, is added —
+  `requireAuth` + controller, **no permission**, Phase 23's `AUTHENTICATED` bucket — and it is the
+  **only** way a `firebaseUid` is attached to an existing account. It answers one question: *may this
+  authenticated Inventory AI account carry this verified Firebase identity?* **Both sides of the
+  association are server-derived:** the account is `req.user.id`, put there by `requireAuth` from the
+  caller's own session (which *is* the ownership proof), and the identity is the verified token's uid.
+  `validateFirebaseLink` returns only `{ problems, idToken }`, so a body naming `userId`, `businessId`,
+  `firebaseUid`, `role` or `status` is **inert rather than rejected** — the handler holds no
+  client-supplied identity to forward and there is no check that could be deleted. A link writes
+  **exactly two fields**, `firebaseUid` and `emailVerified`, so it can never move an account between
+  businesses or change its role. **Four lifecycle cases:** the same identity on the same account is an
+  idempotent `linked: false` with no write and no audit row; an account that already owns a *different*
+  identity is refused; an identity belonging to *another* account is refused and **never merged,
+  transferred or re-pointed**; an identity belonging to nobody is attached. **The email is never a join
+  key in any of them** — not compared, not used to find an account, not used to resolve a conflict —
+  which is what makes "no automatic linking on an address match" a property of the code's shape rather
+  than of a check someone could delete. CASE B and CASE D share **one `409 FIREBASE_IDENTITY_CONFLICT`**
+  naming no account, tenant, role or Firebase UID, and the conflicting uid **never enters the audit
+  row** (readable by every ADMIN, and in CASE B it may name a person in another tenant) — it goes only
+  to the server-side log. Concurrency is settled by the database: one conditional update guarded on
+  `firebaseUid: null` plus the unique index's E11000 mapped to the same conflict, so two accounts racing
+  for one identity cannot both win. **A rejected Firebase token answers `400`, not `401`**, because the
+  mobile client treats a `401`/`403` on a token-carrying request as session loss — a `401` here would
+  sign a user out over a bad provider credential; the error **code** and the Phase 32E
+  password-authority guard are unchanged. **No schema change, no new dependency, no session-model
+  change** (`firebaseUid` stays unique + sparse; the JWT stays `sub` + `jti`, provider-neutral), **no
+  payment or subscription code touched.** **Google Sign-In, Facebook Login, Apple Sign-In, provider
+  SDKs, OAuth redirect flows, provider buttons, account linking via a provider, unlinking and
+  invitations are NOT implemented** — Firebase's own provider linking is performed by the Firebase
+  **client** SDK, and no fake server-side equivalent was invented. **§15 finding, not changed:**
+  `change-password` and the password reset flow still write an inert hash for a linked account and
+  report success — the linking boundary makes that state reachable for the first time, so **O-2 is
+  escalated from a gate on a future phase to a live defect**, left undecided on purpose. **§16 finding,
+  not changed:** no unlink capability of any kind, **O-1 still open**, Phase 32L owns it. Verified by a
+  new **25-test** suite (unit + DB-backed) whose every assertion was **proven able to fail** by a
+  seven-mutation pass — including two doubly-enforced guards that only fall when *both* layers are
+  removed. **Phase 32I, 32J and 32L were NOT started.**

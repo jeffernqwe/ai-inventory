@@ -322,6 +322,31 @@ export function validateFirebaseRegister(body: Body) {
   return { problems, idToken: idToken.value, businessName: businessName.value, name: name.value };
 }
 
+/**
+ * Identity-link payload (Phase 32H). Reads `idToken` and NOTHING else.
+ *
+ * This is the strictest of the three Firebase payloads, and the strictness is the
+ * point. The caller here IS authenticated, so unlike the exchange there is a real
+ * temptation to let the body say which account to link to, or to name the identity
+ * being attached. Neither is read:
+ *
+ *   - the ACCOUNT is `req.user.id`, so there is no `userId` field to forward;
+ *   - the IDENTITY is the uid of the token `verifyFirebaseIdToken` returns, so
+ *     there is no `firebaseUid` field to forward;
+ *   - `businessId`, `role` and `status` are not read on any path in this phase, so
+ *     a body carrying them is inert rather than rejected.
+ *
+ * Returning only `idToken` is what makes those keys inert by construction: the
+ * handler has no variable holding a client-supplied identity, tenant or role, so
+ * there is nothing to pass by mistake and no check that could be removed.
+ */
+export function validateFirebaseLink(body: Body) {
+  const problems = [];
+  const idToken = requiredString(body?.idToken, 'idToken', MAX_ID_TOKEN);
+  problems.push(...idToken.problems);
+  return { problems, idToken: idToken.value };
+}
+
 // ---------------------------------------------------------------------------
 // User management (Phase 14A)
 // ---------------------------------------------------------------------------

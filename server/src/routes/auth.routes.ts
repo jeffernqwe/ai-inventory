@@ -2,7 +2,7 @@ import { Router } from 'express';
 
 import { register, login, me, changePassword, updateMe, logout, listSessions, revokeSession } from '../controllers/auth.controller.ts';
 import { forgotPassword, resetPassword as resetPasswordHandler } from '../controllers/passwordReset.controller.ts';
-import { firebaseExchange, firebaseRegister } from '../controllers/firebaseAuth.controller.ts';
+import { firebaseExchange, firebaseRegister, firebaseLink } from '../controllers/firebaseAuth.controller.ts';
 import requireAuth from '../middlewares/authenticate.ts';
 import {
   createLoginAccountLimiter,
@@ -87,6 +87,27 @@ export function createAuthRouter({ limits }: AuthRouterOptions = {}) {
   router.post('/logout', requireAuth, logout);
   router.get('/sessions', requireAuth, listSessions);
   router.delete('/sessions/:id', requireAuth, revokeSession);
+
+  // Phase 32H: identity linking. AUTHENTICATED, and the authentication IS the
+  // operation's ownership proof (design §14A.4) rather than a convenience — the
+  // caller must already hold the account they are attaching an identity to, which
+  // is exactly the evidence the exchange's collision refusal lacks. It therefore
+  // names no permission: the subject is `req.user.id`, the caller's own account,
+  // and a capability that governed "what you may do to others" would be the wrong
+  // instrument for "what you may attach to yourself" — the same reasoning the
+  // session routes above carry.
+  //
+  // No rate limiter, deliberately and consistently: no authenticated route in this
+  // application is limited. Each attempt requires a live Inventory AI session AND a
+  // Firebase credential, and the only work it can do is a local signature
+  // verification plus two indexed lookups, so the limiter it would need is not the
+  // one that protects the public routes. Adding one means a new factory and a new
+  // config entry in middlewares/rateLimit.ts — scope this phase does not have, and
+  // no finding that asks for it.
+  //
+  // The ID token travels in the POST body, like the exchange's, so it cannot reach
+  // the access log (httpLogger records req.path only) or a Referer header.
+  router.post('/firebase/link', requireAuth, firebaseLink);
 
   return router;
 }

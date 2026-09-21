@@ -156,16 +156,21 @@ set.
 
 ## 2.6 Route inventory
 
-Phase 23 classifies **67 routes**: **47 permission-gated**, **10 authenticated**, **10 public**,
+Phase 23 classifies **68 routes**: **47 permission-gated**, **11 authenticated**, **10 public**,
 **0 role-gated**. The `PUBLIC` and `AUTHENTICATED` buckets are explicit lists that each carry a
 written reason; a route in no bucket fails the guard, and a declared exemption that has stopped being
 true also fails. There is deliberately **no route-count assertion**.
 
 > **Updated by Phase 32F (2026-09-20).** Phase 32A recorded this as "60 routes: 47 gated, 7
 > authenticated, 6 public". Phase 26A added three authenticated routes, Phase 26B-3 added two public
-> ones and **Phase 32C added the two Firebase public routes below** — 47 + 10 + 10 = 67. The gated
-> tier is unchanged at 47 throughout, which is the property that matters: no provider work has added
-> or moved a permission-gated route.
+> ones and **Phase 32C added the two Firebase public routes below** — 47 + 10 + 10 = 67, the total as
+> of Phase 32F. The gated tier is unchanged at 47 throughout, which is the property that matters: no
+> provider work has added or moved a permission-gated route.
+>
+> **Phase 32H added one authenticated route, `POST /api/auth/firebase/link`** (§14B.1) —
+> 47 + 11 + 10 = **68**, the current total. *(Corrected 2026-09-22, documentation only, no behaviour
+> change: the 67 figure was correct through Phase 32C and was not updated when Phase 32H added the
+> authenticated link route.)*
 
 The auth surface (`server/src/routes/auth.routes.ts`):
 
@@ -183,6 +188,7 @@ The auth surface (`server/src/routes/auth.routes.ts`):
 | POST | `/api/auth/logout` | `requireAuth` (sign-out-everywhere is this route with `{all:true}`) |
 | GET | `/api/auth/sessions` | `requireAuth` |
 | DELETE | `/api/auth/sessions/:id` | `requireAuth` |
+| POST | `/api/auth/firebase/link` | `requireAuth` (Phase 32H) |
 
 Both Firebase routes are **public** and declared with their reasons in the Phase 23 guard: a caller
 exchanging an ID token holds no Inventory AI JWT by definition, which is what the exchange exists to

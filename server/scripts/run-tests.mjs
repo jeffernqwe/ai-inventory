@@ -60,6 +60,7 @@ const PURE_DB = [
   'phase24-runtime-authorization-matrix.test.mjs', // runtime role x real-route matrix + role-change effect on an existing JWT
   'phase26a-session-lifecycle.test.mjs', // server-side sessions: mandatory jti, revocation, per-device logout, sign out everywhere
   'phase32e-firebase-legacy-guard.test.mjs', // the legacy password guard: a Firebase-linked account is refused on /api/auth/login, in the approved order, with no session and no lockout
+  'phase32k-firebase-password-boundary.test.mjs', // the Firebase password boundary (change-password + forgot/reset refused for a Firebase-owned account, silently on the recovery path) and the timing equalizer that must never be a credential
 ];
 const MIXED = [
   'phase06-ai-provider.test.mjs',     // unit: provider selection; db: loop + mapping

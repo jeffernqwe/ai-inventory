@@ -92,12 +92,33 @@ export default function ProfileScreen() {
           style={styles.editName}
           onPress={() => router.push('/sessions')}
         />
-        <Button
-          title="Change password"
-          variant="secondary"
-          style={styles.spaced}
-          onPress={() => router.push('/change-password')}
-        />
+        {/**
+         * Phase 32K — local password management is offered only where the server
+         * says it applies. `authMethods.password` is false for an account whose
+         * credential is held by its sign-in provider: Firebase is the
+         * authentication authority for such an account, so the server refuses a
+         * local password change outright (409 `PASSWORD_NOT_APPLICABLE`) and
+         * showing the control would only lead to that rejection.
+         *
+         * The test is `=== false`, not falsiness, so the historical behaviour is
+         * the default: a user object without the field — an older server, or a
+         * response that predates this phase — still gets the button.
+         *
+         * Nothing here is a security control. The server is the boundary either
+         * way; this only stops the UI from offering an action it knows will fail.
+         */}
+        {user?.authMethods?.password === false ? (
+          <Text style={[styles.securityText, styles.spaced]}>
+            Your password is managed by your sign-in provider, so it can&apos;t be changed here.
+          </Text>
+        ) : (
+          <Button
+            title="Change password"
+            variant="secondary"
+            style={styles.spaced}
+            onPress={() => router.push('/change-password')}
+          />
+        )}
       </Card>
 
       <Button title="Refresh account" variant="secondary" style={styles.spaced} onPress={() => refresh()} />

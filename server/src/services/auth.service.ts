@@ -14,9 +14,48 @@ const BCRYPT_ROUNDS = 10;
 const OWNER_ROLE = 'OWNER';
 const ACTIVE_STATUS = 'ACTIVE';
 
-// Compared against when the email is unknown, so both failure branches take
-// roughly the same time (reduces account-enumeration via timing).
+/**
+ * The TIMING EQUALIZER, and nothing else. Compared against when an account has
+ * no stored hash, so an unknown address and a hashless account cost the same
+ * bcrypt work as a real verification and cannot be told apart by response time.
+ *
+ * ★ PHASE 32K — IT IS NOT A CREDENTIAL, AND ITS TYPE DOES NOT SAY SO.
+ * `bcrypt.hashSync` returns a VALID hash of a KNOWN string, so the old
+ * `user?.passwordHash || DUMMY_HASH` idiom made this constant the comparison
+ * TARGET for any account with no `passwordHash` — which meant the literal
+ * `timing-equalizer-placeholder` was a working password for such an account and,
+ * in `changePassword`, a working `currentPassword` with which to install a real
+ * one. The hash stays, because the timing property is worth keeping; what
+ * changed is that it is now only ever a target whose result is DISCARDED. See
+ * `verifyPassword` below — the one reader of this constant, which cannot report
+ * success for an account that holds no hash.
+ */
 const DUMMY_HASH = bcrypt.hashSync('timing-equalizer-placeholder', BCRYPT_ROUNDS);
+
+/**
+ * Verifies `password` against an account's STORED hash, timing-equalized.
+ *
+ * THE INVARIANT (Phase 32K): **no stored hash means no password.** The
+ * comparison still runs when there is no hash — that is what equalizes the
+ * timing of a hashless account against a real one — but its result can never be
+ * `true`, so a placeholder that happens to be a valid bcrypt hash of a known
+ * string can never be accepted as a credential.
+ *
+ * IT LIVES IN ONE FUNCTION ON PURPOSE. `|| DUMMY_HASH` appeared in two places
+ * (login and change-password) and the same defect was in both, so a fix applied
+ * to one of them would have looked complete. Routing every password comparison
+ * through here is what makes "a placeholder is never a credential" a property of
+ * the code rather than a rule two call sites must each remember.
+ *
+ * A falsy stored value (`undefined`, `null`, `''`) is treated as "no hash"
+ * rather than passed to `bcrypt.compare`, which would reject an unparseable salt
+ * and turn a forgotten field into a 500 instead of a clean refusal.
+ */
+async function verifyPassword(password: string, storedHash: string | null | undefined): Promise<boolean> {
+  const hash = storedHash || null;
+  const matches = await bcrypt.compare(password, hash ?? DUMMY_HASH);
+  return hash !== null && matches;
+}
 
 /**
  * Phase 32E — the legacy password route refusing an account that Firebase owns.
@@ -82,6 +121,35 @@ const INVALID_CREDENTIALS_MESSAGE = 'Invalid email or password';
 const ACCOUNT_DISABLED_MESSAGE = 'This account is disabled. Contact an administrator.';
 
 /**
+ * ★ PHASE 32K — Firebase is the authentication authority for this account, so
+ * Inventory AI local password management does not apply to it.
+ *
+ * THE DECISION THIS ENCODES (Phase 32K). For every user carrying a `firebaseUid`
+ * — whether Firebase-native (no hash at all) or Firebase-linked (a retained
+ * hash) — Firebase owns the credential. Inventory AI never holds one that could
+ * authenticate, so it must not offer to change one.
+ *
+ * WHY 409 AND NOT 401/403, which would be the obvious neighbours. The mobile
+ * client's session-loss rule keys on the STATUS of a response to a request that
+ * carried a token (`lib/client.ts`: `if (token && (res.status === 401 ||
+ * res.status === 403)) sessionLostHandler?.(error)`), so a 403 here would sign a
+ * user out of a perfectly valid session over a refusal that says nothing about
+ * their session. 409 is also what the adjacent "this conflicts with the account's
+ * current state" refusals already use (`EMAIL_IN_USE`,
+ * `FIREBASE_IDENTITY_CONFLICT`), so a client needs one branch for the family.
+ * The Phase 32H link route made the same move for the same reason.
+ */
+export const PASSWORD_NOT_APPLICABLE_CODE = 'PASSWORD_NOT_APPLICABLE';
+
+/**
+ * Provider-neutral on purpose: it names no Firebase, no uid, no token and no
+ * internal field — a person reads it and knows only that their password lives
+ * with whoever signs them in, which is exactly the actionable fact.
+ */
+const PASSWORD_NOT_APPLICABLE_MESSAGE =
+  'Your password is managed by your sign-in provider, so it cannot be changed here.';
+
+/**
  * Local to this module, following `inventory.service.ts`, `product.service.ts`,
  * `audit.service.ts` and `users.service.ts`: every caller passes either the
  * string `req.user` carries or the ObjectId a document the server already loaded
@@ -122,7 +190,36 @@ type ChangePasswordPayload = {
   newPassword: string;
 };
 
-/** Public shape of a user document. Never includes passwordHash. */
+/**
+ * The provider-neutral capability block on the public user DTO (Phase 32K).
+ *
+ * WHY IT EXISTS. The client must know whether local password management applies
+ * before it offers it, and it must NOT be told why: `firebaseUid` is the mapping
+ * this server derives authorization and identity from, so publishing it would
+ * hand out the join key the whole Firebase design keeps server-side. `password`
+ * is the only fact a screen needs — "may this account change a password here?" —
+ * and it is expressed without naming a provider, so adding Facebook or Apple
+ * later changes nothing about this contract.
+ *
+ * `password: false` DOES NOT MEAN "no credential exists". A Firebase-LINKED
+ * account still retains its legacy hash (Phase 32H deliberately does not delete
+ * it); it means the local password cannot authenticate, so it is not a password
+ * a person can manage. That is the fact Phase 32K's boundary turns on.
+ *
+ * Exported so the two surfaces that publish a user — `toPublicUser` and
+ * `requireAuth`'s `req.user` — compute it in one place rather than each carrying
+ * a copy free to drift.
+ */
+export function authMethodsFor(user: { firebaseUid?: string | null }) {
+  return { password: !user.firebaseUid };
+}
+
+/**
+ * Public shape of a user document. Never includes passwordHash.
+ *
+ * Phase 32K adds `authMethods` — see `authMethodsFor` for why it carries a
+ * capability rather than the `firebaseUid` behind it.
+ */
 export function toPublicUser(user: UserDoc) {
   return {
     id: String(user._id),
@@ -132,6 +229,7 @@ export function toPublicUser(user: UserDoc) {
     role: user.role,
     status: user.status,
     createdAt: user.createdAt,
+    authMethods: authMethodsFor(user),
   };
 }
 
@@ -199,10 +297,10 @@ export async function loginWithPassword({ email, password, deviceLabel }: LoginP
   const normEmail = normalizeEmail(email);
   const user = await User.findOne({ email: normEmail }).select('+passwordHash');
 
-  const passwordOk = await bcrypt.compare(
-    password,
-    user?.passwordHash || DUMMY_HASH
-  );
+  // Phase 32K: timing-equalized by `verifyPassword`, which cannot accept the
+  // placeholder for an account with no stored hash. An unknown address and a
+  // hashless account both compare against the equalizer and both fail.
+  const passwordOk = await verifyPassword(password, user?.passwordHash);
 
   if (!user || !passwordOk) {
     throw new ApiError(401, INVALID_CREDENTIALS_MESSAGE, 'INVALID_CREDENTIALS');
@@ -236,19 +334,50 @@ export async function loginWithPassword({ email, password, deviceLabel }: LoginP
 
 /**
  * Password change (Phase 15). The current password is verified against the
- * stored hash FIRST — nothing changes on a wrong password. On success the hash
+ * stored hash — nothing changes on a wrong password. On success the hash
  * is replaced and passwordChangedAt is stamped with now, which invalidates
  * every JWT issued before that moment (requireAuth compares the token's iat
  * second: iat < changedAtSec → 401 SESSION_INVALIDATED). No new token is
  * issued here — the client signs in again with the new password, and that
  * fresh token's iat is at or after changedAtSec, so it is never rejected.
+ *
+ * ★ PHASE 32K CHANGED WHAT COMES FIRST. The order is now: load the account,
+ * refuse a Firebase-owned one, then verify the current password. Until this
+ * phase this function reached the bcrypt comparison unconditionally, which made
+ * `user.passwordHash || DUMMY_HASH` the comparison target and let the timing
+ * equalizer — a valid hash of a KNOWN string — be submitted as the "current
+ * password" of any hashless account in order to install a real one. Both halves
+ * of that are closed: `verifyPassword` cannot accept the placeholder, and a
+ * Firebase-owned account is refused before a password is even considered.
  */
 export async function changePassword(userId: IdLike, { currentPassword, newPassword }: ChangePasswordPayload) {
   const user = await User.findById(userId).select('+passwordHash');
   if (!user) {
     throw new ApiError(401, 'Authentication required', 'AUTH_REQUIRED');
   }
-  const passwordOk = await bcrypt.compare(currentPassword, user.passwordHash || DUMMY_HASH);
+  // ★ PHASE 32K — Firebase owns this account's credential, so there is no
+  // Inventory AI password to change. See PASSWORD_NOT_APPLICABLE_CODE.
+  //
+  // PLACED BEFORE THE CURRENT-PASSWORD COMPARISON, and the position is
+  // load-bearing rather than tidy. Placed after it, a Firebase-NATIVE account
+  // (no hash) would fail the comparison first and report 400
+  // INVALID_CURRENT_PASSWORD, while a Firebase-LINKED account (hash retained)
+  // would verify and report 409 — two different answers to one question, decided
+  // by whether a now-inert hash happens to still be on the document. Refusing
+  // first makes the boundary the same for both states.
+  //
+  // It is not an enumeration oracle: the caller is authenticated as this very
+  // account, so there is no fact here they do not already hold. And it sits
+  // ahead of every effect below — no hash is rewritten, `passwordChangedAt` is
+  // not stamped, and no session is revoked — so a refused attempt leaves the
+  // account exactly as it was.
+  if (user.firebaseUid) {
+    throw new ApiError(409, PASSWORD_NOT_APPLICABLE_MESSAGE, PASSWORD_NOT_APPLICABLE_CODE);
+  }
+  // Phase 32K: the same equalizer, and the same invariant — an account with no
+  // stored hash has no current password, so the placeholder cannot be used to
+  // install one. This was the second half of the DUMMY_HASH defect.
+  const passwordOk = await verifyPassword(currentPassword, user.passwordHash);
   if (!passwordOk) {
     throw new ApiError(400, 'Current password is incorrect', 'INVALID_CURRENT_PASSWORD');
   }
@@ -276,4 +405,12 @@ export async function updateMyName(userId: IdLike, name: string) {
   return user;
 }
 
-export default { registerBusinessOwner, loginWithPassword, changePassword, updateMyName, toPublicUser };
+export default {
+  registerBusinessOwner,
+  loginWithPassword,
+  changePassword,
+  updateMyName,
+  toPublicUser,
+  authMethodsFor,
+  PASSWORD_NOT_APPLICABLE_CODE,
+};

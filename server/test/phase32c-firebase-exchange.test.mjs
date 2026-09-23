@@ -583,10 +583,19 @@ dbSuite('Phase 32C — Firebase exchange and registration over HTTP and a real d
     setFakeFirebaseToken({ uid: id, email: user.email, email_verified: true });
 
     const res = await exchange({ idToken: ID_TOKEN });
+    // Phase 32K adds exactly one key — `authMethods`, the provider-neutral
+    // capability the client needs — and this stays an EXACT allowlist so that
+    // addition had to be made here deliberately rather than slipping through.
+    // The uid itself is still asserted absent by both cases below.
     assert.deepEqual(
       Object.keys(res.json.user).sort(),
-      ['businessId', 'createdAt', 'email', 'id', 'name', 'role', 'status'],
+      ['authMethods', 'businessId', 'createdAt', 'email', 'id', 'name', 'role', 'status'],
       'the public DTO is a strict allowlist and carries no firebaseUid'
+    );
+    assert.equal(
+      res.json.user.authMethods.password,
+      false,
+      'and an identity with a uid manages no local password'
     );
     assert.equal(bodySurface(res.json).includes(id), false, 'nor is the uid leaked');
   });

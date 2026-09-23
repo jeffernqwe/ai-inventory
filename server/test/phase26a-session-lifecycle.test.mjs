@@ -556,13 +556,17 @@ dbSuite('Phase 26A — session lifecycle over real HTTP', dbOk, () => {
       assert.equal(res.json.code, 'AUTH_REQUIRED');
     }
 
-    // /api/auth/me's payload is byte-for-byte the contract Phase 15 pinned: the
-    // session layer added nothing to it, so no existing client or test moved.
+    // /api/auth/me's payload is the contract Phase 15 pinned, plus the ONE
+    // capability Phase 32K added (`authMethods`); the session layer added nothing
+    // to it — `jti` and the session id are still absent, which is what this case
+    // exists to prove. The list is asserted EXACTLY rather than by inclusion, so
+    // a future field still has to be declared here on purpose.
     const user = await createStaff(owner);
     const token = (await login(user.email, PASSWORD)).json.token;
     const res = await me(token);
     assert.equal(res.status, 200);
     assert.deepEqual(Object.keys(res.json.user).sort(), [
+      'authMethods',
       'businessId',
       'email',
       'id',
@@ -570,6 +574,11 @@ dbSuite('Phase 26A — session lifecycle over real HTTP', dbOk, () => {
       'role',
       'status',
     ]);
+    assert.equal(
+      JSON.stringify(res.json).includes('firebaseUid'),
+      false,
+      'the capability is published, never the uid behind it'
+    );
     assert.equal(JSON.stringify(res.json).includes('jti'), false, 'no session id in /me');
 
     // A permission-gated route still denies an unpermitted role: the session

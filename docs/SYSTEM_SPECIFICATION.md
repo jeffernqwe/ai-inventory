@@ -1219,13 +1219,42 @@ account with `403 FIREBASE_SIGN_IN_REQUIRED`, after the password comparison and 
 the refusal does not reveal whether the account exists — and before any session is written, so no
 half-login can be left behind. This guard is **not to be removed or weakened**.
 
-Its recorded consequence: for a linked account, `POST /api/auth/change-password` and the password
-reset flow no longer change the credential that actually authenticates the user. **Phase 32H made that
-population reachable for the first time** — it added the only operation that writes `firebaseUid` onto
-an existing password account — so the state this consequence describes is no longer hypothetical. The
-disposition of those endpoints for linked accounts is **still open** and was deliberately not decided
-by that phase; see the open items at the end of this section. Nothing about the guard itself changed:
-it is intact and unweakened, and the link route does not offer a second way in.
+**Phase 32H made that population reachable for the first time** — it added the only operation that
+writes `firebaseUid` onto an existing password account — and **Phase 32K decided and implemented the
+consequence**: because Firebase holds such an account's credential, Inventory AI local password
+operations **do not apply** to it.
+
+- `POST /api/auth/change-password` is **refused** with `409 PASSWORD_NOT_APPLICABLE`, **before** the
+  current-password comparison and before every effect — no hash rewritten, no `passwordChangedAt`
+  stamped, no session revoked. That position is deliberate: placed after the comparison, a
+  Firebase-native account (no hash) would report `400 INVALID_CURRENT_PASSWORD` while a linked account
+  (hash retained) would report the boundary refusal — two different answers to one question, decided by
+  whether an inert hash happens to remain on the document. `409`, not `401`/`403`, because the mobile
+  client treats those two statuses on a token-bearing request as session loss and would sign the user
+  out of a perfectly valid session.
+- `POST /api/auth/forgot-password` takes the **silent exit**: one uniform `202`, with **no token, no
+  email and no audit row**. Distinguishing such an address would be the account-existence oracle the
+  recovery design refuses to be, and the check sits *after* the tenant check so it adds no new timing
+  signal to a path whose residual database-work term is only partially mitigated. `POST
+  /api/auth/reset-password` refuses with the generic `400 INVALID_RESET_TOKEN`, **last, immediately
+  before the write**, so no local credential is ever created for such an account.
+
+**No retained `passwordHash` is deleted, and none is created.** A hash a linked account already holds is
+**retained and made inert** — deleting it now could make a later unlink irreversible, which is why that
+lifecycle question remains open below. A **Firebase-native** account holds no hash at all.
+
+**The timing equalizer is never a credential** (Phase 32K). `passwordHash` is optional, so a comparison
+must still run — and still run at bcrypt cost — when an account has none, or a hashless account would be
+distinguishable from a real one by response time. Its *result*, however, must never be accepted: a
+placeholder that is a valid bcrypt hash of a known string would otherwise become a working password.
+Both comparison sites — login and `change-password` — therefore route through one helper whose contract
+is **no stored hash means no password**, so the timing property is preserved and acceptance is not.
+
+The client learns whether local password management applies through a **provider-neutral capability** —
+`authMethods: { password: boolean }` — published by both the public user DTO (`toPublicUser`) and
+`requireAuth`'s `req.user`, so the two surfaces cannot disagree. The `firebaseUid` behind it is **never**
+exposed: it is the identity join key this design keeps server-side. Nothing about the Phase 32E guard
+itself changed — it is intact and unweakened, and the link route does not offer a second way in.
 
 ## Provider Identity Linking Policy
 
@@ -1361,13 +1390,21 @@ requires an explicit owner decision before the phase that would implement it:
 | Open item | Blocks |
 | --- | --- |
 | The unlink policy and last-authentication-method protection | Any unlink capability |
-| The linked-account disposition of `change-password` and the password reset flow | **A live defect, not a gate.** Phase 32H implemented the operation that writes `firebaseUid` onto password accounts, so a linked account can now exist — and for it, those two endpoints change a credential that no longer authenticates anyone, while reporting success. The decision is owed by a hardening phase; it no longer blocks anything, because the state is reachable now. |
 | Whether `emailVerified` is enforced | Provider sign-in that relies on a provider-asserted address |
 | M1 (native SDK) vs M2 (`expo-auth-session`) for the mobile provider integration | All Google/Facebook mobile work |
 | The Facebook missing-email onboarding flow | Facebook Login |
 | The remedy, if any, for the unhealable orphan (a legacy account whose email already has a Firebase identity that can never resolve to it) | The legacy migration/linking phase |
 | `google-services.json` / `GoogleService-Info.plist` storage and whether they are committed | Any native provider configuration |
 | Whether Firebase takes over the password reset flow, and the disposition of the Phase 26B/27 artefacts if it does | Password recovery |
+
+**Retired by Phase 32K.** The linked-account disposition of `change-password` and the password reset
+flow was previously listed here as a live defect. It is no longer open — Phase 32K decided and
+implemented the boundary described under *Password Authority for Linked Accounts* above. The audit
+accompanying that phase also **corrected the finding's wording**: an ordinary `change-password` attempt
+by a Firebase-native account **fails** `400 INVALID_CURRENT_PASSWORD` (a hashless account has no current
+password to verify) rather than reporting success; it was the **reset** flow that reported success while
+writing an unusable credential, and `change-password` behaved as first described only for a linked
+account that still carries a hash.
 
 Two further facts are **UNVERIFIED** and gate later work rather than this one: whether Firebase's
 `auth:import` accepts bcrypt hashes (which decides whether a bulk migration is possible at all), and

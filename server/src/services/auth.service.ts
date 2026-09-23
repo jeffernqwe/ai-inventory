@@ -206,12 +206,29 @@ type ChangePasswordPayload = {
  * it); it means the local password cannot authenticate, so it is not a password
  * a person can manage. That is the fact Phase 32K's boundary turns on.
  *
+ * PHASE 32L adds the `firebase` sibling, and the pair is now derived from ONE
+ * field so the two booleans cannot describe different accounts:
+ *
+ *   linked     -> { password: false, firebase: true  }
+ *   unlinked   -> { password: true,  firebase: false }
+ *
+ * `firebase: true` states only that this account authenticates through Firebase.
+ * It deliberately does NOT enumerate the Firebase providers behind that identity —
+ * Google, Facebook and Apple are Firebase's business, and this server neither
+ * stores nor learns them, so there is no provider-specific field here that could
+ * drift from Firebase's own state.
+ *
+ * Both flags are derived, never stored: they are a pure function of `firebaseUid`,
+ * which is what makes Phase 32L's unlink transition automatically correct — the
+ * single write that clears the uid flips both booleans, with nothing else to keep
+ * in step.
+ *
  * Exported so the two surfaces that publish a user — `toPublicUser` and
  * `requireAuth`'s `req.user` — compute it in one place rather than each carrying
  * a copy free to drift.
  */
 export function authMethodsFor(user: { firebaseUid?: string | null }) {
-  return { password: !user.firebaseUid };
+  return { password: !user.firebaseUid, firebase: Boolean(user.firebaseUid) };
 }
 
 /**

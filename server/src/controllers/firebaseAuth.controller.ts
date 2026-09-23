@@ -57,12 +57,13 @@
 
 import type { Request, Response } from 'express';
 
-import { validateFirebaseExchange, validateFirebaseRegister, validateFirebaseLink } from '../utils/validate.ts';
+import { validateFirebaseExchange, validateFirebaseRegister, validateFirebaseLink, validateFirebaseUnlink } from '../utils/validate.ts';
 import {
   exchangeFirebaseSession,
   registerBusinessFromFirebase,
 } from '../services/firebaseAuth.service.ts';
 import { linkFirebaseIdentity } from '../services/firebaseLink.service.ts';
+import { unlinkFirebaseIdentity } from '../services/firebaseUnlink.service.ts';
 import { toPublicUser } from '../services/auth.service.ts';
 import {
   FirebaseNotConfigured,
@@ -190,9 +191,14 @@ function mapFirebaseFailure(err: unknown) {
 }
 
 /**
- * The link route's boundary. Delegates to `mapFirebaseFailure` — so there is still
- * exactly one place a Phase 32B domain error is interpreted — and then moves ONE
- * of its answers.
+ * The AUTHENTICATED Firebase routes' boundary — Phase 32H's link and Phase 32L's
+ * unlink. Delegates to `mapFirebaseFailure` — so there is still exactly one place a
+ * Phase 32B domain error is interpreted — and then moves ONE of its answers.
+ *
+ * Both routes share this mapping rather than each carrying a copy, because the
+ * hazard it addresses is a property of being authenticated, not of either
+ * operation: the moment a route carries a token, the client's session-loss rule
+ * makes every 401/403 it returns a potential sign-out.
  *
  * WHY THE 401 BECOMES A 400. The client's session-loss rule keys on the HTTP
  * STATUS of a response to a request that carried a token, not on the code:
@@ -215,7 +221,7 @@ function mapFirebaseFailure(err: unknown) {
  * rule and already correct, because nothing about the caller's credential was
  * rejected — the server simply cannot verify anything at all.
  */
-function mapFirebaseLinkFailure(err: unknown) {
+function mapAuthenticatedFirebaseFailure(err: unknown) {
   const mapped = mapFirebaseFailure(err);
   if (mapped instanceof ApiError && mapped.code === FIREBASE_TOKEN_INVALID) {
     return new ApiError(400, FIREBASE_LINK_TOKEN_INVALID_MESSAGE, FIREBASE_TOKEN_INVALID);
@@ -355,7 +361,7 @@ export async function firebaseLink(req: AuthenticatedRequest, res: Response) {
       idToken,
     });
   } catch (err) {
-    throw mapFirebaseLinkFailure(err);
+    throw mapAuthenticatedFirebaseFailure(err);
   }
 
   return res.status(200).json({
@@ -364,4 +370,72 @@ export async function firebaseLink(req: AuthenticatedRequest, res: Response) {
   });
 }
 
-export default { firebaseExchange, firebaseRegister, firebaseLink };
+/**
+ * POST /api/auth/firebase/unlink — AUTHENTICATED (Phase 32L).
+ *
+ * The inverse of the route above, and the narrower of the two: it makes the
+ * CALLER'S OWN account stop authenticating through the Firebase identity it
+ * currently carries, and establishes a NEW local password in the same transition
+ * (Policy B — see the service for why the old retained hash is replaced rather
+ * than re-enabled).
+ *
+ * THE ACCOUNT AND THE IDENTITY ARE BOTH SERVER-DERIVED, exactly as on the link
+ * route and for the same reason:
+ *
+ *   - `req.user.id` is the account, put there by `requireAuth` from the MongoDB
+ *     document this request's own session resolves to. `validateFirebaseUnlink`
+ *     returns no `userId` field that could carry one.
+ *   - the identity is `verifyFirebaseIdToken(idToken).uid`, and the service
+ *     additionally requires it to EQUAL the uid already on the account. So the
+ *     token cannot name a different identity — it can only confirm the one being
+ *     detached. There is no `firebaseUid` field in the validated body either.
+ *   - `businessId` comes from `req.user`, never the request, so this route cannot
+ *     reach across tenants; the service never writes the field, so an unlink cannot
+ *     MOVE an account either.
+ *   - `role` and `status` are not read on any path.
+ *
+ * WHY AUTHENTICATED, AND WHY THAT IS THE OWNERSHIP PROOF. As with linking, the
+ * session is the primary evidence that the caller may act on this account. The
+ * Firebase credential is required as well — not instead — and it is what Phase 32L
+ * adds beyond the session: a live, RECENT Firebase authentication whose uid matches
+ * the mapping. Both halves are necessary and neither is sufficient.
+ *
+ * THE RESPONSE IS THE NEW ACCOUNT, NOT THE OLD IDENTITY. `user` is
+ * `toPublicUser`'s allowlist, so it carries `authMethods` (`{ password: true,
+ * firebase: false }` after this) and never a `firebaseUid`. `unlinked: true` states
+ * the one fact the client needs to proceed: it should now discard its Firebase
+ * session and return the user to login, where the password just established will
+ * work.
+ *
+ * ERRORS, AND WHY NONE OF THEM CAN SIGN THE USER OUT. A bad Firebase credential
+ * answers 400 through `mapAuthenticatedFirebaseFailure`, as on the link route. The
+ * two unlink-specific refusals are 409 (`FIREBASE_IDENTITY_NOT_LINKED`,
+ * `FIREBASE_IDENTITY_CONFLICT`) and the freshness refusal is ALSO 409
+ * (`FIREBASE_REAUTHENTICATION_REQUIRED`) — never 401 or 403, which the mobile
+ * client's session-loss rule would read as "your session is gone" and act on by
+ * clearing it. See the service for the full argument.
+ */
+export async function firebaseUnlink(req: AuthenticatedRequest, res: Response) {
+  const body = req.body ?? {};
+  const { problems, idToken, newPassword } = validateFirebaseUnlink(body);
+  if (problems.length > 0) throwValidation(problems);
+
+  let result;
+  try {
+    result = await unlinkFirebaseIdentity({
+      userId: req.user!.id,
+      businessId: req.user!.businessId,
+      idToken,
+      newPassword,
+    });
+  } catch (err) {
+    throw mapAuthenticatedFirebaseFailure(err);
+  }
+
+  return res.status(200).json({
+    unlinked: true,
+    user: toPublicUser(result.user),
+  });
+}
+
+export default { firebaseExchange, firebaseRegister, firebaseLink, firebaseUnlink };

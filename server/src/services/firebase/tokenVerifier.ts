@@ -10,7 +10,7 @@
  * Two things make that guarantee hold:
  *
  *   NARROWING — the raw decoded token is never handed out. `verifyFirebaseIdToken`
- *     returns a four-field allowlisted shape, so a caller cannot accidentally
+ *     returns a five-field allowlisted shape, so a caller cannot accidentally
  *     depend on some other claim, and adding one becomes a deliberate edit here
  *     rather than a convenience read somewhere else. Narrowing runs on EVERY
  *     path, including the test seam (see below), which is what keeps it under
@@ -52,12 +52,27 @@ import { FirebaseTokenError, safeTokenReason } from './firebaseErrors.ts';
  * `email` is lowercased to match the `users.email` field, which Mongoose stores
  * with `lowercase: true`. Normalizing here means the mapping cannot miss a match
  * because Google capitalized a letter.
+ *
+ * `authTime` is Phase 32L's addition, and it is the ONLY new claim the
+ * Firebase-unlink operation needs. It is the signed `auth_time` — "when the user
+ * authenticated", per Firebase's own token reference — as distinct from `iat`,
+ * which is when THIS token was issued and moves on every hourly refresh. A
+ * freshness rule keyed on `iat` would therefore accept an arbitrarily old
+ * authentication, which is precisely the failure Phase 32L exists to avoid.
+ *
+ * It is surfaced as `number | null` rather than `number`. A token without a
+ * usable `auth_time` is not an error here — the claim is absent from some token
+ * shapes — so the field states what the token actually carried and leaves the
+ * decision to the one consumer that needs it, which must treat `null` as "not
+ * recent" and fail closed. Throwing instead would turn a claim-shape question
+ * into a verification failure, which is a different statement to the caller.
  */
 export interface VerifiedFirebaseIdentity {
   uid: string;
   email: string | null;
   emailVerified: boolean;
   signInProvider: string | null;
+  authTime: number | null;
 }
 
 /**
@@ -124,11 +139,21 @@ function toVerifiedIdentity(decoded: unknown): VerifiedFirebaseIdentity {
   const provider =
     typeof firebaseClaim.sign_in_provider === 'string' ? firebaseClaim.sign_in_provider.trim() : '';
 
+  // `auth_time` is a numeric Unix-seconds claim. Anything that is not a finite
+  // number becomes `null` rather than a NaN or a string, so the freshness check
+  // downstream has exactly one shape to reject. A string is refused deliberately:
+  // coercing it would let a token shape the verifier has never seen choose a
+  // number for the freshness rule.
+  const rawAuthTime = token.auth_time;
+  const authTime =
+    typeof rawAuthTime === 'number' && Number.isFinite(rawAuthTime) ? rawAuthTime : null;
+
   return {
     uid,
     email: rawEmail || null,
     emailVerified: token.email_verified === true,
     signInProvider: provider || null,
+    authTime,
   };
 }
 

@@ -316,7 +316,7 @@ No reset, restore, clean, stash or history manipulation was used at any point.
 | Branch | `experiment/freebuff-evaluation` — unchanged |
 | HEAD | `8af1d49f83b3f4d82c7e40d894c94ab61620ab80` — **unchanged** |
 | Staged | **0** |
-| Commit | **none created** |
+| Commit | at the time of this pass **none created**. **A later final-review checkpoint committed the phase as `01ae73f5d237da5ae49a723b970aae4daf421d2a` — see §24** |
 | Push | **none performed** |
 | Mobile files | untouched by this task (17 pre-existing entries) |
 | Dependency / schema / migration change | **none by this task** |
@@ -485,4 +485,49 @@ protections caught deterministically five times out of five.**
 - **The two gaps FB-D-121 recorded are now CLOSED**, recorded as **FB-D-122**.
 - **This addendum changes no production behaviour**, so the verification gate's own runtime evidence
   (**56/56 checks**) remains valid and was deliberately **not** re-run.
-- **No commit, no push** — still withheld, as instructed.
+- **No commit, no push** — still withheld, as instructed *at the time of the addendum*. The checkpoint
+  followed, recorded in §24.
+
+---
+
+## 24. Final review + commit checkpoint — COMPLETE
+
+**Appended after the commit.** Nothing above is rewritten; this section records only what happened next.
+
+| Item | Value |
+| --- | --- |
+| Outcome | **PASS** — the final review and commit checkpoint completed successfully |
+| Commit | **`01ae73f5d237da5ae49a723b970aae4daf421d2a`** |
+| Subject | **`feat: implement Firebase identity unlink (Phase 32L-A)`** — used verbatim, as prescribed |
+| Author / committer | `jeffernzxc <jefferndullamalinaozxc@gmail.com>` — the canonical project identity |
+| Scope | **21 files, +4615 / −33** |
+| Amended afterwards | **no** |
+| Pushed | **no** |
+
+**What the checkpoint confirmed, in the order it was checked:**
+
+1. **Mutation hardening completed at 11 of 11 detected** — M1–M11, with the per-mutation evidence in §A3.
+2. **The M3 and M7 race gaps were closed deterministically.** With each clause removed the targeted tests
+   fail **5 of 5** runs (§A4); with the code pristine the three race tests pass **10 of 10** runs.
+3. **Final verification remained green** — `npm test` **840 tests / 109 suites / 0 fail**; `test:unit`
+   348 / 324 pass / 0 fail; `test:db` 542 / 516 pass / 0 fail; `typecheck` and `lint` clean.
+4. **Production source remained unchanged during the mutation hardening** — all **ten** 32L-A source
+   files `sha256`-identical before and after (§A4), re-confirmed at commit time. The hardening touched
+   **test files and documentation only**, so this verification's **56/56 runtime evidence remains valid**
+   and was deliberately not re-run.
+5. **The implementation was committed**, together with the hardened tests and the corrected documentation,
+   so the committed mutation record carries the corrected figures rather than the historical `10/10`.
+6. **No push occurred.** No `git push` was run at any point in this phase.
+7. **Phase 32L-B was not started** — no mobile unlink UI, no client reauthentication, no provider-unlink
+   UI, and no dependency, schema or unrelated refactor.
+
+**The historical-integrity rule was honoured at this step.** FB-008's original `10/10` statement is **not**
+rewritten; **FB-D-121** remains the authoritative corrected interpretation of it, and **FB-D-122** records
+that both gaps are now closed. No previously recorded runtime or test evidence was altered.
+
+**Two consequences of the owner's scope decision, recorded so they are not mistaken for omissions:**
+`docs/freebuff/HANDOFF.md`, `docs/freebuff/TEST_BASELINE.md` and
+`docs/freebuff/tasks/FB-006-firebase-password-boundary.md` were **deliberately left uncommitted** — each
+carries mixed FB-007/Phase-32K content, so none is strictly 32L-A-only. `README.md` and
+`docs/DEVELOPMENT_ROADMAP.md` were likewise excluded, and `mobile/package.json` was excluded because it
+carries **three unrelated Phase 32I/32J dependencies**.

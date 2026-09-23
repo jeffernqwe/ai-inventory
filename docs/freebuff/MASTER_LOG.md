@@ -401,7 +401,37 @@ holds.
 targeted tests fail **5/5** runs; with the code pristine the three race tests pass **10/10** runs. Suites:
 **840 / 109 suites / 0 fail**, `test:unit` 324 pass, `test:db` **542 / 516 pass**, `typecheck` and `lint`
 clean. **Because no production behaviour changed, FB-009's 56/56 runtime evidence remains valid and was
-deliberately not re-run.** Recorded as `DECISIONS.md` **FB-D-122**. **No commit, no push.**
+deliberately not re-run.** Recorded as `DECISIONS.md` **FB-D-122**. **No commit, no push** — *at the time
+of that note*. The checkpoint followed; see below.
+
+### COMMIT CHECKPOINT — Phase 32L-A committed (recorded at the checkpoint)
+
+| Field | Value |
+| --- | --- |
+| Commit | **`01ae73f5d237da5ae49a723b970aae4daf421d2a`** |
+| Subject | `feat: implement Firebase identity unlink (Phase 32L-A)` |
+| Author / committer | `jeffernzxc <jefferndullamalinaozxc@gmail.com>` — the canonical project identity |
+| Scope | **21 files, +4615 / −33** — 10 production, 5 test-side, 6 documentation |
+| Amended | **no** | **Pushed:** **no** |
+| Parent | `8af1d49` — `feat: enforce firebase password authority boundary (Phase 32K)` |
+
+**What was committed:** the Phase 32L-A implementation together with the **mutation-hardening follow-up**
+and the trail records for both, so the committed mutation record carries the **corrected** figures rather
+than the historical `10/10`. The hardening changed **test files and documentation only** — all **ten**
+32L-A production source files were `sha256`-identical before and after it.
+
+**Deliberately NOT committed, by explicit owner scope decision:** `docs/freebuff/HANDOFF.md`,
+`docs/freebuff/TEST_BASELINE.md` and `docs/freebuff/tasks/FB-006-firebase-password-boundary.md` — each
+carries mixed FB-007/Phase-32K content, so none is strictly 32L-A-only; plus `README.md` and
+`docs/DEVELOPMENT_ROADMAP.md` (dominated by Phases 32B–32K), and `mobile/package.json`, which carries
+**three unrelated Phase 32I/32J dependencies**. Their Phase 32L content waits for a later commit.
+
+**Four pre-existing working-tree entries are protected and remain uncommitted**, byte-identical to the
+FB-002 baseline: `mobile/eas.json`, `server/src/services/ai/providers/http.ts`,
+`server/test/phase06-ai-wire.test.mjs`, and the two Phase-18 plan documents.
+
+**Still open, and none of it started:** Phase 32L-B (the mobile unlink flow), O-1, O-6, and the
+project-documentation close-out.
 
 ---
 

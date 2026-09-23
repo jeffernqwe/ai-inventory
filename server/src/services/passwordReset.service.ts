@@ -359,6 +359,30 @@ export async function requestPasswordReset({ email }: ResetRequestInput = {}) {
     return;
   }
 
+  // ★ PHASE 32K — a Firebase-owned account has NO local password to recover.
+  //
+  // WHY THIS IS A SILENT RETURN AND NOT AN ERROR. There are two ways to refuse
+  // here and only one of them is safe. Answering a distinguishable code — or any
+  // error at all — for an address that exists would turn this route into the
+  // account-existence oracle the whole design refuses to be, and the fact being
+  // protected ("this account uses a managed sign-in") is itself account state an
+  // unauthenticated caller may not learn. Taking the SAME silent exit as a
+  // DISABLED account or an inactive tenant means the route still answers one
+  // uniform 202, and the caller learns nothing at all.
+  //
+  // WHY IT SITS HERE, after the tenant check and before the token insert. Placed
+  // after the tenant check so a Firebase account performs exactly the database
+  // work a legacy one does right up to the point a token would be created — the
+  // request path is timing-sensitive (see the KNOWN LIMITATION above) and a
+  // refusal that short-circuits earlier would add a signal rather than remove
+  // one. Placed before the token insert because a reset token is a credential,
+  // and this account can never spend one: minting it, mailing it and totalling
+  // it in the ONE-LIVE-TOKEN cleanup would be inventing a fake local credential
+  // and emailing a link that cannot work. It also means the `PASSWORD_RESET_REQUESTED`
+  // audit row below is never written, so the trail does not record a recovery
+  // request that was refused before it began.
+  if (user.firebaseUid) return;
+
   const rawToken = generateResetToken();
   const token = await PasswordResetToken.create({
     userId: user._id,
@@ -480,6 +504,27 @@ export async function resetPassword({ token, newPassword }: ResetPasswordInput =
     // Never BUSINESS_NOT_ACTIVE — a suspended tenant must not be tellable here.
     throw invalidResetToken();
   }
+
+  // ★ PHASE 32K — the same boundary, seen from the completion side, and
+  // deliberately LAST: it is the final gate before the one write that matters.
+  //
+  // WHY IT IS HERE AT ALL, given the request path above can no longer issue a
+  // token for such an account. Two reasons, and the second is the real one.
+  // First, tokens issued BEFORE this phase may still be unspent, and this route
+  // can be reached with one. Second, and generally: the write below is what
+  // creates the fake local credential, so the guard belongs immediately in front
+  // of it — "which accounts may hold a local password" is a property of this
+  // write, and a request-path check alone would be enforcement by a different
+  // function.
+  //
+  // The token is already SPENT when this throws (`usedAt` was set by the atomic
+  // claim above and nothing unsets it), which is the existing fail-closed rule
+  // rather than a new consequence: a refused completion costs the caller another
+  // link, and the account is left untouched — no hash written, `passwordChangedAt`
+  // not stamped, no session revoked, no PASSWORD_RESET_COMPLETED row. The generic
+  // code hides which of the rejection reasons applied, exactly as the six above
+  // do.
+  if (user.firebaseUid) throw invalidResetToken();
 
   // The assertion is erased and restates what step 1 already proved: reaching
   // this line means `newPasswordProblems` returned nothing, and the only branch

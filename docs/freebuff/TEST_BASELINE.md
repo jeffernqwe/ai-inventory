@@ -131,6 +131,23 @@ _Status updated by FB-005: the register remains empty through FB-005 — FB-003 
 read-only audits that executed nothing, and FB-005 executed no test, typecheck, lint or build. The
 pre-existing inventory in §2/§3 is unchanged._
 
+### 4a. FB-006 (Phase 32K) — the register's first non-zero entry
+
+| Category | Count | Details |
+| --- | --- | --- |
+| `FREEBUFF-CREATED` tests | **2** | `server/test/phase32k-firebase-password-boundary.test.mjs` (node:test, `PURE_DB`, 12 cases, registered in `run-tests.mjs`); `mobile/__tests__/phase32k-password-capability-gating.test.tsx` (jest, 4 cases) — **renamed from `fb-006-*` by owner decision (FB-D-115)** |
+| `FREEBUFF-MODIFIED` tests | **2** | `phase26a-session-lifecycle.test.mjs` and `phase32c-firebase-exchange.test.mjs` — both exact-allowlist guards updated for the additive `authMethods` field **and strengthened** with an explicit `firebaseUid`-absent assertion. Declared in `DECISIONS.md` **FB-D-114** (trail rule 5). No assertion was removed, relaxed or skipped |
+| Tests **executed** by Freebuff | **YES — first execution since FB-002** | server: new suite 12/12; `npm test` **795 tests / 106 suites / 0 fail**; `npm run test:unit` 336 tests / 313 pass / 0 fail; `npm run typecheck` clean; `npm run lint` clean. mobile: new suite 4/4; `npx jest` **21 suites / 213 tests / 0 fail**; `npx tsc --noEmit` clean; `npx eslint .` clean |
+| Mutation pass | **7 mutations**, each reverted | A change-password guard → cases 6, 10; B equalizer accepts → 3, 4, 5; C forgot guard → 7, 11; D reset guard → 8; E1 `toPublicUser` → 1, 12; E2 `requireAuth` → 12; F mobile Profile gate → mobile case 1. No mutated file left behind |
+| Tests **deleted** by Freebuff | **0** | none |
+
+**§2/§3 inventory note (amendment, not a rewrite):** the authoritative inventory in §2 and §3 is the
+`FB-002` snapshot and remains historically accurate; it is **not** back-updated. As of FB-006 there are
+**46** server test files (45 pre-existing + 1 Freebuff-created) and **16** mobile suite files (15
+pre-existing + 1 Freebuff-created), and FB-006 is the first task in this trail to execute any test.
+The pre-existing counts and every "Executed by Freebuff: NO" row above still describe the baseline and
+should be read with that amendment.
+
 ## 5. `DOCUMENTED HISTORICAL RESULT` claims in the repository
 
 **Every figure below is `DOCUMENTED HISTORICAL RESULT — NOT REPRODUCED BY FREEBUFF`.** They are
@@ -157,6 +174,9 @@ recorded so a future agent can see what the project claims, with its source — 
 
 **Never claimable by Freebuff without execution:** MongoDB behaviour, Firebase behaviour, EAS build
 results, live API behaviour, route counts produced by the classifier, and any lint/typecheck output.
+
+**FB-006 status:** the binding rule in §0 now has its first `EXECUTED / VERIFIED BY FREEBUFF` figures —
+see §4a. No historical claim in §5 is reproduced or upgraded by them.
 
 ## 6. Rules for tests Freebuff creates (owner-approved naming)
 

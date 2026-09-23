@@ -5,6 +5,7 @@ import User from '../models/user.model.ts';
 import ApiError from '../utils/ApiError.ts';
 import { verifyAccessToken } from '../config/jwt.ts';
 import { assertActiveBusiness } from '../services/business.service.ts';
+import { authMethodsFor } from '../services/auth.service.ts';
 import {
   findActiveSessionByJti,
   touchSession,
@@ -17,11 +18,13 @@ import {
  * expiration, then reloads the user from the database to attach an
  * AUTHORITATIVE request context.
  *
- * req.user = { id, businessId, name, email, role, status }
+ * req.user = { id, businessId, name, email, role, status, authMethods }
  *   - businessId and role always come from the database for this request, never
  *     from token claims or the client (a user demoted/disabled is rejected
  *     immediately).
  *   - passwordHash is never loaded here.
+ *   - Phase 32K: `firebaseUid` IS now loaded, but it is never published — it
+ *     exists only so `authMethods` can be derived from it. See below.
  *
  * Phase 26A: a token must also name a live server-side session. The token's
  * `jti` is looked up in `sessions`, and the request is refused unless that row
@@ -58,6 +61,8 @@ type AuthenticatedRequest = Request & {
     email?: string;
     role: string;
     status?: string;
+    /** Phase 32K — the provider-neutral capability block (see `authMethodsFor`). */
+    authMethods?: { password: boolean };
   };
   auth?: { sessionId: string; jti: string };
 };
@@ -92,7 +97,13 @@ export async function requireAuth(req: AuthenticatedRequest, res: Response, next
       throw new ApiError(401, 'Invalid or expired token', 'INVALID_TOKEN');
     }
 
-    const user = await User.findById(userId).select('name email role status businessId passwordChangedAt');
+    // Phase 32K: `firebaseUid` is selected ONLY so `authMethods` below can be
+    // derived from it, and only that derived boolean leaves this middleware. The
+    // uid itself is deliberately not published on `req.user`: it is the identity
+    // join key the Firebase design keeps server-side, and this middleware runs on
+    // EVERY route, so putting it here would expose it far more widely than the
+    // DTO that legitimately needed it.
+    const user = await User.findById(userId).select('name email role status businessId passwordChangedAt firebaseUid');
     if (!user) {
       throw new ApiError(401, 'Authentication required', 'AUTH_REQUIRED');
     }
@@ -137,6 +148,11 @@ export async function requireAuth(req: AuthenticatedRequest, res: Response, next
       email: user.email,
       role: user.role,
       status: user.status,
+      // Phase 32K: GET /api/auth/me answers `{ user: req.user }`, and the client
+      // reads the user object from BOTH here and `toPublicUser`. Deriving the
+      // capability in the one shared helper is what keeps those two surfaces from
+      // disagreeing about whether local password management applies.
+      authMethods: authMethodsFor(user),
     };
     req.auth = { sessionId: String(session._id), jti };
     return next();

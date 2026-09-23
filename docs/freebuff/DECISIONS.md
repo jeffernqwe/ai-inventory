@@ -228,6 +228,43 @@
 - **Resulting action:** applied under FB-005. This does **not** weaken FB-D-008: that rule forbids *silent* fixes; this one is explicit, scoped, dated and recorded. It is a one-off; extending it to any other drift item (FB-D-101…FB-D-104, FB-D-106…FB-D-111) requires a fresh explicit authorization.
 - **Commit status:** the design doc's working-tree diff is intentional and **uncommitted** by owner decision 6; committing requires a separate future instruction.
 
+### FB-D-114 — Two pre-existing test files were modified under FB-006 · `OWNER DECISION` (FB-006 authorization) + `SOURCE-CODE OBSERVATION`
+- **Date:** 2026-09-23 (FB-006).
+- **What happened:** `npm test` failed in two PRE-EXISTING files after the Phase 32K change:
+  `server/test/phase26a-session-lifecycle.test.mjs` (asserts the exact key set of `GET /api/auth/me`) and
+  `server/test/phase32c-firebase-exchange.test.mjs` (asserts the exact key set of the exchange's public
+  user DTO). Both are **exact-allowlist** guards, so the single additive field `authMethods` made them
+  red — correctly. They were not wrong.
+- **Why this needs an entry (trail rule 5 / `TEST_BASELINE.md` §6 rule 5):** Freebuff must never
+  modify, weaken or delete a pre-existing test to make new work pass, and must document the concern
+  rather than "fix" it.
+- **What was done, and why it is NOT a weakening:** each file keeps its exact-shape `deepEqual`
+  assertion (now including `authMethods`) **and gained a NEW assertion** that the serialized payload
+  contains no `firebaseUid` / no `firebaseUid` field name. Nothing was removed, relaxed or skipped, and
+  no other case in either file was touched. The guards now state the property they exist to protect
+  rather than leaving it implied by the list.
+- **Evidence:** the failing output (actual keys vs expected keys), then 795/106/0 on the re-run.
+- **Authority:** the FB-006 brief authorizes the implementation; the change to these two files is a
+  necessary consequence of the authorized additive DTO field, and is declared here and in the FB-006
+  record rather than left implicit.
+
+### FB-D-115 — New test files: `fb-006-*` conflict resolved in favour of the project series (`phase32k-*`) · `OWNER DECISION`
+- **Date:** 2026-09-23 (FB-006).
+- **Observation (`SOURCE-CODE OBSERVATION`):** `TEST_BASELINE.md` §6 rule 1 (owner-approved, FB-D-002)
+  requires a test Freebuff creates to be named `fb-<task-id>-<topic>.test.mjs`. The project's own
+  convention for every other suite is `phaseNN-<topic>.test.mjs` (or a topic name under
+  `mobile/__tests__/`), and the FB-006 brief describes the work as "Phase 32K".
+- **Conflict:** the two conventions give different names for the same two files. Freebuff first applied
+  trail rule 1 (the files were created as `fb-006-*`, which is the compliant reading) and declared the
+  conflict here rather than hiding it.
+- **Owner decision (`OWNER DECISION`):** the project series governs — **rename to `phase32k-*`**. The
+  files are `server/test/phase32k-firebase-password-boundary.test.mjs` and
+  `mobile/__tests__/phase32k-password-capability-gating.test.tsx`.
+- **Resulting action:** both files renamed; references updated in `run-tests.mjs` (still `PURE_DB`),
+  roadmap §27M, the README Phase 32K entry, and every trail file that named the old paths.
+- **Note for a future task:** trail rule 1 and the project's `phaseNN-*` series will collide again for
+  any Freebuff task that lands a project phase. Recorded so the next task asks rather than picks.
+
 ---
 
 ## Part 3 — Freebuff inferences that are explicitly NOT decisions

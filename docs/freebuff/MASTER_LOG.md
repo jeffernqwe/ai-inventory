@@ -184,6 +184,34 @@ implementation and verification phases wrote the files listed below. The full re
 
 ---
 
+## FB-006 — Firebase password authority boundary & timing-equalizer credential fix (Phase 32K)
+
+**Written during the task (self-recorded).** The full record is
+`tasks/FB-006-firebase-password-boundary.md`; this block is the ledger summary. It is placed with the
+other task blocks, in chronological order, rather than after the correction log.
+
+| Field | Value |
+| --- | --- |
+| Task ID | FB-006 |
+| Date/time | 2026-09-23 — host clock read at the final pre-commit check: `2026-09-23 06:39 UTC` |
+| Branch | `experiment/freebuff-evaluation` |
+| Starting commit | `6bac86e2d128215c873874a05e6249aedf28ad64` (Phase 32J work uncommitted above `d8b693a`) |
+| Ending commit | **none at the time of writing — no commit, no stage, no push.** The brief's §14 commit checkpoint was deferred because a commit of the changed files would also carry the uncommitted Phase 32I/32J hunks in the shared files. The owner then decided the scope (FB-006-clean files only) — see the **post-commit note** appended at the end of this block |
+| Task requested | Implement the Phase 32K boundary — for every user with `firebaseUid`, Firebase is the sole authentication authority, so local password operations do not apply — plus the credential-integrity fix its audit found, with regression tests, mutation evidence, documentation and this record |
+| Task classification | **RISKY — production authentication code.** Mitigated by: tests written and proven able to fail, seven mutations, full-suite runs, and no schema/dependency/session change. No unlink, no hash deletion, no Console change, no deploy |
+| Plan status | The brief itself was the frozen plan; executed in the order it specifies (preflight → tests → fixes → capability → mobile → verify → document) |
+| Approval status | **APPROVED** — the brief: *"This implementation is authorized as: `FB-006`"*. The commit step inside it was **not** taken unilaterally (see Ending commit) |
+| Actions performed | Read-only preflight (branch/HEAD/status/staged/protected hashes/docs-freebuff); source reading of the auth, recovery, linking, session, audit, mail, route, controller, model and middleware modules plus the test helpers and fakes; `verifyPassword` + the `DUMMY_HASH` contract; the `change-password` / `forgot-password` / `reset-password` boundary; `authMethodsFor` published by `toPublicUser` **and** `requireAuth`; mobile `AuthUser` + Profile gating; one new server suite (`PURE_DB`, registered) and one new mobile suite; seven mutations (all reverted); `npm test`, `npm run test:unit`, `npm run typecheck`, `npm run lint`, `npx jest`, `npx tsc --noEmit`, `npx eslint .`; documentation updates; this record |
+| Files affected | **Added (3):** `server/test/phase32k-firebase-password-boundary.test.mjs`, `mobile/__tests__/phase32k-password-capability-gating.test.tsx`, `tasks/FB-006-firebase-password-boundary.md`. **Modified (11):** `server/src/services/auth.service.ts`, `server/src/middlewares/authenticate.ts`, `server/src/services/passwordReset.service.ts`, `server/scripts/run-tests.mjs`, `server/test/phase26a-session-lifecycle.test.mjs`, `server/test/phase32c-firebase-exchange.test.mjs`, `mobile/lib/auth.tsx`, `mobile/app/(app)/profile.tsx`, `README.md`, `docs/DEVELOPMENT_ROADMAP.md`, `docs/SYSTEM_SPECIFICATION.md` — plus the trail files this task updates (`MASTER_LOG.md`, `DECISIONS.md`, `TEST_BASELINE.md`, `HANDOFF.md`). Nothing staged or committed |
+| Tests performed | **EXECUTED BY FREEBUFF:** new server suite 12/12 pass; `npm test` **795 tests / 106 suites / 0 fail**; `npm run test:unit` 336 tests, 313 pass, 0 fail; `npm run typecheck` clean; `npm run lint` clean; new mobile suite 4/4 pass; `npx jest` **21 suites / 213 tests, 0 fail**; `npx tsc --noEmit` clean; `npx eslint .` clean. Re-run after the test-file rename: same figures |
+| Results | **SUCCESS.** The credential defect is closed (the timing equalizer cannot be accepted as a password or as a `currentPassword`) and the Firebase password boundary is implemented. **Seven mutations** each reddened the intended cases (A→6,10; B→3,4,5; C→7,11; D→8; E1→1,12; E2→12; F→mobile 1); all reverted with no remnant. **Two pre-existing exact-allowlist tests were modified** and are declared (FB-D-114) |
+| Errors | **Two failing pre-existing suites** appeared on the first full run: `phase26a-session-lifecycle.test.mjs` and `phase32c-firebase-exchange.test.mjs`, both pinning the exact key set of a user payload and therefore correctly rejecting the additive `authMethods`. Reported rather than worked around; both were updated **and strengthened** with an explicit `firebaseUid`-absent assertion. One earlier `npx node` invocation installed an unrelated `node` package (harmless; re-invoked as `node --test`) |
+| Safety events | **none.** All five protected hashes byte-identical pre→post; no stage/commit/push/reset/restore/stash/clean; `docs/freebuff/` created-in-trail only; no `.env`, credential or token read or recorded; **Render not touched**; Firebase/Google Console not touched; **no schema change**; the Phase 32J test tenant not read or modified |
+| Final outcome | **SUCCESS** — implemented and statically verified; **no runtime verification** (no build, no device, no live Firebase project); repository deliberately left **uncommitted** |
+| Handoff notes | (1) Commit scope decided by the owner: the FB-006-clean files only, leaving the files that also carry Phase 32I/32J work uncommitted. (2) The new tests were created as `fb-006-*` (trail rule 1) and **renamed by owner decision to the project series `phase32k-*`** (FB-D-115). (3) The two modified pre-existing tests are the only changes a reviewer should check by hand. (4) The timing property is **reasoned, not measured**; the recovery path's residual timing term is **unchanged** and still only partially mitigated |
+
+---
+
 ## Correction log
 
 ### CORRECTION OF FB-001 — recorded during FB-005 (2026-09-22)

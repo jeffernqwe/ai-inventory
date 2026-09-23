@@ -2,7 +2,7 @@ import { Router } from 'express';
 
 import { register, login, me, changePassword, updateMe, logout, listSessions, revokeSession } from '../controllers/auth.controller.ts';
 import { forgotPassword, resetPassword as resetPasswordHandler } from '../controllers/passwordReset.controller.ts';
-import { firebaseExchange, firebaseRegister, firebaseLink } from '../controllers/firebaseAuth.controller.ts';
+import { firebaseExchange, firebaseRegister, firebaseLink, firebaseUnlink } from '../controllers/firebaseAuth.controller.ts';
 import requireAuth from '../middlewares/authenticate.ts';
 import {
   createLoginAccountLimiter,
@@ -108,6 +108,29 @@ export function createAuthRouter({ limits }: AuthRouterOptions = {}) {
   // The ID token travels in the POST body, like the exchange's, so it cannot reach
   // the access log (httpLogger records req.path only) or a Referer header.
   router.post('/firebase/link', requireAuth, firebaseLink);
+
+  // Phase 32L: identity UNlinking. AUTHENTICATED for exactly the reasons the link
+  // route above is — the authentication IS the ownership proof (design §14A.4),
+  // and the subject is `req.user.id`, the caller's own account, so no permission
+  // key could express the operation without inventing an authorization concept
+  // the catalogue does not have.
+  //
+  // It adds a requirement linking does not have and cannot express as a
+  // permission: the Firebase credential must be RECENT. That is enforced in the
+  // service from the token's signed `auth_time`, because Phase 32L measured
+  // Firebase NOT gating provider unlinking on recency — so a server that wants the
+  // requirement has to hold it itself.
+  //
+  // No rate limiter, for the same standing reason as the link route: no
+  // authenticated route in this application is limited, and each attempt here
+  // requires a live session, a verified Firebase credential, a matching identity
+  // and a fresh authentication before it can do any work at all.
+  //
+  // The ID token travels in the POST body, like every other Firebase route, so it
+  // cannot reach the access log (httpLogger records req.path only) or a Referer
+  // header. The new password travels in the same body and is handled like every
+  // other password this API accepts — never logged, never echoed.
+  router.post('/firebase/unlink', requireAuth, firebaseUnlink);
 
   return router;
 }

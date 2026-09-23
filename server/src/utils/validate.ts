@@ -347,6 +347,45 @@ export function validateFirebaseLink(body: Body) {
   return { problems, idToken: idToken.value };
 }
 
+/**
+ * Identity-unlink payload (Phase 32L). Reads `idToken` and `newPassword`.
+ *
+ * `newPassword` is the whole of Policy B: an account may stop authenticating
+ * through Firebase only by establishing a local password in the same transition,
+ * so the new credential is a REQUIRED field rather than an optional one. It is
+ * held to the shared password rules through `passwordProblems` — the same 8–72
+ * bound `validateChangePassword` and `validateResetPassword` apply — and its
+ * problems are re-labelled `newPassword`, exactly as both of those do, so a
+ * client can anchor the error on the right input.
+ *
+ * `confirmPassword` is deliberately NOT read. Confirmation is a client-side UX
+ * concern on the reset screen, where a mistyped confirmation must not spend a
+ * token; here the caller is already authenticated and a mistyped password costs
+ * them nothing but a second attempt.
+ *
+ * Every other key is IGNORED rather than rejected, matching `validateFirebaseLink`:
+ * `firebaseUid`, `userId`, `businessId`, `role` and `status` are inert because the
+ * returned object has no field to carry them — the account is `req.user.id` and
+ * the identity is the verified token's uid. There is nothing to pass by mistake
+ * and no check that could be removed.
+ *
+ * The token's SHAPE is still not validated. `requiredString` bounds its length
+ * only; what a real token looks like is the verifier's decision, and a 400 here
+ * would imply the server knows.
+ */
+export function validateFirebaseUnlink(body: Body) {
+  const problems = [];
+
+  const idToken = requiredString(body?.idToken, 'idToken', MAX_ID_TOKEN);
+  problems.push(...idToken.problems);
+
+  problems.push(
+    ...passwordProblems(body?.newPassword).map((p) => ({ ...p, field: 'newPassword' }))
+  );
+
+  return { problems, idToken: idToken.value, newPassword: body?.newPassword };
+}
+
 // ---------------------------------------------------------------------------
 // User management (Phase 14A)
 // ---------------------------------------------------------------------------

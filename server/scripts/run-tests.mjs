@@ -83,6 +83,7 @@ const MIXED = [
   'phase32b-firebase-admin.test.mjs', // unit: Firebase config parsing, error leak boundary, ID-token narrowing via the seam, admin-app lifecycle, production-config integration; db: User firebaseUid/emailVerified schema + the sparse unique index against real MongoDB
   'phase32c-firebase-exchange.test.mjs', // unit: exchange/registration validators + limiter keying and the absent skipSuccessfulRequests; db: POST /api/auth/firebase/exchange + /register over the real app (session shape, JWT sub/jti, REGISTRATION_REQUIRED, ACCOUNT_DISABLED, inactive business, body-identity injection ignored, registration + orphan retry)
   'phase32h-firebase-linking.test.mjs', // unit: the link payload returns only {problems, idToken} and a planted identity/tenant/role is inert; db: POST /api/auth/firebase/link over the real app (CASE A-D, conflict indistinguishability, email is not a join key, unauthenticated 401, 400-not-401 on a bad Firebase token, 503 unconfigured, 32E guard intact, race outcomes)
+  'phase32l-firebase-unlink.test.mjs', // unit: unlink validator shape + the auth_time freshness helper (fail-closed, window boundary, iat is not freshness); db: POST /api/auth/firebase/unlink over the real app (Policy B transition, last-method invariant, identity mismatch/not-linked, recency, R-3 + R-4 reset-token race both orderings, session revocation, audit hygiene, authMethods, conditional-write races)
 ];
 
 const FILE_LISTS = {

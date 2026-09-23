@@ -371,7 +371,11 @@ unitSuite('Phase 32B — ID token verification and narrowing', () => {
     }
   });
 
-  it('returns exactly the four allowlisted fields, and nothing else', async () => {
+  // Phase 32L widened this allowlist by exactly one field, `authTime`, because the
+  // unlink operation must check the signed `auth_time`. The pin is updated rather
+  // than relaxed: the assertion still names EVERY field the narrowing may return,
+  // so a further claim could not be added without failing here.
+  it('returns exactly the five allowlisted fields, and nothing else', async () => {
     registerFakeFirebaseVerifier();
     try {
       setFakeFirebaseToken({
@@ -390,8 +394,13 @@ unitSuite('Phase 32B — ID token verification and narrowing', () => {
         email: 'owner@example.test',
         emailVerified: true,
         signInProvider: 'password',
+        // Absent from this payload, and `null` rather than refused: a token that
+        // cannot be dated is not a verification failure here — the freshness rule
+        // is the one consumer that decides, and it fails closed.
+        authTime: null,
       });
       assert.deepEqual(Object.keys(identity).sort(), [
+        'authTime',
         'email',
         'emailVerified',
         'signInProvider',

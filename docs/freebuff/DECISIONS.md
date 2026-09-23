@@ -265,6 +265,183 @@
 - **Note for a future task:** trail rule 1 and the project's `phaseNN-*` series will collide again for
   any Freebuff task that lands a project phase. Recorded so the next task asks rather than picks.
 
+### FB-D-116 — Unlink design (Phase 32L / O-1): recommended policy is "unlink = detach + establish a fresh local password" · `FREEBUFF RECOMMENDATION` — **NOT a decision**
+- **Date:** 2026-09-23 (FB-007).
+- **Observation (`SOURCE-CODE OBSERVATION`):** no unlink capability of any kind exists — no route, no
+  service, no helper, no audit action, no provider field on any model, and no mobile surface
+  (`lib/api.ts` exports `firebaseExchange` and `firebaseRegister` only). The two dangerous end-states
+  are therefore unreachable **only because the operation does not exist**, not because anything
+  guards them.
+- **Recommendation:** one authenticated `POST /api/auth/firebase/unlink`, account from `req.user.id`,
+  identity from a **verified** Firebase ID token whose uid must **equal the account's own
+  `firebaseUid`**, body `{ idToken, newPassword }`, one **conditional write**
+  (`{ _id, firebaseUid: tokenUid }`) that sets `firebaseUid: null`, `emailVerified: false`, the freshly
+  hashed password and `passwordChangedAt`, plus `revokeAllSessions`; two audit actions carrying no uid;
+  no schema change; `authMethods: { password, firebase }`.
+- **Why this option:** it is the only one of the four considered that closes **both** Case A (lockout)
+  and Case B (silent reactivation) with **one uniform rule**, by **replacing** the retained hash rather
+  than resurrecting it — which is also the first concrete answer to why Phase 32K retained it.
+- **Conflict declared:** this is the **one** place a `passwordHash` would be written for a
+  `firebaseUid` account, so it is a deliberate exception to Phase 32K's "local password operations do
+  not apply" boundary and must be documented as such.
+- **Authority:** **none.** No owner decision taken. Recorded here as a recommendation so it cannot be
+  mistaken for policy; the five owner-only questions are listed in the FB-007 record.
+
+### FB-D-117 — Phase 32H's server-side link route has no mobile surface at all · `SOURCE-CODE OBSERVATION`
+- **Date:** 2026-09-23 (FB-007).
+- **Observation:** `mobile/lib/api.ts` exports **two** Firebase calls — `firebaseExchange` and
+  `firebaseRegister`. There is **no** `firebaseLink` wrapper, no "Connect Google" screen, and no
+  caller of `POST /api/auth/firebase/link` anywhere under `mobile/`.
+- **Consequence:** the server-side linking boundary is complete but **unreachable from the app**, so no
+  user can currently attach a Firebase identity to an existing password account. A future phase that
+  assumes the link UI exists (or that unlink would be the client-side inverse of a working app flow)
+  would be built on a false premise.
+- **Authority:** none needed — an observation, not a decision.
+
+### FB-D-118 — CORRECTION: the repository records "the server cannot unlink a provider" as a capability fact; it is a capability fact about the *client* only · `SOURCE-CODE OBSERVATION` + `DOCUMENTED FACT`
+- **Date:** 2026-09-23 (FB-007, second pass).
+- **Observation:** the installed `firebase-admin@14.4.0` declares
+  `UpdateRequest.providersToUnlink?: string[]` (*"Unlinks this user from the specified providers."*,
+  `lib/auth/auth-config.d.ts:158-160`), alongside `providerToLink`, `getUser(uid).providerData`
+  (`user-record.d.ts:241`) and `revokeRefreshTokens(uid)` (`base-auth.d.ts:321`). **None of the four is
+  referenced anywhere under `server/src/`.**
+- **Drift:** the specification §29 states *"Unlinking is a client-side Firebase operation, so the server
+  cannot observe it"*, and both the specification and design document §14B state that attaching a
+  provider *"is not a server-side operation at all — the server neither performs it nor has an API for
+  it."* Both remain true as statements about **what the client does and what the server can observe**;
+  both are **inaccurate as statements of server capability**. The server *does* have the API, and a
+  server-performed unlink *would* be observable by definition.
+- **Scope of the correction:** a capability correction only. Phase 32H's **choice** not to perform
+  provider linking server-side stands unchanged and is not criticised here; only its recorded *reason*
+  is superseded. No behaviour is proposed or changed, and the FB-007 recommendation does not depend on
+  this finding in either direction.
+- **Verified vs unverified:** the **declaration** is `[SOURCE]`. The **runtime semantics** — whether the
+  last provider can be removed, and whether an existing refresh token survives an unlink — are
+  **`[EXTERNAL VERIFICATION REQUIRED]`**. The same SDK's doc comment on `providerToLink` warns that
+  linking does **not** invalidate the refresh token, which is a caution that unlinking may not either.
+- **Authority:** none. Recorded as an observation/correction for a future reviewer so the old wording
+  does not rule out an available design.
+
+### FB-D-119 — Phase 32L architecture FROZEN by the owner · `OWNER DECISION`
+- **Date:** 2026-09-23 (FB-007, fourth pass — decision freeze).
+- **What was decided:** the Phase 32L unlink architecture, superseding the FB-D-116 recommendation
+  where the two differ. Frozen verbatim in `tasks/FB-007-phase-32l-decision-freeze.md`: **recency =
+  Option D** (client reauthenticates *when required*; **server verifies the signed `auth_time`**; `iat`
+  is **not** a freshness signal; window **300 s**) · **provider unlink is client-side cleanup only**,
+  with Admin `providersToUnlink` **verified-but-future** · **dedicated codes**
+  (`FIREBASE_IDENTITY_NOT_LINKED` for "nothing is linked"; `FIREBASE_IDENTITY_CONFLICT` preserved for
+  genuine conflicts) · **`authMethods = { password, firebase }`** · **business status inherited** from
+  `requireAuth → assertActiveBusiness` · **Policy B** (unlink requires a NEW password; the retained hash
+  is never resurrected) · a **mandated reset-token race contract** · identity rules preserved (uid is
+  the linkage key, **email is not a join key**) · sequence **server-unlink-first**.
+- **What changed versus FB-D-116:** FB-D-116 was a `FREEBUFF RECOMMENDATION`; this is the owner's
+  decision. The recommendation's own second-pass refinement (that the business-status question was
+  already settled by the middleware) was **confirmed** by the owner. The race contract was **added** by
+  the owner and did not originate in the recommendation.
+- **Implemented by:** FB-008 (Phase 32L-A, backend only). **Provider unlink was deliberately NOT
+  implemented**, per the freeze.
+- **Authority:** the owner's explicit freeze instruction. Recorded here so no later task treats the
+  unlink design as still open.
+
+### FB-D-120 — ★ The last-provider belief is REFUTED by runtime experiment; the freshness refusal is 409, not 403 · `EXPERIMENT` + `SOURCE-CODE OBSERVATION`
+- **Date:** 2026-09-23 (FB-007 fourth pass experiment; FB-008 implementation).
+- **★ Refutes FB-D-118's unaudited half and the project's recorded assumption.** The Phase 32L runtime
+  experiment, run against the **real** Firebase project with the installed client SDK on dedicated
+  throwaway accounts, observed client `unlink()` of the **only** provider **SUCCEEDING** and leaving the
+  account with **zero** providers. Repeating it yields `auth/no-such-provider`. The experiment was
+  **calibrated**: at the same 390-second session age the same harness observed `updatePassword`
+  **REFUSED** with `auth/requires-recent-login` — so the harness genuinely detects recency enforcement
+  and the unlink success is not an artefact. **Consequence, and it is why the freeze is shaped as it
+  is:** Firebase will not protect a Firebase-native user from lockout, so **the last-authentication-method
+  rule must be enforced server-side** and must never be delegated upward.
+- **`auth_time` re-stamping observed.** `reauthenticateWithCredential()` produced a token whose
+  `auth_time` **advanced** (+9 s across a deliberate idle, reproduced twice), while a plain forced
+  `getIdToken(true)` moved only `iat` and left `auth_time` unchanged. This is what makes Option D
+  enforceable from a signed claim rather than from client honesty.
+- **Provider unlink does not revoke refresh tokens** in the observed behaviour; a password write did.
+  Unlinking a provider makes a **later** sign-in with that provider create a **new** Firebase account.
+- **The 409, not 403, is an engineering decision taken under the brief's express allowance** ("preserve
+  the project's established convention … but keep the error code exactly"). `mobile/lib/client.ts`
+  treats a **401 or 403** response to a token-bearing request as **session loss** and clears the
+  session, so a 403 on `FIREBASE_REAUTHENTICATION_REQUIRED` would sign a user out merely for being asked
+  to reauthenticate. The frozen **code** is unchanged; only the status is.
+- **Still unverified:** whether a **federated** re-sign-in after unlink mints a new uid in this project
+  (needs a live Google credential), and whether Google/Facebook reauth re-stamps `auth_time` as
+  email/password did. Neither is claimed as fact, and neither contradicts the frozen design.
+- **Authority:** none for the political sense — a measurement and a recorded implementation choice.
+
+### FB-D-121 — CORRECTION OF FB-008: its "10/10 mutations detected" claim is overstated, and two protections are not reliably proven · `EXPERIMENT` + `SOURCE-CODE OBSERVATION`
+- **Date:** 2026-09-23 (FB-009, Phase 32L-A verification gate).
+- **Correction:** FB-008 reports *"**10/10 mutations detected**"*, with M3 (conditional unlink write made
+  unconditional) and M7 (conditional reset completion made blind) both marked DETECTED. Independent
+  re-running, each mutation alone on a pristine copy and behind a startup anchor guard, **does not reproduce
+  it**: **M7 survives 2 of 2 runs**, and **M3 is detected in one run and not in another** because the
+  assertion that catches it is **timing-dependent**. Corrected figure: **8 of 10 reliably detected, one
+  flaky, one surviving.** Read the FB-008 statement as **superseded**. The FB-008 block is not rewritten
+  (trail rule 1).
+- **Both are TEST weaknesses, not code defects, and both clauses are load-bearing:**
+  - **M7** — the `firebaseUid: null` half of the R-4 completion filter is **not** load-bearing for the
+    unlink race itself (the unlink stamps `passwordChangedAt`, so the `$or` range branch already refuses —
+    which is exactly why the R-4 test stays green with the clause removed). It **is** load-bearing for one
+    narrow interleaving: an account **linked to Firebase after the reset's own read but before its
+    completion write**. R-2's guard cannot see a link landing after it has read. Without the clause such a
+    token could write a local password onto a Firebase-linked account, re-establishing the very credential
+    Phase 32K says must not be usable while `firebaseUid` is set.
+  - **M3** — the `firebaseUid: identity.uid` half of the unlink filter stops a **stale** unlink from
+    detaching an identity attached after its own read. The CASE-D guard makes it redundant in the
+    sequential path; only a race distinguishes them.
+- **Remedy, NOT APPLIED (FB-009 was verification-only):** one DB-backed interleaving test per path, using a
+  hooked model call that runs between the service's read and its write — `PasswordResetToken.deleteMany`
+  for the unlink path and `bcrypt.hash` for the reset path. That makes M3 deterministic and M7 detectable.
+  De-flake the concurrent-unlink assertion by asserting the observable outcome (exactly one 200 and one
+  409).
+- **Also recorded:** one `npm run test:unit` run reported **323 pass / 1 fail** and has **not recurred in 13
+  runs**; the failing case was **not identified** and is **not attributable to a 32L-A file**. Two
+  timing-suspicious unit files were checked in isolation with no reproduction. `[EXPERIMENT REQUIRED]`.
+- **What is NOT in question:** the implementation itself. FB-009's source review confirmed every frozen
+  decision, and 56 runtime checks against the real app, real MongoDB and the real Firebase verifier passed —
+  including a 315-second-old token that still **verified** yet was refused for freshness with no mutation
+  and no session revocation, followed by success after a fresh sign-in.
+- **Authority:** none. A correction of a prior Freebuff claim, recorded so the overstated figure is not
+  relied on.
+
+### FB-D-122 — FOLLOW-UP TO FB-D-121: both remaining test gaps are CLOSED; mutation result is now 11/11 · `EXPERIMENT`
+- **Date:** 2026-09-23 (owner-authorized mutation-hardening follow-up to FB-009). **Test files only.**
+- **What changed:** three test changes, **no production file touched** — proven by `sha256` on all ten
+  32L-A source files (identical before and after).
+  1. A new DB-backed **stale-identity** test for the unlink path, interposing on **`bcrypt.hash`** (which
+     runs *between* the ownership check and the authoritative write) to change the account's `firebaseUid`
+     mid-request, then requiring 409 `FIREBASE_IDENTITY_CONFLICT` with the arriving identity **not**
+     detached and no credential written.
+  2. A new DB-backed **R-4 LINK** test for the reset path, using the same seam, where the account acquires
+     Firebase authority after the read that fed the Phase 32K guard and **without** moving
+     `passwordChangedAt` — which is exactly why the `$or` cannot substitute for the uid clause.
+  3. The **concurrent-unlink** test replaced a scheduling-dependent assertion with a **barrier**: both
+     requests are held until the second arrives, so both read the same pre-unlink account before either
+     writes. It now requires the exact statuses `[200, 409]` and keeps and **extends** the state, session,
+     audit-count and login assertions.
+- **Result:** **M3 DETECTED (was flaky)** and **M7 DETECTED (was surviving)**; the full set is now **11 of
+  11**, with an added mutation **M11** (`passwordChangedAt: null` arm removed) also detected. **M11 needed
+  no new test** — two **pre-existing** reset cases already prove that arm is required, verified by mutation
+  rather than asserted from reading.
+- **Determinism, measured in the direction that matters:** with each clause removed, the targeted tests
+  fail **5 of 5** runs (M3 → `[2,2,2,2,2]`, M7 → `[1,1,1,1,1]`); with the code pristine, the three race
+  tests pass **10 of 10** runs (30/30 executions). No sleeps are used anywhere — only a barrier and
+  one-shot interpositions, with a 15-second timeout present as a **safety valve that fails the test**.
+- **One design correction worth keeping:** the first draft hooked `PasswordResetToken.deleteMany` and
+  thereby made **M6** (R-3 removed) redden the new test **incidentally**, because the hook never ran. A
+  hook a mutation can stop from being called yields a failure for a reason unrelated to the assertion — a
+  **false signal**. Moving the seam to `bcrypt.hash`, which every path reaching the write crosses, removed
+  the coupling: **M6 is now caught only by the R-3 test**.
+- **Verification:** `npm test` **840 / 109 suites / 0 fail**; `test:unit` 348 / 324 pass / 0 fail;
+  `test:db` **542 / 516 pass** / 0 fail; `typecheck` and `lint` clean; all five protected files
+  byte-identical. **No commit, no push.**
+- **Consequence for the gate:** because no production behaviour changed, the runtime evidence from FB-009
+  (**56/56 checks against the real app, real MongoDB and the real Firebase verifier**) **remains valid**
+  and was deliberately not re-run.
+- **Authority:** none. A verification correction, recorded so the FB-D-121 gaps are not treated as still
+  open.
+
 ---
 
 ## Part 3 — Freebuff inferences that are explicitly NOT decisions
@@ -274,6 +451,8 @@
 | FB-I-01 | "Phase 32I" has no defined scope anywhere in the repository; mapping it to Google Sign-In would be an inference, not a fact | high | none | none — Freebuff will not infer the next phase |
 | FB-I-02 | The two untracked protected plan documents are phase-18 planning artifacts whose status text is historical rather than a current work queue | medium | none | none |
 | FB-I-03 | The three tracked protected diffs belong to an in-flight AI-provider/test workflow, judging by their paths; their intent is `AUTHORSHIP UNKNOWN` because Freebuff did not read their content | low-medium | none | none — content not read, files not touched |
+| FB-I-04 | The proposed unlink path is a **low** account-existence-oracle risk, because the caller is authenticated and operating on their own account — so a mismatch refusal reveals nothing they did not already hold | medium | none | none — reasoned from source, **not measured**; a future phase must measure or accept it |
+| FB-I-05 | After a server-side unlink the Firebase identity is left orphaned in Firebase (the §16.6/O-6 class), so **re-registering with that same Google account stays `409 EMAIL_IN_USE`** and the only route back is explicit link from a password-authenticated session | medium-high | none | none — an interaction to verify during implementation |
 
 **Closing statement.** No `FREEBUFF INFERENCE` or `FREEBUFF RECOMMENDATION` in this file has been, or
 may be, converted into an Inventory AI project decision or policy by Freebuff. That requires an

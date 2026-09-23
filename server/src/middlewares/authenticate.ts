@@ -61,8 +61,8 @@ type AuthenticatedRequest = Request & {
     email?: string;
     role: string;
     status?: string;
-    /** Phase 32K — the provider-neutral capability block (see `authMethodsFor`). */
-    authMethods?: { password: boolean };
+    /** Phase 32K/L — the provider-neutral capability block (see `authMethodsFor`). */
+    authMethods?: { password: boolean; firebase: boolean };
   };
   auth?: { sessionId: string; jti: string };
 };

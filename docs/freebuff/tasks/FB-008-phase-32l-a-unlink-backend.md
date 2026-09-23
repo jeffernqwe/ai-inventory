@@ -19,7 +19,7 @@
 | Mode | `IMPLEMENTATION + STATIC VERIFICATION` |
 | Started from HEAD | `8af1d49f83b3f4d82c7e40d894c94ab61620ab80` — `feat: enforce firebase password authority boundary (Phase 32K)` |
 | Branch | `experiment/freebuff-evaluation` |
-| Commit | **none created** — the brief says to stop and report the proposed message unless the workflow requires a checkpoint |
+| Commit | at the time of writing **none created** — the brief said to stop and report the proposed message unless the workflow requires a checkpoint. **The owner then authorized the checkpoint: committed as `01ae73f5d237da5ae49a723b970aae4daf421d2a`, `feat: implement Firebase identity unlink (Phase 32L-A)` — see the post-commit note at the end** |
 
 ## Requested Objective
 
@@ -334,10 +334,11 @@ documentation synchronisation of `README.md`, `docs/DEVELOPMENT_ROADMAP.md`,
 | HEAD before | `8af1d49f83b3f4d82c7e40d894c94ab61620ab80` |
 | HEAD after | `8af1d49f83b3f4d82c7e40d894c94ab61620ab80` — **unchanged** |
 | Staged | **0** |
-| Commit | **none created** — the brief says to stop and report the proposed message unless the workflow requires a checkpoint |
+| Commit | at the time of writing **none created** — see the post-commit note at the end. **Committed as `01ae73f5d237da5ae49a723b970aae4daf421d2a`** |
 | Push | **never** |
 
-**Proposed commit message (not executed):**
+**Proposed commit message at the time of writing (not executed; the owner later prescribed a different
+subject — see the post-commit note):**
 
 ```
 feat: add firebase unlink backend boundary (Phase 32L-A)
@@ -384,3 +385,44 @@ the new password; the server call; then Firebase sign-out and **optional** provi
 order, never provider-unlink-first. Nothing sensitive may pass through router params, and the client must
 never log a token, a uid or a password. `authMethods = { password, firebase }` is the surface the UI
 gates on; no provider-specific field exists to consume.
+
+---
+
+## Post-commit note
+
+**Appended after the commit, because this record was written before it existed.** The entries above are
+not rewritten; only their *status* is synchronized, following the convention this task's own FB-006
+predecessor established. **The original implementation report and its historical `10/10` mutation result
+stand exactly as written.**
+
+| Item | Value |
+| --- | --- |
+| Commit | **`01ae73f5d237da5ae49a723b970aae4daf421d2a`** — `feat: implement Firebase identity unlink (Phase 32L-A)` |
+| Author / committer | `jeffernzxc <jefferndullamalinaozxc@gmail.com>` — the canonical project identity, unchanged from the repository's configuration |
+| Scope | **21 files, +4615 / −33** |
+| Committed as | the FB-008 file set **plus** the mutation-hardening follow-up and its documentation |
+| Amended | **no** |
+| Pushed | **no** |
+
+**What the commit contains beyond the implementation report above.** The implementation landed together
+with a **mutation-hardening follow-up** that closed the two gaps FB-009's verification had found, and with
+the trail records for it. The hardening changed **test files and documentation only** — all **ten** 32L-A
+production source files were `sha256`-identical before and after it.
+
+**Status of the mutation result — read this before citing a number.**
+
+| Statement | Status |
+| --- | --- |
+| **`10/10 mutations detected`** (the "Final Outcome" row above) | **HISTORICAL.** It is the figure this task reported at the time and it was **not reproducible** on independent re-running. It is **not** rewritten, and it must not be cited as the current result |
+| **`8 of 10 reliably detected; one flaky; one surviving`** | **`DECISIONS.md` FB-D-121** — the authoritative corrected interpretation of the `10/10` claim above |
+| **`11 of 11 detected`** | **The current result**, after the hardening: **`DECISIONS.md` FB-D-122**, and FB-009's hardening addendum §A3 for the per-mutation evidence |
+
+**Phase 32L-A is committed and closed.** The remaining open items are unchanged and belong to later
+phases: **Phase 32L-B** (the mobile flow), **O-1** (unlink policy beyond the freeze), **O-6** (the
+unlinked Firebase identity left orphaned), and the project-documentation close-out.
+
+**Verification at commit time:** `npm test` **840 tests / 109 suites / 0 fail**; `test:unit` 348 /
+324 pass / 0 fail; `test:db` 542 / 516 pass / 0 fail; `typecheck` and `lint` clean. **Runtime
+verification remains `EXPERIMENT REQUIRED`** for a device/emulator run: FB-009's 56/56 checks were an
+HTTP-level exercise against the real app, real MongoDB and the real Firebase verifier, and **no build,
+deploy or physical-device run exists** for this phase.

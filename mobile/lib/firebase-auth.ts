@@ -87,9 +87,11 @@ import { googleClientId, isGoogleConfigured } from './config';
 import { getFirebaseAuth } from './firebase';
 import {
   isNativeFirebaseConfigured,
+  isNativeGoogleConfigured,
   nativeCreateUserWithEmail,
   nativeCurrentIdToken,
   nativeSignInWithEmail,
+  nativeSignInWithGoogle,
   nativeSignOut,
 } from './firebase-native';
 
@@ -504,45 +506,49 @@ export function googleRedirectUri(): string {
 /**
  * Signs in with Google. Never throws: every outcome is a value.
  *
- * The sequence is exactly the one the approved design recorded, and each step is
- * the library's own call rather than a reimplementation:
+ * PHASE C MOVED THIS OPERATION TO THE NATIVE SDK, and the outcome contract did not
+ * move with it. `NativeGoogleSignInResult` is `idToken | cancelled`, which maps one
+ * to one onto this function's `idToken | cancelled`; a real failure is a throw and
+ * is classified exactly as before. Callers — `lib/auth.tsx`'s `googleSignIn` and the
+ * login screen behind it — are unchanged, because they already branch on this union
+ * and nothing else.
  *
- *   1. `AuthRequest.promptAsync` opens the SYSTEM browser for Google consent.
- *   2. The redirect returns an authorization `code`.
- *   3. `exchangeCodeAsync` swaps the code (+ PKCE verifier) for Google's `id_token`.
- *   4. `GoogleAuthProvider.credential` wraps it as a Firebase credential.
- *   5. `signInWithCredential` authenticates with Firebase.
- *   6. `getIdToken()` returns the Firebase ID token the caller exchanges.
+ * WHAT `lib/firebase-native.ts` DOES, IN ORDER: configure the library with the Web
+ * client ID, open the native consent sheet, read Google's `id_token`, wrap it with
+ * `GoogleAuthProvider.credential`, authenticate with `signInWithCredential`, and
+ * return a fresh **Firebase** ID token. Steps 4-6 used to live here; they moved so
+ * that this module keeps ONLY the decision about what a failure means — the same
+ * split the email/password operations got in Phase B.
+ *
+ * THE GATE IS CHECKED OUTSIDE THE TRY, as in `signInWithEmail`: "this build has no
+ * Web client ID" is a property of the build, not a condition a runtime fault can
+ * produce, so it must not be confusable with one. It is also deliberately the
+ * NATIVE predicate rather than `isGoogleConfigured()` — see its comment in the
+ * boundary for why the two questions differ.
  *
  * A missing configuration is a `failure`, never a silent downgrade — there is no
  * other door to downgrade to. Every thrown error is classified by the same table
- * the email flow uses, so a Firebase fault surfaces as safe copy and its code is
- * kept for the log but never shown.
+ * the email flow uses, so a native or Firebase fault surfaces as safe copy and its
+ * code is kept for the operator but never shown.
  *
- * STEPS 1-3 LIVE IN `acquireGoogleIdToken` (Phase 32L-B). They were extracted so
- * that the DISCONNECT flow's "confirm your sign-in" step can run the *same*
- * Google mechanics without a second copy of the PKCE sequence free to drift from
- * this one. This function keeps steps 4-6, and its outcome contract is unchanged.
+ * THE BROWSER FLOW IS STILL HERE, ONE FUNCTION BELOW. `acquireGoogleIdToken` and
+ * the Phase 32I discovery constants now serve ONLY `confirmFirebaseSignIn`'s `google`
+ * method — the disconnect confirmation — which is Phase D/E work. Nothing was
+ * deleted, so the two implementations coexist for one phase by owner decision.
  */
 export async function signInWithGoogle(): Promise<GoogleSignInOutcome> {
+  if (!isNativeGoogleConfigured()) {
+    return {
+      kind: 'failure',
+      code: 'google/not-configured',
+      message: GOOGLE_NOT_CONFIGURED_MESSAGE,
+    };
+  }
+
   try {
-    const auth = getFirebaseAuth();
-    if (!auth || !isGoogleConfigured()) {
-      return {
-        kind: 'failure',
-        code: 'google/not-configured',
-        message: GOOGLE_NOT_CONFIGURED_MESSAGE,
-      };
-    }
-
-    const google = await acquireGoogleIdToken();
-    if (google.kind === 'cancelled') return { kind: 'cancelled' };
-    if (google.kind === 'failure') return google;
-
-    const credential = GoogleAuthProvider.credential(google.idToken);
-    const userCredential = await signInWithCredential(auth, credential);
-    const idToken = await userCredential.user.getIdToken();
-    return { kind: 'idToken', idToken };
+    const outcome = await nativeSignInWithGoogle();
+    if (outcome.kind === 'cancelled') return { kind: 'cancelled' };
+    return { kind: 'idToken', idToken: outcome.idToken };
   } catch (err) {
     const code = errorCode(err);
     return { kind: 'failure', code, message: describeFirebaseFailure(code, GOOGLE_FAILED_MESSAGE) };

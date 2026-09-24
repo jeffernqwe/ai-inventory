@@ -26,6 +26,7 @@
 
 import { firebaseUnlink } from '../lib/api';
 import { confirmFirebaseSignIn, signInWithGoogle } from '../lib/firebase-auth';
+import { isNativeGoogleConfigured } from '../lib/firebase-native';
 
 const mockSignInWithEmailAndPassword = jest.fn();
 const mockSignInWithCredential = jest.fn();
@@ -47,6 +48,12 @@ const mockGetFirebaseAuth = jest.fn();
 
 jest.mock('../lib/firebase', () => ({
   getFirebaseAuth: () => mockGetFirebaseAuth(),
+  // ADDED BY PHASE C. `lib/firebase-native` (the native boundary, not mocked here)
+  // reaches the Firebase gate through this module, and the module under test does not
+  // import it for its own account. Reporting the gate OFF keeps this file's world the
+  // pre-Firebase-NATIVE one, so the one case below that touches `signInWithGoogle`
+  // observes the native path declining rather than a missing export throwing.
+  isFirebaseConfigured: () => false,
 }));
 
 const mockIsGoogleConfigured = jest.fn(() => true);
@@ -302,12 +309,27 @@ describe('confirmFirebaseSignIn — the Google method', () => {
     expect(mockPromptAsync).not.toHaveBeenCalled();
   });
 
-  it('leaves the sign-in flow unchanged — the same mechanics are shared, not copied', async () => {
-    // `signInWithGoogle` must still work after the extraction, and must still answer its
-    // own sign-in outcome shapes rather than the confirmation's.
+  it('no longer shares the browser mechanics — sign-in moved to the native boundary', async () => {
+    // PHASE C CHANGED THIS CLAIM, so this test changed with it. Until Phase C the two
+    // Google paths shared `acquireGoogleIdToken` (authorization code + PKCE), and this
+    // case pinned that sharing. Sign-in now runs through the native Google library, so
+    // the sharing is gone BY DESIGN and the copper-bottomed claim is the opposite one:
+    // a sign-in must not touch the browser seams at all. The confirmation still does,
+    // which is what the cases above prove.
+    //
+    // In this file `lib/firebase-native` is NOT mocked and the mocked Firebase gate
+    // reports OFF (see the mock above), so the native path declines before it loads
+    // anything — which is exactly the state that lets the assertion below prove the
+    // browser seams are untouched while still pinning the sign-in outcome's own shape
+    // (a `failure`, never the confirmation's).
+    expect(isNativeGoogleConfigured()).toBe(false);
+
     const outcome = await signInWithGoogle();
 
-    expect(outcome).toEqual({ kind: 'idToken', idToken: ID_TOKEN });
+    expect(mockPromptAsync).not.toHaveBeenCalled();
+    expect(mockExchangeCodeAsync).not.toHaveBeenCalled();
+    expect(outcome.kind).toBe('failure');
+    expect((outcome as { code: string }).code).toBe('google/not-configured');
   });
 });
 

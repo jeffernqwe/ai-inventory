@@ -1,6 +1,6 @@
 /**
- * Phase 1 (RNFirebase foundation) / Phase B (native email and password) — the
- * React Native Firebase (native SDK) boundary.
+ * Phase 1 (RNFirebase foundation) / Phase B (native email and password) / Phase C
+ * (native Google Sign-In) — the React Native Firebase (native SDK) boundary.
  *
  * ONE HALF OF A PAIR, AND — SINCE PHASE B — THE AUTHENTICATING HALF. `lib/firebase.ts`
  * is the Firebase *JavaScript* SDK boundary and is deliberately unchanged: the Google
@@ -57,8 +57,19 @@
  * and the account-mutation verbs. Each is either a later phase's work or forbidden
  * outright, and the guards enumerate them so that "not yet" cannot drift into
  * "accidentally".
+ *
+ * PHASE C ADDS A THIRD NATIVE PACKAGE, AND ONLY FOR SIGN-IN.
+ * `@react-native-google-signin/google-signin` performs the native Google consent
+ * step and hands back a Google `id_token`; this module exchanges that for a Firebase
+ * credential and then for a Firebase ID token, so the caller's input is unchanged.
+ * The browser (authorization-code + PKCE) flow is deliberately NOT deleted: it is
+ * still what `confirmFirebaseSignIn`'s `google` method uses for the DISCONNECT
+ * confirmation, which Phase D/E owns. Both therefore coexist for one phase, and the
+ * guards keep the native package confined to this file exactly as they keep
+ * `@react-native-firebase` confined.
  */
 
+import { GOOGLE_WEB_CLIENT_ID } from './config';
 import { isFirebaseConfigured } from './firebase';
 
 /**
@@ -132,6 +143,7 @@ export function isNativeFirebaseConfigured(): boolean {
 type NativeAppModule = typeof import('@react-native-firebase/app');
 type NativeAuthModule = typeof import('@react-native-firebase/auth');
 type NativeAuth = ReturnType<NativeAuthModule['getAuth']>;
+type NativeGoogleSigninModule = typeof import('@react-native-google-signin/google-signin');
 
 type LoadedNativeFirebase = {
   /** The module namespace, so operations call the modular API exactly as documented. */
@@ -156,6 +168,20 @@ function loadNativeFirebase(): LoadedNativeFirebase | null {
   const app = require('@react-native-firebase/app') as NativeAppModule;
   const auth = require('@react-native-firebase/auth') as NativeAuthModule;
   return { auth, instance: auth.getAuth(app.getApp()) };
+}
+
+/**
+ * The Google Sign-In namespace, or `null` when native Google cannot run.
+ *
+ * The SAME two rules the loader above follows, for the same reasons: the gate is
+ * consulted before the package is evaluated, so an unconfigured build never loads
+ * it; and the module is reached through Metro's synchronous `require()` rather than
+ * a static import, so a build without the native module cannot throw at bundle
+ * evaluation time.
+ */
+function loadNativeGoogleSignin(): NativeGoogleSigninModule | null {
+  if (!isNativeGoogleConfigured()) return null;
+  return require('@react-native-google-signin/google-signin') as NativeGoogleSigninModule;
 }
 
 /**
@@ -348,4 +374,177 @@ export async function nativeCurrentIdToken(): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+// ---------------------------------------------------------------------------
+// The native operations (Phase C) — Google Sign-In
+// ---------------------------------------------------------------------------
+//
+// THE SAME SHAPE AS THE PHASE B OPERATIONS ABOVE: gate first, lazy load, and a
+// result carrying only what `lib/firebase-auth.ts` needs. It ends by returning a
+// FIREBASE ID token, which the caller exchanges once at the one existing boundary
+// (`POST /api/auth/firebase/exchange`), exactly as the browser flow did before it.
+// No Google-specific server route exists or is needed, because the exchange is
+// UID-authoritative and never asks which provider minted the identity.
+//
+// THE GOOGLE ID TOKEN IS A CREDENTIAL FOR FIREBASE, NOT FOR INVENTORY AI. It is
+// consumed by `GoogleAuthProvider.credential()` two lines after it is received and
+// is never returned, persisted, logged or handed to a screen — the same standing
+// the browser flow's Google token had.
+//
+// IT REPLACES THE BROWSER FLOW FOR **SIGN-IN ONLY**. `confirmFirebaseSignIn`'s
+// `google` method still runs the Phase 32I authorization-code + PKCE sequence,
+// because the disconnect confirmation is Phase D/E work the owner has not
+// authorised migrating here. Both implementations therefore coexist for one phase,
+// and neither is dead code.
+
+/**
+ * The scopes the native flow requests. `openid` is the one that makes Google return
+ * an `id_token` at all — `email` and `profile` are what the person sees on the
+ * consent sheet — and they are written out rather than relied on as the library's
+ * defaults so the requirement is visible at the call site.
+ */
+const NATIVE_GOOGLE_SCOPES: readonly string[] = ['openid', 'email', 'profile'];
+
+/**
+ * What {@link nativeSignInWithGoogle} answers.
+ *
+ * A discriminated union for the same reason `FirebaseSignInOutcome` is one:
+ * cancellation is ORDINARY, not a failure — the person closed the sheet — and
+ * modelling it as a thrown error would push a routine action into a `catch`.
+ * There is deliberately no `failure` member: a genuine failure is a THROW, so the
+ * classification layer above sees exactly one shape for each case.
+ */
+export type NativeGoogleSignInResult =
+  | { kind: 'idToken'; idToken: string }
+  | { kind: 'cancelled' };
+
+/**
+ * Whether native Google Sign-In can run at all.
+ *
+ * TWO CONDITIONS, AND BOTH ARE REAL. The Google library needs a **Web** OAuth client
+ * ID — the value Firebase injects into the Android build as `default_web_client_id` —
+ * because only a web client mints an `id_token` from a native sign-in; an Android
+ * client ID in that slot is a build fault, not a degraded mode. And the Firebase
+ * boundary must be configured, because a Google identity is only useful once
+ * `signInWithCredential` has turned it into a Firebase ID token.
+ *
+ * DELIBERATELY NOT `isGoogleConfigured()` FROM `lib/config.ts`. That predicate
+ * answers "is there a client ID for THIS PLATFORM", which is the right question for
+ * the browser flow (which uses the Android client on Android). This one asks the
+ * narrower question the native flow needs, and the two must not be conflated: on a
+ * build with only the Android client set, the browser flow works and this one must
+ * refuse rather than configure the library with the wrong client.
+ */
+export function isNativeGoogleConfigured(): boolean {
+  return isNativeFirebaseConfigured() && Boolean(GOOGLE_WEB_CLIENT_ID);
+}
+
+/**
+ * Raised when native Google Sign-In cannot complete, carrying a code this app owns.
+ *
+ * THE NATIVE MESSAGE IS DISCARDED, NOT RELAYED, and the fixed sentence is what
+ * replaces it. google-signin's errors can carry a developer-written description and,
+ * on Android, activity and package detail; none of that belongs in front of a user,
+ * and the classification layer above branches on `code` alone. `code` is the only
+ * field a caller may read — the same shape `FirebaseAuthError` has, so
+ * `lib/firebase-auth.ts` needs no second branch.
+ */
+class NativeGoogleSignInError extends Error {
+  readonly code: string;
+  constructor(code: string) {
+    super('Google sign-in could not be completed.');
+    this.code = code;
+    this.name = 'NativeGoogleSignInError';
+  }
+}
+
+/** The loaded Google namespace, or a throw. Mirrors `requireNativeFirebase`. */
+function requireNativeGoogleSignin(): NativeGoogleSigninModule {
+  const loaded = loadNativeGoogleSignin();
+  if (!loaded) throw new NativeGoogleSignInError('google/not-configured');
+  return loaded;
+}
+
+/**
+ * Google Sign-In's failure code, reduced to a closed set this app owns.
+ *
+ * EVERY BRANCH IS A CODE WE CHOSE. google-signin reports failures through
+ * `statusCodes`, whose values are Android status codes rendered as strings, and the
+ * library's own `isErrorWithCode` is the documented way to tell one from an
+ * arbitrary throw. Anything unrecognised becomes `google/failed`, so an unexpected
+ * or future failure can never smuggle native text upward — the code is kept for the
+ * operator, the sentence shown is always ours.
+ */
+function mapGoogleSignInFailure(
+  google: NativeGoogleSigninModule,
+  code: string | null
+): string {
+  if (code === google.statusCodes.IN_PROGRESS) return 'google/in-progress';
+  if (code === google.statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
+    return 'google/play-services-unavailable';
+  }
+  if (code === google.statusCodes.SIGN_IN_REQUIRED) return 'google/sign-in-required';
+  return 'google/failed';
+}
+
+/**
+ * Signs in with Google natively and returns a fresh **Firebase** ID token.
+ *
+ * THE SEQUENCE, and each step is the library's own call rather than a
+ * reimplementation:
+ *
+ *   1. `GoogleSignin.configure` pins the **Web** client ID the library must use.
+ *   2. `GoogleSignin.signIn` opens the native consent UI.
+ *   3. The response carries Google's `id_token`.
+ *   4. `GoogleAuthProvider.credential` wraps it as a Firebase credential.
+ *   5. `signInWithCredential` authenticates with Firebase.
+ *   6. `getIdToken()` returns the token the caller exchanges.
+ *
+ * CANCELLATION IS CHECKED TWICE ON PURPOSE. On Android the person dismissing the
+ * sheet arrives as a REJECTION carrying `SIGN_IN_CANCELLED`, while the typed
+ * `cancelled` RESPONSE is what this version of the library documents; handling only
+ * the second would turn every dismissal into a visible error, and handling only the
+ * first would break on the version that answers instead of throwing. Both are
+ * matched, and neither is treated as a fault.
+ *
+ * THROWS `NativeGoogleSignInError` FOR EVERY REAL FAILURE, never a raw library error,
+ * so no native message can reach the layer above. It returns nothing but the token —
+ * no uid, no email, no credential object — because the server derives the identity
+ * from the token's verified payload and the app has no use for anything else.
+ */
+export async function nativeSignInWithGoogle(): Promise<NativeGoogleSignInResult> {
+  // THE GOOGLE GATE IS CONSULTED FIRST, so every unconfigured state reports the code
+  // that names the operation the caller actually attempted. `requireNativeFirebase`
+  // would otherwise throw `native/unconfigured` first, which is true but less useful
+  // — and unreachable in practice anyway, since `isNativeGoogleConfigured()` already
+  // requires the Firebase gate, so reaching it here means the two disagreed.
+  const google = requireNativeGoogleSignin();
+  const { auth, instance } = requireNativeFirebase();
+
+  google.GoogleSignin.configure({
+    webClientId: GOOGLE_WEB_CLIENT_ID,
+    scopes: [...NATIVE_GOOGLE_SCOPES],
+  });
+
+  let response: Awaited<ReturnType<NativeGoogleSigninModule['GoogleSignin']['signIn']>>;
+  try {
+    response = await google.GoogleSignin.signIn();
+  } catch (error) {
+    const code = google.isErrorWithCode(error) ? String(error.code) : null;
+    if (code === google.statusCodes.SIGN_IN_CANCELLED) return { kind: 'cancelled' };
+    throw new NativeGoogleSignInError(mapGoogleSignInFailure(google, code));
+  }
+
+  if (google.isCancelledResponse(response)) return { kind: 'cancelled' };
+  if (!google.isSuccessResponse(response)) {
+    throw new NativeGoogleSignInError('google/unexpected-response');
+  }
+
+  const googleIdToken = response.data.idToken;
+  if (!googleIdToken) throw new NativeGoogleSignInError('google/missing-id-token');
+
+  const credential = auth.GoogleAuthProvider.credential(googleIdToken);
+  const userCredential = await auth.signInWithCredential(instance, credential);
+  return { kind: 'idToken', idToken: await userCredential.user.getIdToken() };
 }

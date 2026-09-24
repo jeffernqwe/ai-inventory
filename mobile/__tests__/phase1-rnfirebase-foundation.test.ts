@@ -209,6 +209,19 @@ describe('the native boundary calls no authentication verb', () => {
       (match) => match[1],
     );
     expect(sites.sort()).toEqual(['import(', 'import(', 'require(', 'require(']);
+
+    // PHASE C ADDS A THIRD PACKAGE, AND THE SAME TWO SHAPES ARE THE ONLY ONES
+    // ALLOWED FOR IT: one `typeof import(...)` TYPE query, which TypeScript erases,
+    // and one lazy `require()` inside its own gated loader. A static import of the
+    // Google library would evaluate it before its gate could be consulted, exactly
+    // as it would for the two above — so the count is pinned rather than the shape
+    // merely described.
+    expect(code).not.toMatch(/from\s+['"]@react-native-google-signin/);
+
+    const googleSites = [
+      ...code.matchAll(/(\w+\(|from\s)['"]?@react-native-google-signin\/\w+/g),
+    ].map((match) => match[1]);
+    expect(googleSites.sort()).toEqual(['import(', 'require(']);
   });
 
   it('consults the shared gate before either native package is loaded', () => {
@@ -226,6 +239,15 @@ describe('nothing in the app or the library can reach the native SDK yet', () =>
 
   it('is the only file that names @react-native-firebase', () => {
     expect(others.filter((path) => readSource(path).includes('@react-native-firebase'))).toEqual([]);
+  });
+
+  it('is also the only file that names @react-native-google-signin', () => {
+    // Phase C's addition, held to Phase 1's rule: a screen that imported the Google
+    // library directly would bypass the boundary, and with it the gate, the lazy
+    // load and the rule that no credential is ever handed upward.
+    expect(
+      others.filter((path) => readSource(path).includes('@react-native-google-signin'))
+    ).toEqual([]);
   });
 
   it('is imported only by the classification layer, and by no screen or layout', () => {

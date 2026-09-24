@@ -2,7 +2,10 @@
   "expo": {
     "name": "Inventory AI",
     "slug": "inventory-ai",
-    "scheme": "inventoryai",
+    "scheme": [
+      "inventoryai",
+      "com.inventoryai.app"
+    ],
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -35,6 +38,7 @@
           "barcodeScannerEnabled": true
         }
       ],
+      "expo-web-browser",
       "@react-native-firebase/app",
       "@react-native-firebase/auth",
       "@react-native-google-signin/google-signin"

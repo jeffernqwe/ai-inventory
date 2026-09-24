@@ -31,6 +31,18 @@
  * creates no user, and calls no endpoint, so there is nothing of that kind to
  * test. `hasCurrentUser` is asserted on both sides because Phase 1 expects `false`
  * on a real build and a probe that could only ever say `false` would be worthless.
+ *
+ * PHASE B CHANGED FIVE GUARDS ON PURPOSE, and the changes are recorded here rather
+ * than discovered later. The boundary now authenticates, so it legitimately uses
+ * `signInWith*`, `createUserWith*`, `signOut(`, `getIdToken` and `updateProfile(`; the
+ * app-wide import guard narrowed from "nothing may reference the boundary" to
+ * "exactly one module may — `lib/firebase-auth.ts`, and no screen"; and the
+ * dependency guard stopped claiming the JS SDK is what every path uses. Everything
+ * else is untouched, including the two guards that carry the real weight: the boundary
+ * still reaches the native packages only through the gated lazy loader, and it is still
+ * the only file that names them. The Firebase operations themselves are tested in
+ * `__tests__/firebase-auth.test.ts` (them migrated to the native seam) and in the
+ * Phase B suites beside it.
  */
 
 /// <reference types="node" />
@@ -149,20 +161,30 @@ describe('the native boundary calls no authentication verb', () => {
   const code = codeOnly(source);
 
   /**
-   * Grouped by what an accidental call would do, so a failure names the risk:
-   * sign a user in, create one, end a session, mint a token, attach a listener,
-   * change persistence (P2 forbids a workaround), or link/unlink a provider.
+   * Grouped by what an accidental call would do, so a failure names the risk.
+   *
+   * PHASE B RELAXED EXACTLY FIVE VERBS, and each is now a shipped operation of the
+   * boundary rather than an accident waiting to happen: `signInWith` (native
+   * email/password sign-in), `createUserWith` (native registration), `signOut(`
+   * (ending the durable session), `getIdToken` (minting the token the exchange
+   * consumes once) and `updateProfile(` (the cosmetic display name a registration
+   * writes). Every remaining group is forbidden for a reason that has not changed:
+   * an auth-state listener would let native state drive the app, `setPersistence`
+   * cannot work on React Native Firebase at all (owner decision P2 §3), and the
+   * provider link/unlink, Firebase email and account-mutation verbs are Phase D/E
+   * work that the owner has not authorised.
    */
   const FORBIDDEN: Record<string, string[]> = {
-    'signs a user in': ['signInWith', 'signInAnonymously'],
-    'creates a user': ['createUserWith'],
-    'ends the Firebase session': ['signOut('],
-    'mints an ID token': ['getIdToken'],
+    'signs in anonymously': ['signInAnonymously'],
     'attaches an auth listener': ['onAuthStateChanged', 'onIdTokenChanged'],
     'writes a persistence workaround': ['setPersistence'],
     're-authenticates': ['reauthenticateWith'],
     'sends a Firebase email': ['sendPasswordResetEmail', 'sendSignInLinkToEmail'],
-    'changes the account': ['deleteUser(', 'updateEmail(', 'updateProfile(', 'verifyBeforeUpdateEmail('],
+    'changes the account destructively': [
+      'deleteUser(',
+      'updateEmail(',
+      'verifyBeforeUpdateEmail(',
+    ],
     'links or unlinks a provider': ['linkWithCredential', 'unlink('],
   };
 
@@ -206,8 +228,16 @@ describe('nothing in the app or the library can reach the native SDK yet', () =>
     expect(others.filter((path) => readSource(path).includes('@react-native-firebase'))).toEqual([]);
   });
 
-  it('is imported by no screen, layout or other library module', () => {
-    expect(others.filter((path) => /firebase-native/.test(readSource(path)))).toEqual([]);
+  it('is imported only by the classification layer, and by no screen or layout', () => {
+    // Phase B narrowed this from "imported by nothing at all" rather than deleting
+    // it, because the property that matters is still exactly one thing: nothing above
+    // the classification layer may hold a Firebase session. The boundary is reachable
+    // through `lib/firebase-auth.ts` alone — the module that owns every Firebase
+    // operation and the decision about what a Firebase failure means — so a screen
+    // that imported the boundary would fail here, and so would a second library
+    // module. Nothing under `app/` may ever appear in this list.
+    const importers = others.filter((path) => /firebase-native/.test(readSource(path)));
+    expect(importers).toEqual([join(MOBILE_ROOT, 'lib', 'firebase-auth.ts')]);
   });
 
   it('covers the trees it claims to cover', () => {
@@ -390,7 +420,12 @@ describe('the frozen Phase 1 dependency versions', () => {
     expect(dependencies['@react-native-google-signin/google-signin']).toBe('16.1.5');
   });
 
-  it('keeps the Firebase JS SDK, which every shipped auth path still uses', () => {
+  it('still installs the Firebase JS SDK, which Phase B left in place', () => {
+    // Phase B migrated email/password to the native SDK, so the original wording
+    // ("which every shipped auth path still uses") stopped being true and was
+    // corrected rather than left to mislead. The JS SDK remains INSTALLED because
+    // Google sign-in (32I) and the disconnect confirmation (32L-B) still run through
+    // it, and removing it is Phase F work the owner has not authorised.
     expect(dependencies.firebase).toBeDefined();
   });
 });

@@ -143,7 +143,9 @@ for any step inside the brief's stated scope. One decision was **deliberately no
 the brief's §14 asks for a commit, and a commit would necessarily include the uncommitted Phase 32I/32J
 work in the shared files (`README.md`, `mobile/lib/auth.tsx`, `mobile/app/login.tsx`,
 `mobile/lib/firebase-auth.ts`, `docs/DEVELOPMENT_ROADMAP.md`). Absent an explicit instruction naming
-that consequence, **nothing was staged or committed** (trail README §5).
+that consequence, **nothing was staged or committed** at that point (trail README §5). The owner then
+decided the scope — the FB-006-clean file set only — and the commit was made; see the **post-commit
+note** at the end of this record.
 
 ## Actions
 
@@ -350,14 +352,20 @@ git branch --show-current
 experiment/freebuff-evaluation
 
 git rev-parse HEAD
-6bac86e2d128215c873874a05e6249aedf28ad64   (unchanged — no commit, no stage, no push)
+6bac86e2d128215c873874a05e6249aedf28ad64   (at the time of writing; the scoped commit is 8af1d49)
 
 git status --short
 (22 tracked modifications, of which 11 belong to this task's change set; 11 untracked, of which
  3 are this task's: the two phase32k test files and this record)
+
+git show --stat --oneline HEAD
+8af1d49 feat: enforce firebase password authority boundary (Phase 32K)
+15 files changed, 1488 insertions(+), 36 deletions(-)   (the FB-006-clean set only)
 ```
 
-- **Staged:** none. **Committed:** none. **Pushed:** none. **Reset/restored/stashed/cleaned:** none.
+- **Staged:** none at the time of writing. **Committed:** none at the time of writing (the scoped
+  commit `8af1d49` was made after the owner decided the scope — see the post-commit note).
+  **Pushed:** none. **Reset/restored/stashed/cleaned:** none.
 - `PLANNED`: the three server modules, the two mobile files, the new tests, `run-tests.mjs`, the
   documentation, this record.
 - `IMPLEMENTED`: all of the above, **plus two pre-existing test files** (`phase26a`, `phase32c`) that
@@ -369,8 +377,9 @@ git status --short
 
 ## Final Outcome
 
-`SUCCESS` — the boundary is implemented and verified by tests, with no commit (the brief's §14 commit
-checkpoint is deferred to the owner because a commit would also carry the uncommitted Phase 32I/32J work).
+`SUCCESS` — the boundary is implemented and verified by tests, and the FB-006-clean file set is
+committed as `8af1d49` under an explicit owner decision on scope. The files that also carry uncommitted
+Phase 32I/32J work were deliberately left uncommitted (see the post-commit note below).
 
 ## Claude Code Handoff
 
@@ -395,3 +404,49 @@ checkpoint is deferred to the owner because a commit would also carry the uncomm
   all executed in this task, with the counts above.
 - **Tests still needing a run:** none for this change set. The *runtime* behaviour of the boundary has
   never been exercised on a device.
+
+---
+
+## Post-commit note
+
+**Appended after the commit, because the record above was written before it existed.** The entries above
+are not rewritten; this note states what changed, in keeping with the log's append-only rule.
+
+**Owner decisions taken during this task (both recorded in `DECISIONS.md`):**
+
+1. **Commit scope — commit only the FB-006-clean files.** Freebuff had flagged that several changed
+   files also carry uncommitted Phase 32I/32J work, so an unrestricted commit would have swept unrelated
+   work in. The owner chose the narrower set.
+2. **Test naming — rename to the project series** (`phase32k-*`), superseding trail rule 1's
+   `fb-<task-id>-<topic>` for this task (`DECISIONS.md` FB-D-115). Done before the commit, so the
+   committed files carry the final names; the re-run after the rename produced the same figures.
+
+**The commit.** Applied to the working tree at `2026-09-23 06:39 UTC` and made by Freebuff with the
+repository's configured Jeffern identity (`jeffernzxc <jefferndullamalinaozxc@gmail.com>` — reported at
+commit time, not changed by Freebuff, and matching the canonical identity in `CLAUDE.md` §16):
+
+```
+8af1d49 feat: enforce firebase password authority boundary (Phase 32K)
+15 files changed, 1488 insertions(+), 36 deletions(-)
+```
+
+Committed files (15): `server/src/services/auth.service.ts`, `server/src/middlewares/authenticate.ts`,
+`server/src/services/passwordReset.service.ts`, `server/scripts/run-tests.mjs`,
+`server/test/phase26a-session-lifecycle.test.mjs`, `server/test/phase32c-firebase-exchange.test.mjs`,
+`server/test/phase32k-firebase-password-boundary.test.mjs` (new), `mobile/app/(app)/profile.tsx`,
+`mobile/__tests__/phase32k-password-capability-gating.test.tsx` (new), `docs/SYSTEM_SPECIFICATION.md`,
+`docs/freebuff/{MASTER_LOG,DECISIONS,HANDOFF,TEST_BASELINE}.md`,
+`docs/freebuff/tasks/FB-006-firebase-password-boundary.md` (new).
+
+**Deliberately NOT committed** — each carries unrelated Phase 32I/32J work, so committing it would have
+extended the scope the owner set: `README.md`, `docs/DEVELOPMENT_ROADMAP.md` (both include this task's
+Phase 32K entry/§27M alongside that earlier work), `mobile/lib/auth.tsx`, `mobile/app/login.tsx`,
+`mobile/lib/firebase-auth.ts`, and the remaining pre-existing modified/untracked files. **Consequence,
+stated plainly: the README Phase 32K entry and roadmap §27M are written but not yet committed.**
+
+**Protected files:** all five byte-identical before and after the commit; none was staged.
+
+**This note itself is uncommitted**, so `docs/freebuff/` shows as modified again — expected, and the
+reason the note exists rather than a silent edit to the sections above.
+
+**Push:** not performed. No remote operation of any kind.

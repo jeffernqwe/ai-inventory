@@ -225,6 +225,51 @@ export function firebaseRegister({ idToken, businessName, name }: FirebaseRegist
   });
 }
 
+export interface FirebaseUnlinkPayload {
+  /** A Firebase ID token from `lib/firebase-auth`. Consumed once, never stored. */
+  idToken: string;
+  /** The password that will own this account after the identity is detached. */
+  newPassword: string;
+}
+
+/**
+ * POST /api/auth/firebase/unlink -> { unlinked: true, user } (200, Phase 32L-A).
+ * AUTHENTICATED — the caller's own session token is required.
+ *
+ * Detaches the account's Firebase identity and establishes a NEW local password
+ * in one atomic transition. The account comes from the session and the identity
+ * from the verified token, so NO id, uid, businessId or role is ever sent — the
+ * body below is the whole request.
+ *
+ * THE THREE 409s ARE THE REASONS THIS IS NOT A PLAIN ERROR PATH, and none of
+ * them is session loss — a 401/403 here would sign the user out over an unrelated
+ * failure, which is exactly why the server answers them as 409s:
+ *
+ *   409 `FIREBASE_REAUTHENTICATION_REQUIRED` — the Firebase authentication is
+ *       older than the 300 s window. RECOVERABLE: confirm the sign-in, then retry.
+ *   409 `FIREBASE_IDENTITY_NOT_LINKED` — nothing is attached (also the answer
+ *       when a concurrent unlink won the race). TERMINAL.
+ *   409 `FIREBASE_IDENTITY_CONFLICT` — the verified identity is not this
+ *       account's, or a concurrent link changed it. TERMINAL, and the likeliest
+ *       cause is that the WRONG CONFIRMATION OPTION was chosen.
+ *
+ * Also 400 `VALIDATION_ERROR` with `fields` for a weak/missing new password and
+ * 400 `FIREBASE_TOKEN_INVALID` for a token Firebase refused — a bad request
+ * field, NOT a dead session, which is why the server deliberately moved that code
+ * off 401. 403 `BUSINESS_NOT_ACTIVE` and 503 `FIREBASE_NOT_CONFIGURED` are
+ * unchanged.
+ */
+export function firebaseUnlink(
+  token: string,
+  { idToken, newPassword }: FirebaseUnlinkPayload
+): Promise<ApiResponse> {
+  return apiFetch('/api/auth/firebase/unlink', {
+    token,
+    method: 'POST',
+    body: { idToken, newPassword },
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Users (Phase 14A backend / 14B mobile)
 // ---------------------------------------------------------------------------
@@ -553,6 +598,7 @@ export default {
   resetPassword,
   firebaseExchange,
   firebaseRegister,
+  firebaseUnlink,
   updateMe,
   logout,
   sessions,

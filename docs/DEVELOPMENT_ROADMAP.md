@@ -171,6 +171,12 @@ First EAS Development Build / Native Runtime Validation
         ↓
 Phase 32H
 Server-Side Account Linking Boundary & Authentication Ownership
+        ↓
+Phase 32J
+Mobile Firebase Registration Onboarding (Google → register → exchange → session)
+        ↓
+Phase 32K
+Firebase Password Authority Boundary & Timing-Equalizer Credential Fix
 ```
 
 ---
@@ -3985,6 +3991,16 @@ on a future phase" to "a live defect", and the final decision remains a separate
 item.** The success audit row records `{ passwordCredentialRetained: boolean }` — informational only,
 zero authentication behaviour change — so an operator investigating has a start point.
 
+> **Superseded by Phase 32K (§27M).** O-2 was decided and implemented there: Firebase is the sole
+authentication authority for any account carrying a `firebaseUid`, and local password login,
+`change-password` and the recovery flow now refuse such an account. The Phase 32K audit also **corrected
+the finding above**: an ordinary `change-password` attempt by a Firebase-**native** account does *not*
+report success — it fails `400 INVALID_CURRENT_PASSWORD`, because a hashless account has no current
+password to verify. It was `reset-password` that reported success while writing an unusable credential,
+and `change-password` behaved as described only for a Firebase-**linked** account that still carried a
+hash. Those statements should be read as superseded, not as still true; the original text is not
+rewritten.
+
 ## §16 — the unlink finding
 
 **Nothing implemented, nothing changed.** Unlinking remains a client-side Firebase-only operation the
@@ -4071,6 +4087,346 @@ both layers at once.
 - **Google Sign-In, Facebook Login, Apple Sign-In, account linking via a provider, account unlinking
   and invitations are NOT implemented**, and no provider SDK was installed.
 - **Phase 32I, 32J and 32L were NOT started.**
+
+---
+
+# 27L. Phase 32J — Mobile Firebase Registration Onboarding (Google → register → exchange → session)
+
+## Objective
+
+Make an already-authenticated Firebase/Google identity that the exchange refuses with `403
+REGISTRATION_REQUIRED` able to finish Inventory AI registration through the endpoint that already
+exists, and then enter the ordinary session flow.
+
+## What was implemented
+
+Two new mobile files and three touched ones. **No server file changed** — `POST
+/api/auth/firebase/register` (Phase 32C) and `POST /api/auth/firebase/exchange` (Phase 32C) are reused
+as shipped, and no new endpoint, schema field, session mechanism or dependency was added.
+
+```text
+Google OAuth → Firebase JS → POST /api/auth/firebase/exchange → 403 REGISTRATION_REQUIRED
+   → /register-firebase (businessName + optional name)
+   → POST /api/auth/firebase/register → 201 { user, business }
+   → POST /api/auth/firebase/exchange → 200 { token, user }
+   → applySession(token, user) → authenticated app
+```
+
+- `mobile/lib/firebase-auth.ts` — one additive export, `currentFirebaseIdToken()`. It reads
+  `getFirebaseAuth()?.currentUser` and returns `user.getIdToken()`, and is **total by design**: `null`
+  for "no current user" and `null` for "the refresh failed", because both have the single consequence
+  that this device cannot produce a registration credential right now. It never fabricates,
+  reconstructs or caches one.
+- `mobile/lib/auth.tsx` — `firebaseRegistrationRequired` state, `completeFirebaseRegistration`, and the
+  arming that points the user at onboarding.
+- `mobile/app/register-firebase.tsx` — the onboarding screen (new route).
+- `mobile/app/login.tsx` — the `REGISTRATION_REQUIRED` banner action now targets `/register-firebase`
+  instead of the email/password `/register`.
+
+## Route decision — a dedicated route, not a mode of `/register`
+
+`/register` collects `businessName`, `name`, `email`, `password` and a confirmation, and its `signUp()`
+asks Firebase for a **new** identity (`ensureFirebaseAccount`). For a person who has just proved one
+identity with Google, the email it would ask for is one they have already proved, and the password it
+would ask for is what mints a **second** Firebase identity — which the server then refuses with
+`EMAIL_IN_USE`, and which is not the identity that was authenticated in any case. Neither outcome can
+produce a tenant, so a controlled mode would have had to suppress half the form and route around
+`signUp` anyway. A dedicated route keeps both paths honest: `/register` is unchanged for email/password
+(its flow and tests still pass), and `/register-firebase` collects exactly what is missing — `businessName`
+(required) and `name` (optional). It renders **no** email, password or confirmation input, and its
+`Link` target is asserted directly so a banner action that silently still pointed at `/register` would
+fail the suite.
+
+## The identity never travels through navigation
+
+`completeFirebaseRegistration({ businessName, name })` is the whole client-side input surface. There is
+no `idToken`, `firebaseUid`, `email`, `userId`, `businessId`, `role` or `status` parameter, so no route
+parameter, no AsyncStorage entry and no screen state can carry a credential; the token is obtained
+inside the context from the Firebase Auth layer and used immediately. That is the same shape Phase 32H
+and Phase 32C established: the client never declares its own identity, and the server derives
+`firebaseUid`, `email` and `emailVerified` from the verified token.
+
+## Arming, and what clears it
+
+`firebaseRegistrationRequired` is armed by one helper, `isRegistrationRequired(err)` — `err instanceof
+ApiError && err.code === 'REGISTRATION_REQUIRED'` — reached from both entry points (`signIn` and
+`googleSignIn`), so Google and email/password failures converge on the same onboarding. It is cleared by
+`applySession` whenever a real token is applied, so a later successful sign-in does not leave onboarding
+armed. It is deliberately **not persisted**: with `inMemoryPersistence` (Phase 32D) the Firebase identity
+itself does not survive a process restart either, so persisting the flag alone would only let the user
+type a business name against an identity that is gone. Reaching the route without the flag therefore
+renders a "Start again" state that makes **no request** — failing safe rather than fabricating a
+credential.
+
+## A half-done attempt must not be repeated
+
+Registration and sign-in are two calls, and the first can succeed while the second fails (network,
+server). Re-running both would create a second Business and a second OWNER for the same person, so the
+context holds `firebaseAccountRegisteredRef`: set **only** when `api.firebaseRegister` actually
+resolves, left `false` by a refusal (the input is correctable) and left `false` by a network fault (the
+attempt is genuinely repeatable). A retry after a successful register therefore resumes at the exchange.
+`armRegistrationRequired()` resets the ref, because reaching `REGISTRATION_REQUIRED` again cannot belong
+to the same half — a half-created attempt left an account linked to that identity, so the exchange for it
+can no longer answer `REGISTRATION_REQUIRED` — which is what keeps a stale flag from stranding a
+**different** identity. No backend idempotency mechanism was invented.
+
+## Conflict behaviour
+
+- **`409 EMAIL_IN_USE`** — reported with a fixed client sentence and a "Sign in to your existing
+  account" action. Nothing is linked: attaching the uid from here is exactly the automatic-match linking
+  Phase 32H refuses, and the explicit route for it is `POST /api/auth/firebase/link` over an existing
+  session.
+- **Firebase UID collision** — the backend reports it as a plain 500, so the screen shows one fixed
+  sentence and never the thrown error's text. This is asserted by a test that scans every rendered string
+  for the thrown message, not just the banner.
+- **No Firebase user left** — a safe sentence and no request at all.
+- **A field error naming an input this screen does not render** (for example `idToken` when a verified
+  identity carries no email) is promoted to form level rather than dropped, the rule Phase 27 set.
+
+## Testing
+
+Two new suites, **24 tests**, plus the two touched suites:
+
+- `mobile/__tests__/firebase-registration-onboarding.test.tsx` (12) — the service, over the real
+  `AuthProvider` with only the Firebase, API and SecureStore module boundaries mocked. Pins the register
+  payload as `{ idToken, businessName, name }` and nothing else, the exchange-after-register order, the
+  retry-as-exchange-only rule, and that a refusal opens no session and attaches nothing.
+- `mobile/__tests__/register-firebase-screen.test.tsx` (12) — the screen and its login entry point, with
+  real `AuthLayout`/`Banner`/`Input`/`Button`: the form asks for a business name only (no email, no
+  password, no confirmation), the conflict copy offers sign-in, no raw error text can reach the screen,
+  and the banner action targets `/register-firebase`.
+- **Every assertion was proven able to fail before being trusted.** Five mutations were applied to
+  pristine copies and each produced a red test: removing `firebaseRegister` (7 failures), removing
+  `firebaseExchange` (5), removing `applySession` (5), making the screen demand a password (6), and
+  swallowing `EMAIL_IN_USE` to auto-link (1). All five were reverted and both files verified
+  **byte-identical** to their pre-mutation SHA-256.
+
+## Runtime verification
+
+A **real-device run**, not an inference from unit tests. The OPPO F11 Pro (`PV4DDMIZZLTCIVSK`) running the
+installed development build, Metro serving the updated JavaScript bundle (1553 modules), the backend on
+stdout. The operator drove Google and the form; the experiment observed only non-secret metadata.
+
+| Gate | Result | Evidence |
+| --- | --- | --- |
+| Google authorization + callback | PASS | OS delivered the callback to `com.inventoryai.app/.MainActivity` |
+| `POST /api/auth/firebase/exchange` | 403 `REGISTRATION_REQUIRED` | request log |
+| Onboarding reached, business name submitted | PASS | by the operator |
+| `POST /api/auth/firebase/register` | **201** | request log, 214.9 ms |
+| `POST /api/auth/firebase/exchange` | **200** | request log, 322 ms later |
+| Session applied | PASS | `GET /api/dashboard` **200** with a `userId`; `GET /api/purchase-orders` 304 |
+| Final screen | authenticated Home (OWNER entries) | UI dump |
+| Process continuity | **WARM** — same PID before and after | `pidof` |
+| Expo Router `Unmatched Route` | **0 occurrences** | logcat |
+| JS errors | 0 | logcat |
+
+## Verification
+
+- `npx jest` — **20 suites, 209 tests, all pass** (was 18 / 185).
+- `npx tsc --noEmit` — clean. `npx eslint .` — clean.
+- Server tests were not run: **no server file was modified**.
+- **No secret was committed and none was logged**: the temp capture that held the one-time authorization
+  code was deleted at the end of the run, and the report quotes only method, path and status.
+- **The five pre-existing working-tree entries are untouched**, none was reset, restored, stashed,
+  deleted or overwritten.
+
+## Known limitations
+
+- **No cold-start recovery.** The Firebase identity lives in memory (Phase 32D), so the flow is
+  in-session only and the route fails safe when it is not.
+- **iOS is unverified** — the iOS client ID is still empty.
+- **O-2 remains open and is now reachable in the ordinary course of business**: the first Google-registered
+  OWNER is a Firebase-native account with no usable password, so `change-password` and the reset flow
+  would report success while changing nothing. This phase did not touch that decision. *(**Resolved by
+  Phase 32K — §27M.** The audit there also corrected this sentence's second clause: `change-password`
+  fails for a Firebase-native account rather than reporting success; it was the reset flow that reported
+  success. The wording is superseded, not rewritten.)*
+- **Registration still writes no audit row and uses no transaction** — inherited from Phase 32C and
+  explicitly out of scope here.
+- The run left **a real Business + OWNER user** in the MongoDB database the local server connects to, and
+  the device remains signed in as that owner.
+
+## Definition of Done
+
+- An already-authenticated Firebase identity can complete registration and reach an Inventory AI session
+  through the existing endpoints, with no second sign-in.
+- Email/password registration is unchanged, and no Firebase-native path asks for credentials the identity
+  already has.
+- No credential is passed through navigation, persisted, or reconstructed when absent.
+- `EMAIL_IN_USE` never links, and a UID collision never leaks server text.
+- A failed exchange after a successful registration cannot create a second business.
+- **No server file, schema, dependency, session mechanism or Firebase/Google configuration changed.**
+
+---
+
+# 27M. Phase 32K — Firebase Password Authority Boundary & Timing-Equalizer Credential Fix
+
+## Objective
+
+Make the boundary that Phase 32H escalated to a **live defect** true in code: **for every Inventory AI
+user carrying a `firebaseUid`, Firebase is the sole authentication authority**, so Inventory AI local
+password operations do not apply to that account. Phase 32J had made Firebase-native OWNER registration
+a normal outcome, so the state was no longer theoretical.
+
+The phase also fixes a second, sharper defect the Phase 32K audit found in the same code while auditing
+the first.
+
+## 1. ★ The timing equalizer was a credential
+
+`server/src/services/auth.service.ts` held:
+
+```ts
+const DUMMY_HASH = bcrypt.hashSync('timing-equalizer-placeholder', BCRYPT_ROUNDS);
+```
+
+`bcrypt.hashSync` returns a **valid hash of a known string**, and the idiom `user?.passwordHash ||
+DUMMY_HASH` made that constant the comparison **target** whenever an account held no `passwordHash`. Two
+consequences followed, and both were real:
+
+- `loginWithPassword` — submitting the literal `timing-equalizer-placeholder` **authenticated** a hashless
+  account and opened a session for it.
+- `changePassword` — submitting the same literal as `currentPassword` **installed a real credential**,
+  stamped `passwordChangedAt` and revoked every session. The attacker left with a password, not just a
+  session.
+
+It was reachable because `passwordHash` is optional (Phase 32B) and because a Firebase-native account has
+none by design. The fix is one function, `verifyPassword(password, storedHash)`, which runs the bcrypt
+comparison in every branch — so the timing property is preserved exactly — and then **discards the
+result** when there is no stored hash:
+
+```ts
+const hash = storedHash || null;
+const matches = await bcrypt.compare(password, hash ?? DUMMY_HASH);
+return hash !== null && matches;
+```
+
+Putting it in one place is the point: `|| DUMMY_HASH` appeared at **two** call sites with the same defect,
+so fixing either one alone would have looked complete. "A placeholder is never a credential" is now a
+property of the code rather than a rule two call sites must each remember.
+
+## 2. The password boundary
+
+| Surface | Firebase-owned account (`firebaseUid` present) | Legacy account (no `firebaseUid`) |
+| --- | --- | --- |
+| `POST /api/auth/login` | unchanged — the Phase 32E guard still answers `403 FIREBASE_SIGN_IN_REQUIRED` (linked) or the generic `401` (native, which has no hash to verify) | unchanged |
+| `POST /api/auth/change-password` | **refused** `409 PASSWORD_NOT_APPLICABLE`, before the current-password comparison and before every effect | unchanged |
+| `POST /api/auth/forgot-password` | **silent exit** — the same uniform `202`, **no token, no email, no audit row** | unchanged |
+| `POST /api/auth/reset-password` | **refused** `400 INVALID_RESET_TOKEN`, token spent fail-closed, **no hash written** | unchanged |
+
+Three placement decisions carry the phase, and each is recorded in the code at its site:
+
+- **The change-password guard sits BEFORE the current-password comparison.** Placed after it, a
+  Firebase-native account (no hash) would report `400 INVALID_CURRENT_PASSWORD` while a Firebase-linked
+  account (hash retained) would report the boundary refusal — two different answers to one question,
+  decided by whether an inert hash happens to remain on the document.
+- **The change-password refusal is a `409`, not a `401`/`403`.** `mobile/lib/client.ts` treats a `401` or
+  `403` on a request that carried a token as session loss and clears the session, so a `403` here would
+  sign a user out of a perfectly valid session. `409` is also what the adjacent account-state refusals
+  already use (`EMAIL_IN_USE`, `FIREBASE_IDENTITY_CONFLICT`), and Phase 32H's link route made the same
+  move for the same reason.
+- **The recovery refusal is a SILENT RETURN, not an error.** Distinguishing a Firebase address from an
+  unknown one would turn `forgot-password` into the account-existence oracle the whole Phase 26B design
+  refuses to be, and "this account uses a managed sign-in" is itself account state an unauthenticated
+  caller may not learn. It takes the same silent exit as a DISABLED account or an inactive tenant and
+  sits **after** the tenant check, so a Firebase account performs exactly the database work a legacy one
+  does up to the point a token would be created — adding no new timing signal to a path whose residual
+  database-work term is already documented as only **partially mitigated**.
+
+The reset-completion guard is deliberately the **last thing before the write**. Tokens issued before this
+phase may still be unspent, but the more general reason is that "which accounts may hold a local
+password" is a property of *that write*, so the check belongs immediately in front of it rather than in a
+different function on a different request.
+
+## 3. The capability the client consumes
+
+Mobile needs to know whether local password management applies, and must not be told why. The public DTO
+gains **one** additive field derived in **one** helper:
+
+```ts
+authMethods: { password: !user.firebaseUid }
+```
+
+`firebaseUid` is never published — it is the identity join key the Firebase design keeps server-side.
+`password: false` does **not** mean "no credential exists": a Firebase-**linked** account still retains
+its legacy hash (Phase 32H deliberately does not delete it); it means that hash cannot authenticate, so
+it is not a password anyone can manage.
+
+The helper is imported by **both** surfaces that publish a user — `toPublicUser` (login, exchange,
+register, link, `/api/users`) and `requireAuth`'s `req.user` (which answers `GET /api/auth/me` and does
+**not** go through `toPublicUser`) — so the two cannot disagree. `requireAuth` selects `firebaseUid` for
+this derivation only, and never puts it on `req.user`.
+
+Mobile: `AuthUser` gains the optional capability, and the Profile screen hides the Change-password
+control and explains why when it is `false`. The test is `=== false`, not falsiness, so an older server's
+user object keeps the historical behaviour. **The screen is not the boundary** — a request that reaches
+`/change-password` anyway is refused by the server, and the screen's existing error path renders that
+message.
+
+## 4. What was deliberately NOT done
+
+- **No retained `passwordHash` was deleted.** The unlink / last-authentication-method disposition is
+  still open (Phase 32L owns O-1), and deleting a hash now could make a later unlink irreversible. The
+  hash is retained and made inert.
+- **No schema change.** `passwordHash` was already optional and `firebaseUid` already present, so the
+  existing schema was sufficient. No field, index or migration was added.
+- **No unlinking, no provider SDK, no Facebook/Apple, no session-model change, no new dependency.**
+- **No second password credential** was created for any Firebase account, and no reset token is issued
+  that such an account could never spend.
+
+## Verification
+
+- **Server:** `npm test` — **795 tests, 106 suites, 0 fail**; `npm run test:unit` — 336 tests, 313 pass,
+  0 fail (the difference is DB-required suites skipped with a visible reason in unit mode);
+  `npm run typecheck` and `npm run lint` clean.
+- **Mobile:** `npx jest` — **21 suites / 213 tests** (was 20 / 209); `tsc --noEmit` and `eslint .` clean.
+- **New suite:** `server/test/phase32k-firebase-password-boundary.test.mjs` (12 cases, registered
+  `PURE_DB`) walks the legacy / Firebase-native / Firebase-linked matrix. It does **not** restate the
+  equalizer literal: it reads it **out of `auth.service.ts`**, so the case cannot pass vacuously if the
+  string changes, and the assertion that the pattern still matches fails loudly if the equalizer is ever
+  removed. Two new mobile cases cover the capability gating, including the backward-compatible
+  "capability absent" case.
+- **Every new assertion was proven able to fail** before it was trusted, by a seven-mutation pass (all
+  reverted; no mutated file left behind):
+
+| Mutation | Cases that went red |
+| --- | --- |
+| change-password Firebase guard disabled | 6, 10 |
+| equalizer accepts again (`return matches`) | 3, 4, 5 |
+| `forgot-password` guard removed | 7, 11 |
+| `reset-password` guard removed | 8 |
+| `authMethods` dropped from `toPublicUser` | 1, 12 |
+| `authMethods` dropped from `requireAuth` | 12 |
+| mobile Profile gate disabled | mobile case 1 |
+
+- **Two pre-existing suites had to change**, and the change is declared rather than smoothed over. Both
+  pin the **exact key set** of a user payload, so an additive field is a deliberate edit:
+  `phase26a-session-lifecycle.test.mjs` (the `/api/auth/me` allowlist) and
+  `phase32c-firebase-exchange.test.mjs` (the exchange's public-DTO allowlist). Each keeps its exact-shape
+  assertion and gained an explicit `firebaseUid`-absent assertion so the property they actually guard is
+  stated rather than implied by the list.
+
+## Known limitations
+
+- **No runtime verification of this phase.** The changes are server-side and mobile-JS; no development
+  build was produced, no device run was performed and no live Firebase project was exercised. Every
+  figure above is a test/lint/typecheck result, not an observation of the behaviour in a running app.
+- **A token issued before this phase can still be spent once** on `reset-password` for a Firebase account
+  — it is refused, and fail-closed, but it is not "already spent". Only the refusal is new.
+- **The retained hash is inert, not gone.** If unlinking is later added without a last-authentication-method
+  rule, the retained hash becomes live again for that account the moment `firebaseUid` is cleared.
+- **`change-password`'s refusal message is provider-neutral by design**, so a user is not told which
+  provider manages their password. That is deliberate, and it does mean the app cannot point them at a
+  specific next step while only one provider exists.
+
+## Definition of Done
+
+- No account carrying a `firebaseUid` can obtain, change or reset an Inventory AI local password.
+- The timing equalizer performs its timing work and can never be accepted as a credential.
+- No Firebase account is sent a reset email, is written a fake credential, or is recorded as having
+  changed one.
+- Legacy accounts without a `firebaseUid` behave exactly as before, on every password surface.
+- The client learns whether local password management applies without learning the identity behind it.
+- **No schema, index, migration, dependency, session mechanism or retained hash was changed.**
 
 ---
 

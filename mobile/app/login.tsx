@@ -52,6 +52,15 @@ function fieldMap(err: unknown): Record<string, string> {
  * journey needs a control. It is rendered in the INFO tone rather than the error
  * tone: the credentials were accepted, and nothing the user did was wrong.
  *
+ * Phase 32J: the control leads to `/register-firebase`, NOT `/register`. The
+ * identity that produced this refusal is already authenticated with Firebase and
+ * is still signed in, so sending the user to the email/password form would ask
+ * them for an email they already proved and a password that would create a SECOND
+ * Firebase identity — and then refuse to register either of them. The Firebase
+ * onboarding screen asks only for the business name, and the identity it registers
+ * is read from the Firebase layer rather than carried here, so no token, uid or
+ * email travels through this link.
+ *
  * Every other refusal (ACCOUNT_DISABLED, BUSINESS_NOT_ACTIVE,
  * FIREBASE_SIGN_IN_REQUIRED, INVALID_CREDENTIALS) is a statement with nothing to
  * press and is shown as an ordinary error banner.
@@ -59,7 +68,7 @@ function fieldMap(err: unknown): Record<string, string> {
 const REGISTRATION_REQUIRED = 'REGISTRATION_REQUIRED';
 
 export default function LoginScreen() {
-  const { status, user, signIn } = useSession();
+  const { status, user, signIn, signInWithGoogle } = useSession();
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [email, setEmail] = useState('');
@@ -68,26 +77,60 @@ export default function LoginScreen() {
   const [formError, setFormError] = useState<string | null>(null);
   const [needsAccount, setNeedsAccount] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [googleBusy, setGoogleBusy] = useState(false);
 
   if (status === 'signedIn') return <Redirect href={defaultHomePath(user)} />;
 
-  async function submit(): Promise<void> {
-    setBusy(true);
+  /**
+   * One place turns a sign-in rejection into what the screen shows. Shared by the
+   * password form and the Google button, so a `REGISTRATION_REQUIRED` from the
+   * exchange renders identically whichever provider proved the identity — the
+   * refusal is about the Inventory AI account, not about how it was entered.
+   */
+  function applyAuthError(err: unknown): void {
+    const fields = fieldMap(err);
+    if (Object.keys(fields).length) setFieldErrors(fields);
+    else {
+      setNeedsAccount(err instanceof ApiError && err.code === REGISTRATION_REQUIRED);
+      setFormError((err as { message?: string } | null)?.message || 'Unable to sign in. Please try again.');
+    }
+  }
+
+  function resetFeedback(): void {
     setFormError(null);
     setFieldErrors({});
     setNeedsAccount(false);
+  }
+
+  async function submit(): Promise<void> {
+    setBusy(true);
+    resetFeedback();
     try {
       await signIn({ email, password });
       // Navigation: on success the signedIn guard redirects this screen away.
     } catch (err) {
-      const fields = fieldMap(err);
-      if (Object.keys(fields).length) setFieldErrors(fields);
-      else {
-        setNeedsAccount(err instanceof ApiError && err.code === REGISTRATION_REQUIRED);
-        setFormError((err as { message?: string } | null)?.message || 'Unable to sign in. Please try again.');
-      }
+      applyAuthError(err);
     } finally {
       setBusy(false);
+    }
+  }
+
+  /**
+   * Google Sign-In (Phase 32I). `signInWithGoogle` resolves `null` when the user
+   * cancels, which is not an error: the Google sheet simply closes and the form is
+   * left as it was, with no banner. A real refusal throws and goes through the
+   * same `applyAuthError` the password form uses, so `REGISTRATION_REQUIRED`
+   * shows its info banner and the "Create a business account" action.
+   */
+  async function handleGoogle(): Promise<void> {
+    setGoogleBusy(true);
+    resetFeedback();
+    try {
+      await signInWithGoogle();
+    } catch (err) {
+      applyAuthError(err);
+    } finally {
+      setGoogleBusy(false);
     }
   }
 
@@ -114,7 +157,7 @@ export default function LoginScreen() {
       {needsAccount ? <Banner type="info" text={formError} /> : <Banner type="error" text={formError} />}
       {needsAccount ? (
         <Text style={styles.actionRow}>
-          <Link href="/register" style={styles.link}>
+          <Link href="/register-firebase" style={styles.link}>
             Create a business account
           </Link>
         </Text>
@@ -143,7 +186,15 @@ export default function LoginScreen() {
         returnKeyType="go"
         onSubmitEditing={submit}
       />
-      <Button title="Sign In" onPress={submit} loading={busy} full />
+      <Button title="Sign In" onPress={submit} loading={busy} disabled={googleBusy} full />
+      <Button
+        title="Continue with Google"
+        variant="secondary"
+        onPress={handleGoogle}
+        loading={googleBusy}
+        disabled={busy}
+        full
+      />
     </AuthLayout>
   );
 }

@@ -444,6 +444,117 @@
 
 ---
 
+### FB-D-123 — Phase 32L-B: the Q6 email parameter is RATIFIED, and the retry no longer holds the new password across a confirmation · `OWNER DECISION` (ratification) + `SOURCE-CODE OBSERVATION` (remediation)
+- **Date:** 2026-09-24 (owner remediation brief following the FB-010 implementation report).
+  **Mobile only** — no server file, no schema, no dependency, no protected file.
+- **★ Ratification — the Q6.2 email parameter.** The frozen Q6.2 contract was
+  `confirmFirebaseSignIn({ method, password })` with "no email parameter"; the implementation
+  requires `email` for the password method, and the owner has **ratified that as the final Phase
+  32L-B contract**, not as a defect to be reverted. `signInWithEmailAndPassword` takes an address,
+  and the only other source — `auth.currentUser.email` — is `null` in exactly the cold-start state
+  Q6.1 was frozen to survive, so the alternative would have made the password method unusable after
+  a restart. The intent is enforced structurally rather than by a check: the address is
+  `user.email` from the authenticated session, **no email input exists anywhere in the flow**
+  (asserted as an absence, and mutation **M9** reddens the suite if one is added), it is never
+  compared, never used to look an account up and never used to resolve a `firebaseUid`.
+- **★ Remediation — the retry password.** The first implementation answered
+  `409 FIREBASE_REAUTHENTICATION_REQUIRED` by confirming again and retrying **with the password it
+  was already holding**, contradicting Q1's own reason for REAUTH-FIRST (a confirmation can
+  hand control to a browser that backgrounds or kills the process). The contract is now:
+  the refusal is returned as `{ kind: 'reauth-required' }` after **one request**;
+  the screen **discards the typed password before anything else happens**; the person confirms
+  again with no password in scope; the fields are empty on arrival at step 2; the retry sends a
+  password typed afterwards. **One attempt per call**, so the frame holding the credential has
+  returned before the second confirmation runs.
+- **The cap is in the session layer, not in the screen's good behaviour.** A call marked `retry`
+  **throws** on a freshness refusal instead of answering `reauth-required`, so no caller can ask a
+  third time. The screen additionally stops offering the remedy once its own sticky `retried` flag
+  is set. Mutations **M4** (cap removed) and **M13** (cap re-armed by the screen) both redden.
+- **Verification:** mobile `npx jest` **24 suites / 279 tests / 0 fail**; the three 32L-B suites
+  18 + 22 + 26 = **66**; `tsc --noEmit` and `eslint .` **clean**; a **14-mutation** pass with
+  **14/14 detected** (M2 and M12 are the brief's required "retains/reuses the old password across
+  the second confirmation" case, attacked from the session layer and the screen respectively);
+  all five protected files byte-identical; **no server file changed**. **No commit, no push.**
+- **★ Not runtime-verified.** No build, emulator, device or live Firebase/Google credential was
+  exercised, so the Google confirmation path's runtime behaviour remains **unproven** — the same
+  prerequisite Phase 32G recorded. This record must not be read as runtime evidence.
+- **Authority:** the ratification is an **owner decision** and is final for Phase 32L-B; the
+  remediation is a **SOURCE-CODE OBSERVATION** of the implemented contract. The **Q9
+  commit-boundary problem is NOT decided here** and remains open — `lib/auth.tsx` and
+  `lib/firebase-auth.ts` carry pre-existing 32I/32J hunks, and for `lib/firebase-auth.ts` a clean
+  split may be impossible because this phase modifies uncommitted 32I code.
+
+### FB-D-124 — ★ Phase 1 blocker resolved: **P2 durable Firebase persistence APPROVED**; the Phase 32D `inMemoryPersistence` requirement is **SUPERSEDED** · `OWNER DECISION`
+- **Date:** 2026-09-24 (owner approval, following the read-only Phase 1 blocker verification).
+- **Context:** the two Phase 1 blocking items were verified read-only and reported as
+  **compatibility = PASS** and **persistence = `P1 NOT SUPPORTED — P2 REQUIRED`**. The persistence
+  finding rests on RNFirebase's own API reference (*`setPersistence` — "**Not supported on React Native
+  Firebase. Always throws synchronously**…"*) and on the auth usage page's statement that the native
+  SDKs persist state between app sessions. Under that evidence P1 could not be reproduced, so the
+  blocking item was handed to the owner rather than decided in code.
+- **Owner decision (the approving words):** *"I approve P2: React Native Firebase will use its native
+  durable Firebase Auth persistence. This formally supersedes the previous Phase 32D
+  `inMemoryPersistence` decision. We accept that the device may hold two durable credentials… We also
+  accept the resulting threat-model change and will redesign logout, cold-start restoration,
+  reauthentication, Firebase unlink, and session reconciliation accordingly."*
+- **What this supersedes, and what it does not:** exactly **one** requirement — the Phase 32D
+  `inMemoryPersistence` pin and its rationale. It is marked **SUPERSEDED, not deleted**, in all four
+  places it is recorded (`mobile/lib/firebase.ts`, `CLAUDE.md`, the Phase 32D row of the Firebase
+  design doc's phase table, and the design doc §12 cross-reference added by this task). No other owner
+  decision recorded in this register or anywhere else is altered. **Option B is unchanged** — the
+  Firebase ID token is still exchanged once for an Inventory AI JWT, and MongoDB remains authoritative.
+- **Resulting action:** a new decision record was created —
+  `docs/superpowers/specs/2026-09-24-rnfirebase-p2-persistence-decision.md` — plus a **dated, additive**
+  cross-reference in §12 of `docs/superpowers/specs/2026-09-18-firebase-auth-design.md` and a status
+  update to the **`O-4`** row of its §14A.5 open-decisions table. **Documentation only:** no source,
+  dependency, `.env`, package manifest, schema, MongoDB, Firebase Console, test or protected file was
+  touched, and **no commit was made**.
+- **What is NOT decided here:** the storage strategy for `google-services.json` /
+  `GoogleService-Info.plist` (`O-7`) and the Google Sign-In library choice both remain **OPEN**, and
+  Phase 1 may not begin until they are resolved. No RNFirebase package was installed and Phase 1 was not
+  started.
+- **Authority:** the owner's explicit approval, quoted above. This is a **project decision**, and the
+  register's own rule (`DECISIONS.md`, register rule 2) is satisfied: the approval is recorded as a new
+  entry rather than the earlier Freebuff recommendation being promoted on its own.
+
+### FB-D-125 — ★ Phase 1's two remaining decisions FROZEN: **P-1 = EAS build-time injection**; **P-2 = `@react-native-google-signin/google-signin@16.1.5`** · `OWNER DECISION`
+- **Date:** 2026-09-24 (owner approval, following FB-011's recording of both items as blocking).
+- **Context:** FB-D-124 closed the persistence question but left `P-1` (native config-file storage) and
+  `P-2` (Google Sign-In library) recorded as **OPEN / OWNER DECISION**, and stated that Phase 1 could
+  not begin until both were resolved. Both address the same free-tier-first constraint the project
+  already carries.
+- **Owner decision — P-1 (approving words):** *"P-1 — Native Firebase configuration files. APPROVED:
+  EAS build-time injection for: `google-services.json`, `GoogleService-Info.plist`. **Do not commit
+  these native Firebase configuration files to the repository** unless a later explicit owner decision
+  changes this."*
+- **Owner decision — P-2 (approving words):** *"P-2 — Google Sign-In library. APPROVED:
+  `@react-native-google-signin/google-signin@16.1.5`. Reason: **current free/public integration path and
+  project free-tier-first constraint.** Treat this as the **selected Phase 1 integration path**, subject
+  to actual Android/iOS build and runtime verification."*
+- **What each decides, precisely.** P-1 settles only the **storage/injection** question — the two files
+  are supplied to the build through EAS and are **not committed**; the mechanism (EAS file environment
+  variables vs. another build-time channel) is `[EXTERNAL VERIFICATION REQUIRED]` at Phase 1. P-2 selects
+  **one library** as the Phase 1 path; it does **not** assert that the integration works, and it
+  supersedes the `react-native-nitro-google-signin` alternative that RNFirebase's own docs also name.
+- **What this does NOT do:** install any package, run `expo prebuild`, change Firebase Console, write any
+  MongoDB document or application data, modify any auth implementation, or alter any other architecture
+  decision. **Documentation only.**
+- **Resulting action:** the decision record
+  (`docs/superpowers/specs/2026-09-24-rnfirebase-p2-persistence-decision.md`) gained an amended header
+  and a new **§8.1** holding both approvals, and its §8.2 now carries the remaining items; the Firebase
+  design authority's §14A.5 **`O-7`** cell was annotated **RESOLVED 2026-09-24** in place, and its §12
+  banner now names the chosen library and the injection decision. `MASTER_LOG.md` `FB-012` and
+  `tasks/FB-012-phase-1-decisions-freeze.md` record this task.
+- **Status of the remaining Phase 1 blockers — recorded here so they cannot be mistaken for resolved:**
+  **P-3** (`compileSdk`/`targetSdk` alignment) and **P-4** (Android `setPersistence` reachability; iOS
+  Keychain survival across reinstall) remain **`[EXTERNAL VERIFICATION REQUIRED]`**; **P-5** (Firebase
+  Console state) and **P-6** (iOS build capability) remain **OPEN**; **P-7** (M1 vs M2) is **CLOSED** by
+  FB-D-124.
+- **Authority:** the owner's explicit approval, quoted above. **Phase 1 implementation remains
+  unauthorized** and must not begin until the owner separately approves it.
+
+---
+
 ## Part 3 — Freebuff inferences that are explicitly NOT decisions
 
 | Entry | Inference | Confidence | Approval | Action |

@@ -71,3 +71,46 @@ export function isFirebaseConfigured(): boolean {
     FIREBASE_API_KEY && FIREBASE_AUTH_DOMAIN && FIREBASE_PROJECT_ID && FIREBASE_APP_ID,
   );
 }
+
+/**
+ * Google OAuth client IDs (Phase 32I).
+ *
+ * CLIENT configuration, never secrets — the same standing as the Firebase values
+ * above. Google issues one client ID per platform, and which one is used is
+ * selected at runtime by {@link googleClientId}. They are read longhand for the
+ * same reason the Firebase values are: Expo inlines only the literal
+ * `process.env.NAME` expression, so a table-driven lookup would compile to
+ * `undefined` in a real bundle while passing every Jest test.
+ *
+ * An unset variable yields `''`, matching the Firebase convention.
+ */
+export const GOOGLE_WEB_CLIENT_ID: string = (process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || '').trim();
+export const GOOGLE_ANDROID_CLIENT_ID: string = (
+  process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || ''
+).trim();
+export const GOOGLE_IOS_CLIENT_ID: string = (
+  process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || ''
+).trim();
+
+/**
+ * The Google client ID to use on the current platform.
+ *
+ * Android and iOS each fall back to the web client ID when their own is unset,
+ * so a single configured client is still usable while a platform-specific one is
+ * preferred when present. Returns `''` when nothing is configured.
+ */
+export function googleClientId(): string {
+  if (Platform.OS === 'ios') return GOOGLE_IOS_CLIENT_ID || GOOGLE_WEB_CLIENT_ID;
+  if (Platform.OS === 'android') return GOOGLE_ANDROID_CLIENT_ID || GOOGLE_WEB_CLIENT_ID;
+  return GOOGLE_WEB_CLIENT_ID;
+}
+
+/**
+ * Whether Google Sign-In is configured for this build.
+ *
+ * Deliberately SDK-free, exactly like {@link isFirebaseConfigured}: a screen can
+ * ask whether to offer the button without importing the Firebase or Google SDK.
+ */
+export function isGoogleConfigured(): boolean {
+  return Boolean(googleClientId());
+}

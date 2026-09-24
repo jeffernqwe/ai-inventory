@@ -1,11 +1,25 @@
 /**
- * Phase 32E — Firebase email/password sign-in, behind the Phase 32D boundary.
+ * Phase 32E — Firebase email/password sign-in, behind the Firebase boundaries.
  *
- * This module is the second half of the Firebase boundary `lib/firebase.ts`
- * opened: that file owns the app instance and the persistence decision, and this
- * one owns the email/password operations and — more importantly — the DECISION
- * ABOUT WHAT A FIREBASE FAILURE MEANS. `lib/auth.tsx` is the only importer, and
- * no screen sees a Firebase error.
+ * This module owns the email/password operations and — more importantly — the
+ * DECISION ABOUT WHAT A FIREBASE FAILURE MEANS. `lib/auth.tsx` is the only
+ * importer, and no screen sees a Firebase error.
+ *
+ * PHASE B: THE EMAIL/PASSWORD OPERATIONS NOW RUN ON THE NATIVE SDK. Sign-in,
+ * registration, sign-out and ID-token access go through `lib/firebase-native.ts`
+ * (React Native Firebase), which is the only module that names the native packages,
+ * so every shipped email/password path now authenticates natively with native
+ * durable persistence (owner decision P2). The Google flow and the disconnect
+ * confirmation still run on the Firebase *JavaScript* SDK through `lib/firebase.ts`,
+ * because native Google is Phase C by owner decision — and that is why both imports
+ * appear below.
+ *
+ * WHAT DID NOT CHANGE, AND IS THE POINT OF THE PHASE: the exported names, the outcome
+ * unions, the two fallback codes, the message table, the registration/adoption policy
+ * and every sentence a user can read. The native SDK reports the SAME namespaced
+ * codes the JS SDK does (`auth/invalid-credential`, `auth/user-not-found`, …) —
+ * verified from the installed native error mapping rather than assumed — so the
+ * classification below is unchanged and only its source moved.
  *
  * THIS MODULE IS NOT A SECURITY BOUNDARY, and nothing here should be read as one.
  * It decides which server endpoint to call next; it never decides who may sign in.
@@ -58,13 +72,26 @@
  */
 
 import {
-  createUserWithEmailAndPassword,
+  GoogleAuthProvider,
+  signInWithCredential,
   signInWithEmailAndPassword,
-  signOut as firebaseSignOut,
-  updateProfile,
 } from 'firebase/auth';
+import {
+  AuthRequest,
+  ResponseType,
+  exchangeCodeAsync,
+  makeRedirectUri,
+} from 'expo-auth-session';
 
+import { googleClientId, isGoogleConfigured } from './config';
 import { getFirebaseAuth } from './firebase';
+import {
+  isNativeFirebaseConfigured,
+  nativeCreateUserWithEmail,
+  nativeCurrentIdToken,
+  nativeSignInWithEmail,
+  nativeSignOut,
+} from './firebase-native';
 
 // ---------------------------------------------------------------------------
 // Codes and copy
@@ -136,15 +163,25 @@ function errorCode(err: unknown): string | null {
   return typeof code === 'string' && code ? code : null;
 }
 
-/** The sentence to show for a Firebase failure code. Never the SDK's own text. */
-function describeFirebaseFailure(code: string | null): string {
-  if (!code) return DEFAULT_FAILURE_MESSAGE;
+/**
+ * The sentence to show for a Firebase failure code. Never the SDK's own text.
+ *
+ * The table is shared by every flow, but the sentence for a code the table has no
+ * entry for is the CALLER's, because "Unable to sign in." is the wrong thing to
+ * read after tapping a Google button. Passing `fallback` keeps one classification
+ * table while letting each entry point finish the sentence for its own method.
+ */
+function describeFirebaseFailure(
+  code: string | null,
+  fallback: string = DEFAULT_FAILURE_MESSAGE
+): string {
+  if (!code) return fallback;
   const known = FAILURE_MESSAGES[code];
   if (known) return known;
   // The API-key codes are spelled several ways across SDK versions and all carry
   // the rejected key in their message, so they are matched by shape instead.
   if (code.includes('api-key') || code.includes('api_key')) return MISCONFIGURED_MESSAGE;
-  return DEFAULT_FAILURE_MESSAGE;
+  return fallback;
 }
 
 /**
@@ -192,25 +229,33 @@ export type FirebaseSignInOutcome =
  * Signs in with email and password. Never throws: every failure is an outcome,
  * so the caller's branches are exhaustive and reviewable at a glance.
  *
- * THE BOUNDARY CALL IS INSIDE THE TRY, and that is load-bearing twice over. A
- * failure to mint a token (an expired user record, a dropped connection) is then
- * classified by exactly the same rules as a failure to authenticate, so "we
- * authenticated but have nothing to exchange" cannot be mistaken for a legacy
- * account. And `getFirebaseAuth()` — which initializes the SDK on first use — is
- * covered too: its one throw, `auth/already-initialized`, is a development-time
- * artifact of Fast Refresh (see the note in `lib/firebase.ts`) and arrives here
- * as an ordinary `failure`, which does not fall back.
+ * THE NATIVE CALL IS INSIDE THE TRY, and that is load-bearing twice over. A failure
+ * to mint a token (an expired user record, a dropped connection) is then classified
+ * by exactly the same rules as a failure to authenticate, so "we authenticated but
+ * have nothing to exchange" cannot be mistaken for a legacy account. And a native
+ * module that could not be loaded at all is covered too: it arrives here as an
+ * ordinary `failure`, which does not fall back — the safe direction, because a build
+ * whose Firebase gate is ON but whose native module is missing is broken, not
+ * unconfigured.
  */
 export async function signInWithEmail(
   email: string,
   password: string
 ): Promise<FirebaseSignInOutcome> {
-  try {
-    const auth = getFirebaseAuth();
-    if (!auth) return { kind: 'legacyFallback', reason: 'not-configured' };
+  // THE GATE CHECK IS OUTSIDE THE TRY (Phase B). "This build has no Firebase
+  // configuration" is a property of the build, not a condition an attacker can create
+  // at runtime, so it is the one state allowed to open the legacy door — and keeping
+  // it out of the try is what stops it from ever being confused with a fault.
+  if (!isNativeFirebaseConfigured()) {
+    return { kind: 'legacyFallback', reason: 'not-configured' };
+  }
 
-    const credential = await signInWithEmailAndPassword(auth, email, password);
-    const idToken = await credential.user.getIdToken();
+  // Everything the native boundary can do is INSIDE the try, so a native module that
+  // failed to load, a token that could not be minted and a refused credential are all
+  // classified by exactly the same rules — and none of them can be mistaken for a
+  // legacy account. This is the property Phase 32E introduced and Phase B preserves.
+  try {
+    const { idToken } = await nativeSignInWithEmail(email, password);
     return { kind: 'idToken', idToken };
   } catch (err) {
     const code = errorCode(err);
@@ -226,7 +271,7 @@ export async function signInWithEmail(
  * token. Throws {@link FirebaseAuthError} if it cannot.
  *
  * THE ADOPTION BRANCH IS THE ORPHAN RECOVERY PATH, and it is why this is not
- * simply `createUserWithEmailAndPassword`. Registration is two systems, not one:
+ * simply a native create call. Registration is two systems, not one:
  * Firebase creates the account first, and the server creates the MongoDB user
  * second (Phase 32C). If the second half fails — a dropped connection at exactly
  * the wrong moment — a Firebase account exists with no tenant, which Phase 32A
@@ -244,10 +289,13 @@ export async function signInWithEmail(
  * The display name is set AFTER the identity exists and its failure is swallowed:
  * it is profile text the server does not read (the `name` the server stores comes
  * from the register request body), so a cosmetic write must not fail a signup that
- * has already succeeded at everything that matters.
+ * has already succeeded at everything that matters. Phase B moved that write into
+ * the native boundary, which is now the layer that has the user object; the ADOPTION
+ * path no longer repeats it, because the attempt that created the identity already
+ * applied it and the value is unread by both the server and the UI.
  *
  * The caller checks the build's configuration before reaching this — see
- * `lib/auth.tsx` — so the `null` branch below is a programming fault, not a state
+ * `lib/auth.tsx` — so the gate branch below is a programming fault, not a state
  * an unconfigured build can arrive in.
  */
 export async function ensureFirebaseAccount({
@@ -259,23 +307,23 @@ export async function ensureFirebaseAccount({
   password: string;
   name?: string;
 }): Promise<{ idToken: string }> {
-  const auth = getFirebaseAuth();
-  if (!auth) {
+  if (!isNativeFirebaseConfigured()) {
     throw new FirebaseAuthError(null, MISCONFIGURED_MESSAGE);
   }
 
-  let user;
   try {
-    const credential = await createUserWithEmailAndPassword(auth, email, password);
-    user = credential.user;
+    return await nativeCreateUserWithEmail(email, password, name);
   } catch (err) {
     const code = errorCode(err);
     if (code !== EMAIL_ALREADY_IN_USE) {
       throw new FirebaseAuthError(code, describeFirebaseFailure(code));
     }
+    // The adoption branch, unchanged in policy: the identity already exists, so
+    // signing into it with the SAME password is what proves the caller is the person
+    // who created it. A token that could not be minted on the create path is NOT a
+    // collision, so it is reported above rather than falling through to here.
     try {
-      const credential = await signInWithEmailAndPassword(auth, email, password);
-      user = credential.user;
+      return await nativeSignInWithEmail(email, password);
     } catch {
       // The address is taken and this password does not open it, so it belongs to
       // someone else. Reported as the taken address it is — the sign-in screen is
@@ -283,47 +331,487 @@ export async function ensureFirebaseAccount({
       throw new FirebaseAuthError(EMAIL_ALREADY_IN_USE, EMAIL_TAKEN_MESSAGE);
     }
   }
-
-  const trimmed = (name ?? '').trim();
-  if (trimmed) {
-    try {
-      await updateProfile(user, { displayName: trimmed });
-    } catch {
-      // Cosmetic only — see the note above.
-    }
-  }
-
-  try {
-    return { idToken: await user.getIdToken() };
-  } catch (err) {
-    const code = errorCode(err);
-    throw new FirebaseAuthError(code, describeFirebaseFailure(code));
-  }
 }
 
 /**
  * Ends the Firebase session, if there is one. Never throws.
  *
  * Called from the single central sign-out in `lib/auth.tsx`, so all ~20 sign-out
- * call sites in the app reach it without any of them knowing Firebase exists.
- * Making it total is deliberate: sign-out must complete on a device with no
- * network, and this is not a network operation anyway — with `inMemoryPersistence`
- * it clears the in-process copy, so there is no durable Firebase credential to
- * revoke. That is the Phase 32D decision this function inherits rather than makes.
+ * call sites in the app reach it without any of them knowing Firebase exists — and,
+ * since Phase B, also from that file's session-loss handler (owner decision: a
+ * token-bearing 401/403 ends the durable native session too, so a server-side
+ * eviction cannot leave a live Firebase identity behind).
+ *
+ * UNDER P2 THIS IS NO LONGER HYGIENE. The native session is DURABLE (owner decision
+ * P2, superseding the Phase 32D `inMemoryPersistence` decision this function was
+ * written under), so skipping this call would leave a persisted Firebase credential
+ * on the device after Inventory AI had ended the session. It stays TOTAL regardless —
+ * sign-out must complete on a device with no network, and the local Inventory AI
+ * session is cleared by the caller whatever this returns.
+ *
+ * IT RETURNS WHETHER THE ATTEMPT SUCCEEDED, where it previously returned nothing.
+ * That is the observability the owner's Phase B decision requires: a best-effort
+ * operation that swallowed its failure would leave a durable credential in place with
+ * no way to tell, and a boolean is the smallest thing that reports it — no token, no
+ * key and no error text is logged to achieve it. The return type is widened, never
+ * narrowed, so every existing call site (which ignores the value) is unaffected.
  */
-export async function signOutOfFirebase(): Promise<void> {
+export async function signOutOfFirebase(): Promise<boolean> {
+  return nativeSignOut();
+}
+
+/**
+ * A fresh Firebase ID token for the identity that is ALREADY signed in, or `null`
+ * when there is no such identity. Phase 32J.
+ *
+ * THIS IS THE CREDENTIAL FOR FIREBASE REGISTRATION, and it is deliberately read
+ * from the Firebase Auth layer rather than carried anywhere. The onboarding flow
+ * begins when `POST /api/auth/firebase/exchange` answers `REGISTRATION_REQUIRED`,
+ * i.e. AFTER `signInWithCredential` / `signInWithEmailAndPassword` has already
+ * authenticated someone — so the identity the user must register is the one the
+ * SDK is currently holding, and `currentUser` is the only source of it. Nothing
+ * about it travels through navigation, storage or a screen: a route parameter
+ * carrying a token would put a credential in a URL, and a `firebaseUid` supplied
+ * by the UI is not identity authority anyway (the server reads the uid from the
+ * verified token's payload and ignores anything else).
+ *
+ * `getIdToken()` with no argument returns the cached token and transparently
+ * refreshes it when it is near expiry, so a long sign-in is not punished.
+ *
+ * UNDER P2 THE SESSION IS DURABLE, so — unlike when this function was written under
+ * the Phase 32D `inMemoryPersistence` decision — a COLD START CAN answer a token.
+ * That is exactly why nothing may infer an authenticated Inventory AI session from
+ * it: `lib/auth.tsx` restores from SecureStore alone and never exchanges because a
+ * native user exists, and the onboarding screen still refuses to resume without the
+ * in-memory registration flag it was armed with.
+ *
+ * TOTAL BY DESIGN, and it collapses two causes into one answer on purpose. "No
+ * current user" and "the refresh request failed" are different facts, but they
+ * have exactly one consequence here — this device cannot produce a registration
+ * credential right now — and the caller already has to handle that consequence
+ * as a single safe outcome. Returning `null` for both keeps the caller to one
+ * branch and keeps a raw SDK error from reaching a screen. It never fabricates,
+ * reconstructs or guesses a token; it returns `null` or a real one.
+ */
+export async function currentFirebaseIdToken(): Promise<string | null> {
+  return nativeCurrentIdToken();
+}
+
+// ---------------------------------------------------------------------------
+// Google Sign-In (Phase 32I) — Authorization Code + PKCE
+// ---------------------------------------------------------------------------
+//
+// THIS IS THE SAME SHAPE AS THE EMAIL/PASSWORD OPERATIONS ABOVE: it ends by
+// returning a Firebase ID token, and the caller exchanges it at the one existing
+// boundary (`POST /api/auth/firebase/exchange`). No Google-specific server route
+// exists or is needed, because the exchange is UID-authoritative and never asks
+// which provider minted the identity.
+//
+// AUTHORIZATION CODE + PKCE, NOT THE IMPLICIT FLOW (owner decision, Phase 32I).
+// The authorization code is exchanged at Google's token endpoint for a token
+// response that carries the Google `id_token`; the code itself is never a
+// Firebase ID token, and nothing here treats it as one. PKCE is what makes the
+// exchange safe for a public client, and `AuthRequest` defaults to it — the
+// `usePKCE: true` below is written out rather than relied on so the decision is
+// visible.
+//
+// THE GOOGLE ID TOKEN IS A CREDENTIAL FOR FIREBASE, NOT FOR INVENTORY AI. It is
+// handed to `GoogleAuthProvider.credential()` and then to `signInWithCredential()`,
+// which is what mints the *Firebase* ID token this module returns. The Google
+// token itself is never returned, logged, or stored.
+//
+// BOTH HALVES OF THE OAuth EXCHANGE USE THE SAME `clientId` AND `redirectUri`,
+// because Google rejects a token request whose redirect does not match the
+// authorization request's. They are computed once per call and passed to both.
+
+/**
+ * Google's OIDC endpoints. These are Google's published, stable endpoints — the
+ * same pair `expo-auth-session/providers/google` hardcodes — and are not project
+ * configuration.
+ */
+const GOOGLE_DISCOVERY = {
+  authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
+  tokenEndpoint: 'https://oauth2.googleapis.com/token',
+} as const;
+
+const GOOGLE_SCOPES = ['openid', 'email', 'profile'];
+
+const GOOGLE_NOT_CONFIGURED_MESSAGE =
+  'Google sign-in is not configured for this build. Contact your administrator.';
+const GOOGLE_FAILED_MESSAGE = 'Unable to sign in with Google. Please try again.';
+
+/**
+ * The codes the PASSWORD confirmation method reads as its own failure.
+ *
+ * All three mean "these credentials did not open a password identity here":
+ * `auth/invalid-credential` is the collapsed form the SDK reports when email
+ * enumeration protection is ON, and `auth/wrong-password` is the separate form it
+ * reports when that protection is OFF. Both answer the same sentence, because the
+ * module cannot tell a typo from a different method and does not pretend to.
+ *
+ * `auth/user-not-found` is deliberately NOT in this list — it is unambiguous, and
+ * `confirmFirebaseSignIn` maps it to `wrong-method` instead.
+ */
+const PASSWORD_METHOD_CODES: readonly string[] = [
+  'auth/invalid-credential',
+  'auth/wrong-password',
+];
+
+/**
+ * `signInWithGoogle`'s result.
+ *
+ * A discriminated union for the same reason `FirebaseSignInOutcome` is one:
+ * cancellation is ORDINARY, not a failure, and modelling it as a thrown error
+ * would push a routine user action into a `catch` block. There is deliberately no
+ * `legacyFallback` member: Google has no legacy path to fall back to, and adding
+ * one would be a way in that the email flow's rules do not describe.
+ */
+export type GoogleSignInOutcome =
+  | { kind: 'idToken'; idToken: string }
+  | { kind: 'cancelled' }
+  | { kind: 'failure'; code: string | null; message: string };
+
+/**
+ * The redirect URI this build will use for the Google OAuth round-trip.
+ *
+ * Exported so it can be asserted and reported: the value must be registered on the
+ * Google OAuth client, and a value nobody can read is a value nobody can register.
+ *
+ * Phase 32I-N moved this to the NATIVE form so the value can satisfy Google's
+ * custom-scheme rules. Google documents the shape as `com.example.app:redirect_uri_path`
+ * — reverse-DNS scheme, then a SINGLE slash, then the path — and requires the scheme
+ * to contain a period. The previous value, `inventoryai://oauthredirect`, satisfied
+ * none of that (no period, a double slash) and was registrable on no client type.
+ *
+ * `com.inventoryai.app` is the app's own Android package / iOS bundle identifier
+ * (app.json), added to `expo.scheme` as a SECOND scheme. `inventoryai` is retained
+ * because the password-reset deep link `inventoryai://reset-password` uses it;
+ * adding a scheme is additive, so the two coexist.
+ *
+ * WHY `native` IS ACTUALLY HONOURED HERE — including in a development build:
+ * expo-auth-session returns the `native` value verbatim only when
+ * `Constants.executionEnvironment` is `Standalone` or `Bare`. The published
+ * expo-constants native service hardcodes `"bare"` (Android ConstantsService.kt,
+ * iOS EXConstantsService.m), so every CNG/EAS build — development, preview and
+ * standalone alike — takes the `native` branch. Only Expo Go reports `storeClient`
+ * and therefore ignores `native`, resolving to an `exp://…` URL; that is one more
+ * reason Expo Go is not an acceptance environment for this flow.
+ */
+export function googleRedirectUri(): string {
+  return makeRedirectUri({ native: 'com.inventoryai.app:/oauthredirect' });
+}
+
+/**
+ * Signs in with Google. Never throws: every outcome is a value.
+ *
+ * The sequence is exactly the one the approved design recorded, and each step is
+ * the library's own call rather than a reimplementation:
+ *
+ *   1. `AuthRequest.promptAsync` opens the SYSTEM browser for Google consent.
+ *   2. The redirect returns an authorization `code`.
+ *   3. `exchangeCodeAsync` swaps the code (+ PKCE verifier) for Google's `id_token`.
+ *   4. `GoogleAuthProvider.credential` wraps it as a Firebase credential.
+ *   5. `signInWithCredential` authenticates with Firebase.
+ *   6. `getIdToken()` returns the Firebase ID token the caller exchanges.
+ *
+ * A missing configuration is a `failure`, never a silent downgrade — there is no
+ * other door to downgrade to. Every thrown error is classified by the same table
+ * the email flow uses, so a Firebase fault surfaces as safe copy and its code is
+ * kept for the log but never shown.
+ *
+ * STEPS 1-3 LIVE IN `acquireGoogleIdToken` (Phase 32L-B). They were extracted so
+ * that the DISCONNECT flow's "confirm your sign-in" step can run the *same*
+ * Google mechanics without a second copy of the PKCE sequence free to drift from
+ * this one. This function keeps steps 4-6, and its outcome contract is unchanged.
+ */
+export async function signInWithGoogle(): Promise<GoogleSignInOutcome> {
   try {
     const auth = getFirebaseAuth();
-    if (!auth) return;
-    await firebaseSignOut(auth);
-  } catch {
-    // Best effort: the local Inventory AI session is cleared regardless.
+    if (!auth || !isGoogleConfigured()) {
+      return {
+        kind: 'failure',
+        code: 'google/not-configured',
+        message: GOOGLE_NOT_CONFIGURED_MESSAGE,
+      };
+    }
+
+    const google = await acquireGoogleIdToken();
+    if (google.kind === 'cancelled') return { kind: 'cancelled' };
+    if (google.kind === 'failure') return google;
+
+    const credential = GoogleAuthProvider.credential(google.idToken);
+    const userCredential = await signInWithCredential(auth, credential);
+    const idToken = await userCredential.user.getIdToken();
+    return { kind: 'idToken', idToken };
+  } catch (err) {
+    const code = errorCode(err);
+    return { kind: 'failure', code, message: describeFirebaseFailure(code, GOOGLE_FAILED_MESSAGE) };
+  }
+}
+
+/**
+ * Steps 1-3 of the Google flow: consent in the system browser, then the code +
+ * PKCE verifier swapped at Google's token endpoint for Google's own `id_token`.
+ *
+ * RETURNS GOOGLE'S TOKEN, NOT FIREBASE'S. Authenticating with Firebase is the
+ * caller's step (`signInWithCredential`), which is what lets this helper serve
+ * both the sign-in path and the Phase 32L-B confirmation path without either one
+ * owning the other's semantics.
+ *
+ * NEVER THROWS. Every rejection — a thrown `AuthRequest`, a Google `error`
+ * result, a missing code, a missing PKCE verifier, a token-endpoint failure — is
+ * an outcome, so a caller has one shape to branch on. The PKCE check still fails
+ * CLOSED exactly as it did before: no verifier means no token-endpoint call.
+ */
+async function acquireGoogleIdToken(): Promise<GoogleIdTokenOutcome> {
+  try {
+    const clientId = googleClientId();
+    const redirectUri = googleRedirectUri();
+
+    const request = new AuthRequest({
+      clientId,
+      scopes: GOOGLE_SCOPES,
+      redirectUri,
+      responseType: ResponseType.Code,
+      usePKCE: true,
+    });
+
+    const result = await request.promptAsync(GOOGLE_DISCOVERY);
+
+    if (result.type === 'cancel' || result.type === 'dismiss') {
+      return { kind: 'cancelled' };
+    }
+    if (result.type === 'error') {
+      return {
+        kind: 'failure',
+        code: result.errorCode ?? 'google/oauth-error',
+        message: GOOGLE_FAILED_MESSAGE,
+      };
+    }
+    if (result.type !== 'success') {
+      return { kind: 'failure', code: `google/${result.type}`, message: GOOGLE_FAILED_MESSAGE };
+    }
+
+    const code = result.params.code;
+    if (!code) {
+      return { kind: 'failure', code: 'google/missing-code', message: GOOGLE_FAILED_MESSAGE };
+    }
+
+    // PKCE FAILS CLOSED (Phase 32I-N, finding I-1). `usePKCE: true` above is what
+    // makes the library mint the verifier, so in a correctly built request it is
+    // present; if it is not, the exchange must NOT be attempted. The previous
+    // `request.codeVerifier ?? ''` sent an EMPTY `code_verifier` — a request that
+    // Google either rejects outright or, worse, one that could be honoured without
+    // the proof PKCE exists to provide. No verifier therefore means no token-endpoint
+    // call at all, reported through this module's ordinary failure outcome rather
+    // than a new error architecture. The code names the missing input, never a value.
+    const codeVerifier = request.codeVerifier;
+    if (!codeVerifier) {
+      return {
+        kind: 'failure',
+        code: 'google/missing-code-verifier',
+        message: GOOGLE_FAILED_MESSAGE,
+      };
+    }
+
+    const tokenResponse = await exchangeCodeAsync(
+      {
+        clientId,
+        code,
+        redirectUri,
+        extraParams: { code_verifier: codeVerifier },
+      },
+      { tokenEndpoint: GOOGLE_DISCOVERY.tokenEndpoint }
+    );
+
+    const googleIdToken = tokenResponse.idToken;
+    if (!googleIdToken) {
+      return { kind: 'failure', code: 'google/missing-id-token', message: GOOGLE_FAILED_MESSAGE };
+    }
+
+    return { kind: 'idToken', idToken: googleIdToken };
+  } catch (err) {
+    const code = errorCode(err);
+    return { kind: 'failure', code, message: describeFirebaseFailure(code, GOOGLE_FAILED_MESSAGE) };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Confirm sign-in (Phase 32L-B)
+// ---------------------------------------------------------------------------
+//
+// THE DISCONNECT FLOW'S "CONFIRM YOUR SIGN-IN" STEP, and NOT a second sign-in
+// path. Firebase owns the authentication authority for a Firebase-linked
+// account (Phase 32K), and the server additionally requires a RECENT
+// authentication — the signed `auth_time` claim, within 300 s — before it will
+// detach the identity (Phase 32L-A). Confirming the sign-in is how a client
+// produces that freshness.
+//
+// WHY THIS IS NOT `signInWithEmail` / `signInWithGoogle` REUSED. Three
+// differences, each of which would be a bug if flattened away:
+//
+//   1. NO LEGACY FALLBACK. `signInWithEmail` may answer `legacyFallback`, which
+//      licenses the caller to try `POST /api/auth/login`. A confirmation has no
+//      such door: "no Firebase identity answers to these credentials" here means
+//      THIS IS NOT THE ACCOUNT'S METHOD, and the remedy is the OTHER confirmation
+//      option — never a downgrade to the password route. Returning an outcome
+//      whose variants do not include a fallback is how that is enforced by the
+//      type rather than by a comment.
+//   2. NO `currentUser` REQUIREMENT. The Inventory AI session is restored from
+//      `expo-secure-store` on boot, and the JavaScript SDK instance this path uses
+//      is pinned to `inMemoryPersistence` (Phase 32D), so after a COLD START this
+//      app is `signedIn` with that instance's `auth.currentUser === null`.
+//      `reauthenticateWithCredential` cannot run in that state — it needs a
+//      `User` — which is why the password method uses
+//      `signInWithEmailAndPassword` instead. That call needs no prior Firebase
+//      session and produces the same fresh `auth_time`; it is the one path that
+//      works in BOTH states, so it is the only one used. (Phase B migrates the
+//      SIGN-IN operations to the native SDK and deliberately leaves this
+//      confirmation path alone; re-deriving it under durable persistence is a
+//      Phase D/E obligation, recorded in the P2 decision §6.3.)
+//   3. A NARROWER ANSWER. Callers need a token, so that is all this returns — no
+//      `User`, no uid, no `providerData`, no credential object. Nothing about the
+//      identity leaves this module except the one thing the server consumes.
+//
+// NO PROVIDER DISCOVERY, AND NO EMAIL AS A JOIN KEY. The email below is the
+// ACCOUNT'S OWN address, supplied by the session layer from the authenticated
+// user's public record. It is never compared to anything, never used to find an
+// account, and never resolved against Firebase to learn which providers exist
+// (Firebase's only such API, `fetchSignInMethodsForEmail`, is deprecated in the
+// installed SDK and discouraged for security reasons). The identity question is
+// decided ONLY by the server, which compares the verified token's uid to the
+// account's stored `firebaseUid` and refuses a mismatch with 409.
+
+/** Which way the person confirmed. Chosen by them; never discovered. */
+export type FirebaseConfirmMethod = 'google' | 'password';
+
+/**
+ * What {@link confirmFirebaseSignIn} answers.
+ *
+ * `cancelled` and `wrong-method` are ORDINARY STATES, not failures — a person who
+ * closes the Google sheet changed their mind, and a person who chose the wrong
+ * option needs to be pointed at the other one rather than told something broke.
+ * Neither carries a message because both are product copy, which the screen owns.
+ * Only `failure` carries one, and it is always this module's own safe sentence —
+ * never the SDK's.
+ */
+export type ConfirmSignInOutcome =
+  | { kind: 'idToken'; idToken: string }
+  | { kind: 'cancelled' }
+  | { kind: 'wrong-method' }
+  | { kind: 'failure'; code: string | null; message: string };
+
+/** Google's own token, or why it could not be obtained. Internal to this module. */
+type GoogleIdTokenOutcome =
+  | { kind: 'idToken'; idToken: string }
+  | { kind: 'cancelled' }
+  | { kind: 'failure'; code: string | null; message: string };
+
+/**
+ * The password method's copy. It names BOTH remedies on purpose.
+ *
+ * With Firebase's email-enumeration protection ON (the default for a new
+ * project) the SDK collapses "no such user" and "wrong password" into
+ * `auth/invalid-credential`, so this module genuinely cannot tell which happened.
+ * Asserting either one would be a guess, and guessing wrongly sends the person
+ * down the wrong path. Naming both options is the honest sentence, and it also
+ * points at the other confirmation option without claiming that is the problem.
+ */
+const CONFIRM_PASSWORD_MESSAGE =
+  'That did not confirm this account. Check your sign-in password, or choose Confirm with Google.';
+
+/** The generic confirmation sentence, for a fault this module has no better wording for. */
+const CONFIRM_FAILED_MESSAGE = 'We could not confirm your sign-in. Please try again.';
+
+/**
+ * The code that means "this address has no Firebase password identity".
+ *
+ * It is reported as `wrong-method` rather than as a failure because it is
+ * UNAMBIGUOUS: Firebase says there is no password credential here, so the
+ * remedy is the other option. `auth/invalid-credential` deliberately does NOT
+ * map here — under enumeration protection it also means "wrong password", and
+ * treating it as "wrong method" would tell a person with a typo to switch
+ * methods.
+ */
+const NO_PASSWORD_IDENTITY = 'auth/user-not-found';
+
+/**
+ * Confirms the sign-in of the identity that owns this account, and returns a
+ * fresh Firebase ID token.
+ *
+ * NEVER THROWS, and never reaches the network for anything but Firebase. `email`
+ * is the account's own address and is REQUIRED only for the password method,
+ * because `signInWithEmailAndPassword` takes one and there is no other source for
+ * it in the cold-start state this function exists to survive.
+ *
+ * The returned token is the ONLY artifact. Its `auth_time` is now, which is the
+ * whole point: `getIdToken(true)` re-mints a token and moves `iat`, but leaves
+ * `auth_time` alone, so a forced refresh is NOT a confirmation and must never be
+ * substituted for one.
+ */
+export async function confirmFirebaseSignIn({
+  method,
+  email,
+  password,
+}: {
+  method: FirebaseConfirmMethod;
+  email?: string;
+  password?: string;
+}): Promise<ConfirmSignInOutcome> {
+  if (method === 'google') {
+    try {
+      const auth = getFirebaseAuth();
+      if (!auth || !isGoogleConfigured()) {
+        return { kind: 'failure', code: 'google/not-configured', message: GOOGLE_NOT_CONFIGURED_MESSAGE };
+      }
+
+      const google = await acquireGoogleIdToken();
+      if (google.kind === 'cancelled') return { kind: 'cancelled' };
+      if (google.kind === 'failure') return google;
+
+      const credential = GoogleAuthProvider.credential(google.idToken);
+      const userCredential = await signInWithCredential(auth, credential);
+      return { kind: 'idToken', idToken: await userCredential.user.getIdToken() };
+    } catch (err) {
+      const code = errorCode(err);
+      return { kind: 'failure', code, message: describeFirebaseFailure(code, CONFIRM_FAILED_MESSAGE) };
+    }
+  }
+
+  // The password method. The email is the account's own; a missing one is a
+  // programming fault in the caller rather than anything a person can cause, so
+  // it is answered with the generic sentence instead of a new error class.
+  if (!email) {
+    return { kind: 'failure', code: 'firebase/confirm-missing-email', message: CONFIRM_FAILED_MESSAGE };
+  }
+
+  try {
+    const auth = getFirebaseAuth();
+    if (!auth) {
+      return { kind: 'failure', code: 'firebase/not-configured', message: MISCONFIGURED_MESSAGE };
+    }
+
+    // Works whether or not a Firebase session already exists — see point 2 in the
+    // block comment above. `getIdToken()` afterwards returns a token minted by
+    // THIS authentication, so its `auth_time` is the confirmation's.
+    const userCredential = await signInWithEmailAndPassword(auth, email, password ?? '');
+    return { kind: 'idToken', idToken: await userCredential.user.getIdToken() };
+  } catch (err) {
+    const code = errorCode(err);
+    if (code === NO_PASSWORD_IDENTITY) return { kind: 'wrong-method' };
+    if (code && PASSWORD_METHOD_CODES.includes(code)) {
+      return { kind: 'failure', code, message: CONFIRM_PASSWORD_MESSAGE };
+    }
+    return { kind: 'failure', code, message: describeFirebaseFailure(code, CONFIRM_FAILED_MESSAGE) };
   }
 }
 
 export default {
   signInWithEmail,
+  signInWithGoogle,
   ensureFirebaseAccount,
   signOutOfFirebase,
+  currentFirebaseIdToken,
+  confirmFirebaseSignIn,
   FirebaseAuthError,
 };

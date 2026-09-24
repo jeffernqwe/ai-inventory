@@ -148,6 +148,37 @@ pre-existing + 1 Freebuff-created), and FB-006 is the first task in this trail t
 The pre-existing counts and every "Executed by Freebuff: NO" row above still describe the baseline and
 should be read with that amendment.
 
+### 4b. FB-007 (Phase 32L design) and FB-008 (Phase 32L-A implementation)
+
+**FB-007 — four passes, none of which can produce a test result in this register.** Passes 1, 2 and 3
+were analysis/documentation only; pass 4 ran a **real-Firebase runtime experiment** whose artifacts were
+throwaway Node scripts outside the repository, deleted afterwards. **No repository test file was created,
+modified, deleted or executed by any FB-007 pass**, and no file in `server/test/` or `mobile/__tests__/`
+changed. The experiment's results are recorded in `DECISIONS.md` **FB-D-120** and are **not** a substitute
+for a suite: they are measurements of *Firebase*, not of Inventory AI.
+
+| Category | Count | Details |
+| --- | --- | --- |
+| `FREEBUFF-CREATED` tests | **1** | `server/test/phase32l-firebase-unlink.test.mjs` — node:test, **`MIXED`** (unit + DB-backed over the real `app.ts`), **43 cases / 3 suites**, registered in `run-tests.mjs` |
+| `FREEBUFF-MODIFIED` tests | **3** | `phase23-authorization-contract.test.mjs` (declares the new route in the `AUTHENTICATED` bucket — the guard pins bucket *membership*, not counts); `phase26b-password-recovery.test.mjs` (a **tripwire** that forbids a field-removal operator was tripped by a *comment* — reworded, tripwire and logic untouched — plus a `User.save()` stub case pinned to the call R-4 replaced); `phase32b-firebase-admin.test.mjs` (pinned the verify seam's returned field set, which now includes `authTime`, plus one added narrowing case). **No assertion was removed, relaxed or skipped** (trail rule 5) |
+| Tests **executed** by Freebuff | **YES** | `node --test test/phase32l-firebase-unlink.test.mjs` 43/43 pass; `npm test` **838 tests / 109 suites / 0 fail**; `npm run test:unit` 348 tests / **324 pass** / 0 fail (24 skipped by design); `npm run test:db` 540 tests / **514 pass** / 0 fail (26 skipped by design); `npm run typecheck` clean; `npm run lint` clean |
+| Mutation pass | **10 mutations**, each reverted | M1 `auth_time` enforcement → DETECTED; M2 uid ownership (both layers, together) → DETECTED; M3 conditional write → DETECTED; **M4 new-password → NOT DETECTED, fixed, DETECTED**; M5 old-hash replacement → DETECTED; **M6 R-3 → NOT DETECTED, fixed, DETECTED**; M7 conditional reset completion → DETECTED; M8 session revocation → DETECTED; M9 `authMethods.firebase` → DETECTED; M10 audit row → DETECTED. Restore clean |
+| Tests **deleted** by Freebuff | **0** | none |
+
+**★ The two undetected mutations were real test weaknesses, and the fix was to strengthen the tests, not
+to accept the result.** **M4** was invisible because the *controller validator* also rejects a bad
+password, so removing the service-level check changed nothing observable over HTTP; a case was added that
+calls the service **directly**, with no HTTP layer in front of it. **M6** was invisible because the R-3
+case first ran a "while the account is linked" probe on the **same** token, which *spent* it — so the
+later `usedAt: null` count was measuring the spending, not R-3's deletion; the probe now uses a
+**separate** token and the assertion checks both the unused count (1 → 0) and that the specific row is
+gone by hash. **M2** deliberately removes two layers at once because each is independently enforced —
+removing either alone correctly leaves the suite green (defense-in-depth, matching §6 rule 6).
+
+**§2/§3 inventory note (further amendment, not a rewrite):** as of FB-008 there are **47** server test
+files (45 pre-existing + 1 FB-006 + 1 FB-008). The mobile suite count is **not** changed by FB-008 — no
+mobile file was touched. The underlying §2/§3 snapshot remains the FB-002 baseline.
+
 ## 5. `DOCUMENTED HISTORICAL RESULT` claims in the repository
 
 **Every figure below is `DOCUMENTED HISTORICAL RESULT — NOT REPRODUCED BY FREEBUFF`.** They are

@@ -50,17 +50,35 @@ implementation (the brief states: *"This implementation is authorized as: `FB-00
 - **Render was not touched by any task, including FB-006.**
 - **No runtime verification** exists for FB-006: no build, no device, no live Firebase project.
 
+## 1b. FB-007 / FB-008 — the answers that changed (Phase 32L)
+
+| # | Question | Answer (as of FB-008) |
+| --- | --- | --- |
+| 3 | Files modified? | **Yes.** FB-007 modified **none** (four passes: analysis, refinement, documentation-only verification, then a runtime experiment whose scripts lived outside the repository). **FB-008 added 4 and modified 12** — see §2. No mobile file was touched |
+| 8 | Tests created / modified? | **Yes, by FB-008 only.** One new server suite (43 cases, `MIXED`). Three pre-existing suites modified — one to **declare** the new route, two because a pinned injection point moved. No assertion was weakened (trail rule 5) |
+| 9 | Tests executed? | **Yes, by FB-008:** full server suite **838 / 109 suites / 0 fail**, `test:unit` 348 (324 pass), `test:db` 540 (514 pass), typecheck and lint clean. FB-007 executed **no** repository test (its runtime experiment measured *Firebase*, not Inventory AI) |
+| 10 | Runtime verified? | **No.** FB-008 was **not** runtime-verified — no build, no device, no emulator, no live API call, and **no real unlink executed**. The Phase 32L runtime experiment exercised the **real Firebase project**, not the Inventory AI endpoint |
+| 16 | Committed? | **No.** HEAD is unchanged at `8af1d49`; nothing staged; nothing pushed. FB-008's proposed message is recorded in its task record |
+| 17 | Deployed / Console / schema touched? | **No** on every count. **No schema or index change** — the design is deliberately schema-free |
+
+**The single most important answer:** the Phase 32L runtime experiment **refuted the project's own
+recorded assumption** that Firebase refuses to remove the last provider — it succeeded, leaving an
+account with zero providers (calibrated against `updatePassword`, which *was* refused at the same session
+age). **The last-authentication-method rule must therefore be enforced server-side and never delegated
+to Firebase.** See `DECISIONS.md` **FB-D-119** / **FB-D-120**.
+
 ## 2. Current state
 
 | Field | Value |
 | --- | --- |
 | Branch | `experiment/freebuff-evaluation` |
-| HEAD | `6bac86e2d128215c873874a05e6249aedf28ad64` (unchanged through FB-006 — the Phase 32I/32J/32K work sits uncommitted above `d8b693a`) |
-| Freebuff commits | **none** — no commit was made or authorized |
-| Files added by Freebuff | **15:** 12 under `docs/freebuff/` (**untracked, unstaged**) — 9 at FB-002 + task records FB-003/004/005 — plus, at FB-006, `server/test/phase32k-firebase-password-boundary.test.mjs`, `mobile/__tests__/phase32k-password-capability-gating.test.tsx` and `docs/freebuff/tasks/FB-006-firebase-password-boundary.md` |
+| HEAD | `8af1d49` — "feat: enforce firebase password authority boundary (Phase 32K)", the **first Freebuff commit ever made** (FB-006, owner-authorized scope). It sits above `6bac86e2`, which was HEAD through FB-001–FB-005 and in turn above `d8b693a` (Phase 32H). **Unchanged through FB-007 and FB-008** |
+| Freebuff commits | **1:** `8af1d49` (FB-006) — 15 files, +1488/−36: the FB-006-clean set only. **FB-007 and FB-008 created none** (FB-008 stops before the commit and reports its proposed message) |
+| Files added by Freebuff | **15:** 12 under `docs/freebuff/` — 9 at FB-002 + task records FB-003/004/005, all now **tracked** (committed by the `docs:` FB-005 commit `6bac86e2`) — plus, at FB-006, `server/test/phase32k-firebase-password-boundary.test.mjs`, `mobile/__tests__/phase32k-password-capability-gating.test.tsx` and `docs/freebuff/tasks/FB-006-firebase-password-boundary.md` |
 | Files modified/deleted by Freebuff | **Modified (FB-005):** the four trail files in Q5 + `TEST_BASELINE.md` §4 + the design doc **§2.6 only**. **Modified (FB-006):** 11 production/doc files — see §1a. **Deleted: none** |
-| Tests run by Freebuff | **FB-006: yes** (see §1a). FB-001–FB-005: none |
-| Repository commit state | **Currently uncommitted** (owner decisions FB-D-006, FB-005 decisions 5/6, and the FB-006 commit deferral). Staging/committing requires a separate explicit instruction |
+| Tests run by Freebuff | **FB-006 and FB-008: yes** (see §1a, §1b). FB-001–FB-005 and FB-007: none |
+| Repository commit state | **Partially committed.** FB-006's clean set is in `8af1d49`. Everything else remains deliberately uncommitted, and each reason is recorded: `docs/freebuff/`'s post-commit notes are uncommitted by construction; `README.md` and `docs/DEVELOPMENT_ROADMAP.md` carry the Phase 32K entries **plus** uncommitted Phase 32I/32J work; `mobile/lib/auth.tsx`, `mobile/app/login.tsx` and `mobile/lib/firebase-auth.ts` are Phase 32J work. **FB-007 and FB-008 added more to that uncommitted set** — the FB-008 server files and the trail records — and are likewise uncommitted. Staging/committing any of it requires a separate explicit instruction. **Nothing has been pushed.** |
+| Current phase | **Phase 32L-A is implemented but NOT committed and NOT runtime-verified.** The unlink endpoint exists server-side; **the mobile half (Phase 32L-B) does not exist**, so nothing in the running app can reach it yet |
 
 ## 3. Inspect first
 
@@ -115,10 +133,9 @@ did not infer it (`FB-I-01`).
 implemented and statically verified; `docs/freebuff/` and every production change remain deliberately
 **uncommitted**.
 
-Waiting on the owner, in priority order:
-
-1. **Commit authorization and scope** — the brief's §14 checkpoint was deferred because a commit would
-also carry the uncommitted Phase 32I/32J work.
+Waiting on the owner, in priority order:1. **The remaining uncommitted work** — the Phase 32K README entry and roadmap §27M are written but
+   uncommitted because those files also carry Phase 32I/32J changes; so is all of Phase 32I/32J itself,
+   and so are the two FB-006 post-commit notes.
 2. **O-1 / Phase 32L** — the unlink policy and last-authentication-method protection. Now more
    pointed: a retained `passwordHash` is **inert while `firebaseUid` is set**, so clearing the uid
    without a last-method rule would make it live again.

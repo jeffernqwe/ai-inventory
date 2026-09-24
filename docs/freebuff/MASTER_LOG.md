@@ -435,6 +435,87 @@ project-documentation close-out.
 
 ---
 
+## FB-010 — Mobile Firebase unlink + reauthentication (Phase 32L-B)
+
+**Written during the task (implementation + remediation phase).** The full record is
+`tasks/FB-010-phase-32l-b-mobile-unlink.md`; this block is the ledger summary.
+
+| Field | Value |
+| --- | --- |
+| Task ID | FB-010 |
+| Date/time | 2026-09-24 — host clock read at close |
+| Branch | `experiment/freebuff-evaluation` |
+| Starting commit | `9917447ec3b0f70846a60547d3e5a9ff10625ed6` |
+| Ending commit | **none — no commit, no stage, no push.** HEAD unchanged throughout; the Q9 commit boundary is an open owner decision |
+| Task requested | Implement the **mobile** half of Firebase unlink against the already-committed Phase 32L-A endpoint, per the Q1–Q9 freeze — then, on the owner's remediation brief, ratify one deviation and change the retry contract so the new password is not held across a second confirmation |
+| Task classification | **IMPLEMENTATION + STATIC VERIFICATION.** Mobile only. No server, schema, dependency, `.env`, Mongo, Console or deploy. **No runtime verification** |
+| Plan status | Executed: preflight → contract read from source → implementation → tests → 14-mutation pass → full suites + `tsc` + `eslint` → protected-file and server-integrity checks → remediation → re-verification → this record |
+| Approval status | **APPROVED** — the owner's GO, then the remediation brief. **No unratified decision was taken**; the one deviation is now an owner-ratified contract (`FB-D-123`) |
+| Actions performed | Read the 32L-A route/controller/service/validator/errors from source; widened `AuthUser.authMethods`; added `confirmFirebaseSignIn` to the session surface and `disconnectFirebase` as the orchestration; added `lib/api.ts`'s `firebaseUnlink`; created the dedicated screen, registered it and added the gated Profile entry point; wrote three suites (66 tests) and a 14-mutation harness; then remediated the retry contract and re-ran everything |
+| Files affected | **Added (7):** `app/(app)/disconnect-firebase.tsx`, three `__tests__/phase32l-b-*` suites, `tasks/FB-010-phase-32l-b-mobile-unlink.md`, and the two ledger entries. **Modified (5, mobile only):** `lib/firebase-auth.ts`, `lib/auth.tsx`, `lib/api.ts`, `app/(app)/_layout.tsx`, `app/(app)/profile.tsx`. **Server, model, config, dependency and `.env` files: none.** Nothing staged or committed. All harness scripts lived outside the repository and were deleted |
+| Tests performed | **EXECUTED BY FREEBUFF:** mobile `npx jest` **24 suites / 279 tests / 0 fail / 0 skipped**; 32L-B suites **18 + 22 + 26 = 66**; `npx tsc --noEmit` **clean**; `npx eslint .` **clean (0 problems)**; a **14-mutation** pass, **14/14 detected**, each restored and verified byte-for-byte. Server suites deliberately **not run** — no server file changed, proven by `git status` and by re-reading the protected hashes |
+| Results | **PASS (implementation + remediation).** The frozen Q1–Q9 design is implemented: reauth-first, no provider unlink in the critical path, a dedicated gated screen, provider-neutral `authMethods = { password, firebase }`, uniform copy, and a server-first sequence in which a 200 is the only thing that produces a teardown (**the Firebase session is ended after the 200** — mutation M3 pins it — and `api.logout` is **never** called for the revoked session). **One deviation, ratified** (the Q6 email parameter). **One remediation:** the retry no longer holds the new password across a second confirmation |
+| Errors | **none.** No accidental modification, no failed restore, no anchor miss, no surviving mutation |
+| Safety events | **none.** All five protected hashes byte-identical pre→post; **no server file changed**; no stage/commit/push/reset/restore/stash/clean; **no schema, dependency or persistence change**; `mobile/package.json`, `package-lock.json` and `app.json` mtimes unchanged (09-22, pre-existing 32I/32J work); no credential printed |
+| Final outcome | **PASS, not committed.** Ready for the owner's Q9 commit-boundary decision |
+| Handoff notes | (1) **Do not fold the retry back into `disconnectFirebase`** — it would reintroduce the credential-in-memory window; **M2** guards it. (2) **The Q6 email parameter is ratified** as the final contract; reverting it breaks the cold-start password method. (3) **The Q9 hazard is measured, not solved:** `lib/auth.tsx` (16 hunks) and `lib/firebase-auth.ts` (9 hunks) are **entangled** with uncommitted 32I/32J work, and for the latter a clean split may be impossible because this phase modifies uncommitted 32I code. (4) **Runtime verification of the Google confirmation path is still owed** and needs a development build. (5) The Phase 32L-B project-documentation close-out (specification, roadmap, README) remains outstanding and was **not** authorized |
+
+---
+
+## FB-011 — Phase 1 blocker verification + RNFirebase P2 persistence architecture freeze
+
+**Written during the task (documentation phase).** The full record is
+`tasks/FB-011-rnfirebase-p2-persistence-freeze.md`; this block is the ledger summary.
+
+| Field | Value |
+| --- | --- |
+| Task ID | FB-011 |
+| Date/time | 2026-09-24 — host clock read at close |
+| Branch | `experiment/freebuff-evaluation` |
+| Starting commit | `9917447ec3b0f70846a60547d3e5a9ff10625ed6` |
+| Ending commit | **none — no commit, no stage, no push.** The Q9 commit boundary remains an open owner decision |
+| Task requested | (a) verify the two Phase 1 blockers read-only; (b) on the owner's P2 approval, document the decision as an APPROVED/FROZEN architecture record and mark the Phase 32D `inMemoryPersistence` requirement SUPERSEDED |
+| Task classification | **SAFE / DOCUMENTATION ONLY.** No source, dependency, `.env`, package manifest, schema, MongoDB, Firebase Console, test or protected file touched. **No RNFirebase package installed. Phase 1 NOT started** |
+| Plan status | Executed: preflight and pre-state capture → read the authoritative docs and the audit trail → create the decision record → additive cross-reference in the design authority → append this ledger and `DECISIONS.md` → protected-file and diff verification |
+| Approval status | **APPROVED** — the owner's P2 approval, quoted verbatim in `DECISIONS.md` FB-D-124. Documentation scope was explicitly authorized; a commit was explicitly **not** |
+| Actions performed | Read-only web/registry verification of RNFirebase compatibility and native persistence; read the design authority, `CLAUDE.md`/`README.md` references, and the audit-trail conventions; created the decision record; added a dated additive cross-reference to design doc §12 and a status update to its §14A.5 `O-4` row; appended FB-D-124 and this block |
+| Files affected | **Added (2):** `docs/superpowers/specs/2026-09-24-rnfirebase-p2-persistence-decision.md`, `tasks/FB-011-rnfirebase-p2-persistence-freeze.md`. **Modified (3, documentation only):** the design authority (two additive, dated edits), `DECISIONS.md`, `MASTER_LOG.md`. **No source, config, dependency, `.env`, schema, DB, Firebase or protected file.** Nothing staged or committed |
+| Tests performed | **none executed — and none is applicable.** No test reads the `docs/` tree (checked read-only: the only `readFileSync` callers are source/guard suites over `server/src` and `mobile/lib`). Verification was therefore integrity-based: `git status` / `git diff --stat` scope review and `sha256sum` of the five protected entries |
+| Results | **PASS (documentation).** Compatibility `PASS`; persistence **`P2 REQUIRED`**; owner approved P2. The Phase 32D `inMemoryPersistence` requirement is recorded as **SUPERSEDED, not deleted**, in a new decision record plus a dated cross-reference in the design authority |
+| Errors | One transient tool-environment failure (`ripgrep` binary `ENOENT`, host path redacted) — retried with `grep` via the terminal. One streaming interruption mid-response; the step was restarted. **No repository effect from either** |
+| Safety events | **none.** All five protected hashes byte-identical pre→post; no source/test/config file changed; no stage/commit/push/reset/restore/stash/clean; no package installed; no Console, MongoDB or `.env` action; no secret printed |
+| Final outcome | **PASS, not committed.** Phase 1 remains blocked only on the two OPEN items recorded in `DECISIONS.md` FB-D-124 |
+| Handoff notes | (1) **Phase 32D's `inMemoryPersistence` is SUPERSEDED, not deleted** — do not "clean up" the old statements; they are the historical record. (2) **Option B is unchanged** — the Firebase ID token is still exchanged once for an Inventory AI JWT. (3) **Phase 1 must not begin** until the `google-services.json`/plist storage strategy and the Google Sign-In library choice are decided. (4) The behaviour obligations created by P2 (logout, cold start, reauth, unlink, session reconciliation) are recorded as **binding design obligations** in §6 of the new decision record and are **not** implemented |
+
+---
+
+## FB-012 — Phase 1 remaining owner decisions frozen (P-1 native config, P-2 Google Sign-In library)
+
+**Written during the task (documentation phase).** The full record is
+`tasks/FB-012-phase-1-decisions-freeze.md`; this block is the ledger summary.
+
+| Field | Value |
+| --- | --- |
+| Task ID | FB-012 |
+| Date/time | 2026-09-24 — host clock read at close |
+| Branch | `experiment/freebuff-evaluation` |
+| Starting commit | `9917447ec3b0f70846a60547d3e5a9ff10625ed6` |
+| Ending commit | **none — no commit, no stage, no push.** The Q9 commit boundary remains an open owner decision |
+| Task requested | Record the owner's approval of **P-1** (native Firebase config = EAS build-time injection; not committed) and **P-2** (`@react-native-google-signin/google-signin@16.1.5`) as APPROVED/FROZEN; mark the remaining items' status; documentation only |
+| Task classification | **SAFE / DOCUMENTATION ONLY.** No package installed, no `expo prebuild`, no Firebase Console, no MongoDB or application data, no auth implementation, no source/test/config/manifest/`.env` file. **Phase 1 NOT started** |
+| Plan status | Executed: read the decision record and the design authority → amend the decision record (header + new §8.1, §8.2 restated) → annotate `O-7` and the §12 banner in the design authority → append `FB-D-125` and this block → create the task record → protected-file and diff verification |
+| Approval status | **APPROVED** — the owner's P-1/P-2 approval, quoted verbatim in `DECISIONS.md` FB-D-125. Documentation scope only; a commit was explicitly **not** authorized |
+| Actions performed | Read the decision record §8 and the design authority's open-decision rows; amended the decision record; applied two additive edits to the design authority; appended the register and ledger entries; created the task record; ran the verification pass |
+| Files affected | **Added (1):** `tasks/FB-012-phase-1-decisions-freeze.md`. **Modified (3, documentation only):** the decision record, the design authority, `DECISIONS.md`, `MASTER_LOG.md`. **No source, config, manifest, `.env`, schema, DB, Firebase or protected file.** Nothing staged or committed |
+| Tests performed | **none executed — and none is applicable.** No test reads the `docs/` tree. Verification was integrity-based: `git status` / `git diff --stat` scope review and `sha256sum` of the five protected entries |
+| Results | **PASS (documentation).** P-1 and P-2 are recorded as APPROVED/FROZEN; `O-7` is annotated resolved; P-3/P-4 remain `[EXTERNAL VERIFICATION REQUIRED]`, P-5/P-6 remain OPEN, P-7 is CLOSED. **Phase 1 is no longer blocked on any owner decision** — but remains unimplemented and unauthorized |
+| Errors | One transient tool-environment failure earlier in the session (`ripgrep` binary `ENOENT`, host path redacted) — worked around with `grep` via the terminal. **No repository effect** |
+| Safety events | **none.** All five protected hashes byte-identical pre→post; HEAD unchanged; nothing staged; no source/config/test/manifest/`.env` file changed by this task; no package installed; no Console, MongoDB or build action; no secret printed |
+| Final outcome | **PASS, not committed.** Awaiting the owner's explicit Phase 1 implementation approval and the separate commit instruction |
+| Handoff notes | (1) **`google-services.json` and `GoogleService-Info.plist` are NOT to be committed** — they are supplied by EAS build-time injection; a `mobile/.gitignore` entry is *not* the mechanism and, if one is ever added, `.easignore` replaces rather than extends `.gitignore`. (2) **`@react-native-google-signin/google-signin@16.1.5` is the selected library**, not `react-native-nitro-google-signin`; the selection is **not** evidence the integration works. (3) **P-3/P-4/P-5/P-6 remain outstanding** — see FB-D-125. (4) **Do not begin Phase 1** without a separate explicit owner approval |
+
+---
+
 ## Correction log
 
 ### CORRECTION OF FB-001 — recorded during FB-005 (2026-09-22)

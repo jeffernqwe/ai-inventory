@@ -672,6 +672,16 @@ exercised in production for a meaningful period.
 
 # 12. M1 vs M2 — mobile integration paths
 
+> **UPDATE — 2026-09-24 (additive; nothing below is removed).** The mobile integration
+> path has since been **decided**: **M1 (React Native Firebase) is approved**, together with the
+> Firebase **P2 durable-persistence** decision. That decision **supersedes the Phase 32D
+> `inMemoryPersistence` requirement** and is recorded in
+> [`2026-09-24-rnfirebase-p2-persistence-decision.md`](./2026-09-24-rnfirebase-p2-persistence-decision.md).
+> The comparison table and rationale below remain the M1-vs-M2 analysis exactly as written. Read `O-4`
+> and `O-7` in §14A.5 as resolved, and `O-11` (Expo Go) as forfeited as a consequence of choosing M1.
+> The chosen Google Sign-In library is `@react-native-google-signin/google-signin@16.1.5`, and the two
+> native configuration files are supplied by **EAS build-time injection** rather than committed.
+
 Both are documented because the choice is an owner decision (§14.5) and it is not reversible cheaply
 once native configuration exists.
 
@@ -973,10 +983,10 @@ rewritten.)
 | **O-1** | The **unlink policy** and last-authentication-method protection, accounting for both Firebase's own provider set and the app-side `firebaseUid` password refusal. | Any unlink capability |
 | **O-2** | The **linked-account disposition** of `change-password` and the 26B/27 reset flow, which today would change an inert hash and revoke every session as a side effect. | Any phase that writes `firebaseUid` onto password accounts |
 | **O-3** | Whether **`emailVerified` is enforced** (§14.2). | Provider sign-in relying on a provider-asserted address |
-| **O-4** | **M1 vs M2** (§14.5). | All Google/Facebook mobile work |
+| **O-4** | **M1 vs M2** (§14.5). — **RESOLVED 2026-09-24:** **M1 (React Native Firebase)** approved, with P2 durable persistence; see [`2026-09-24-rnfirebase-p2-persistence-decision.md`](./2026-09-24-rnfirebase-p2-persistence-decision.md). | All Google/Facebook mobile work |
 | **O-5** | The **Facebook missing-email onboarding flow** — the policy is R-10, the flow is undecided. | Facebook Login |
 | **O-6** | The **remedy, if any, for the unhealable orphan** (§16.6). | The legacy migration/linking phase |
-| **O-7** | **`google-services.json` / `GoogleService-Info.plist` storage** (§14.6). | Native provider configuration |
+| **O-7** | **`google-services.json` / `GoogleService-Info.plist` storage** (§14.6). — **RESOLVED 2026-09-24:** **EAS build-time injection**; the files are **not committed** to the repository unless a later explicit owner decision changes this. See [`2026-09-24-rnfirebase-p2-persistence-decision.md`](./2026-09-24-rnfirebase-p2-persistence-decision.md) §8.1. | Native provider configuration |
 | **O-8** | Whether **Firebase takes over the password reset flow**, and the disposition of the 26B/27 artefacts if it does (§14.1, still open). | Password recovery |
 | **O-9** | **`passwordChangedAt` semantics for Firebase-native accounts** (§14.7) — `SESSION_INVALIDATED` does not fire for them. | Explicit acceptance or a compensating design |
 | **O-10** | **Invitation implementation** — model, lifetime, single-use semantics, routes, revocation (§14.3). | Invitation onboarding |

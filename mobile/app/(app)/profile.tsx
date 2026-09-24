@@ -119,6 +119,31 @@ export default function ProfileScreen() {
             onPress={() => router.push('/change-password')}
           />
         )}
+        {/**
+         * Phase 32L-B — the disconnect entry point, offered only where there is
+         * something to disconnect.
+         *
+         * `authMethods.firebase` is the server's own statement that this account
+         * authenticates through a Firebase identity, so it is the correct gate: it is
+         * true for a Firebase-NATIVE account and for a Firebase-LINKED legacy account
+         * alike, and the app cannot tell those apart — nor should it, since the
+         * server publishes a capability rather than the identity behind it.
+         *
+         * The test is `=== true`, not truthiness, so a user object that predates the
+         * field simply shows no action instead of opening a flow the server would
+         * refuse with 409 `FIREBASE_IDENTITY_NOT_LINKED`.
+         *
+         * Nothing here is a security control: the screen re-checks the same
+         * capability, and the server is the boundary in every case.
+         */}
+        {user?.authMethods?.firebase === true ? (
+          <Button
+            title="Disconnect Firebase"
+            variant="secondary"
+            style={styles.spaced}
+            onPress={() => router.push('/disconnect-firebase')}
+          />
+        ) : null}
       </Card>
 
       <Button title="Refresh account" variant="secondary" style={styles.spaced} onPress={() => refresh()} />

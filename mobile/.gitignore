@@ -39,3 +39,8 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Firebase native configuration (Phase 1 — owner decision P-1: injected into an
+# EAS build as file environment variables, never committed).
+google-services.json
+GoogleService-Info.plist

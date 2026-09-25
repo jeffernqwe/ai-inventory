@@ -998,6 +998,47 @@ not rewritten).
 > `docs/superpowers/specs/2026-09-18-firebase-auth-design.md` §14A.9 and
 > `docs/DEVELOPMENT_ROADMAP.md` §27N.
 
+> **Cross-reference added 2026-09-25 (Phase F2).** Phase F2 completed the G-1 cleanup on the **native
+> surface**: `expo-auth-session`, `expo-web-browser` (and its `app.json` plugin, removed atomically) and
+> `expo-crypto` are gone from `mobile/package.json` and the lockfile; `expo.scheme` is now exactly
+> `["inventoryai"]`; and `mobile/app/+native-intent.ts` with its suite is deleted, because the
+> `com.inventoryai.app:/oauthredirect` callback it intercepted can no longer be delivered by any configured
+> scheme. `android.package` / `ios.bundleIdentifier` remain `com.inventoryai.app` and the six native plugins
+> remain. **F2.9 — a new EAS development build — has NOT been created**, so F2 is **config-verified only**;
+> native confirmation is pending, iOS remains `[EXTERNAL VERIFICATION REQUIRED]`, and the F2.9 build targets
+> the **local LAN backend**, not Render. See `docs/DEVELOPMENT_ROADMAP.md` §27O and
+> `docs/superpowers/specs/2026-09-18-firebase-auth-design.md` §14A.10.
+>
+> **Firebase dependency boundary, stated precisely (verified in Phase F2.6):** the **root** `firebase`
+> dependency is removed and `firebase` is **not hoisted**, but it is **NOT absent from `node_modules`** —
+> `@react-native-firebase/app@26.4.0`, which is kept on purpose because it is what authenticates, declares
+> `firebase@12.17.1` as a hard dependency, so the JS SDK remains nested at
+> `node_modules/@react-native-firebase/app/node_modules/firebase` and `npm ls firebase` still resolves. The
+> invariant that holds, and is asserted, is that **no module under `mobile/lib/` or `mobile/app/` can resolve
+> or import the bare Firebase JS SDK**. `@react-native-firebase/app` must not be removed or altered, and no
+> record may claim the JS SDK is absent everywhere.
+
+> **Cross-reference added 2026-09-25 (Phase F2.9).** The EAS development build and the Android runtime/native
+> verification that F2.9 left open are now **done**. Build **`f3038fa1-1cab-476e-b0f9-d6a9178f955b`** — status
+> **FINISHED**, profile **`development`** / **Android**, fingerprint
+> **`d16abc4e7df419812e73598db676985be3606dc7`** — installed and ran on emulator **`emulator-5554`** (SDK 35,
+> x86_64) with **0 `FATAL EXCEPTION` / `AndroidRuntime: FATAL`**. The fingerprint **exactly matched the current
+> working-tree fingerprint**, proving the uncommitted F2 tree was what EAS built. **The F2 native surface is
+> now Android-runtime VERIFIED**: `inventoryai://reset-password` renders the reset screen,
+> `com.inventoryai.app:/oauthredirect` is **unresolvable at the OS level**, and `expo-web-browser` /
+> `WebBrowserModule` / `oauthredirect` are **absent from the APK dex** while RNFirebase and native Google
+> Sign-In remain; a real **local-backend** round trip was proven and **Render was not used**. **This supersedes
+> the statement above that F2.9 had not been created.**
+>
+> **Authentication E2E remains deliberately unverified, and this is not an F2 failure.** F2 changed no
+> authentication logic; the blockers are pre-existing and environmental: email/password is **PARTIAL** (the
+> native Firebase path executes, but no live Firebase project or valid credentials exist), and native Google
+> Sign-In, the Firebase→backend exchange, the Inventory AI JWT/session and Firebase logout/session teardown are
+> all **BLOCKED**. **iOS remains `[EXTERNAL VERIFICATION REQUIRED]`** — no iOS build can be produced on this
+> Windows host. Runtime verification changed **no source, config, EAS variable or API URL**, created no service
+> file, and committed nothing. See `docs/DEVELOPMENT_ROADMAP.md` §27P and
+> `docs/superpowers/specs/2026-09-18-firebase-auth-design.md` §14A.11.
+
 Phase 32H is an owner-directed account-linking increment delivered as a single approved increment after
 Phase 32G, and it implements the **server half of linking and deliberately nothing else**. The question
 it answers is exactly one: *may this authenticated Inventory AI account carry this verified Firebase

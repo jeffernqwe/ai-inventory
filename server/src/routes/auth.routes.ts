@@ -2,7 +2,7 @@ import { Router } from 'express';
 
 import { register, login, me, changePassword, updateMe, logout, listSessions, revokeSession } from '../controllers/auth.controller.ts';
 import { forgotPassword, resetPassword as resetPasswordHandler } from '../controllers/passwordReset.controller.ts';
-import { firebaseExchange, firebaseRegister } from '../controllers/firebaseAuth.controller.ts';
+import { firebaseExchange, firebaseRegister, firebaseLink, firebaseUnlink } from '../controllers/firebaseAuth.controller.ts';
 import requireAuth from '../middlewares/authenticate.ts';
 import {
   createLoginAccountLimiter,
@@ -87,6 +87,50 @@ export function createAuthRouter({ limits }: AuthRouterOptions = {}) {
   router.post('/logout', requireAuth, logout);
   router.get('/sessions', requireAuth, listSessions);
   router.delete('/sessions/:id', requireAuth, revokeSession);
+
+  // Phase 32H: identity linking. AUTHENTICATED, and the authentication IS the
+  // operation's ownership proof (design §14A.4) rather than a convenience — the
+  // caller must already hold the account they are attaching an identity to, which
+  // is exactly the evidence the exchange's collision refusal lacks. It therefore
+  // names no permission: the subject is `req.user.id`, the caller's own account,
+  // and a capability that governed "what you may do to others" would be the wrong
+  // instrument for "what you may attach to yourself" — the same reasoning the
+  // session routes above carry.
+  //
+  // No rate limiter, deliberately and consistently: no authenticated route in this
+  // application is limited. Each attempt requires a live Inventory AI session AND a
+  // Firebase credential, and the only work it can do is a local signature
+  // verification plus two indexed lookups, so the limiter it would need is not the
+  // one that protects the public routes. Adding one means a new factory and a new
+  // config entry in middlewares/rateLimit.ts — scope this phase does not have, and
+  // no finding that asks for it.
+  //
+  // The ID token travels in the POST body, like the exchange's, so it cannot reach
+  // the access log (httpLogger records req.path only) or a Referer header.
+  router.post('/firebase/link', requireAuth, firebaseLink);
+
+  // Phase 32L: identity UNlinking. AUTHENTICATED for exactly the reasons the link
+  // route above is — the authentication IS the ownership proof (design §14A.4),
+  // and the subject is `req.user.id`, the caller's own account, so no permission
+  // key could express the operation without inventing an authorization concept
+  // the catalogue does not have.
+  //
+  // It adds a requirement linking does not have and cannot express as a
+  // permission: the Firebase credential must be RECENT. That is enforced in the
+  // service from the token's signed `auth_time`, because Phase 32L measured
+  // Firebase NOT gating provider unlinking on recency — so a server that wants the
+  // requirement has to hold it itself.
+  //
+  // No rate limiter, for the same standing reason as the link route: no
+  // authenticated route in this application is limited, and each attempt here
+  // requires a live session, a verified Firebase credential, a matching identity
+  // and a fresh authentication before it can do any work at all.
+  //
+  // The ID token travels in the POST body, like every other Firebase route, so it
+  // cannot reach the access log (httpLogger records req.path only) or a Referer
+  // header. The new password travels in the same body and is handled like every
+  // other password this API accepts — never logged, never echoed.
+  router.post('/firebase/unlink', requireAuth, firebaseUnlink);
 
   return router;
 }

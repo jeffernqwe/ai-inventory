@@ -154,20 +154,21 @@ function stubStatic(model, name, impl) {
  * call that must not be able to un-spend the token.
  */
 function stubUserSaveToThrow() {
-  const real = User.findById.bind(User);
-  User.findById = async (...args) => {
-    const user = await real(...args);
-    if (user) {
-      user.save = async () => {
-        const err = new Error('injected user save failure');
-        err.name = 'InjectedUserSaveError';
-        throw err;
-      };
-    }
-    return user;
+  // ★ PHASE 32L MOVED THE INJECTION POINT. The reset completion used to end in
+  // `user.save()`; it now ends in a CONDITIONAL `User.findOneAndUpdate`, because
+  // the write must be bound to the credential state the token was issued against
+  // (see the service). The property this helper exists to exercise is unchanged —
+  // a failed write must not release the token — so the stub targets whichever
+  // write the service actually performs. `User.findOneAndUpdate` is the ONLY such
+  // call in the reset path, so nothing else is affected by the override.
+  const real = User.findOneAndUpdate.bind(User);
+  User.findOneAndUpdate = async () => {
+    const err = new Error('injected user write failure');
+    err.name = 'InjectedUserWriteError';
+    throw err;
   };
   return () => {
-    User.findById = real;
+    User.findOneAndUpdate = real;
   };
 }
 
@@ -1044,7 +1045,7 @@ dbSuite('Phase 26B-2 — password recovery over a real database', dbOk, () => {
 
     // The failure propagated rather than being swallowed.
     assert.ok(err);
-    assert.equal(err.name, 'InjectedUserSaveError');
+    assert.equal(err.name, 'InjectedUserWriteError');
 
     // And the token stays SPENT. This is the whole point: a reset that failed
     // half-way is recoverable by asking for a new link, while a token that could

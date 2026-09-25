@@ -69,5 +69,11 @@ Desktop.ini
 # local tooling artifacts (repo-root .gitignore)
 .playwright-mcp/
 
+# Firebase native configuration (mobile/.gitignore, Phase 1) — never upload to
+# EAS: they are supplied to the build as file environment variables instead
+# (owner decision P-1).
+google-services.json
+GoogleService-Info.plist
+
 # Local smoke-test artifacts — never upload to EAS
 .smoke/

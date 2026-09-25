@@ -6,18 +6,22 @@
  * below, so the SDK's version, its initialization order and its persistence
  * choice are decided in one file rather than discovered across a codebase.
  *
- * INFRASTRUCTURE ONLY. Phase 32D establishes this boundary and nothing more: it
- * creates no Firebase user, signs nobody in, calls no API, and does not touch
- * Inventory AI authentication state. No screen imports this module yet. The full
- * behaviour it exists to support — Google Sign-In, then Facebook Login, each
- * exchanging its Firebase ID token server-side for an Inventory AI session — is
- * a later phase, and the exchange endpoint it will call has existed since Phase
- * 32C. Nothing here is user-visible.
+ * ONE HALF OF THE BOUNDARY, AND STILL INFRASTRUCTURE. Phase 32D established this
+ * module and nothing more; Phase 32E added `lib/firebase-auth.ts` beside it, which
+ * is what performs the email/password operations and decides what a Firebase
+ * failure means. The split is deliberate: this file owns the SDK's version, its
+ * initialization order and its persistence choice — the things that must be true
+ * of every Firebase call — while the other owns behaviour. `lib/auth.tsx` is the
+ * only importer of either, so no screen reaches Firebase directly and none sees a
+ * Firebase error. Google Sign-In and Facebook Login remain later phases, and the
+ * exchange endpoint they will call has existed since Phase 32C.
  *
  * DISABLED BY DEFAULT. With the four `EXPO_PUBLIC_FIREBASE_*` values unset,
  * `isFirebaseConfigured()` is `false`, both accessors return `null`, and the SDK
  * is never initialized. The app behaves exactly as it did before this module
- * existed, which is the phase's central invariant.
+ * existed, which is the phase's central invariant — and it is the state of this
+ * repository today, so `lib/auth.tsx` branches on `isFirebaseConfigured()` to keep
+ * registration on its pre-32D path.
  *
  * WHY `initializeAuth` AND NOT `getAuth` (owner decision 4). `getAuth()` picks
  * the platform's default persistence, which on React Native is a durable store.
@@ -34,10 +38,14 @@
  * of THIS file during development re-evaluates the module (resetting the cache)
  * while the SDK's own app registry survives, so a reload after editing this file
  * can surface that error until the app is restarted. It is a development-only
- * artifact with no runtime call site in this phase, and it is deliberately not
- * worked around here: the only workaround is `getAuth`, which decision 4 rules
- * out. Whichever phase first calls these accessors should address it with the
- * call sites in hand.
+ * artifact — nothing an attacker or a user can reach — and it is deliberately not
+ * worked around here, because the only workaround is `getAuth`, which decision 4
+ * rules out. Phase 32E, the phase that first calls these accessors, contains it
+ * rather than fixing it: `getFirebaseAuth()` is called INSIDE the try in
+ * `lib/firebase-auth.ts`, so the throw arrives as an ordinary `failure` outcome
+ * and the caller declines to fall back to the legacy route. The visible effect of
+ * a Fast Refresh of this file is therefore a clear error instead of a silent
+ * downgrade.
  */
 
 import { getApps, initializeApp, type FirebaseApp } from 'firebase/app';

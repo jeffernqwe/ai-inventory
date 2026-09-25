@@ -27,6 +27,10 @@ const createStyles = (colors: Palette) =>
     // Margin rather than a `gap` on the wrapper: the two lines are separate
     // Text nodes precisely so each centres on its own when it wraps.
     footerSpaced: { marginTop: spacing.md },
+    // The registration action, directly under the info banner that asks for it.
+    // Same alignment as the footer lines, and no negative margin to claw back the
+    // banner's own spacing — the two read as one block.
+    actionRow: { ...type.bodySmall, alignSelf: 'stretch', textAlign: 'center' },
     link: { color: colors.link, fontWeight: '700' },
   });
 
@@ -38,31 +42,95 @@ function fieldMap(err: unknown): Record<string, string> {
   return out;
 }
 
+/**
+ * Phase 32E — the one server outcome this screen must do more than print.
+ *
+ * `POST /api/auth/firebase/exchange` answers `REGISTRATION_REQUIRED` when the
+ * identity authenticated with Firebase but has no Inventory AI account yet. The
+ * server's message tells the user to create a business account, and this is the
+ * screen that has to make that actionable — the message names a journey, so the
+ * journey needs a control. It is rendered in the INFO tone rather than the error
+ * tone: the credentials were accepted, and nothing the user did was wrong.
+ *
+ * Phase 32J: the control leads to `/register-firebase`, NOT `/register`. The
+ * identity that produced this refusal is already authenticated with Firebase and
+ * is still signed in, so sending the user to the email/password form would ask
+ * them for an email they already proved and a password that would create a SECOND
+ * Firebase identity — and then refuse to register either of them. The Firebase
+ * onboarding screen asks only for the business name, and the identity it registers
+ * is read from the Firebase layer rather than carried here, so no token, uid or
+ * email travels through this link.
+ *
+ * Every other refusal (ACCOUNT_DISABLED, BUSINESS_NOT_ACTIVE,
+ * FIREBASE_SIGN_IN_REQUIRED, INVALID_CREDENTIALS) is a statement with nothing to
+ * press and is shown as an ordinary error banner.
+ */
+const REGISTRATION_REQUIRED = 'REGISTRATION_REQUIRED';
+
 export default function LoginScreen() {
-  const { status, user, signIn } = useSession();
+  const { status, user, signIn, signInWithGoogle } = useSession();
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
+  const [needsAccount, setNeedsAccount] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [googleBusy, setGoogleBusy] = useState(false);
 
   if (status === 'signedIn') return <Redirect href={defaultHomePath(user)} />;
 
-  async function submit(): Promise<void> {
-    setBusy(true);
+  /**
+   * One place turns a sign-in rejection into what the screen shows. Shared by the
+   * password form and the Google button, so a `REGISTRATION_REQUIRED` from the
+   * exchange renders identically whichever provider proved the identity — the
+   * refusal is about the Inventory AI account, not about how it was entered.
+   */
+  function applyAuthError(err: unknown): void {
+    const fields = fieldMap(err);
+    if (Object.keys(fields).length) setFieldErrors(fields);
+    else {
+      setNeedsAccount(err instanceof ApiError && err.code === REGISTRATION_REQUIRED);
+      setFormError((err as { message?: string } | null)?.message || 'Unable to sign in. Please try again.');
+    }
+  }
+
+  function resetFeedback(): void {
     setFormError(null);
     setFieldErrors({});
+    setNeedsAccount(false);
+  }
+
+  async function submit(): Promise<void> {
+    setBusy(true);
+    resetFeedback();
     try {
       await signIn({ email, password });
       // Navigation: on success the signedIn guard redirects this screen away.
     } catch (err) {
-      const fields = fieldMap(err);
-      if (Object.keys(fields).length) setFieldErrors(fields);
-      else setFormError((err as { message?: string } | null)?.message || 'Unable to sign in. Please try again.');
+      applyAuthError(err);
     } finally {
       setBusy(false);
+    }
+  }
+
+  /**
+   * Google Sign-In (Phase 32I). `signInWithGoogle` resolves `null` when the user
+   * cancels, which is not an error: the Google sheet simply closes and the form is
+   * left as it was, with no banner. A real refusal throws and goes through the
+   * same `applyAuthError` the password form uses, so `REGISTRATION_REQUIRED`
+   * shows its info banner and the "Create a business account" action.
+   */
+  async function handleGoogle(): Promise<void> {
+    setGoogleBusy(true);
+    resetFeedback();
+    try {
+      await signInWithGoogle();
+    } catch (err) {
+      applyAuthError(err);
+    } finally {
+      setGoogleBusy(false);
     }
   }
 
@@ -86,7 +154,14 @@ export default function LoginScreen() {
         </View>
       }
     >
-      <Banner type="error" text={formError} />
+      {needsAccount ? <Banner type="info" text={formError} /> : <Banner type="error" text={formError} />}
+      {needsAccount ? (
+        <Text style={styles.actionRow}>
+          <Link href="/register-firebase" style={styles.link}>
+            Create a business account
+          </Link>
+        </Text>
+      ) : null}
       <Input
         name="email"
         label="Email"
@@ -111,7 +186,15 @@ export default function LoginScreen() {
         returnKeyType="go"
         onSubmitEditing={submit}
       />
-      <Button title="Sign In" onPress={submit} loading={busy} full />
+      <Button title="Sign In" onPress={submit} loading={busy} disabled={googleBusy} full />
+      <Button
+        title="Continue with Google"
+        variant="secondary"
+        onPress={handleGoogle}
+        loading={googleBusy}
+        disabled={busy}
+        full
+      />
     </AuthLayout>
   );
 }

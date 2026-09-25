@@ -164,6 +164,113 @@ export function resetPassword({ token, newPassword, confirmPassword }: ResetPass
 }
 
 // ---------------------------------------------------------------------------
+// Firebase authentication (Phase 32C backend / 32E mobile)
+// ---------------------------------------------------------------------------
+// BOTH WRAPPERS ARE TOKENLESS, and that is structural rather than incidental.
+// `lib/client.ts` reports session loss only for a request that CARRIED a token
+// (`if (token && (res.status === 401 || res.status === 403))`), so a 401 or 403
+// from either route here cannot reach the session-lost handler and clear a
+// session that these routes never had. The caller is proving an identity with a
+// Firebase credential precisely BECAUSE they hold no Inventory AI JWT yet, so
+// passing one would make the endpoint able to mint only sessions that already
+// exist.
+//
+// The response of `firebaseExchange` is byte-for-byte the shape `login` returns
+// (token/tokenType/expiresIn/user), which is what lets `lib/auth.tsx` store it
+// exactly as it stores a password-login token. The Firebase ID token is consumed
+// server-side and is never a field of anything returned.
+
+export interface FirebaseExchangePayload {
+  /** A Firebase ID token from `lib/firebase-auth`. Consumed once, never stored. */
+  idToken: string;
+  /** Cosmetic device hint, exactly as `login` takes it. */
+  deviceLabel?: string;
+}
+
+/**
+ * POST /api/auth/firebase/exchange -> { token, tokenType, expiresIn, user } (200).
+ * PUBLIC — no session token is sent.
+ *
+ * 403 `REGISTRATION_REQUIRED` when the verified identity has no Inventory AI
+ * account yet; 403 `ACCOUNT_DISABLED` / `BUSINESS_NOT_ACTIVE`; 401
+ * `FIREBASE_TOKEN_INVALID` for a token the server would not accept; 503
+ * `FIREBASE_NOT_CONFIGURED` when the server has no service account.
+ */
+export function firebaseExchange({ idToken, deviceLabel }: FirebaseExchangePayload): Promise<ApiResponse> {
+  return apiFetch('/api/auth/firebase/exchange', {
+    method: 'POST',
+    body: { idToken, deviceLabel },
+  });
+}
+
+export interface FirebaseRegisterPayload {
+  idToken: string;
+  businessName: string;
+  name?: string;
+}
+
+/**
+ * POST /api/auth/firebase/register -> { user, business } (201, no token).
+ * PUBLIC — no session token is sent.
+ *
+ * Issues no token, exactly like `register`: the caller exchanges next. 409
+ * `EMAIL_IN_USE` when the verified identity's email already belongs to an
+ * Inventory AI account — the server refuses to link the two rather than merging
+ * them, so this is a real dead end and not a transient one.
+ */
+export function firebaseRegister({ idToken, businessName, name }: FirebaseRegisterPayload): Promise<ApiResponse> {
+  return apiFetch('/api/auth/firebase/register', {
+    method: 'POST',
+    body: { idToken, businessName, name },
+  });
+}
+
+export interface FirebaseUnlinkPayload {
+  /** A Firebase ID token from `lib/firebase-auth`. Consumed once, never stored. */
+  idToken: string;
+  /** The password that will own this account after the identity is detached. */
+  newPassword: string;
+}
+
+/**
+ * POST /api/auth/firebase/unlink -> { unlinked: true, user } (200, Phase 32L-A).
+ * AUTHENTICATED — the caller's own session token is required.
+ *
+ * Detaches the account's Firebase identity and establishes a NEW local password
+ * in one atomic transition. The account comes from the session and the identity
+ * from the verified token, so NO id, uid, businessId or role is ever sent — the
+ * body below is the whole request.
+ *
+ * THE THREE 409s ARE THE REASONS THIS IS NOT A PLAIN ERROR PATH, and none of
+ * them is session loss — a 401/403 here would sign the user out over an unrelated
+ * failure, which is exactly why the server answers them as 409s:
+ *
+ *   409 `FIREBASE_REAUTHENTICATION_REQUIRED` — the Firebase authentication is
+ *       older than the 300 s window. RECOVERABLE: confirm the sign-in, then retry.
+ *   409 `FIREBASE_IDENTITY_NOT_LINKED` — nothing is attached (also the answer
+ *       when a concurrent unlink won the race). TERMINAL.
+ *   409 `FIREBASE_IDENTITY_CONFLICT` — the verified identity is not this
+ *       account's, or a concurrent link changed it. TERMINAL, and the likeliest
+ *       cause is that the WRONG CONFIRMATION OPTION was chosen.
+ *
+ * Also 400 `VALIDATION_ERROR` with `fields` for a weak/missing new password and
+ * 400 `FIREBASE_TOKEN_INVALID` for a token Firebase refused — a bad request
+ * field, NOT a dead session, which is why the server deliberately moved that code
+ * off 401. 403 `BUSINESS_NOT_ACTIVE` and 503 `FIREBASE_NOT_CONFIGURED` are
+ * unchanged.
+ */
+export function firebaseUnlink(
+  token: string,
+  { idToken, newPassword }: FirebaseUnlinkPayload
+): Promise<ApiResponse> {
+  return apiFetch('/api/auth/firebase/unlink', {
+    token,
+    method: 'POST',
+    body: { idToken, newPassword },
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Users (Phase 14A backend / 14B mobile)
 // ---------------------------------------------------------------------------
 // OWNER/ADMIN only (users.manage). Create/assign never includes OWNER; the
@@ -489,6 +596,9 @@ export default {
   changePassword,
   forgotPassword,
   resetPassword,
+  firebaseExchange,
+  firebaseRegister,
+  firebaseUnlink,
   updateMe,
   logout,
   sessions,

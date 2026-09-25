@@ -9,10 +9,15 @@
  * registration, sign-out and ID-token access go through `lib/firebase-native.ts`
  * (React Native Firebase), which is the only module that names the native packages,
  * so every shipped email/password path now authenticates natively with native
- * durable persistence (owner decision P2). The Google flow and the disconnect
- * confirmation still run on the Firebase *JavaScript* SDK through `lib/firebase.ts`,
- * because native Google is Phase C by owner decision — and that is why both imports
- * appear below.
+ * durable persistence (owner decision P2).
+ *
+ * PHASE C moved Google SIGN-IN to the same boundary. PHASE D moves the last two
+ * operations — the disconnect CONFIRMATION's password and Google methods — so that
+ * every authentication this app performs now runs natively, and this module no longer
+ * imports the JavaScript SDK at all. That absence is the phase's deliverable: it is
+ * what makes Phase F able to remove `firebase`, `expo-auth-session` and the browser
+ * helper below. Nothing about the outcome unions, the codes, the messages or the
+ * unlink policy moved with it.
  *
  * WHAT DID NOT CHANGE, AND IS THE POINT OF THE PHASE: the exported names, the outcome
  * unions, the two fallback codes, the message table, the registration/adoption policy
@@ -71,11 +76,12 @@
  * branch, the server's `firebaseUid` guard refuses it.
  */
 
-import {
-  GoogleAuthProvider,
-  signInWithCredential,
-  signInWithEmailAndPassword,
-} from 'firebase/auth';
+// THERE IS DELIBERATELY NO `import … from 'firebase/auth'` HERE ANY MORE (Phase D).
+// Every operation in this module authenticates through `lib/firebase-native.ts`, and
+// the absence of that import is the phase's central fact rather than an omission. The
+// package itself, `lib/firebase.ts` and the browser helper below all REMAIN for Phase
+// F, which is the phase that removes them; `lib/firebase.ts` is still imported by
+// `lib/firebase-native.ts` for the configuration GATE, so it is not orphaned by this.
 import {
   AuthRequest,
   ResponseType,
@@ -83,8 +89,7 @@ import {
   makeRedirectUri,
 } from 'expo-auth-session';
 
-import { googleClientId, isGoogleConfigured } from './config';
-import { getFirebaseAuth } from './firebase';
+import { googleClientId } from './config';
 import {
   isNativeFirebaseConfigured,
   isNativeGoogleConfigured,
@@ -556,11 +561,23 @@ export async function signInWithGoogle(): Promise<GoogleSignInOutcome> {
 }
 
 /**
+ * ────────────────────────────────────────────────────────────────────────────
+ * PHASE F REMOVAL — KEPT DELIBERATELY, AND UNREFERENCED SINCE PHASE D.
+ *
+ * Phase D moved the Google CONFIRMATION to the native library, so nothing calls this
+ * helper any more. It is retained ON PURPOSE, by owner decision: removing the
+ * JavaScript SDK and `expo-auth-session` is Phase F's work, and deleting the whole
+ * browser mechanism there — in one reviewable change — keeps Phase D a one-commit
+ * rollback. The paragraphs below describe what it DID; the caller they name (the
+ * confirmation's Google method) no longer exists, and the browser redirect it depends
+ * on is why `app/+native-intent.ts` is still needed until Phase F.
+ * ────────────────────────────────────────────────────────────────────────────
+ *
  * Steps 1-3 of the Google flow: consent in the system browser, then the code +
  * PKCE verifier swapped at Google's token endpoint for Google's own `id_token`.
  *
- * RETURNS GOOGLE'S TOKEN, NOT FIREBASE'S. Authenticating with Firebase is the
- * caller's step (`signInWithCredential`), which is what lets this helper serve
+ * RETURNS GOOGLE'S TOKEN, NOT FIREBASE'S. Authenticating with Firebase was the
+ * caller's step (`signInWithCredential`), which is what let this helper serve
  * both the sign-in path and the Phase 32L-B confirmation path without either one
  * owning the other's semantics.
  *
@@ -568,7 +585,12 @@ export async function signInWithGoogle(): Promise<GoogleSignInOutcome> {
  * result, a missing code, a missing PKCE verifier, a token-endpoint failure — is
  * an outcome, so a caller has one shape to branch on. The PKCE check still fails
  * CLOSED exactly as it did before: no verifier means no token-endpoint call.
+ *
+ * The suppression below is DELIBERATE AND LOCAL, and it is part of the Phase F marker
+ * rather than a workaround: Phase D gave this helper no caller, owner decision 1 keeps it
+ * anyway, and a later change that gives it a caller again removes the warning with it.
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- PHASE F REMOVAL (Phase D: intentionally unreferenced)
 async function acquireGoogleIdToken(): Promise<GoogleIdTokenOutcome> {
   try {
     const clientId = googleClientId();
@@ -745,6 +767,19 @@ const NO_PASSWORD_IDENTITY = 'auth/user-not-found';
  * Confirms the sign-in of the identity that owns this account, and returns a
  * fresh Firebase ID token.
  *
+ * PHASE D: BOTH METHODS NOW RUN ON THE NATIVE SDK, through the two boundary functions
+ * the sign-in paths already use — `nativeSignInWithEmail` for the password method and
+ * `nativeSignInWithGoogle` for the Google method. No THIRD abstraction was introduced
+ * to do it, and none is needed: a confirmation is a real authentication, which is
+ * exactly what those two perform. Before this phase the Google method ran the Phase 32I
+ * authorization-code + PKCE flow in the system browser and the password method ran the
+ * JavaScript SDK directly; both were the last JS-SDK authentication in the app.
+ *
+ * THE FOUR OUTCOMES ARE UNCHANGED. `wrong-method` is still reachable in principle and
+ * still password-only; the Google method still answers `idToken` or `cancelled` and
+ * classifies every fault through the same table. What changed is only WHERE the
+ * credential is authenticated.
+ *
  * NEVER THROWS, and never reaches the network for anything but Firebase. `email`
  * is the account's own address and is REQUIRED only for the password method,
  * because `signInWithEmailAndPassword` takes one and there is no other source for
@@ -765,19 +800,30 @@ export async function confirmFirebaseSignIn({
   password?: string;
 }): Promise<ConfirmSignInOutcome> {
   if (method === 'google') {
+    // PHASE D — NATIVE, AND THE GATE MOVED WITH IT. `isGoogleConfigured()` asked "is
+    // there a client ID for THIS PLATFORM", which was the right question while the
+    // system browser performed the consent; the native library needs a **Web** OAuth
+    // client on every platform, so the predicate is now `isNativeGoogleConfigured()` —
+    // the same one `signInWithGoogle` uses. It is checked OUTSIDE the try for the reason
+    // all three operations check their gate there: an unconfigured build is a property
+    // of the build, not a condition a runtime fault can produce, so it must not be
+    // confusable with one. The code and the sentence are unchanged.
+    if (!isNativeGoogleConfigured()) {
+      return { kind: 'failure', code: 'google/not-configured', message: GOOGLE_NOT_CONFIGURED_MESSAGE };
+    }
+
     try {
-      const auth = getFirebaseAuth();
-      if (!auth || !isGoogleConfigured()) {
-        return { kind: 'failure', code: 'google/not-configured', message: GOOGLE_NOT_CONFIGURED_MESSAGE };
-      }
-
-      const google = await acquireGoogleIdToken();
-      if (google.kind === 'cancelled') return { kind: 'cancelled' };
-      if (google.kind === 'failure') return google;
-
-      const credential = GoogleAuthProvider.credential(google.idToken);
-      const userCredential = await signInWithCredential(auth, credential);
-      return { kind: 'idToken', idToken: await userCredential.user.getIdToken() };
+      // NO CONTRACT MOVED. `NativeGoogleSignInResult` is `idToken | cancelled`, which
+      // maps one to one onto this function's own two ordinary outcomes, and a real
+      // failure is a THROW that the table below classifies exactly as it classified the
+      // browser flow's failures — so `ConfirmSignInOutcome` is unchanged and the screen
+      // keeps the single branch it already had. A silent consent (GMS reuses the account
+      // it has already been granted) still counts as a confirmation by owner decision 3:
+      // the credential was really authenticated and the token's `auth_time` is really
+      // fresh, which is what the server's rule reads.
+      const outcome = await nativeSignInWithGoogle();
+      if (outcome.kind === 'cancelled') return { kind: 'cancelled' };
+      return { kind: 'idToken', idToken: outcome.idToken };
     } catch (err) {
       const code = errorCode(err);
       return { kind: 'failure', code, message: describeFirebaseFailure(code, CONFIRM_FAILED_MESSAGE) };
@@ -791,17 +837,28 @@ export async function confirmFirebaseSignIn({
     return { kind: 'failure', code: 'firebase/confirm-missing-email', message: CONFIRM_FAILED_MESSAGE };
   }
 
-  try {
-    const auth = getFirebaseAuth();
-    if (!auth) {
-      return { kind: 'failure', code: 'firebase/not-configured', message: MISCONFIGURED_MESSAGE };
-    }
+  // THE GATE, ANSWERED WITH THE SAME CODE AND THE SAME SENTENCE THE JS SDK PATH USED.
+  // `getFirebaseAuth()` returning `null` and the native boundary refusing to load mean
+  // the same thing, so the contract is preserved rather than re-invented.
+  if (!isNativeFirebaseConfigured()) {
+    return { kind: 'failure', code: 'firebase/not-configured', message: MISCONFIGURED_MESSAGE };
+  }
 
-    // Works whether or not a Firebase session already exists — see point 2 in the
-    // block comment above. `getIdToken()` afterwards returns a token minted by
-    // THIS authentication, so its `auth_time` is the confirmation's.
-    const userCredential = await signInWithEmailAndPassword(auth, email, password ?? '');
-    return { kind: 'idToken', idToken: await userCredential.user.getIdToken() };
+  try {
+    // PHASE D — NATIVE, AND THE METHOD DID NOT CHANGE WITH IT. `signInWithEmailAndPassword`
+    // is still what confirms — never `reauthenticateWithCredential` — for the reason the
+    // block comment above gives: the reauthenticate verb cannot run after a cold start,
+    // and surviving one is exactly what this function exists for. `nativeSignInWithEmail`
+    // performs that same sign-in and then mints the token, so the `auth_time` on the
+    // token is THIS authentication's, which is the property the server's 300-second rule
+    // reads. A forced refresh is still not a confirmation and is still not used.
+    //
+    // THE EMAIL IS THE ACCOUNT'S OWN — supplied by the screen from `user.email`, shown
+    // read-only and never typed (see `app/(app)/disconnect-firebase.tsx`). That is the
+    // invariant that keeps a confirmation from authenticating a DIFFERENT identity into
+    // the durable native store, and the native path inherits it rather than restating it.
+    const { idToken } = await nativeSignInWithEmail(email, password ?? '');
+    return { kind: 'idToken', idToken };
   } catch (err) {
     const code = errorCode(err);
     if (code === NO_PASSWORD_IDENTITY) return { kind: 'wrong-method' };

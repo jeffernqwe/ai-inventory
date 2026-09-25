@@ -1,39 +1,29 @@
 /**
  * Google Sign-In — `lib/firebase-auth.ts`.
  *
- * TWO FLOWS, ONE FILE, AND THE SPLIT IS DELIBERATE (Phase C).
+ * SIGN-IN AND THE DISCONNECT CONFIRMATION BOTH RUN NATIVELY (Phases C and D).
  *
- *   • **Sign-in is NATIVE.** `signInWithGoogle` runs through
- *     `lib/firebase-native.ts` on `@react-native-google-signin/google-signin`, which
- *     is Phase C's migration. The cases below prove the module is a thin
- *     classification layer over that boundary — including the negative claim that
- *     matters most: the migrated path touches NONE of the JavaScript SDK's Google
- *     machinery, so a half-finished migration cannot pass by accident.
+ * `signInWithGoogle` and `confirmFirebaseSignIn`'s `google` method both run through
+ * `lib/firebase-native.ts` on `@react-native-google-signin/google-signin`. The cases
+ * below prove the module is a thin classification layer over that boundary, and they
+ * still pin the claims the browser era made where those claims survive: the Firebase
+ * token is the only thing that leaves, a native failure is classified rather than
+ * relayed, and an unconfigured build never reaches the boundary at all.
  *
- *   • **The confirmation is still the BROWSER flow.** `confirmFirebaseSignIn`'s
- *     `google` method still runs the Phase 32I authorization-code + PKCE sequence,
- *     because the disconnect confirmation is Phase D/E work the owner has not
- *     authorised migrating here. Its cases were RETARGETED to that entry point
- *     rather than deleted, so the sequence claims Phase 32I made — the code is
- *     exchanged at Google's token endpoint with the PKCE verifier before any
- *     Firebase credential is built, and PKCE fails closed — are still pinned.
+ * PHASE F1 DELETED THE BROWSER FLOW AND THE ASSERTIONS THAT DESCRIBED IT. Until F1 this
+ * file also mocked `expo-auth-session` and asserted, negatively, that neither operation
+ * touched a browser seam — a claim that kept the retained `acquireGoogleIdToken` helper
+ * provably unreachable. The helper, its constants, `googleRedirectUri()` and this
+ * module's `expo-auth-session` import are gone, so those assertions had nothing left to
+ * describe. The claim they protected is now made once, structurally, in
+ * `phaseF1-retired-dependency-guard.test.ts`, which proves no module under `lib/` or
+ * `app/` imports the retired packages at all.
  *
- * PHASE D MOVED THE CONFIRMATION OFF THIS FLOW. Until Phase D the browser sequence served
- * BOTH Google operations, and the exact order of calls was the claim. Since Phase D the
- * confirmation authenticates natively like the sign-in, so the browser cases have been
- * replaced by native ones — and the assertions that matter most here are the NEGATIVE
- * ones: neither operation may touch a browser seam, which is what keeps the retained
- * `acquireGoogleIdToken` helper genuinely unreferenced until Phase F removes it.
- *
- * `googleRedirectUri` is still asserted below. Its only caller is that unreferenced
- * helper, but the VALUE must not drift while it exists: it is the URI registered with
- * Google, and `app/+native-intent.ts` still matches its callback path.
- *
- * WHAT IS NOT MOCKED: `lib/firebase-auth.ts` itself. Every branch, message and
- * call-order claim below is the shipped one.
+ * WHAT IS NOT MOCKED: `lib/firebase-auth.ts` itself. Every branch, message and code
+ * claim below is the shipped one.
  */
 
-import { confirmFirebaseSignIn, googleRedirectUri, signInWithGoogle } from '../lib/firebase-auth';
+import { confirmFirebaseSignIn, signInWithGoogle } from '../lib/firebase-auth';
 
 // ---------------------------------------------------------------------------
 // The mock seam — Phase C: the native boundary
@@ -53,58 +43,11 @@ jest.mock('../lib/firebase-native', () => ({
 }));
 
 // ---------------------------------------------------------------------------
-// The mock seam — the browser flow, RETAINED BUT UNREFERENCED SINCE PHASE D
-// ---------------------------------------------------------------------------
-
-const mockPromptAsync = jest.fn();
-const mockExchangeCodeAsync = jest.fn();
-const mockMakeRedirectUri = jest.fn(
-  (..._args: unknown[]): string => 'com.inventoryai.app:/oauthredirect'
-);
-const mockAuthRequestCtor = jest.fn();
-// The verifier the mocked `AuthRequest` reports. Settable so a case can prove the
-// fail-closed behaviour of a request that somehow produced none (Phase 32I-N, I-1).
-let mockCodeVerifier: string | undefined = 'pkce-verifier';
-
-jest.mock('expo-auth-session', () => {
-  // A plain constructor (not an arrow) so `new AuthRequest(config)` binds `this`.
-  function AuthRequest(
-    this: { codeVerifier: string | undefined; promptAsync: unknown },
-    config: unknown
-  ) {
-    mockAuthRequestCtor(config);
-    this.codeVerifier = mockCodeVerifier;
-    this.promptAsync = mockPromptAsync;
-  }
-  return {
-    AuthRequest,
-    ResponseType: { Code: 'code', Token: 'token', IdToken: 'id_token' },
-    exchangeCodeAsync: (...args: unknown[]) => mockExchangeCodeAsync(...args),
-    makeRedirectUri: (...args: unknown[]) => mockMakeRedirectUri(...args),
-  };
-});
-
-// THE `firebase/auth` AND `../lib/firebase` MOCKS ARE GONE WITH THE SDK (Phase D). Nothing
-// the module under test reaches still touches either, so mocking them would only have
-// described a path that no longer exists.
-
-const mockGoogleClientId = jest.fn(() => 'google-client-id');
-const mockIsGoogleConfigured = jest.fn(() => true);
-jest.mock('../lib/config', () => ({
-  googleClientId: () => mockGoogleClientId(),
-  // NOT read by the module under test since Phase D removed the import — kept because this
-  // mock replaces the WHOLE module, and an omitted export becomes `undefined` for any
-  // importer rather than failing loudly here.
-  isGoogleConfigured: () => mockIsGoogleConfigured(),
-}));
-
-// ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
 
 const GOOGLE_ID_TOKEN = 'google.id.token';
 const FIREBASE_ID_TOKEN = 'firebase.id.token';
-const REDIRECT_URI = 'com.inventoryai.app:/oauthredirect';
 
 const GOOGLE_FAILED = 'Unable to sign in with Google. Please try again.';
 const GOOGLE_NOT_CONFIGURED =
@@ -122,9 +65,6 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockIsNativeGoogleConfigured.mockReturnValue(true);
   mockNativeSignInWithGoogle.mockResolvedValue({ kind: 'idToken', idToken: FIREBASE_ID_TOKEN });
-  mockGoogleClientId.mockReturnValue('google-client-id');
-  mockMakeRedirectUri.mockReturnValue(REDIRECT_URI);
-  mockCodeVerifier = 'pkce-verifier';
 });
 
 // ===========================================================================
@@ -144,22 +84,20 @@ describe('signInWithGoogle — the native path (Phase C)', () => {
     expect(JSON.stringify(outcome)).not.toContain(GOOGLE_ID_TOKEN);
   });
 
-  it('✕ touches none of the JavaScript SDK Google machinery', async () => {
-    // THE NEGATIVE CLAIM THIS MIGRATION STANDS ON. If a later change re-routed the
-    // sign-in back through the browser flow — or left a half-migrated path that did
-    // both — this case fails, because every browser seam is asserted untouched.
+  it('calls the boundary exactly once and returns its token verbatim', async () => {
+    // Phase F1: this case used to assert the browser seams were untouched. Those seams
+    // no longer exist, so what is left to pin is that the boundary is the ONLY source of
+    // the token — one call, and the value passes through unaltered.
     mockNativeSignInWithGoogle.mockResolvedValue({
       kind: 'idToken',
       idToken: FIREBASE_ID_TOKEN,
     });
 
-    await signInWithGoogle();
+    const outcome = await signInWithGoogle();
 
     expect(mockNativeSignInWithGoogle).toHaveBeenCalledTimes(1);
-    expect(mockPromptAsync).not.toHaveBeenCalled();
-    expect(mockAuthRequestCtor).not.toHaveBeenCalled();
-    expect(mockExchangeCodeAsync).not.toHaveBeenCalled();
-    expect(mockMakeRedirectUri).not.toHaveBeenCalled();
+    expect(mockNativeSignInWithGoogle).toHaveBeenCalledWith();
+    expect(outcome).toEqual({ kind: 'idToken', idToken: FIREBASE_ID_TOKEN });
   });
 
   it('reports cancelled when the person closes the sheet, touching nothing else', async () => {
@@ -168,8 +106,7 @@ describe('signInWithGoogle — the native path (Phase C)', () => {
     const outcome = await signInWithGoogle();
 
     expect(outcome).toEqual({ kind: 'cancelled' });
-    expect(mockExchangeCodeAsync).not.toHaveBeenCalled();
-    expect(mockAuthRequestCtor).not.toHaveBeenCalled();
+    expect(mockNativeSignInWithGoogle).toHaveBeenCalledTimes(1);
   });
 
   it('classifies a native failure by its code and never relays the native text', async () => {
@@ -214,7 +151,6 @@ describe('signInWithGoogle — the native path (Phase C)', () => {
       message: GOOGLE_NOT_CONFIGURED,
     });
     expect(mockNativeSignInWithGoogle).not.toHaveBeenCalled();
-    expect(mockPromptAsync).not.toHaveBeenCalled();
   });
 });
 
@@ -227,12 +163,6 @@ describe('confirmFirebaseSignIn with Google — the native path (Phase D)', () =
     const outcome = await confirmFirebaseSignIn({ method: 'google' });
 
     expect(mockNativeSignInWithGoogle).toHaveBeenCalledTimes(1);
-    // NOTHING ABOUT THE BROWSER RUNS. This is the phase's claim stated as an absence:
-    // no AuthRequest is constructed, no consent prompt opens, no code is exchanged and
-    // no credential is built outside the boundary.
-    expect(mockAuthRequestCtor).not.toHaveBeenCalled();
-    expect(mockPromptAsync).not.toHaveBeenCalled();
-    expect(mockExchangeCodeAsync).not.toHaveBeenCalled();
     // Google's token is never in the outcome — only the Firebase token the boundary
     // minted from it, which is what the caller exchanges once.
     expect(JSON.stringify(outcome)).not.toContain(GOOGLE_ID_TOKEN);
@@ -241,14 +171,12 @@ describe('confirmFirebaseSignIn with Google — the native path (Phase D)', () =
 });
 
 describe('confirmFirebaseSignIn with Google — cancellation is ordinary', () => {
-  it('reports cancelled without touching the browser or reaching Firebase', async () => {
+  it('reports cancelled without reaching Firebase', async () => {
     mockNativeSignInWithGoogle.mockResolvedValue({ kind: 'cancelled' });
 
     const outcome = await confirmFirebaseSignIn({ method: 'google' });
 
     expect(outcome).toEqual({ kind: 'cancelled' });
-    expect(mockPromptAsync).not.toHaveBeenCalled();
-    expect(mockExchangeCodeAsync).not.toHaveBeenCalled();
   });
 });
 
@@ -309,7 +237,7 @@ describe('confirmFirebaseSignIn with Google — Firebase refuses the credential'
 });
 
 describe('confirmFirebaseSignIn with Google — an unconfigured build', () => {
-  it('reports not-configured without reaching the boundary or the browser', async () => {
+  it('reports not-configured without reaching the boundary', async () => {
     mockIsNativeGoogleConfigured.mockReturnValue(false);
 
     const outcome = await confirmFirebaseSignIn({ method: 'google' });
@@ -320,7 +248,6 @@ describe('confirmFirebaseSignIn with Google — an unconfigured build', () => {
       message: GOOGLE_NOT_CONFIGURED,
     });
     expect(mockNativeSignInWithGoogle).not.toHaveBeenCalled();
-    expect(mockPromptAsync).not.toHaveBeenCalled();
   });
 
   // ONE PREDICATE, SO ONE CASE. The browser era had a second case here — "Firebase itself
@@ -331,37 +258,19 @@ describe('confirmFirebaseSignIn with Google — an unconfigured build', () => {
 });
 
 // ---------------------------------------------------------------------------
-// The redirect URI — the value that must be registered with Google
-// ---------------------------------------------------------------------------
-
-describe('googleRedirectUri', () => {
-  it('uses the native custom-scheme redirect, not the app scheme (Phase 32I-N)', () => {
-    expect(googleRedirectUri()).toBe(REDIRECT_URI);
-    expect(mockMakeRedirectUri).toHaveBeenCalledWith({ native: REDIRECT_URI });
-  });
-
-  it('is the reverse-DNS single-slash form Google requires for Android', () => {
-    // The previous value failed Google's documented custom-scheme rules twice over:
-    // `inventoryai` has no period, and `//` is a double slash. Both are asserted
-    // here so a regression cannot pass unnoticed.
-    expect(REDIRECT_URI).toBe('com.inventoryai.app:/oauthredirect');
-    expect(REDIRECT_URI).toContain('.');
-    expect(REDIRECT_URI).not.toBe('inventoryai://oauthredirect');
-    expect(REDIRECT_URI).not.toContain('://');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// PKCE fails closed (Phase 32I-N, finding I-1) — RETIRED IN PHASE D
+// The redirect URI and the PKCE fail-closed property — BOTH RETIRED
 // ---------------------------------------------------------------------------
 //
-// This block drove `acquireGoogleIdToken` through `confirmFirebaseSignIn` and asserted that
-// a missing or empty `code_verifier` stopped the token-endpoint call before it was made.
-// Phase D moved the confirmation to the native library, so that helper has no caller and
-// the property has nothing reachable left to assert against — a test of it now would be a
-// test of nothing. The helper is retained by owner decision so Phase F can remove the whole
-// browser mechanism at once, and the finding it encoded is recorded in the Phase D report.
+// Phase F1 removed `googleRedirectUri()` together with the browser helper that was its
+// only caller, so the two blocks that lived here are gone rather than skipped:
 //
-// What survives from the finding is structural: the helper still fails CLOSED in source, and
-// it is unreachable from the app, so no empty `code_verifier` can be produced by any path a
-// user can take.
+//   • `describe('googleRedirectUri')` pinned the value that had to be registered with
+//     Google and asserted `makeRedirectUri` was called with it. There is no redirect URI
+//     for this build any more — native Google Sign-In does not use one — so there is
+//     nothing to register and no value to assert.
+//
+//   • The PKCE "fails closed" block (Phase 32I-N, finding I-1) was retired in Phase D,
+//     when the confirmation moved to the native library. The finding it encoded is
+//     recorded in the Phase D report.
+//
+// The structural claim that replaced them lives in `phaseF1-retired-dependency-guard.test.ts`.

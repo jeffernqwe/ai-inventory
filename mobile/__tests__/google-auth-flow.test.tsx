@@ -47,7 +47,7 @@ jest.mock('../lib/firebase-auth', () => ({
 }));
 
 const mockIsFirebaseConfigured = jest.fn(() => true);
-jest.mock('../lib/firebase', () => ({
+jest.mock('../lib/config', () => ({
   isFirebaseConfigured: () => mockIsFirebaseConfigured(),
 }));
 

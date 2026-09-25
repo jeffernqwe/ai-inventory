@@ -14,10 +14,10 @@
  * PHASE C moved Google SIGN-IN to the same boundary. PHASE D moves the last two
  * operations — the disconnect CONFIRMATION's password and Google methods — so that
  * every authentication this app performs now runs natively, and this module no longer
- * imports the JavaScript SDK at all. That absence is the phase's deliverable: it is
- * what makes Phase F able to remove `firebase`, `expo-auth-session` and the browser
- * helper below. Nothing about the outcome unions, the codes, the messages or the
- * unlink policy moved with it.
+ * imports the JavaScript SDK at all. That absence was the phase's deliverable, and
+ * PHASE F1 COLLECTED IT: `firebase`, `lib/firebase.ts`, `expo-auth-session` and the
+ * browser helper are now removed rather than merely unused. Nothing about the outcome
+ * unions, the codes, the messages or the unlink policy moved with either change.
  *
  * WHAT DID NOT CHANGE, AND IS THE POINT OF THE PHASE: the exported names, the outcome
  * unions, the two fallback codes, the message table, the registration/adoption policy
@@ -78,18 +78,14 @@
 
 // THERE IS DELIBERATELY NO `import … from 'firebase/auth'` HERE ANY MORE (Phase D).
 // Every operation in this module authenticates through `lib/firebase-native.ts`, and
-// the absence of that import is the phase's central fact rather than an omission. The
-// package itself, `lib/firebase.ts` and the browser helper below all REMAIN for Phase
-// F, which is the phase that removes them; `lib/firebase.ts` is still imported by
-// `lib/firebase-native.ts` for the configuration GATE, so it is not orphaned by this.
-import {
-  AuthRequest,
-  ResponseType,
-  exchangeCodeAsync,
-  makeRedirectUri,
-} from 'expo-auth-session';
-
-import { googleClientId } from './config';
+// the absence of that import is the phase's central fact rather than an omission.
+//
+// PHASE F1 REMOVED THE LAST ONE. The browser authorization-code + PKCE helper
+// (`acquireGoogleIdToken`), its Google discovery constants, `googleRedirectUri()` and
+// this module's `expo-auth-session` import are all gone, together with
+// `lib/firebase.ts` and the `firebase` package. This module now imports no Firebase
+// SDK and no browser SDK at all, and `lib/config.ts` is the only configuration module
+// either boundary reaches.
 import {
   isNativeFirebaseConfigured,
   isNativeGoogleConfigured,
@@ -405,7 +401,7 @@ export async function currentFirebaseIdToken(): Promise<string | null> {
 }
 
 // ---------------------------------------------------------------------------
-// Google Sign-In (Phase 32I) — Authorization Code + PKCE
+// Google Sign-In (Phase 32I) — native consent since Phase C
 // ---------------------------------------------------------------------------
 //
 // THIS IS THE SAME SHAPE AS THE EMAIL/PASSWORD OPERATIONS ABOVE: it ends by
@@ -414,34 +410,16 @@ export async function currentFirebaseIdToken(): Promise<string | null> {
 // exists or is needed, because the exchange is UID-authoritative and never asks
 // which provider minted the identity.
 //
-// AUTHORIZATION CODE + PKCE, NOT THE IMPLICIT FLOW (owner decision, Phase 32I).
-// The authorization code is exchanged at Google's token endpoint for a token
-// response that carries the Google `id_token`; the code itself is never a
-// Firebase ID token, and nothing here treats it as one. PKCE is what makes the
-// exchange safe for a public client, and `AuthRequest` defaults to it — the
-// `usePKCE: true` below is written out rather than relied on so the decision is
-// visible.
+// THE CONSENT SHEET IS NATIVE, AND THE BROWSER ROUND-TRIP IS GONE (Phase C, Phase F1).
+// `lib/firebase-native.ts` opens Google's own sheet and wraps the returned `id_token`
+// with `GoogleAuthProvider.credential()` + `signInWithCredential()`, which is what
+// mints the *Firebase* ID token this module returns. The authorization-code + PKCE
+// round-trip through the system browser — and the `redirectUri` it needed — was
+// retired in Phase F1, so there is no redirect URI to register and no
+// `expo-auth-session` import left in this module.
 //
 // THE GOOGLE ID TOKEN IS A CREDENTIAL FOR FIREBASE, NOT FOR INVENTORY AI. It is
-// handed to `GoogleAuthProvider.credential()` and then to `signInWithCredential()`,
-// which is what mints the *Firebase* ID token this module returns. The Google
-// token itself is never returned, logged, or stored.
-//
-// BOTH HALVES OF THE OAuth EXCHANGE USE THE SAME `clientId` AND `redirectUri`,
-// because Google rejects a token request whose redirect does not match the
-// authorization request's. They are computed once per call and passed to both.
-
-/**
- * Google's OIDC endpoints. These are Google's published, stable endpoints — the
- * same pair `expo-auth-session/providers/google` hardcodes — and are not project
- * configuration.
- */
-const GOOGLE_DISCOVERY = {
-  authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
-  tokenEndpoint: 'https://oauth2.googleapis.com/token',
-} as const;
-
-const GOOGLE_SCOPES = ['openid', 'email', 'profile'];
+// wrapped into a Firebase credential and is never returned, logged, or stored here.
 
 const GOOGLE_NOT_CONFIGURED_MESSAGE =
   'Google sign-in is not configured for this build. Contact your administrator.';
@@ -479,36 +457,6 @@ export type GoogleSignInOutcome =
   | { kind: 'failure'; code: string | null; message: string };
 
 /**
- * The redirect URI this build will use for the Google OAuth round-trip.
- *
- * Exported so it can be asserted and reported: the value must be registered on the
- * Google OAuth client, and a value nobody can read is a value nobody can register.
- *
- * Phase 32I-N moved this to the NATIVE form so the value can satisfy Google's
- * custom-scheme rules. Google documents the shape as `com.example.app:redirect_uri_path`
- * — reverse-DNS scheme, then a SINGLE slash, then the path — and requires the scheme
- * to contain a period. The previous value, `inventoryai://oauthredirect`, satisfied
- * none of that (no period, a double slash) and was registrable on no client type.
- *
- * `com.inventoryai.app` is the app's own Android package / iOS bundle identifier
- * (app.json), added to `expo.scheme` as a SECOND scheme. `inventoryai` is retained
- * because the password-reset deep link `inventoryai://reset-password` uses it;
- * adding a scheme is additive, so the two coexist.
- *
- * WHY `native` IS ACTUALLY HONOURED HERE — including in a development build:
- * expo-auth-session returns the `native` value verbatim only when
- * `Constants.executionEnvironment` is `Standalone` or `Bare`. The published
- * expo-constants native service hardcodes `"bare"` (Android ConstantsService.kt,
- * iOS EXConstantsService.m), so every CNG/EAS build — development, preview and
- * standalone alike — takes the `native` branch. Only Expo Go reports `storeClient`
- * and therefore ignores `native`, resolving to an `exp://…` URL; that is one more
- * reason Expo Go is not an acceptance environment for this flow.
- */
-export function googleRedirectUri(): string {
-  return makeRedirectUri({ native: 'com.inventoryai.app:/oauthredirect' });
-}
-
-/**
  * Signs in with Google. Never throws: every outcome is a value.
  *
  * PHASE C MOVED THIS OPERATION TO THE NATIVE SDK, and the outcome contract did not
@@ -536,10 +484,12 @@ export function googleRedirectUri(): string {
  * the email flow uses, so a native or Firebase fault surfaces as safe copy and its
  * code is kept for the operator but never shown.
  *
- * THE BROWSER FLOW IS STILL HERE, ONE FUNCTION BELOW. `acquireGoogleIdToken` and
- * the Phase 32I discovery constants now serve ONLY `confirmFirebaseSignIn`'s `google`
- * method — the disconnect confirmation — which is Phase D/E work. Nothing was
- * deleted, so the two implementations coexist for one phase by owner decision.
+ * THE BROWSER FLOW IS NO LONGER HERE (Phase F1). Until then this module also carried
+ * `acquireGoogleIdToken`, the authorization-code + PKCE helper Phase D left
+ * unreferenced; it, its Google discovery constants and `googleRedirectUri()` were
+ * removed together with `lib/firebase.ts` and the `firebase` package. Every Google
+ * operation — sign-in and the disconnect confirmation alike — has run through the
+ * native library since Phases C and D, so no caller was lost.
  */
 export async function signInWithGoogle(): Promise<GoogleSignInOutcome> {
   if (!isNativeGoogleConfigured()) {
@@ -562,107 +512,21 @@ export async function signInWithGoogle(): Promise<GoogleSignInOutcome> {
 
 /**
  * ────────────────────────────────────────────────────────────────────────────
- * PHASE F REMOVAL — KEPT DELIBERATELY, AND UNREFERENCED SINCE PHASE D.
+ * PHASE F1 — REMOVED.
  *
- * Phase D moved the Google CONFIRMATION to the native library, so nothing calls this
- * helper any more. It is retained ON PURPOSE, by owner decision: removing the
- * JavaScript SDK and `expo-auth-session` is Phase F's work, and deleting the whole
- * browser mechanism there — in one reviewable change — keeps Phase D a one-commit
- * rollback. The paragraphs below describe what it DID; the caller they name (the
- * confirmation's Google method) no longer exists, and the browser redirect it depends
- * on is why `app/+native-intent.ts` is still needed until Phase F.
+ * `acquireGoogleIdToken` (the authorization-code + PKCE helper), its Google discovery
+ * constants, `googleRedirectUri()` and this module's `expo-auth-session` import were
+ * deleted here, together with `lib/firebase.ts` and the `firebase` package. Since
+ * Phase C no Google operation had used them: sign-in and the disconnect confirmation
+ * both run through `lib/firebase-native.ts`. They were kept through Phases D/E only so
+ * that this removal could be one reviewable change, and owner decision G-2 accepts that
+ * git history is now the rollback mechanism.
+ *
+ * The PKCE fail-closed finding they encoded (Phase 32I-N, I-1) is recorded in the
+ * Phase D report. There is no browser flow left for it to apply to, and no redirect
+ * URI to register with Google for this build.
  * ────────────────────────────────────────────────────────────────────────────
- *
- * Steps 1-3 of the Google flow: consent in the system browser, then the code +
- * PKCE verifier swapped at Google's token endpoint for Google's own `id_token`.
- *
- * RETURNS GOOGLE'S TOKEN, NOT FIREBASE'S. Authenticating with Firebase was the
- * caller's step (`signInWithCredential`), which is what let this helper serve
- * both the sign-in path and the Phase 32L-B confirmation path without either one
- * owning the other's semantics.
- *
- * NEVER THROWS. Every rejection — a thrown `AuthRequest`, a Google `error`
- * result, a missing code, a missing PKCE verifier, a token-endpoint failure — is
- * an outcome, so a caller has one shape to branch on. The PKCE check still fails
- * CLOSED exactly as it did before: no verifier means no token-endpoint call.
- *
- * The suppression below is DELIBERATE AND LOCAL, and it is part of the Phase F marker
- * rather than a workaround: Phase D gave this helper no caller, owner decision 1 keeps it
- * anyway, and a later change that gives it a caller again removes the warning with it.
  */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- PHASE F REMOVAL (Phase D: intentionally unreferenced)
-async function acquireGoogleIdToken(): Promise<GoogleIdTokenOutcome> {
-  try {
-    const clientId = googleClientId();
-    const redirectUri = googleRedirectUri();
-
-    const request = new AuthRequest({
-      clientId,
-      scopes: GOOGLE_SCOPES,
-      redirectUri,
-      responseType: ResponseType.Code,
-      usePKCE: true,
-    });
-
-    const result = await request.promptAsync(GOOGLE_DISCOVERY);
-
-    if (result.type === 'cancel' || result.type === 'dismiss') {
-      return { kind: 'cancelled' };
-    }
-    if (result.type === 'error') {
-      return {
-        kind: 'failure',
-        code: result.errorCode ?? 'google/oauth-error',
-        message: GOOGLE_FAILED_MESSAGE,
-      };
-    }
-    if (result.type !== 'success') {
-      return { kind: 'failure', code: `google/${result.type}`, message: GOOGLE_FAILED_MESSAGE };
-    }
-
-    const code = result.params.code;
-    if (!code) {
-      return { kind: 'failure', code: 'google/missing-code', message: GOOGLE_FAILED_MESSAGE };
-    }
-
-    // PKCE FAILS CLOSED (Phase 32I-N, finding I-1). `usePKCE: true` above is what
-    // makes the library mint the verifier, so in a correctly built request it is
-    // present; if it is not, the exchange must NOT be attempted. The previous
-    // `request.codeVerifier ?? ''` sent an EMPTY `code_verifier` — a request that
-    // Google either rejects outright or, worse, one that could be honoured without
-    // the proof PKCE exists to provide. No verifier therefore means no token-endpoint
-    // call at all, reported through this module's ordinary failure outcome rather
-    // than a new error architecture. The code names the missing input, never a value.
-    const codeVerifier = request.codeVerifier;
-    if (!codeVerifier) {
-      return {
-        kind: 'failure',
-        code: 'google/missing-code-verifier',
-        message: GOOGLE_FAILED_MESSAGE,
-      };
-    }
-
-    const tokenResponse = await exchangeCodeAsync(
-      {
-        clientId,
-        code,
-        redirectUri,
-        extraParams: { code_verifier: codeVerifier },
-      },
-      { tokenEndpoint: GOOGLE_DISCOVERY.tokenEndpoint }
-    );
-
-    const googleIdToken = tokenResponse.idToken;
-    if (!googleIdToken) {
-      return { kind: 'failure', code: 'google/missing-id-token', message: GOOGLE_FAILED_MESSAGE };
-    }
-
-    return { kind: 'idToken', idToken: googleIdToken };
-  } catch (err) {
-    const code = errorCode(err);
-    return { kind: 'failure', code, message: describeFirebaseFailure(code, GOOGLE_FAILED_MESSAGE) };
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Confirm sign-in (Phase 32L-B)
@@ -727,12 +591,6 @@ export type ConfirmSignInOutcome =
   | { kind: 'idToken'; idToken: string }
   | { kind: 'cancelled' }
   | { kind: 'wrong-method' }
-  | { kind: 'failure'; code: string | null; message: string };
-
-/** Google's own token, or why it could not be obtained. Internal to this module. */
-type GoogleIdTokenOutcome =
-  | { kind: 'idToken'; idToken: string }
-  | { kind: 'cancelled' }
   | { kind: 'failure'; code: string | null; message: string };
 
 /**

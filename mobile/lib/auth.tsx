@@ -6,7 +6,7 @@ import * as SecureStore from 'expo-secure-store';
 import * as api from './api';
 import type { ApiResponse, RegisterPayload } from './api';
 import { ApiError, setSessionLostHandler } from './client';
-import { isFirebaseConfigured } from './firebase';
+import { isFirebaseConfigured } from './config';
 import {
   FirebaseAuthError,
   confirmFirebaseSignIn as firebaseConfirmSignIn,

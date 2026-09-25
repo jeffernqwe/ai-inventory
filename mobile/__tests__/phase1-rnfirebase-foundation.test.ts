@@ -91,7 +91,7 @@ jest.mock('@react-native-firebase/auth', () => {
 /** The one gate both boundaries share; `lib/firebase.ts` owns the real one. */
 const mockIsFirebaseConfigured = jest.fn(() => false);
 
-jest.mock('../lib/firebase', () => ({
+jest.mock('../lib/config', () => ({
   isFirebaseConfigured: mockIsFirebaseConfigured,
 }));
 
@@ -227,7 +227,12 @@ describe('the native boundary calls no authentication verb', () => {
   it('consults the shared gate before either native package is loaded', () => {
     const gate = code.indexOf('if (!isNativeFirebaseConfigured())');
     const firstLoad = code.indexOf("require('@react-native-firebase/app')");
-    expect(source).toContain("from './firebase'");
+    // PHASE F1 MOVED THIS IMPORT. The gate used to be read from the JS SDK boundary
+    // (`./firebase`), which is why a native module documented a dependency on the module
+    // Phase F removed. It now comes straight from `./config`, where `isFirebaseConfigured()`
+    // is defined and which imports no SDK at all — so the boundary no longer drags the
+    // retired package into its bundle graph just to ask a boolean question.
+    expect(source).toContain("from './config'");
     expect(gate).toBeGreaterThan(-1);
     expect(firstLoad).toBeGreaterThan(gate);
   });
@@ -442,12 +447,13 @@ describe('the frozen Phase 1 dependency versions', () => {
     expect(dependencies['@react-native-google-signin/google-signin']).toBe('16.1.5');
   });
 
-  it('still installs the Firebase JS SDK, which Phase B left in place', () => {
-    // Phase B migrated email/password to the native SDK, so the original wording
-    // ("which every shipped auth path still uses") stopped being true and was
-    // corrected rather than left to mislead. The JS SDK remains INSTALLED because
-    // Google sign-in (32I) and the disconnect confirmation (32L-B) still run through
-    // it, and removing it is Phase F work the owner has not authorised.
-    expect(dependencies.firebase).toBeDefined();
+  it('no longer installs the Firebase JS SDK, which Phase F1 removed', () => {
+    // Phase B migrated email/password to the native SDK, Phase C moved Google sign-in and
+    // Phase D the disconnect confirmation, so by Phase F1 nothing in the app reached the
+    // JS SDK at all. Phase F1 then removed the package, `lib/firebase.ts` and the browser
+    // OAuth path together (owner decision G-2 accepts that git history is now the rollback
+    // mechanism). This case is the assertion that it does not come back, and it is the
+    // mirror of the structural guard in `phaseF1-retired-dependency-guard.test.ts`.
+    expect(dependencies.firebase).toBeUndefined();
   });
 });

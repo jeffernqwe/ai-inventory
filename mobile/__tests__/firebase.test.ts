@@ -349,12 +349,18 @@ describe('source guards', () => {
     return [...source.matchAll(/process\.env\.([A-Z0-9_]+)/g)].map((m) => m[1]!);
   }
 
-  it('references only the four approved Firebase variables', () => {
+  it('references only the approved Firebase, Google and API variables', () => {
     const names = [...new Set(envNames(bothCode))].sort();
     // `EXPO_PUBLIC_API_URL` is the pre-existing backend URL, legitimately read
-    // from `lib/config.ts`; the guard is scoped to the Firebase namespace.
+    // from `lib/config.ts`; the guard is scoped to the Firebase namespace. Phase
+    // 32I adds the three Google OAuth client IDs, which are CLIENT configuration
+    // (never secrets) read from `lib/config.ts` by the same longhand rule. The
+    // list stays exhaustive: any OTHER `EXPO_PUBLIC_` read still fails here.
     expect(names.filter((n) => !n.startsWith('EXPO_PUBLIC_FIREBASE_'))).toEqual([
       'EXPO_PUBLIC_API_URL',
+      'EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID',
+      'EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID',
+      'EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID',
     ]);
     expect(names.filter((n) => n.startsWith('EXPO_PUBLIC_FIREBASE_'))).toEqual(
       [...FIREBASE_ENV_KEYS].sort(),

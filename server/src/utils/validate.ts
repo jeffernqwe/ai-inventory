@@ -322,6 +322,70 @@ export function validateFirebaseRegister(body: Body) {
   return { problems, idToken: idToken.value, businessName: businessName.value, name: name.value };
 }
 
+/**
+ * Identity-link payload (Phase 32H). Reads `idToken` and NOTHING else.
+ *
+ * This is the strictest of the three Firebase payloads, and the strictness is the
+ * point. The caller here IS authenticated, so unlike the exchange there is a real
+ * temptation to let the body say which account to link to, or to name the identity
+ * being attached. Neither is read:
+ *
+ *   - the ACCOUNT is `req.user.id`, so there is no `userId` field to forward;
+ *   - the IDENTITY is the uid of the token `verifyFirebaseIdToken` returns, so
+ *     there is no `firebaseUid` field to forward;
+ *   - `businessId`, `role` and `status` are not read on any path in this phase, so
+ *     a body carrying them is inert rather than rejected.
+ *
+ * Returning only `idToken` is what makes those keys inert by construction: the
+ * handler has no variable holding a client-supplied identity, tenant or role, so
+ * there is nothing to pass by mistake and no check that could be removed.
+ */
+export function validateFirebaseLink(body: Body) {
+  const problems = [];
+  const idToken = requiredString(body?.idToken, 'idToken', MAX_ID_TOKEN);
+  problems.push(...idToken.problems);
+  return { problems, idToken: idToken.value };
+}
+
+/**
+ * Identity-unlink payload (Phase 32L). Reads `idToken` and `newPassword`.
+ *
+ * `newPassword` is the whole of Policy B: an account may stop authenticating
+ * through Firebase only by establishing a local password in the same transition,
+ * so the new credential is a REQUIRED field rather than an optional one. It is
+ * held to the shared password rules through `passwordProblems` — the same 8–72
+ * bound `validateChangePassword` and `validateResetPassword` apply — and its
+ * problems are re-labelled `newPassword`, exactly as both of those do, so a
+ * client can anchor the error on the right input.
+ *
+ * `confirmPassword` is deliberately NOT read. Confirmation is a client-side UX
+ * concern on the reset screen, where a mistyped confirmation must not spend a
+ * token; here the caller is already authenticated and a mistyped password costs
+ * them nothing but a second attempt.
+ *
+ * Every other key is IGNORED rather than rejected, matching `validateFirebaseLink`:
+ * `firebaseUid`, `userId`, `businessId`, `role` and `status` are inert because the
+ * returned object has no field to carry them — the account is `req.user.id` and
+ * the identity is the verified token's uid. There is nothing to pass by mistake
+ * and no check that could be removed.
+ *
+ * The token's SHAPE is still not validated. `requiredString` bounds its length
+ * only; what a real token looks like is the verifier's decision, and a 400 here
+ * would imply the server knows.
+ */
+export function validateFirebaseUnlink(body: Body) {
+  const problems = [];
+
+  const idToken = requiredString(body?.idToken, 'idToken', MAX_ID_TOKEN);
+  problems.push(...idToken.problems);
+
+  problems.push(
+    ...passwordProblems(body?.newPassword).map((p) => ({ ...p, field: 'newPassword' }))
+  );
+
+  return { problems, idToken: idToken.value, newPassword: body?.newPassword };
+}
+
 // ---------------------------------------------------------------------------
 // User management (Phase 14A)
 // ---------------------------------------------------------------------------

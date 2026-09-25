@@ -59,6 +59,8 @@ const PURE_DB = [
   'phase20-filter-contract.test.mjs', // list filter contract (invalid status/supplierId/blank q rejected, valid filters still narrow)
   'phase24-runtime-authorization-matrix.test.mjs', // runtime role x real-route matrix + role-change effect on an existing JWT
   'phase26a-session-lifecycle.test.mjs', // server-side sessions: mandatory jti, revocation, per-device logout, sign out everywhere
+  'phase32e-firebase-legacy-guard.test.mjs', // the legacy password guard: a Firebase-linked account is refused on /api/auth/login, in the approved order, with no session and no lockout
+  'phase32k-firebase-password-boundary.test.mjs', // the Firebase password boundary (change-password + forgot/reset refused for a Firebase-owned account, silently on the recovery path) and the timing equalizer that must never be a credential
 ];
 const MIXED = [
   'phase06-ai-provider.test.mjs',     // unit: provider selection; db: loop + mapping
@@ -80,6 +82,8 @@ const MIXED = [
   'phase26b-password-recovery-http.test.mjs', // unit: recovery validators + limiter 429 shape/keying; db: forgot/reset over the real app incl. the mail-failure enumeration guard
   'phase32b-firebase-admin.test.mjs', // unit: Firebase config parsing, error leak boundary, ID-token narrowing via the seam, admin-app lifecycle, production-config integration; db: User firebaseUid/emailVerified schema + the sparse unique index against real MongoDB
   'phase32c-firebase-exchange.test.mjs', // unit: exchange/registration validators + limiter keying and the absent skipSuccessfulRequests; db: POST /api/auth/firebase/exchange + /register over the real app (session shape, JWT sub/jti, REGISTRATION_REQUIRED, ACCOUNT_DISABLED, inactive business, body-identity injection ignored, registration + orphan retry)
+  'phase32h-firebase-linking.test.mjs', // unit: the link payload returns only {problems, idToken} and a planted identity/tenant/role is inert; db: POST /api/auth/firebase/link over the real app (CASE A-D, conflict indistinguishability, email is not a join key, unauthenticated 401, 400-not-401 on a bad Firebase token, 503 unconfigured, 32E guard intact, race outcomes)
+  'phase32l-firebase-unlink.test.mjs', // unit: unlink validator shape + the auth_time freshness helper (fail-closed, window boundary, iat is not freshness); db: POST /api/auth/firebase/unlink over the real app (Policy B transition, last-method invariant, identity mismatch/not-linked, recency, R-3 + R-4 reset-token race both orderings, session revocation, audit hygiene, authMethods, conditional-write races)
 ];
 
 const FILE_LISTS = {

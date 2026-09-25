@@ -330,6 +330,19 @@ committed.
   and add the matching `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, or
   `AGENTROUTER_API_KEY` + `AGENTROUTER_BASE_URL`. AI credentials stay server-side —
   they are never sent to the mobile app.
+- **Firebase Authentication (Phases 32B–32E):** the server verifies Firebase ID tokens and
+  needs a service account, supplied either as `FIREBASE_PROJECT_ID`,
+  `FIREBASE_CLIENT_EMAIL` and `FIREBASE_PRIVATE_KEY`, or — preferred, because it removes
+  the newline-mangling failure class — as a single base64-encoded
+  `FIREBASE_SERVICE_ACCOUNT_JSON`. These are **server-side only** and are never sent to
+  the mobile app. Production fails fast if some but not all are set; in development the
+  server boots without them, and the Firebase routes answer their own not-configured
+  error. The **names only** are listed in `server/.env.example`. The mobile app holds no
+  Firebase secret; under the M2 path it uses only the public `EXPO_PUBLIC_FIREBASE_*`
+  client configuration (apiKey, authDomain, projectId, appId), which is not a credential
+  and cannot authorize anything on its own — the API accepts Inventory AI tokens only.
+- **Password recovery / mail (Phases 26B, 28):** see the Phase 26B and 28 sections below and
+  the mail block in `server/.env.example`.
 
 ---
 
@@ -700,3 +713,198 @@ Phase 07 (testing + production hardening) and Phase 08 (owner-directed hardening
   nothing in this phase is runtime-verified:** the evidence is the local toolchain (jest 11 suites / 88
   tests, `tsc --noEmit`, `eslint .`, `expo-doctor` 21/21) plus config introspection. **F-1 (PDF sharing)
   is not fixed and not closed**, and **Phase 30B has not started**.
+- **Phase 32A — Firebase Authentication Architecture & Console Runbook:** documentation only. The
+  design authority is `docs/superpowers/specs/2026-09-18-firebase-auth-design.md`. It records the
+  selected architecture (**Option B**: Firebase is the identity provider, while the existing MongoDB
+  `User` + JWT + server-side `Session` remains the application's session layer), the non-negotiable
+  invariants, the identity mapping, the migration strategy, the two UNVERIFIED gates, and the open
+  owner decisions. **No implementation was authorised by it.**
+- **Phase 32B — Firebase Admin SDK Foundation (server verify boundary):** the Admin SDK dependency,
+  `config/firebase.ts`, the ID-token verifier wrapper, environment validation with production
+  fail-fast, the `.env.example` names, and three **additive** `users` fields — `firebaseUid` (String,
+  **`sparse: true`** unique), `emailVerified` (Boolean, persisted but **not enforced**) and
+  `passwordHash.required: false`. **No routes.** Sparse is mandatory rather than decorative: without
+  it the index cannot be built once two users lack the field.
+- **Phase 32C — Firebase Authentication Session Exchange:** two **public** routes,
+  `POST /api/auth/firebase/exchange` and `POST /api/auth/firebase/register`, their service and rate
+  limiters. The Firebase ID token is exchanged **once** for an ordinary Inventory AI access token and
+  **never becomes the API bearer credential**. A verified identity with no MongoDB user answers
+  `REGISTRATION_REQUIRED`; an email that already belongs to a MongoDB user answers `409 EMAIL_IN_USE`
+  — **account linking is refused, not implemented**. `requireAuth`, RBAC and the legacy path are
+  unchanged.
+- **Phase 32D — Firebase JS SDK Boundary (mobile):** `mobile/lib/firebase.ts` only — the SDK version,
+  initialization order, the `inMemoryPersistence` decision and the `EXPO_PUBLIC_FIREBASE_*` gate that
+  leaves the SDK uninitialized so an unconfigured build behaves as it did before Firebase existed.
+  Infrastructure only: no screen reached Firebase, no API call was made, no authentication state was
+  touched.
+- **Phase 32E — Firebase Email/Password Authentication Flow:** mobile Firebase-first sign-in
+  exchanging its ID token through the 32C endpoint, with the legacy password route reached **only**
+  for the two codes that mean "no Firebase identity answers to these credentials"
+  (`auth/invalid-credential`, `auth/user-not-found`) — **never** for a Firebase or backend failure, so
+  an outage cannot become a downgrade. Adds the server-side `firebaseUid` guard refusing the legacy
+  route with `403 FIREBASE_SIGN_IN_REQUIRED`, placed after the password comparison and the status
+  check (so it is not an enumeration oracle) and before the session write (so no half-login is left
+  behind). **Google Sign-In NOT implemented; account linking and migration NOT implemented.**
+- **Phase 32F — Firebase Multi-Provider Authentication Architecture Decision Record & Documentation
+  Close-out:** **documentation only** — no production code, test, dependency, schema, route,
+  configuration, payment or authentication behaviour changed, and no EAS build created. It converts the
+  multi-provider architecture from open questions into **recorded owner decisions**, and reconciles
+  the documentation drift found during the architecture investigation. **Eleven decisions are
+  RESOLVED**: Firebase is the identity provider while MongoDB stays authoritative for account,
+  business, role, status, permission, billing, session and audit state; the security boundary is
+  server-controlled; a Firebase ID token is exchanged once and never becomes the bearer credential;
+  **a provider identity is never automatically linked to an existing account because the email
+  matches — email is not an account-linking join key**, since authenticating a provider identity is not
+  proof of ownership of an existing account; provider linking is an explicit operation by an
+  already-authenticated user whose provider UID comes from the verified credential and never from a
+  request body; linking **during a sign-in attempt** requires an explicit ownership/recovery proof
+  flow; the exchange remains **UID-authoritative**; the Phase 32E password-authority guard is retained
+  unchanged; sessions remain **provider-neutral** with no provider field on the session model;
+  Facebook identities without a usable email require explicit email completion rather than an invented
+  or UID-derived address; and subscription ownership is **business-level**, never Firebase-user-level.
+  The owner/ADMIN/MANAGER/STAFF creation hierarchy is documented with **invitation-based onboarding
+  recorded as future implementation** (none exists). Open items are kept explicitly separate:
+  unlink/last-method protection, the linked-account `change-password`/reset disposition,
+  `emailVerified` enforcement, M1 vs M2, the Facebook missing-email flow, the unhealable-orphan remedy
+  and credential-file storage all remain **OPEN**. **Google Sign-In, Facebook Login, Apple Sign-In,
+  account linking, account unlinking and invitations were NOT implemented; Apple remains future scope;
+  no provider SDK was installed; and the first EAS development build remains a prerequisite for
+  validating the mobile provider path.** No historical phase record was rewritten.
+- **Phase 32G — First EAS Development Build / Native Runtime Validation:** **validation only** — no
+  provider was implemented (no Google Sign-In, Facebook Login, Apple Sign-In, account linking or
+  unlinking), no MongoDB schema, authentication server behaviour, payment or billing behaviour was
+  modified, **M1 vs M2 was NOT chosen**, and no provider SDK was installed. **No production or
+  configuration file changed**: the EAS configuration was verified against the project rather than
+  assumed correct, and Phase 30A's foundation turned out to be correct as committed, so the phase's
+  diff is documentation only. A `development` profile Android build was produced (`finished` in
+  12 min 11 s), installed on the emulator and **launched — the app runs outside Expo Go**, proven by
+  Metro serving `expo-router/entry.js` (1,525 modules) into the installed native APK with
+  `topResumedActivity=com.inventoryai.app/.MainActivity`. The signed-out root renders, the auth UI
+  loads, Firebase is never initialized (all four `EXPO_PUBLIC_FIREBASE_*` unset) and does not crash,
+  and **API communication is proven end-to-end**: invalid credentials produced the server's own
+  "Invalid email or password" copy, with the backend logging `POST /api/auth/login → 401`. **No
+  physical device was used and no device test is claimed** — all evidence is from the Android
+  **emulator**; **iOS was neither built nor run** (no iOS build exists and the host is Windows); the
+  `preview` and `production` profiles were not exercised; and nothing beyond the signed-out root was
+  navigated. **The build history is corrected:** EAS holds **three** Android builds — two of them
+  predating this phase, including a development build from the Phase 30A commit itself — which
+  supersede the "no EAS build has ever been executed" statements in the Phase 30A and Phase 32F
+  records; Phase 32G is the third build, not the first. **M1 and M2 findings were documented, not
+  chosen:** M1's pipeline is now proven and its plugin auto-discovery confirmed, while M2's redirect
+  capability remains unproven because no redirect was tested. **Phase 32H, 32I and 32J were NOT
+  started** (Phase 32H subsequently shipped — see its entry below; this sentence is the Phase 32G
+  record and is not rewritten).
+- **Phase 32H — Server-Side Account Linking Boundary & Authentication Ownership:** the **server half of
+  linking, and nothing else.** One route, `POST /api/auth/firebase/link`, is added —
+  `requireAuth` + controller, **no permission**, Phase 23's `AUTHENTICATED` bucket — and it is the
+  **only** way a `firebaseUid` is attached to an existing account. It answers one question: *may this
+  authenticated Inventory AI account carry this verified Firebase identity?* **Both sides of the
+  association are server-derived:** the account is `req.user.id`, put there by `requireAuth` from the
+  caller's own session (which *is* the ownership proof), and the identity is the verified token's uid.
+  `validateFirebaseLink` returns only `{ problems, idToken }`, so a body naming `userId`, `businessId`,
+  `firebaseUid`, `role` or `status` is **inert rather than rejected** — the handler holds no
+  client-supplied identity to forward and there is no check that could be deleted. A link writes
+  **exactly two fields**, `firebaseUid` and `emailVerified`, so it can never move an account between
+  businesses or change its role. **Four lifecycle cases:** the same identity on the same account is an
+  idempotent `linked: false` with no write and no audit row; an account that already owns a *different*
+  identity is refused; an identity belonging to *another* account is refused and **never merged,
+  transferred or re-pointed**; an identity belonging to nobody is attached. **The email is never a join
+  key in any of them** — not compared, not used to find an account, not used to resolve a conflict —
+  which is what makes "no automatic linking on an address match" a property of the code's shape rather
+  than of a check someone could delete. CASE B and CASE D share **one `409 FIREBASE_IDENTITY_CONFLICT`**
+  naming no account, tenant, role or Firebase UID, and the conflicting uid **never enters the audit
+  row** (readable by every ADMIN, and in CASE B it may name a person in another tenant) — it goes only
+  to the server-side log. Concurrency is settled by the database: one conditional update guarded on
+  `firebaseUid: null` plus the unique index's E11000 mapped to the same conflict, so two accounts racing
+  for one identity cannot both win. **A rejected Firebase token answers `400`, not `401`**, because the
+  mobile client treats a `401`/`403` on a token-carrying request as session loss — a `401` here would
+  sign a user out over a bad provider credential; the error **code** and the Phase 32E
+  password-authority guard are unchanged. **No schema change, no new dependency, no session-model
+  change** (`firebaseUid` stays unique + sparse; the JWT stays `sub` + `jti`, provider-neutral), **no
+  payment or subscription code touched.** **Google Sign-In, Facebook Login, Apple Sign-In, provider
+  SDKs, OAuth redirect flows, provider buttons, account linking via a provider, unlinking and
+  invitations are NOT implemented** — Firebase's own provider linking is performed by the Firebase
+  **client** SDK, and no fake server-side equivalent was invented. **§15 finding, not changed:**
+  `change-password` and the password reset flow still write an inert hash for a linked account and
+  report success — the linking boundary makes that state reachable for the first time, so **O-2 is
+  escalated from a gate on a future phase to a live defect**, left undecided on purpose. *(**Superseded by
+  Phase 32K — see its entry below.** O-2 was decided and implemented there, and the Phase 32K audit
+  corrected this sentence too: `change-password` does not report success for a Firebase-native account;
+  it was the reset flow that did.)* **§16 finding,
+  not changed:** no unlink capability of any kind, **O-1 still open**, Phase 32L owns it. Verified by a
+  new **25-test** suite (unit + DB-backed) whose every assertion was **proven able to fail** by a
+  seven-mutation pass — including two doubly-enforced guards that only fall when *both* layers are
+  removed. **Phase 32I, 32J and 32L were NOT started.** (Phase 32J subsequently shipped — see its
+  entry below; this sentence is the Phase 32H record and is not rewritten.)
+
+- **Phase 32J — Mobile Firebase Registration Onboarding:** an identity that Firebase has **already
+authenticated** but that owns no Inventory AI account can now finish registration and enter the app,
+reusing the backend that already exists. The exchange answers `403 REGISTRATION_REQUIRED` for exactly
+that identity, so the client now arms `firebaseRegistrationRequired` from that one code — from **both**
+entry points, so Google and email/password converge here — and the login banner's action targets a new
+**`/register-firebase`** route instead of the email/password `/register`. That route is **additive rather
+than a mode of `/register`**, because `/register` collects an email the user has just proved and a
+password that would mint a **second** Firebase identity via `ensureFirebaseAccount`, which the server then
+refuses; the onboarding screen collects exactly what is missing — `businessName` (required) and `name`
+(optional) — and renders **no** email, password or confirmation field. **The credential never travels
+through navigation:** `completeFirebaseRegistration({ businessName, name })` is the entire client input
+surface, the token is read from the Firebase Auth layer inside the context (`currentFirebaseIdToken()`),
+and the server still derives `firebaseUid`/`email`/`emailVerified` from the verified token. **Session
+creation is the existing one, twice over:** `firebase/register → 201` issues no token, so the client calls
+the existing exchange with the same Firebase identity and applies the ordinary Inventory AI JWT with
+`applySession` — **no new endpoint, no second JWT, no new session mechanism, no schema change, and zero
+server files changed.** A half-done attempt is not repeated: a resolved `firebaseRegister` is remembered,
+so a retry after a failed exchange resumes at the exchange rather than creating a second Business and a
+second OWNER, while a refusal leaves the attempt correctable and re-armable. `409 EMAIL_IN_USE` is
+**reported, never linked** (Phase 32H's explicit-session linking is the only route to that), a Firebase UID
+collision shows one fixed sentence and never the thrown server text, and a missing Firebase user makes no
+request at all — the cold-start limitation is stated plainly rather than papered over, since the identity
+lives in memory and cannot be reconstructed. Verified by **two new suites (24 tests)** whose assertions
+were each **proven able to fail** by a five-mutation pass (all reverted, files byte-identical), the full
+suite at **20 suites / 209 tests**, `tsc` and `eslint` clean — and then by a **real-device run** on the
+development build that observed the whole chain rather than inferring it: `403 REGISTRATION_REQUIRED` →
+`firebase/register 201` → `firebase/exchange 200` → `GET /api/dashboard 200` with a real `userId`, landing
+on the authenticated Home screen with the **same PID** (warm, no restart) and **zero** `Unmatched Route`
+or JS errors in logcat. **iOS remains unverified**, and **O-2 is now reachable in the ordinary course of
+business**: the first Google-registered OWNER is Firebase-native, so `change-password` and the reset flow
+would report success while changing nothing — **left undecided on purpose**. **Phase 32L was NOT
+started.** *(**Resolved by Phase 32K — see its entry below.** The audit there also corrected this
+sentence's second clause: it was the reset flow, not `change-password`, that reported success.)*
+
+- **Phase 32K — Firebase Password Authority Boundary & Timing-Equalizer Credential Fix:** the boundary
+  Phase 32H escalated to a live defect is now true in code — **for every user carrying a `firebaseUid`,
+  Firebase is the sole authentication authority**, so Inventory AI local password operations do not
+  apply. `change-password` is **refused** for such an account (`409 PASSWORD_NOT_APPLICABLE`, placed
+  **before** the current-password comparison and before every effect, so a Firebase-native account and a
+  Firebase-linked one get the *same* answer rather than one being decided by whether an inert hash is
+  still on the document — and `409`, not `401`/`403`, because the mobile client treats those two as
+  session loss and would sign a user out of a valid session). `forgot-password` takes the **silent exit**
+  — one uniform `202`, **no token, no email, no audit row** — because distinguishing such an address
+  would be the account-existence oracle the Phase 26B design refuses to be; the check sits **after** the
+  tenant check so it adds no new timing signal to a path already documented as only **partially
+  mitigated**. `reset-password` refuses with the generic `400 INVALID_RESET_TOKEN` **last, immediately
+  before the write**, so no local credential is ever created for such an account — while
+  `change-password` and the recovery flow still write an inert hash, and the Phase 32E login guard is
+  untouched. **A second defect was found and fixed in the same boundary:** the timing equalizer
+  `bcrypt.hashSync('timing-equalizer-placeholder', 10)` is a **valid hash of a known string**, and the
+  old `user?.passwordHash || DUMMY_HASH` idiom made it the comparison *target* for hashless accounts — so
+  that literal **authenticated** a hashless account and, in `change-password`, **installed a real
+  credential** from it. Both call sites now route through one `verifyPassword`, which still runs the
+  bcrypt work (timing preserved) and **discards the result** when no hash is stored: *no stored hash
+  means no password*. The client learns only a **provider-neutral capability** —
+  `authMethods: { password: boolean }`, derived in one helper and published by **both** `toPublicUser`
+  and `requireAuth`'s `req.user` (so login/exchange and `GET /api/auth/me` cannot disagree) — and the
+  `firebaseUid` behind it is **never** exposed; the Profile screen hides the Change-password control and
+  explains why. **No schema change, no migration, no dependency, no session change, and no retained hash
+  deleted** — the hash is retained and made **inert**, because the unlink / last-auth-method disposition
+  is still open (O-1, Phase 32L). Verified by a new **12-case** server suite
+  (`server/test/phase32k-firebase-password-boundary.test.mjs`) that walks the legacy /
+  Firebase-native / Firebase-linked matrix and **reads the equalizer literal out of the source** rather
+  than restating it (so it cannot pass vacuously), a new mobile suite, and a **seven-mutation pass** in
+  which every new assertion was **proven able to fail** (all reverted, no mutated file left behind):
+  server `npm test` **795 tests / 106 suites**, `test:unit` 336 tests, mobile **21 suites / 213 tests**,
+  `tsc` and `eslint` clean on both. **Two pre-existing suites changed** — `phase26a-session-lifecycle` and
+  `phase32c-firebase-exchange`, which pin the **exact key set** of a user payload — and each now asserts
+  the `firebaseUid`-absent property explicitly. **No runtime verification:** no development build, no
+  device run and no live Firebase project, so every figure is a test result rather than an observation.
+  **Phase 32L was NOT started.**

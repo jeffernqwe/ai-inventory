@@ -115,8 +115,12 @@ type RegisterPayload = {
  * a compromised or misconfigured mapping, which "must never be auto-resolved".
  * Reporting the second as the first would hide exactly the condition an operator
  * needs to see.
+ *
+ * Phase 32H exports it: the linking boundary writes the same `firebaseUid` field
+ * and hits the same E11000 when two accounts race for one identity, so it must
+ * read the collision the same way rather than grow a second interpretation of it.
  */
-function duplicateKeyField(err: unknown): string | null {
+export function duplicateKeyField(err: unknown): string | null {
   const pattern = (err as { keyPattern?: Record<string, unknown> } | null)?.keyPattern;
   if (!pattern || typeof pattern !== 'object') return null;
   return Object.keys(pattern)[0] ?? null;

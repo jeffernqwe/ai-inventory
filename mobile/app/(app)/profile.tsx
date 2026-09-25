@@ -92,12 +92,58 @@ export default function ProfileScreen() {
           style={styles.editName}
           onPress={() => router.push('/sessions')}
         />
-        <Button
-          title="Change password"
-          variant="secondary"
-          style={styles.spaced}
-          onPress={() => router.push('/change-password')}
-        />
+        {/**
+         * Phase 32K — local password management is offered only where the server
+         * says it applies. `authMethods.password` is false for an account whose
+         * credential is held by its sign-in provider: Firebase is the
+         * authentication authority for such an account, so the server refuses a
+         * local password change outright (409 `PASSWORD_NOT_APPLICABLE`) and
+         * showing the control would only lead to that rejection.
+         *
+         * The test is `=== false`, not falsiness, so the historical behaviour is
+         * the default: a user object without the field — an older server, or a
+         * response that predates this phase — still gets the button.
+         *
+         * Nothing here is a security control. The server is the boundary either
+         * way; this only stops the UI from offering an action it knows will fail.
+         */}
+        {user?.authMethods?.password === false ? (
+          <Text style={[styles.securityText, styles.spaced]}>
+            Your password is managed by your sign-in provider, so it can&apos;t be changed here.
+          </Text>
+        ) : (
+          <Button
+            title="Change password"
+            variant="secondary"
+            style={styles.spaced}
+            onPress={() => router.push('/change-password')}
+          />
+        )}
+        {/**
+         * Phase 32L-B — the disconnect entry point, offered only where there is
+         * something to disconnect.
+         *
+         * `authMethods.firebase` is the server's own statement that this account
+         * authenticates through a Firebase identity, so it is the correct gate: it is
+         * true for a Firebase-NATIVE account and for a Firebase-LINKED legacy account
+         * alike, and the app cannot tell those apart — nor should it, since the
+         * server publishes a capability rather than the identity behind it.
+         *
+         * The test is `=== true`, not truthiness, so a user object that predates the
+         * field simply shows no action instead of opening a flow the server would
+         * refuse with 409 `FIREBASE_IDENTITY_NOT_LINKED`.
+         *
+         * Nothing here is a security control: the screen re-checks the same
+         * capability, and the server is the boundary in every case.
+         */}
+        {user?.authMethods?.firebase === true ? (
+          <Button
+            title="Disconnect Firebase"
+            variant="secondary"
+            style={styles.spaced}
+            onPress={() => router.push('/disconnect-firebase')}
+          />
+        ) : null}
       </Card>
 
       <Button title="Refresh account" variant="secondary" style={styles.spaced} onPress={() => refresh()} />

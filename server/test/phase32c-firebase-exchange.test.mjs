@@ -583,10 +583,19 @@ dbSuite('Phase 32C — Firebase exchange and registration over HTTP and a real d
     setFakeFirebaseToken({ uid: id, email: user.email, email_verified: true });
 
     const res = await exchange({ idToken: ID_TOKEN });
+    // Phase 32K adds exactly one key — `authMethods`, the provider-neutral
+    // capability the client needs — and this stays an EXACT allowlist so that
+    // addition had to be made here deliberately rather than slipping through.
+    // The uid itself is still asserted absent by both cases below.
     assert.deepEqual(
       Object.keys(res.json.user).sort(),
-      ['businessId', 'createdAt', 'email', 'id', 'name', 'role', 'status'],
+      ['authMethods', 'businessId', 'createdAt', 'email', 'id', 'name', 'role', 'status'],
       'the public DTO is a strict allowlist and carries no firebaseUid'
+    );
+    assert.equal(
+      res.json.user.authMethods.password,
+      false,
+      'and an identity with a uid manages no local password'
     );
     assert.equal(bodySurface(res.json).includes(id), false, 'nor is the uid leaked');
   });
@@ -1022,11 +1031,23 @@ dbSuite('Phase 32C — Firebase exchange and registration over HTTP and a real d
   // The legacy path, asserted rather than assumed
   // -------------------------------------------------------------------------
 
-  it('27. ★ password login still works, and an account can hold both credentials', async () => {
+  it('27. ★ password login still works, and linking Firebase retires the bcrypt path', async () => {
     // The rollback property (Phase 32A §10): every account that existed before
     // Firebase keeps working. Asserted against the SHIPPED app, with the Firebase
     // fake installed throughout this suite — so a change that made the exchange
     // path interfere with the password path would fail here.
+    //
+    // PHASE 32E REVERSED THE FINAL ASSERTION OF THIS CASE, deliberately and with
+    // owner approval, and this note is left in place so the reversal is visible
+    // rather than discovered. Until 32E, one account could hold both credentials
+    // and both worked — the lazy-migration shape Phase 32A §9.1 describes. 32E's
+    // guard in `loginWithPassword` makes the retained hash stop working the moment
+    // a `firebaseUid` is present, so a Firebase credential cannot be bypassed by a
+    // legacy password that nothing keeps in step with it. Everything ABOVE the
+    // reversal is unchanged, and it is still what proves the password path itself
+    // was not touched: the account registers and signs in with a password normally,
+    // and only stops doing so once it is linked. The full ordering contract lives in
+    // test/phase32e-firebase-legacy-guard.test.mjs.
     const password = 'Password123!';
     const email = uniqueEmail('legacy');
     const registration = await app.api('POST', '/api/auth/register', {
@@ -1040,7 +1061,8 @@ dbSuite('Phase 32C — Firebase exchange and registration over HTTP and a real d
     assert.equal(login.status, 200, 'the password path is untouched');
     assert.ok(decodeAccessToken(login.json.token).jti, 'and still opens a real session');
 
-    // The lazy-migration shape: one account, both credentials, both work.
+    // The lazy-migration shape: one account, both credentials — and since Phase
+    // 32E, only the Firebase one still authenticates it.
     const linkedUid = uid('both');
     await User.updateOne({ _id: registration.json.user.id }, { $set: { firebaseUid: linkedUid } });
     setFakeFirebaseToken({ uid: linkedUid, email, email_verified: true });
@@ -1049,8 +1071,13 @@ dbSuite('Phase 32C — Firebase exchange and registration over HTTP and a real d
     assert.equal(exchanged.status, 200, 'the same account also signs in with Firebase');
     assert.equal(exchanged.json.user.id, registration.json.user.id);
 
+    // Phase 32E: the account is linked, so the password it still holds is refused
+    // here — and refused WITHOUT minting a session, which is what makes the refusal
+    // a security boundary rather than a message.
     const loginAgain = await app.api('POST', '/api/auth/login', { body: { email, password } });
-    assert.equal(loginAgain.status, 200, 'and the password still works afterwards');
+    assert.equal(loginAgain.status, 403, 'a Firebase-linked account no longer accepts a password');
+    assert.equal(loginAgain.json.code, 'FIREBASE_SIGN_IN_REQUIRED');
+    assert.equal(loginAgain.json.token, undefined, 'and no session is handed out');
   });
 
   it('28. ★ a Firebase-only account cannot log in with any password', async () => {

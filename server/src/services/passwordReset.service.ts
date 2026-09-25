@@ -359,6 +359,30 @@ export async function requestPasswordReset({ email }: ResetRequestInput = {}) {
     return;
   }
 
+  // ★ PHASE 32K — a Firebase-owned account has NO local password to recover.
+  //
+  // WHY THIS IS A SILENT RETURN AND NOT AN ERROR. There are two ways to refuse
+  // here and only one of them is safe. Answering a distinguishable code — or any
+  // error at all — for an address that exists would turn this route into the
+  // account-existence oracle the whole design refuses to be, and the fact being
+  // protected ("this account uses a managed sign-in") is itself account state an
+  // unauthenticated caller may not learn. Taking the SAME silent exit as a
+  // DISABLED account or an inactive tenant means the route still answers one
+  // uniform 202, and the caller learns nothing at all.
+  //
+  // WHY IT SITS HERE, after the tenant check and before the token insert. Placed
+  // after the tenant check so a Firebase account performs exactly the database
+  // work a legacy one does right up to the point a token would be created — the
+  // request path is timing-sensitive (see the KNOWN LIMITATION above) and a
+  // refusal that short-circuits earlier would add a signal rather than remove
+  // one. Placed before the token insert because a reset token is a credential,
+  // and this account can never spend one: minting it, mailing it and totalling
+  // it in the ONE-LIVE-TOKEN cleanup would be inventing a fake local credential
+  // and emailing a link that cannot work. It also means the `PASSWORD_RESET_REQUESTED`
+  // audit row below is never written, so the trail does not record a recovery
+  // request that was refused before it began.
+  if (user.firebaseUid) return;
+
   const rawToken = generateResetToken();
   const token = await PasswordResetToken.create({
     userId: user._id,
@@ -481,15 +505,127 @@ export async function resetPassword({ token, newPassword }: ResetPasswordInput =
     throw invalidResetToken();
   }
 
+  // ★ PHASE 32K — the same boundary, seen from the completion side, and
+  // deliberately LAST: it is the final gate before the one write that matters.
+  //
+  // WHY IT IS HERE AT ALL, given the request path above can no longer issue a
+  // token for such an account. Two reasons, and the second is the real one.
+  // First, tokens issued BEFORE this phase may still be unspent, and this route
+  // can be reached with one. Second, and generally: the write below is what
+  // creates the fake local credential, so the guard belongs immediately in front
+  // of it — "which accounts may hold a local password" is a property of this
+  // write, and a request-path check alone would be enforcement by a different
+  // function.
+  //
+  // The token is already SPENT when this throws (`usedAt` was set by the atomic
+  // claim above and nothing unsets it), which is the existing fail-closed rule
+  // rather than a new consequence: a refused completion costs the caller another
+  // link, and the account is left untouched — no hash written, `passwordChangedAt`
+  // not stamped, no session revoked, no PASSWORD_RESET_COMPLETED row. The generic
+  // code hides which of the rejection reasons applied, exactly as the six above
+  // do.
+  if (user.firebaseUid) throw invalidResetToken();
+
   // The assertion is erased and restates what step 1 already proved: reaching
   // this line means `newPasswordProblems` returned nothing, and the only branch
   // that does so for a non-string is the one that reports "password is
   // required". The emitted call is unchanged.
-  user.passwordHash = await bcrypt.hash(newPassword as string, BCRYPT_ROUNDS);
-  // The same `now` the token was stamped with, read once, so `usedAt`,
-  // `passwordChangedAt` and the revocation are coherent.
-  user.passwordChangedAt = now;
-  await user.save();
+  const newPasswordHash = await bcrypt.hash(newPassword as string, BCRYPT_ROUNDS);
+
+  // ★ PHASE 32L R-4 — THE COMPLETION WRITE IS CONDITIONAL, NOT A BLIND SAVE.
+  //
+  // WHAT IT CLOSES. Until Phase 32L this was `user.passwordHash = ...;
+  // user.passwordChangedAt = now; await user.save()` — an unconditional write of
+  // the one field whose previous value is the credential itself. The claim above
+  // binds a token to a USER, but nothing bound it to the CREDENTIAL STATE that
+  // existed when the token was issued, so a token that survived any intervening
+  // credential change could still overwrite the result of it.
+  //
+  // The concrete Phase 32L case, which the 32K guards above do NOT cover because
+  // they are keyed on `firebaseUid` BEING PRESENT:
+  //
+  //   t0  a legacy account requests a reset        -> token T is issued (30 min)
+  //   t1  the account is linked to Firebase (32H)  -> firebaseUid set
+  //   t2  the account is UNLINKED (32L)            -> firebaseUid cleared and a NEW
+  //                                                   password established
+  //   t3  T is spent                               -> the guard above no longer
+  //                                                   applies, so without this
+  //                                                   filter the NEW password would
+  //                                                   be silently overwritten
+  //
+  // THE CONDITION IS THE STATE READ AT CLAIM TIME, and both halves are needed:
+  //
+  //   `firebaseUid: null` — the account is still not under Firebase authority. A
+  //     mismatch means the authority changed under us, which is exactly the case
+  //     that must not be written through. (It matches a null OR an absent field,
+  //     which is the same equivalence the rest of the identity code relies on;
+  //     Phase 32L's unlink REMOVES the field outright, so absent is the normal
+  //     state.)
+  //   `$or: [{ passwordChangedAt: null }, { passwordChangedAt: { $lte: issuedAt } }]`
+  //     — NO password change has happened since this token was issued. `issuedAt`
+  //     is the TOKEN's OWN `createdAt`, not a value read during this request, and
+  //     that distinction is the difference between closing the race and merely
+  //     narrowing it.
+  //
+  // ★ WHY THE BINDING IS THE TOKEN'S ISSUE TIME AND NOT A VALUE READ HERE. The
+  //   obvious spelling of this condition is "`passwordChangedAt` still equals what
+  //   it was when we read the user" — but the user is read AFTER the claim, so an
+  //   unlink landing between the claim and that read would already have moved the
+  //   stamp, the captured baseline would be the POST-unlink value, and the filter
+  //   would happily match and overwrite the password the unlink just established.
+  //   Comparing against the token's issue time has no such window: any credential
+  //   change occurring after the token was created makes the stamp LATER than
+  //   `issuedAt`, so the filter stops matching no matter where in the request the
+  //   interleaving lands.
+  //
+  // ★ WHY THE `$or` IS THERE, AND IT IS NOT DEFENSIVE PADDING. A never-changed
+  //   password has `passwordChangedAt: null` (the schema default, and the state of
+  //   every account that predates Phase 15), and MongoDB's range operators compare
+  //   values of the SAME BSON TYPE ONLY — `{ passwordChangedAt: { $lte: <Date> } }`
+  //   matches NEITHER `null` NOR a missing field. Measured against the project's
+  //   own MongoDB, not assumed. So the `null` branch is what keeps the ordinary
+  //   reset working for the majority of accounts, while the range branch supplies
+  //   the actual race protection. The two are complementary, not alternatives.
+  //
+  //   A plain `{ passwordChangedAt: null }` equality is correct for the first
+  //   branch precisely because it matches null OR absent, and the dangerous
+  //   interleavings all WRITE a concrete Date — under which that branch stops
+  //   matching.
+  //
+  // Deliberately NOT a new field and NOT a schema change — `passwordChangedAt`
+  // already exists, is already stamped by every password change, and the token's
+  // `createdAt` is already written by `timestamps: true`.
+  //
+  // WHAT HAPPENS WHEN IT LOSES. The token has already been spent (the claim above
+  // set `usedAt`, and nothing unsets it), and the account is left COMPLETELY
+  // untouched — the newer credential survives, which is the whole point. The
+  // refusal is the same generic `INVALID_RESET_TOKEN` as every other rejection here,
+  // so it discloses nothing about which condition failed.
+  //
+  // `issuedAt` is required for the binding to mean anything, so a claim without one
+  // (impossible with `timestamps: true`, but stated rather than assumed) fails closed.
+  const issuedAt = claim.createdAt ?? null;
+  if (!issuedAt) throw invalidResetToken();
+  const written = await User.findOneAndUpdate(
+    {
+      _id: user._id,
+      firebaseUid: null,
+      // Same-type-only range semantics — see the note above: the `null` branch is
+      // what admits an account that has never changed its password, and it is
+      // load-bearing rather than defensive.
+      $or: [{ passwordChangedAt: null }, { passwordChangedAt: { $lte: issuedAt } }],
+    },
+    {
+      $set: {
+        passwordHash: newPasswordHash,
+        // The same `now` the token was stamped with, read once, so `usedAt`,
+        // `passwordChangedAt` and the revocation are coherent.
+        passwordChangedAt: now,
+      },
+    },
+    { returnDocument: 'after', runValidators: true }
+  );
+  if (!written) throw invalidResetToken();
 
   // End every session. The passwordChangedAt stamp alone already rejects tokens
   // issued in a strictly earlier second (requireAuth compares, then rejects with
@@ -511,7 +647,7 @@ export async function resetPassword({ token, newPassword }: ResetPasswordInput =
     action: AUDIT_ACTIONS.PASSWORD_RESET_COMPLETED,
   });
 
-  return { changedAt: user.passwordChangedAt };
+  return { changedAt: written.passwordChangedAt };
 }
 
 export default {

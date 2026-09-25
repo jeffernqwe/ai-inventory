@@ -203,10 +203,13 @@ const CLASS = {
  *   regained after the password is lost, so by definition the caller holds none.
  *   All are rate-limited.
  * AUTHENTICATED (requireAuth + controller, no permission):
- *   the six self-service account routes operate only on the caller's own
+ *   the seven self-service account routes operate only on the caller's own
  *   account (Phase 26A added the three session-lifecycle routes: they manage
  *   nothing but the caller's own sessions, and the owning userId comes from
- *   req.user, never from the request — so no permission applies), and every
+ *   req.user, never from the request — so no permission applies; Phase 32H added
+ *   POST /api/auth/firebase/link, which attaches a verified Firebase identity to
+ *   the caller's own account for the same reason — the account is req.user.id and
+ *   `firebaseUid` is not a capability any role could be granted), and every
  *   other account route is permission-gated.
  *   The four categories/locations reads are Phase 22's explicit deferral: no
  *   categories.view / locations.view key exists in the catalogue, and inventing
@@ -245,6 +248,14 @@ const AUTHENTICATED_ROUTES = [
   { route: 'POST /api/auth/logout', why: 'Phase 26A: ends only the caller’s own session' },
   { route: 'GET /api/auth/sessions', why: 'Phase 26A: lists only the caller’s own sessions' },
   { route: 'DELETE /api/auth/sessions/:id', why: 'Phase 26A: ends only a session the caller owns' },
+  {
+    route: 'POST /api/auth/firebase/link',
+    why: 'Phase 32H: attaches a verified Firebase identity to the CALLER’S OWN account — the account is req.user.id, so there is no other account the request could name, and no permission key could express "may link an identity" without inventing an authorization concept the catalogue does not have',
+  },
+  {
+    route: 'POST /api/auth/firebase/unlink',
+    why: 'Phase 32L: detaches the CALLER’S OWN Firebase identity and establishes a local password — the account is req.user.id and the identity must equal the uid already on it, so no other account or identity can be named, and no permission key could express "may detach an identity" without inventing an authorization concept the catalogue does not have',
+  },
   { route: 'GET /api/categories', why: 'Phase 22 deferral: no categories.view key exists' },
   { route: 'GET /api/categories/:id', why: 'Phase 22 deferral: no categories.view key exists' },
   { route: 'GET /api/locations', why: 'Phase 22 deferral: no locations.view key exists' },

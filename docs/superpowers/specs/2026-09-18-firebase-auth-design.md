@@ -1018,6 +1018,88 @@ Neither is settled by this phase, and both gate **later** work rather than this 
   `firebaseUid`, **never by email**, rejects an unknown UID with the existing registration-required
   behaviour, applies the existing user/business status checks, and mints the existing JWT/session.
 
+## 14A.8 Phase E — session-reconciliation decisions (2026-09-25)
+
+Owner decisions taken after the Phase D native migration, when the remaining
+JavaScript-SDK confirmation paths were gone and the durable/Inventory split could be
+examined as a whole. **D-E1, D-E2 and D-E5 are implemented; D-E3 and D-E4 are
+ACCEPTED FOR V1 and implemented by nothing** — they record that the current behaviour
+is the intended behaviour, so no later phase treats it as unfinished.
+
+**D-E1 — a failed native Firebase sign-out is CONSUMED, not discarded.**
+`signOutOfFirebase()` has always been total and has always REPORTED whether the durable
+native session could be ended; nothing read that boolean, so a failure left a persisted
+Firebase credential on a device whose Inventory AI session had already ended, with no
+signal at all. The outcome is now consumed: a `false` is recorded as a one-bit
+`firebaseSignOutPending` marker in secure storage, and a later launch that resolves to
+**signed out** retries the sign-out. Two constraints shape it. There is deliberately
+**no user-facing error**, because a failed Firebase sign-out offers a person no action
+and describes a credential they cannot see. And Inventory AI sign-out **still completes
+whatever Firebase does** — the Firebase step runs last and cannot throw, so the marker
+can never be a precondition for the local sign-out. No token, uid, password, hash,
+native error text or secret is stored or logged: the marker is one bit meaning "Firebase
+may still hold a session on this device".
+
+**D-E2 — boot cleanup is EXPLICIT, and is never duplicated.** A boot that restored a
+stored Inventory AI JWT and had it refused ended the durable Firebase session only
+because the centralized `sessionLostHandler` happened to be registered before the boot
+effect ran — a guarantee that rested on React effect ordering rather than on anything
+stated. The boot path now performs the cleanup itself. It does not duplicate the
+handler's work: `lib/client.ts` reports a token-bearing 401/403 to the handler
+*synchronously*, before the refused request is rethrown, so by the time the boot catch
+runs a single flag says whether the centralized path already owns this refusal and the
+boot path acts only when it does not. **The centralized session-loss behaviour is
+unchanged** — it remains the one place a refused token is interpreted, and it remains
+the owner of the Firebase sign-out for every refusal that travels through the
+transport. This is not a second session-loss mechanism; it is the same cleanup, made
+explicit for the one caller that could previously rely on ordering.
+
+**D-E3 — the post-unlink Firebase identity. ACCEPTED FOR V1.** Unlinking detaches the
+MongoDB mapping only: the Firebase identity itself remains in Firebase, because
+provider unlinking is a client-side Firebase operation and the server has no part in it
+(§14B.4). A later sign-in with that detached identity therefore authenticates with
+Firebase and resolves by `firebaseUid` to **no MongoDB user**, so the exchange answers
+`REGISTRATION_REQUIRED` (§8.2) — which is a **new-business onboarding** path, not a
+route back into the account that was unlinked. This is accepted rather than fixed. It is
+**not an account takeover**: the exchange is UID-authoritative and never matches by
+email, so no existing tenant is reachable through a detached uid. It is **not a
+lockout**: the unlinked account keeps working through the new local password Policy B
+established in the same transition. The consequence to state plainly is the surprising
+one — the old Firebase credential can create a *second* Inventory AI business. Related,
+but distinct, from the pre-link orphan of §16.6: that one is an identity created for an
+existing account and never linked to it, whereas this is an identity that was linked and
+then deliberately detached. **No code change, no schema change, and this does not settle
+`O-1`, `O-2` or `O-6`.**
+
+**D-E4 — other devices' Firebase sessions. ACCEPTED FOR V1.** "Sign out everywhere"
+revokes **every Inventory AI session** the user holds, on every device, in one call —
+the server owns those. It **cannot** end the durable native Firebase session on another
+device: that session lives in that device's own store, the server holds no handle on it,
+and nothing is pushed to a client. The other device therefore stops being able to act
+immediately (its JWT is dead server-side) but its Firebase session ends only when it next
+makes a request and the centralized handler clears it. **No architecture change**: the
+alternative would be a server-side Firebase revocation or a push channel, neither of
+which exists and neither of which is proposed here. The residual to state plainly is that
+a device the app is never opened on keeps a durable Firebase credential indefinitely —
+which grants nothing on its own, because a durable Firebase session never becomes an
+Inventory AI session (§14A.2, §16.7).
+
+**D-E5 — a stale persistence comment corrected.** `app/register-firebase.tsx` justified
+its cold-start refusal with "`inMemoryPersistence` (Phase 32D) means a restart has no
+Firebase user at all". That premise is false under owner decision P2, which supersedes
+the Phase 32D pin: a restart **can** restore a native `currentUser`. The refusal itself
+was always correct and still is — the in-memory `firebaseRegistrationRequired` flag, not
+Firebase state, is what authorizes that screen — so only the recorded reason was
+corrected, and it now states the durable-persistence reality and that a restored
+`currentUser` never becomes an Inventory AI session.
+
+**Documentation observation, recorded rather than corrected (§16.7).** §16.7 is the
+Phase 32A record and closes with "*or the client re-exchanges silently if a Firebase
+session remains*". The shipped client does **not** do that: there is no automatic
+exchange anywhere, boot consults only the stored Inventory AI JWT, and a durable Firebase
+`currentUser` grants no session by itself. The clause is superseded by implementation and
+is left as the historical record it is; the accurate statement is the one above.
+
 ---
 
 ## 14B. Phase 32H — the server-side linking boundary (implemented)

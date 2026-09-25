@@ -408,6 +408,54 @@ async function readStoredToken(): Promise<string | null> {
   }
 }
 
+/**
+ * D-E1 — the marker that says a durable Firebase sign-out FAILED and must be
+ * retried. A second key rather than a field on the token, because the two facts
+ * have different lifetimes: the token is cleared BY the sign-out, and this marker
+ * is meaningful precisely because the token is gone.
+ *
+ * WHAT IT IS NOT. Not a credential, token, uid, password, hash or error detail —
+ * one bit whose only meaning is "Firebase may still hold a session on this device".
+ * Nothing is rendered from it, and the only value ever read is `'1'` — the key's
+ * own existence says nothing, because a successful sign-out writes `'0'` rather than
+ * removing it.
+ */
+const FIREBASE_SIGNOUT_PENDING_KEY = 'inventoryai.auth.firebaseSignOutPending';
+
+// The web target's in-memory mirror, exactly as `mem` is for the token: there is no
+// native keychain to persist to, so there the marker lives for the launch only.
+const memFirebaseSignOutPending = { pending: false };
+
+/**
+ * Records whether a durable Firebase sign-out is still outstanding.
+ *
+ * Quiet on failure, like `persistToken`: the in-memory copy keeps the current launch
+ * honest, and a storage fault must never be able to fail a sign-out.
+ */
+async function persistFirebaseSignOutPending(pending: boolean): Promise<void> {
+  memFirebaseSignOutPending.pending = pending;
+  if (Platform.OS === 'web') return;
+  try {
+    // ONE SET of '1'/'0', not a set/delete pair. Both states are meaningful and a
+    // write is always truthful, so a successful sign-out never has to guess whether
+    // a stale marker exists in order to remove it — which is also what keeps this
+    // marker from ever touching the token's own storage entry.
+    await SecureStore.setItemAsync(FIREBASE_SIGNOUT_PENDING_KEY, pending ? '1' : '0');
+  } catch {
+    // Non-fatal: the in-memory copy keeps this launch honest.
+  }
+}
+
+/** Whether an earlier Firebase sign-out is still outstanding. False on any fault. */
+async function readFirebaseSignOutPending(): Promise<boolean> {
+  if (Platform.OS === 'web') return memFirebaseSignOutPending.pending;
+  try {
+    return (await SecureStore.getItemAsync(FIREBASE_SIGNOUT_PENDING_KEY)) === '1';
+  } catch {
+    return memFirebaseSignOutPending.pending;
+  }
+}
+
 const AuthContext = createContext<AuthValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -420,6 +468,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // revoke. Both are refs because neither should re-render anything.
   const tokenRef = useRef<string | null>(null);
   const sessionLostRef = useRef(false);
+
+  /**
+   * Whether the durable Firebase session has ALREADY been ended for the current
+   * session loss. One loss is reported by several callers — see `endFirebaseSession`
+   * — and this is the claim that makes the native operation happen exactly once.
+   */
+  const firebaseEndedRef = useRef(false);
 
   // Phase 32J: an identity is authenticated and waiting for a tenant.
   const [firebaseRegistrationRequired, setFirebaseRegistrationRequired] = useState(false);
@@ -451,6 +506,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await persistToken(nextToken);
     tokenRef.current = nextToken;
     if (nextToken) sessionLostRef.current = false;
+    // A new session may have authenticated a Firebase user again, so the NEXT loss must
+    // be able to end it (see `endFirebaseSession`).
+    if (nextToken) firebaseEndedRef.current = false;
     // A live session means nothing is waiting for a tenant any more, whichever
     // path produced it.
     if (nextToken) setFirebaseRegistrationRequired(false);
@@ -462,6 +520,61 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const clearSession = useCallback(async (): Promise<void> => {
     await applySession(null, null);
   }, [applySession]);
+
+  /**
+   * D-E1 / D-E2 — ends the durable native Firebase session and CONSUMES the outcome
+   * `signOutOfFirebase()` reports.
+   *
+   * IDEMPOTENT PER SESSION LOSS, WHICH IS NOT THE SAME AS PER RESPONSE. Three
+   * independent callers reach here for ONE dead session: the centralized handler below,
+   * the boot restore's own cleanup, and — because this app has always done it — a
+   * screen's `signOut()` from its `onSessionError` / `isSessionError` branch. A screen
+   * commonly has two requests in flight as well, so the naive shape asks the native SDK
+   * to sign out once per refused response, and on device that was measurably two
+   * `signOut` calls for one loss. The first call claims the loss and every later one is
+   * a no-op until a NEW session is applied, which clears the claim because a fresh
+   * sign-in can have a live Firebase user again.
+   *
+   * It lives in the component rather than at module scope for exactly that reason: the
+   * claim is per Provider instance, so a remount starts clean.
+   *
+   * WHY THE BOOLEAN IS READ. `signOutOfFirebase` is total by design: it never throws and
+   * answers `false` when the native session could not be ended (offline, the native
+   * module absent, an SDK fault). Discarding that answer left the one state the P2
+   * decision exists to avoid — a persisted Firebase credential on a device whose
+   * Inventory AI session has already ended — with no signal at all. The boolean IS the
+   * signal: it is persisted as the `FIREBASE_SIGNOUT_PENDING` marker, which
+   * `retryPendingFirebaseSignOut` consumes on a later signed-out launch.
+   *
+   * WHY THERE IS NO USER-FACING ERROR (owner decision D-E1). A failed Firebase sign-out
+   * has no action a person could take, and a prompt would say so about a credential they
+   * cannot see. Retrying later is the remedy that actually converges.
+   *
+   * NEVER THROWS, and that is load-bearing: every caller runs it AFTER the Inventory AI
+   * session is already gone, so a Firebase failure must not be able to undo that.
+   */
+  const endFirebaseSession = useCallback(async (): Promise<void> => {
+    if (firebaseEndedRef.current) return;
+    firebaseEndedRef.current = true;
+    const completed = await signOutOfFirebase();
+    // `true` also covers "there was nothing to end", which is the same outcome for every
+    // caller and must clear a marker left by an earlier failed attempt.
+    await persistFirebaseSignOutPending(!completed);
+  }, []);
+
+  /**
+   * D-E1 — the retry point, and the only one.
+   *
+   * A launch that resolves to SIGNED OUT is the sole state in which retrying is safe:
+   * no live Inventory AI session can be disturbed, and it is exactly the state a previous
+   * failed sign-out leaves behind. A signed-in launch deliberately does not retry — the
+   * marker is only ever set while signed out, and retrying from a live session would sign
+   * the freshly authenticated Firebase user out from under someone.
+   */
+  const retryPendingFirebaseSignOut = useCallback(async (): Promise<void> => {
+    if (!(await readFirebaseSignOutPending())) return;
+    await endFirebaseSession();
+  }, [endFirebaseSession]);
 
   // One place decides what a refused token means. Registered here rather than in
   // each screen (see lib/client.ts), so a dead session is handled identically
@@ -476,18 +589,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // decision §6.5 exists to avoid. Clearing first is what keeps the guarantee intact —
   // `signOutOfFirebase` is total and REPORTS its outcome rather than throwing, so a
   // failed or offline Firebase sign-out can never take the Inventory AI sign-out down
-  // with it, and no token, key or error text is logged to make that observable.
+  // with it. D-E1: that reported outcome is now CONSUMED (`endFirebaseSession`) rather
+  // than discarded, so a failure is recorded for retry on a later signed-out launch
+  // instead of leaving an unsignalled durable credential.
   useEffect(() => {
     setSessionLostHandler((err) => {
       if (!isSessionError(err)) return;
+      // One loss arrives as SEVERAL refused responses, because a screen commonly has two
+      // requests in flight and `lib/client.ts` reports each. The first claims it; the rest
+      // are no-ops. `endFirebaseSession` is idempotent for the same reason, so the native
+      // sign-out happens once even though a screen's own `signOut()` may also run.
+      if (sessionLostRef.current) return;
       sessionLostRef.current = true;
       void (async () => {
         await clearSession();
-        await signOutOfFirebase();
+        await endFirebaseSession();
       })();
     });
     return () => setSessionLostHandler(null);
-  }, [clearSession]);
+  }, [clearSession, endFirebaseSession]);
 
   /**
    * Sign in (Phase 32E). Firebase first, then the legacy password route.
@@ -686,13 +806,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * `all` ends every session the user has open, this one included ("sign out
    * everywhere", the same route with `{ all: true }`).
    *
-   * Phase 32E adds one step at the end: the Firebase session is ended too. It is
-   * local and holds nothing durable (Phase 32D pinned `inMemoryPersistence`), so
-   * this is hygiene rather than revocation — but leaving it live would let a later
-   * sign-in silently resume the previous Firebase user, and a sign-out that leaves
-   * an identity signed in somewhere is not a sign-out. It is best effort and never
-   * fatal, and it runs after `clearSession` so the local session is gone whatever
-   * the SDK does.
+   * The durable Firebase session is ended too. Under owner decision P2 a native
+   * Firebase session OUTLIVES the process, so this is no longer hygiene: leaving it
+   * live would keep a credential on a device whose Inventory AI session the server has
+   * just revoked, which is the split-brain state P2 §6.5 exists to avoid. It runs
+   * AFTER `clearSession`, so the Inventory AI sign-out is complete whatever Firebase
+   * does, and its reported outcome is consumed rather than discarded (D-E1) — a failure
+   * is recorded for retry on a later signed-out launch and never surfaced as an error.
    */
   const endSession = useCallback(
     async ({ all = false }: { all?: boolean } = {}): Promise<void> => {
@@ -715,9 +835,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // no token, so it cannot clear this itself.
       firebaseAccountRegisteredRef.current = false;
       setFirebaseRegistrationRequired(false);
-      await signOutOfFirebase();
+      await endFirebaseSession();
     },
-    [clearSession]
+    [clearSession, endFirebaseSession]
   );
 
   const signOut = useCallback((): Promise<void> => endSession(), [endSession]);
@@ -836,7 +956,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [token, clearSession]);
 
-  // Restore the session exactly once on boot.
+  // Restore the session exactly once on boot. The Inventory AI JWT is the ONLY thing
+  // consulted: a restored native Firebase `currentUser` never signs anyone in, is never
+  // exchanged, and there is no auth-state listener anywhere in this file.
   useEffect(() => {
     let active = true;
     void (async () => {
@@ -848,15 +970,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setUser(null);
           setStatus('signedOut');
         }
+        // D-E1 — a SIGNED-OUT launch is the retry point for a Firebase sign-out that
+        // previously failed. It runs AFTER the signed-out state is set, so a slow or
+        // offline retry cannot delay the login screen, and it is a no-op when nothing
+        // is outstanding.
+        if (active) await retryPendingFirebaseSignOut();
         return;
       }
       try {
         const { user: fresh } = await api.me(stored);
         if (active) {
           // Restored without going through applySession (the token is already
-          // persisted), so the ref signOut reads must be set here too.
+          // persisted), so the refs signOut reads must be set here too.
           tokenRef.current = stored;
           sessionLostRef.current = false;
+          firebaseEndedRef.current = false;
           setToken(stored);
           setUser(fresh);
           setStatus('signedIn');
@@ -864,6 +992,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } catch (err) {
         if (isSessionError(err)) {
           await persistToken(null);
+          // D-E2 — the boot path ends the durable Firebase session EXPLICITLY rather
+          // than relying on which React effect happened to run first. It calls the one
+          // consumer unconditionally: for a 401/403 that travelled through
+          // `lib/client.ts` the centralized handler has already claimed the loss and
+          // this is a no-op, and when the refusal did NOT come through the handler this
+          // is the call that performs the cleanup. The idempotency lives in
+          // `endFirebaseSession` rather than in a condition here, so there is one rule
+          // to reason about instead of two.
+          await endFirebaseSession();
         }
         if (active) {
           tokenRef.current = null;
@@ -876,7 +1013,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       active = false;
     };
-  }, []);
+  }, [endFirebaseSession, retryPendingFirebaseSignOut]);
 
   const value = useMemo<AuthValue>(
     () => ({

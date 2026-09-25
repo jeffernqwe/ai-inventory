@@ -1391,7 +1391,7 @@ requires an explicit owner decision before the phase that would implement it:
 | --- | --- |
 | The unlink policy and last-authentication-method protection | Any unlink capability |
 | Whether `emailVerified` is enforced | Provider sign-in that relies on a provider-asserted address |
-| M1 (native SDK) vs M2 (`expo-auth-session`) for the mobile provider integration | All Google/Facebook mobile work |
+| M1 (native SDK) vs M2 (`expo-auth-session`) for the mobile provider integration — **CLOSED 2026-09-25 (Phase F1): RESOLVED as M1, the shipped architecture; M2 is superseded and its browser machinery removed** | ~~All Google/Facebook mobile work~~ — this row no longer blocks Google, which ships natively. Facebook Login remains future scope, and it inherits the M1 decision |
 | The Facebook missing-email onboarding flow | Facebook Login |
 | The remedy, if any, for the unhealable orphan (a legacy account whose email already has a Firebase identity that can never resolve to it) | The legacy migration/linking phase |
 | `google-services.json` / `GoogleService-Info.plist` storage and whether they are committed | Any native provider configuration |

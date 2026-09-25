@@ -24,10 +24,13 @@
  * the module under test is NOT — every branch, message and code below is the shipped one,
  * and the failure shapes are CONSTRUCTED (`{ code }` is the only property read).
  *
- * THE LOCAL `firebase/auth` MOCK IS GONE WITH THE SDK. The browser helper is still present
- * in the module under test, so the `expo-auth-session` and `lib/config` mocks remain — and
- * the cases below assert those browser seams are NOT reached, which states the migration as
- * an absence rather than as a promise.
+ * THE LOCAL `firebase/auth` MOCK IS GONE WITH THE SDK. PHASE F1 THEN REMOVED THE BROWSER
+ * MECHANISM ITSELF — `acquireGoogleIdToken`, its Google discovery constants,
+ * `googleRedirectUri()` and the `expo-auth-session` import — so the `expo-auth-session`
+ * mock that used to model those seams is gone with it: there is nothing left to assert
+ * against. The structural claim that replaced those negative assertions lives in
+ * `phaseF1-retired-dependency-guard.test.ts`. `lib/config` is still mocked, because
+ * `lib/api.ts` — imported below for the `firebaseUnlink` cases — reads its URL and timeout.
  */
 
 import { firebaseUnlink } from '../lib/api';
@@ -52,36 +55,13 @@ jest.mock('../lib/firebase-native', () => ({
   nativeSignInWithGoogle: (...args: unknown[]) => mockNativeSignInWithGoogle(...args),
 }));
 
-const mockIsGoogleConfigured = jest.fn(() => true);
-const mockGoogleClientId = jest.fn(() => 'google-client-id');
-const mockGoogleRedirectUri = jest.fn(() => 'com.inventoryai.app:/oauthredirect');
-
+// Phase F1: the three Google keys that used to be stubbed here (`isGoogleConfigured`,
+// `googleClientId`, `googleRedirectUri`) described a browser flow the module under test no
+// longer contains — and `googleRedirectUri` never belonged to this module in the first
+// place. What remains is exactly what `lib/api.ts` reads.
 jest.mock('../lib/config', () => ({
-  isGoogleConfigured: () => mockIsGoogleConfigured(),
-  googleClientId: () => mockGoogleClientId(),
-  googleRedirectUri: () => mockGoogleRedirectUri(),
   API_URL: 'http://localhost:4000',
   REQUEST_TIMEOUT_MS: 15000,
-}));
-
-const mockPromptAsync = jest.fn();
-const mockCodeVerifier = { value: 'pkce-verifier' as string | undefined };
-const mockExchangeCodeAsync = jest.fn();
-
-jest.mock('expo-auth-session', () => ({
-  ResponseType: { Code: 'code' },
-  // A constructor is deliberately absent: the module under test passes options it never
-  // reads back, and declaring one that ignored them would only be a lint warning.
-  AuthRequest: class AuthRequest {
-    get codeVerifier(): string | undefined {
-      return mockCodeVerifier.value;
-    }
-    promptAsync(...args: unknown[]) {
-      return mockPromptAsync(...args);
-    }
-  },
-  makeRedirectUri: () => 'com.inventoryai.app:/oauthredirect',
-  exchangeCodeAsync: (...args: unknown[]) => mockExchangeCodeAsync(...args),
 }));
 
 // ---------------------------------------------------------------------------
@@ -91,7 +71,6 @@ jest.mock('expo-auth-session', () => ({
 const EMAIL = 'owner@example.com';
 const PASSWORD = 'Password123!';
 const ID_TOKEN = 'firebase.id.token';
-const GOOGLE_ID_TOKEN = 'google.id.token';
 
 /** A native or Firebase error, as the module reads it — `code` only, never a message. */
 const firebaseError = (code: string) => Object.assign(new Error('native text'), { code });
@@ -112,9 +91,6 @@ beforeEach(() => {
   mockIsNativeGoogleConfigured.mockReturnValue(true);
   mockNativeSignInWithEmail.mockResolvedValue({ idToken: ID_TOKEN });
   mockNativeSignInWithGoogle.mockResolvedValue({ kind: 'idToken', idToken: ID_TOKEN });
-  mockCodeVerifier.value = 'pkce-verifier';
-  mockPromptAsync.mockResolvedValue({ type: 'success', params: { code: 'auth-code' } });
-  mockExchangeCodeAsync.mockResolvedValue({ idToken: GOOGLE_ID_TOKEN });
 });
 
 // ---------------------------------------------------------------------------
@@ -275,12 +251,10 @@ describe('confirmFirebaseSignIn — the Google method', () => {
   it('authenticates through the native boundary and returns the Firebase token', async () => {
     const outcome = await confirmFirebaseSignIn({ method: 'google', email: EMAIL });
 
+    // THE BOUNDARY IS THE WHOLE FLOW (Phase D), and since Phase F1 it is the only one:
+    // the consent, Google's `id_token` and the Firebase credential all happen inside it,
+    // so the token this function returns is the one the boundary minted.
     expect(mockNativeSignInWithGoogle).toHaveBeenCalledTimes(1);
-    // THE BROWSER SEAMS ARE NOT TOUCHED, and asserting the absence is the Phase D claim:
-    // the consent, Google's `id_token` and the Firebase credential all happen inside the
-    // boundary, so neither the PKCE prompt nor the token endpoint is reached from here.
-    expect(mockPromptAsync).not.toHaveBeenCalled();
-    expect(mockExchangeCodeAsync).not.toHaveBeenCalled();
     expect(outcome).toEqual({ kind: 'idToken', idToken: ID_TOKEN });
   });
 
@@ -296,8 +270,7 @@ describe('confirmFirebaseSignIn — the Google method', () => {
     const outcome = await confirmFirebaseSignIn({ method: 'google', email: EMAIL });
 
     expect((outcome as { code: string }).code).toBe('google/not-configured');
-    // The refusal happens at the GATE, so the native library is never asked — the same
-    // property the browser era pinned with `mockPromptAsync`.
+    // The refusal happens at the GATE, so the native library is never asked.
     expect(mockNativeSignInWithGoogle).not.toHaveBeenCalled();
   });
 
@@ -319,21 +292,19 @@ describe('confirmFirebaseSignIn — the Google method', () => {
 
   // RETIRED IN PHASE D — "fails closed when the PKCE verifier is missing". That case
   // exercised `acquireGoogleIdToken` through this function, and this function no longer
-  // calls it. The helper is retained by owner decision so Phase F can remove the whole
-  // browser mechanism at once, but it is unreferenced, so its PKCE fail-closed property
-  // has no reachable caller left to assert against. It is recorded in the Phase D report
-  // rather than kept as a test of nothing.
+  // calls it. PHASE F1 DELETED THE HELPER, its Google discovery constants and
+  // `googleRedirectUri()` outright, so the property has nothing left to apply to; the
+  // finding it encoded is recorded in the Phase D report.
 
-  it('keeps the sign-in path on the same boundary and off the browser seams', async () => {
-    // PHASE C pinned this for SIGN-IN; Phase D extends it to the CONFIRMATION above. Both
-    // Google operations now run natively, so neither may reach `expo-auth-session` — the
-    // two assertions are what keep the retained browser helper genuinely unreferenced.
+  it('keeps the sign-in path on the same boundary as the confirmation', async () => {
+    // PHASE C pinned this for SIGN-IN; Phase D extended it to the CONFIRMATION above. Both
+    // Google operations run natively, and since Phase F1 that is the only implementation
+    // the module has — there is no browser seam left for either one to reach.
     expect(isNativeGoogleConfigured()).toBe(true);
 
     const outcome = await signInWithGoogle();
 
-    expect(mockPromptAsync).not.toHaveBeenCalled();
-    expect(mockExchangeCodeAsync).not.toHaveBeenCalled();
+    expect(mockNativeSignInWithGoogle).toHaveBeenCalledTimes(1);
     expect(outcome).toEqual({ kind: 'idToken', idToken: ID_TOKEN });
   });
 });

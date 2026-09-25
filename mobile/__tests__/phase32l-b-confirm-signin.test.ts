@@ -18,42 +18,38 @@
  *    `signInWithEmailAndPassword` in BOTH states, and the source guard at the end pins
  *    that no call to the two rejected APIs is ever introduced.
  *
- * THE FIREBASE SDK IS MOCKED, AND IT HAS TO BE: the real package cannot be loaded under
- * this Jest configuration (see `firebase.test.ts`). The module under test is NOT mocked,
- * so every branch, message and code below is the shipped one, and the failure shapes are
- * CONSTRUCTED — `{ code }` is the only property the module reads.
+ * THE NATIVE BOUNDARY IS MOCKED, AND IT HAS TO BE (Phase D). Since Phase D every
+ * confirmation authenticates through `lib/firebase-native.ts`, whose real native modules
+ * cannot be loaded under this Jest configuration, so `lib/firebase-native` is mocked and
+ * the module under test is NOT — every branch, message and code below is the shipped one,
+ * and the failure shapes are CONSTRUCTED (`{ code }` is the only property read).
+ *
+ * THE LOCAL `firebase/auth` MOCK IS GONE WITH THE SDK. The browser helper is still present
+ * in the module under test, so the `expo-auth-session` and `lib/config` mocks remain — and
+ * the cases below assert those browser seams are NOT reached, which states the migration as
+ * an absence rather than as a promise.
  */
 
 import { firebaseUnlink } from '../lib/api';
 import { confirmFirebaseSignIn, signInWithGoogle } from '../lib/firebase-auth';
 import { isNativeGoogleConfigured } from '../lib/firebase-native';
 
-const mockSignInWithEmailAndPassword = jest.fn();
-const mockSignInWithCredential = jest.fn();
-const mockGoogleCredential = jest.fn();
+const mockNativeSignInWithEmail = jest.fn();
+const mockNativeSignInWithGoogle = jest.fn();
+const mockIsNativeFirebaseConfigured = jest.fn(() => true);
+const mockIsNativeGoogleConfigured = jest.fn(() => true);
 
-jest.mock('firebase/auth', () => ({
-  signInWithEmailAndPassword: (...args: unknown[]) => mockSignInWithEmailAndPassword(...args),
-  signInWithCredential: (...args: unknown[]) => mockSignInWithCredential(...args),
-  signInWithEmailAndPasswordRaw: jest.fn(),
-  createUserWithEmailAndPassword: jest.fn(),
-  updateProfile: jest.fn(),
-  signOut: jest.fn(),
-  GoogleAuthProvider: {
-    credential: (...args: unknown[]) => mockGoogleCredential(...args),
-  },
-}));
-
-const mockGetFirebaseAuth = jest.fn();
-
-jest.mock('../lib/firebase', () => ({
-  getFirebaseAuth: () => mockGetFirebaseAuth(),
-  // ADDED BY PHASE C. `lib/firebase-native` (the native boundary, not mocked here)
-  // reaches the Firebase gate through this module, and the module under test does not
-  // import it for its own account. Reporting the gate OFF keeps this file's world the
-  // pre-Firebase-NATIVE one, so the one case below that touches `signInWithGoogle`
-  // observes the native path declining rather than a missing export throwing.
-  isFirebaseConfigured: () => false,
+/**
+ * PHASE D — THE SEAM IS THE BOUNDARY, NOT THE SDK. Both confirmation methods now enter
+ * `lib/firebase-native.ts`, so that is the module to mock. Mocking it also keeps the four
+ * exports the module under test reads — two gates, two operations — explicit, so a rename
+ * or a dropped export fails here rather than silently changing what is under test.
+ */
+jest.mock('../lib/firebase-native', () => ({
+  isNativeFirebaseConfigured: () => mockIsNativeFirebaseConfigured(),
+  isNativeGoogleConfigured: () => mockIsNativeGoogleConfigured(),
+  nativeSignInWithEmail: (...args: unknown[]) => mockNativeSignInWithEmail(...args),
+  nativeSignInWithGoogle: (...args: unknown[]) => mockNativeSignInWithGoogle(...args),
 }));
 
 const mockIsGoogleConfigured = jest.fn(() => true);
@@ -97,23 +93,26 @@ const PASSWORD = 'Password123!';
 const ID_TOKEN = 'firebase.id.token';
 const GOOGLE_ID_TOKEN = 'google.id.token';
 
-const AUTH = { name: '[DEFAULT]', __fakeAuth: true };
+/** A native or Firebase error, as the module reads it — `code` only, never a message. */
+const firebaseError = (code: string) => Object.assign(new Error('native text'), { code });
 
-/** A Firebase error, as the module reads it — `code` only, never a message. */
-const firebaseError = (code: string) => Object.assign(new Error('sdk text'), { code });
-
-/** The credential the SDK returns for a successful authentication. */
-const credentialResult = () => ({
-  user: { getIdToken: async () => ID_TOKEN },
-});
+/**
+ * A google-signin failure as the boundary would surface it: a code this app owns, plus
+ * developer-written text that must never reach a person. The text is modelled on the real
+ * Android message so the `not.toContain` assertions below test something that exists.
+ */
+const nativeGoogleFailure = (code: string) =>
+  Object.assign(new Error('DEVELOPER_ERROR: SHA-1 mismatch for com.inventoryai.app'), { code });
 
 beforeEach(() => {
   jest.clearAllMocks();
-  mockGetFirebaseAuth.mockReturnValue(AUTH);
-  mockIsGoogleConfigured.mockReturnValue(true);
+  // Both gates default ON so a case that cares about a gate sets it itself, and both
+  // operations default to a success, which is what every happy-path case expects.
+  mockIsNativeFirebaseConfigured.mockReturnValue(true);
+  mockIsNativeGoogleConfigured.mockReturnValue(true);
+  mockNativeSignInWithEmail.mockResolvedValue({ idToken: ID_TOKEN });
+  mockNativeSignInWithGoogle.mockResolvedValue({ kind: 'idToken', idToken: ID_TOKEN });
   mockCodeVerifier.value = 'pkce-verifier';
-  mockSignInWithCredential.mockResolvedValue(credentialResult());
-  mockGoogleCredential.mockReturnValue({ __fakeCredential: true });
   mockPromptAsync.mockResolvedValue({ type: 'success', params: { code: 'auth-code' } });
   mockExchangeCodeAsync.mockResolvedValue({ idToken: GOOGLE_ID_TOKEN });
 });
@@ -124,7 +123,7 @@ beforeEach(() => {
 
 describe('confirmFirebaseSignIn — the password method', () => {
   it('authenticates with email and password and returns only the token', async () => {
-    mockSignInWithEmailAndPassword.mockResolvedValue(credentialResult());
+    mockNativeSignInWithEmail.mockResolvedValue({ idToken: ID_TOKEN });
 
     const outcome = await confirmFirebaseSignIn({
       method: 'password',
@@ -132,7 +131,10 @@ describe('confirmFirebaseSignIn — the password method', () => {
       password: PASSWORD,
     });
 
-    expect(mockSignInWithEmailAndPassword).toHaveBeenCalledWith(AUTH, EMAIL, PASSWORD);
+    // TWO ARGUMENTS, NOT THREE. The native operation takes the credentials only; the
+    // Auth instance is the boundary's business, so the test asserts the shape the
+    // module actually uses rather than the shape the SDK used to require.
+    expect(mockNativeSignInWithEmail).toHaveBeenCalledWith(EMAIL, PASSWORD);
     // The token is the whole contract — no User, no uid, no providerData, no credential.
     expect(outcome).toEqual({ kind: 'idToken', idToken: ID_TOKEN });
   });
@@ -141,7 +143,7 @@ describe('confirmFirebaseSignIn — the password method', () => {
     // `auth.currentUser === null` after a restart under `inMemoryPersistence`. The call
     // must not depend on it: `reauthenticateWithCredential` would need one and is
     // therefore not used anywhere (see the source guard below).
-    mockSignInWithEmailAndPassword.mockResolvedValue(credentialResult());
+    mockNativeSignInWithEmail.mockResolvedValue({ idToken: ID_TOKEN });
 
     const outcome = await confirmFirebaseSignIn({
       method: 'password',
@@ -149,12 +151,12 @@ describe('confirmFirebaseSignIn — the password method', () => {
       password: PASSWORD,
     });
 
-    expect(mockSignInWithEmailAndPassword).toHaveBeenCalledTimes(1);
+    expect(mockNativeSignInWithEmail).toHaveBeenCalledTimes(1);
     expect(outcome.kind).toBe('idToken');
   });
 
   it('reports the unambiguous "no password identity here" as wrong-method', async () => {
-    mockSignInWithEmailAndPassword.mockRejectedValue(firebaseError('auth/user-not-found'));
+    mockNativeSignInWithEmail.mockRejectedValue(firebaseError('auth/user-not-found'));
 
     const outcome = await confirmFirebaseSignIn({
       method: 'password',
@@ -171,7 +173,7 @@ describe('confirmFirebaseSignIn — the password method', () => {
     // Under email-enumeration protection the SDK collapses "no such user" and "wrong
     // password" into this one code. Calling it `wrong-method` would tell a person with a
     // typo to switch methods, so it stays a failure whose sentence names both remedies.
-    mockSignInWithEmailAndPassword.mockRejectedValue(firebaseError('auth/invalid-credential'));
+    mockNativeSignInWithEmail.mockRejectedValue(firebaseError('auth/invalid-credential'));
 
     const outcome = await confirmFirebaseSignIn({
       method: 'password',
@@ -185,7 +187,7 @@ describe('confirmFirebaseSignIn — the password method', () => {
   });
 
   it('treats the unprotected-project form of a bad password the same way', async () => {
-    mockSignInWithEmailAndPassword.mockRejectedValue(firebaseError('auth/wrong-password'));
+    mockNativeSignInWithEmail.mockRejectedValue(firebaseError('auth/wrong-password'));
 
     const outcome = await confirmFirebaseSignIn({
       method: 'password',
@@ -197,7 +199,7 @@ describe('confirmFirebaseSignIn — the password method', () => {
   });
 
   it('classifies a rate limit through the shared table', async () => {
-    mockSignInWithEmailAndPassword.mockRejectedValue(firebaseError('auth/too-many-requests'));
+    mockNativeSignInWithEmail.mockRejectedValue(firebaseError('auth/too-many-requests'));
 
     const outcome = await confirmFirebaseSignIn({
       method: 'password',
@@ -213,7 +215,7 @@ describe('confirmFirebaseSignIn — the password method', () => {
   });
 
   it('never relays a raw SDK message', async () => {
-    mockSignInWithEmailAndPassword.mockRejectedValue(
+    mockNativeSignInWithEmail.mockRejectedValue(
       Object.assign(new Error('Firebase: Error (auth/invalid-api-key). The API key abc123 is invalid.'), {
         code: 'auth/invalid-api-key',
       })
@@ -244,11 +246,11 @@ describe('confirmFirebaseSignIn — the password method', () => {
       code: 'firebase/confirm-missing-email',
       message: 'We could not confirm your sign-in. Please try again.',
     });
-    expect(mockSignInWithEmailAndPassword).not.toHaveBeenCalled();
+    expect(mockNativeSignInWithEmail).not.toHaveBeenCalled();
   });
 
   it('answers an unconfigured build without touching the SDK', async () => {
-    mockGetFirebaseAuth.mockReturnValue(null);
+    mockIsNativeFirebaseConfigured.mockReturnValue(false);
 
     const outcome = await confirmFirebaseSignIn({
       method: 'password',
@@ -261,7 +263,7 @@ describe('confirmFirebaseSignIn — the password method', () => {
       code: 'firebase/not-configured',
       message: 'Sign-in is misconfigured. Contact your administrator.',
     });
-    expect(mockSignInWithEmailAndPassword).not.toHaveBeenCalled();
+    expect(mockNativeSignInWithEmail).not.toHaveBeenCalled();
   });
 });
 
@@ -270,66 +272,69 @@ describe('confirmFirebaseSignIn — the password method', () => {
 // ---------------------------------------------------------------------------
 
 describe('confirmFirebaseSignIn — the Google method', () => {
-  it('runs the code + PKCE exchange and returns the Firebase token', async () => {
+  it('authenticates through the native boundary and returns the Firebase token', async () => {
     const outcome = await confirmFirebaseSignIn({ method: 'google', email: EMAIL });
 
-    expect(mockPromptAsync).toHaveBeenCalledTimes(1);
-    expect(mockGoogleCredential).toHaveBeenCalledWith(GOOGLE_ID_TOKEN);
-    expect(mockSignInWithCredential).toHaveBeenCalledTimes(1);
+    expect(mockNativeSignInWithGoogle).toHaveBeenCalledTimes(1);
+    // THE BROWSER SEAMS ARE NOT TOUCHED, and asserting the absence is the Phase D claim:
+    // the consent, Google's `id_token` and the Firebase credential all happen inside the
+    // boundary, so neither the PKCE prompt nor the token endpoint is reached from here.
+    expect(mockPromptAsync).not.toHaveBeenCalled();
+    expect(mockExchangeCodeAsync).not.toHaveBeenCalled();
     expect(outcome).toEqual({ kind: 'idToken', idToken: ID_TOKEN });
   });
 
   it('reports a closed sheet as cancelled rather than as a fault', async () => {
-    mockPromptAsync.mockResolvedValue({ type: 'dismiss' });
+    mockNativeSignInWithGoogle.mockResolvedValue({ kind: 'cancelled' });
 
     expect(await confirmFirebaseSignIn({ method: 'google' })).toEqual({ kind: 'cancelled' });
   });
 
-  it('fails closed when the PKCE verifier is missing, without calling the token endpoint', async () => {
-    // The Phase 32I-N finding: an empty `code_verifier` is a request Google either
-    // rejects or, worse, one honoured without the proof PKCE exists to provide.
-    mockCodeVerifier.value = undefined;
+  it('refuses when native Google is not configured for this build', async () => {
+    mockIsNativeGoogleConfigured.mockReturnValue(false);
+
+    const outcome = await confirmFirebaseSignIn({ method: 'google', email: EMAIL });
+
+    expect((outcome as { code: string }).code).toBe('google/not-configured');
+    // The refusal happens at the GATE, so the native library is never asked — the same
+    // property the browser era pinned with `mockPromptAsync`.
+    expect(mockNativeSignInWithGoogle).not.toHaveBeenCalled();
+  });
+
+  it('classifies a native failure with the confirmation sentence, never the native text', async () => {
+    mockNativeSignInWithGoogle.mockRejectedValue(nativeGoogleFailure('google/failed'));
 
     const outcome = await confirmFirebaseSignIn({ method: 'google', email: EMAIL });
 
     expect(outcome).toEqual({
       kind: 'failure',
-      code: 'google/missing-code-verifier',
-      message: 'Unable to sign in with Google. Please try again.',
+      code: 'google/failed',
+      message: 'We could not confirm your sign-in. Please try again.',
     });
-    expect(mockExchangeCodeAsync).not.toHaveBeenCalled();
+    // The boundary's own sentence is the only one that may reach a person; a
+    // google-signin error's developer text names the app's signing certificate.
+    expect((outcome as { message: string }).message).not.toContain('DEVELOPER_ERROR');
+    expect((outcome as { message: string }).message).not.toContain('SHA-1');
   });
 
-  it('refuses when Google is not configured for this build', async () => {
-    mockIsGoogleConfigured.mockReturnValue(false);
+  // RETIRED IN PHASE D — "fails closed when the PKCE verifier is missing". That case
+  // exercised `acquireGoogleIdToken` through this function, and this function no longer
+  // calls it. The helper is retained by owner decision so Phase F can remove the whole
+  // browser mechanism at once, but it is unreferenced, so its PKCE fail-closed property
+  // has no reachable caller left to assert against. It is recorded in the Phase D report
+  // rather than kept as a test of nothing.
 
-    const outcome = await confirmFirebaseSignIn({ method: 'google', email: EMAIL });
-
-    expect((outcome as { code: string }).code).toBe('google/not-configured');
-    expect(mockPromptAsync).not.toHaveBeenCalled();
-  });
-
-  it('no longer shares the browser mechanics — sign-in moved to the native boundary', async () => {
-    // PHASE C CHANGED THIS CLAIM, so this test changed with it. Until Phase C the two
-    // Google paths shared `acquireGoogleIdToken` (authorization code + PKCE), and this
-    // case pinned that sharing. Sign-in now runs through the native Google library, so
-    // the sharing is gone BY DESIGN and the copper-bottomed claim is the opposite one:
-    // a sign-in must not touch the browser seams at all. The confirmation still does,
-    // which is what the cases above prove.
-    //
-    // In this file `lib/firebase-native` is NOT mocked and the mocked Firebase gate
-    // reports OFF (see the mock above), so the native path declines before it loads
-    // anything — which is exactly the state that lets the assertion below prove the
-    // browser seams are untouched while still pinning the sign-in outcome's own shape
-    // (a `failure`, never the confirmation's).
-    expect(isNativeGoogleConfigured()).toBe(false);
+  it('keeps the sign-in path on the same boundary and off the browser seams', async () => {
+    // PHASE C pinned this for SIGN-IN; Phase D extends it to the CONFIRMATION above. Both
+    // Google operations now run natively, so neither may reach `expo-auth-session` — the
+    // two assertions are what keep the retained browser helper genuinely unreferenced.
+    expect(isNativeGoogleConfigured()).toBe(true);
 
     const outcome = await signInWithGoogle();
 
     expect(mockPromptAsync).not.toHaveBeenCalled();
     expect(mockExchangeCodeAsync).not.toHaveBeenCalled();
-    expect(outcome.kind).toBe('failure');
-    expect((outcome as { code: string }).code).toBe('google/not-configured');
+    expect(outcome).toEqual({ kind: 'idToken', idToken: ID_TOKEN });
   });
 });
 
@@ -352,7 +357,7 @@ describe('a confirmation has no legacy door', () => {
     ];
 
     for (const code of codes) {
-      mockSignInWithEmailAndPassword.mockRejectedValue(firebaseError(code));
+      mockNativeSignInWithEmail.mockRejectedValue(firebaseError(code));
       const outcome = await confirmFirebaseSignIn({
         method: 'password',
         email: EMAIL,
@@ -387,12 +392,21 @@ describe('a confirmation has no legacy door', () => {
     // below pass for the wrong reason, so the extraction is proved to have real content
     // and to have kept the one call this method actually makes.
     expect(source.length).toBeGreaterThan(1000);
-    expect(code).toMatch(/signInWithEmailAndPassword\(auth,\s*email,\s*password/);
+    expect(code).toMatch(/nativeSignInWithEmail\(email,\s*password/);
     expect(source).toMatch(/reauthenticateWithCredential/);
     expect(source).toMatch(/getIdToken\(true\)/);
 
     expect(code).not.toMatch(/reauthenticateWith/);
     expect(code).not.toMatch(/getIdToken\(\s*true\s*\)/);
+
+    // PHASE D ADDITIONS. The JavaScript SDK must not come back into this module by any
+    // route — not as an import, and not through the accessor the confirmation used to
+    // reach it. A future "simplification" that reintroduced either would put authentication
+    // back on the SDK the migration exists to retire, and this is the only place that
+    // would notice.
+    expect(code).not.toMatch(/from 'firebase\/auth'/);
+    expect(code).not.toMatch(/from 'firebase\/app'/);
+    expect(code).not.toMatch(/getFirebaseAuth\(/);
   });
 });
 

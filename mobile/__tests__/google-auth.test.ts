@@ -18,10 +18,16 @@
  *     exchanged at Google's token endpoint with the PKCE verifier before any
  *     Firebase credential is built, and PKCE fails closed — are still pinned.
  *
- * THE SEQUENCE IS THE POINT. Phase 32I chose Authorization Code with PKCE,
- * explicitly NOT the implicit `id_token` flow, and that is a claim about the actual
- * order of calls. An authorization code is never treated as a Firebase ID token, and
- * the browser cases would fail if it were.
+ * PHASE D MOVED THE CONFIRMATION OFF THIS FLOW. Until Phase D the browser sequence served
+ * BOTH Google operations, and the exact order of calls was the claim. Since Phase D the
+ * confirmation authenticates natively like the sign-in, so the browser cases have been
+ * replaced by native ones — and the assertions that matter most here are the NEGATIVE
+ * ones: neither operation may touch a browser seam, which is what keeps the retained
+ * `acquireGoogleIdToken` helper genuinely unreferenced until Phase F removes it.
+ *
+ * `googleRedirectUri` is still asserted below. Its only caller is that unreferenced
+ * helper, but the VALUE must not drift while it exists: it is the URI registered with
+ * Google, and `app/+native-intent.ts` still matches its callback path.
  *
  * WHAT IS NOT MOCKED: `lib/firebase-auth.ts` itself. Every branch, message and
  * call-order claim below is the shipped one.
@@ -47,7 +53,7 @@ jest.mock('../lib/firebase-native', () => ({
 }));
 
 // ---------------------------------------------------------------------------
-// The mock seam — the browser flow, still used by the CONFIRMATION path
+// The mock seam — the browser flow, RETAINED BUT UNREFERENCED SINCE PHASE D
 // ---------------------------------------------------------------------------
 
 const mockPromptAsync = jest.fn();
@@ -78,25 +84,17 @@ jest.mock('expo-auth-session', () => {
   };
 });
 
-const mockGoogleCredential = jest.fn();
-const mockSignInWithCredential = jest.fn();
-
-jest.mock('firebase/auth', () => ({
-  GoogleAuthProvider: { credential: (...args: unknown[]) => mockGoogleCredential(...args) },
-  signInWithCredential: (...args: unknown[]) => mockSignInWithCredential(...args),
-  createUserWithEmailAndPassword: jest.fn(),
-  signInWithEmailAndPassword: jest.fn(),
-  signOut: jest.fn(),
-  updateProfile: jest.fn(),
-}));
-
-const mockGetFirebaseAuth = jest.fn();
-jest.mock('../lib/firebase', () => ({ getFirebaseAuth: () => mockGetFirebaseAuth() }));
+// THE `firebase/auth` AND `../lib/firebase` MOCKS ARE GONE WITH THE SDK (Phase D). Nothing
+// the module under test reaches still touches either, so mocking them would only have
+// described a path that no longer exists.
 
 const mockGoogleClientId = jest.fn(() => 'google-client-id');
 const mockIsGoogleConfigured = jest.fn(() => true);
 jest.mock('../lib/config', () => ({
   googleClientId: () => mockGoogleClientId(),
+  // NOT read by the module under test since Phase D removed the import — kept because this
+  // mock replaces the WHOLE module, and an omitted export becomes `undefined` for any
+  // importer rather than failing loudly here.
   isGoogleConfigured: () => mockIsGoogleConfigured(),
 }));
 
@@ -104,7 +102,6 @@ jest.mock('../lib/config', () => ({
 // Fixtures
 // ---------------------------------------------------------------------------
 
-const AUTH = { name: '[DEFAULT]', __fakeAuth: true };
 const GOOGLE_ID_TOKEN = 'google.id.token';
 const FIREBASE_ID_TOKEN = 'firebase.id.token';
 const REDIRECT_URI = 'com.inventoryai.app:/oauthredirect';
@@ -121,20 +118,10 @@ function firebaseError(code: string): Error {
   return Object.assign(new Error(SDK_MESSAGE), { code });
 }
 
-function firebaseCredential(idToken: string = FIREBASE_ID_TOKEN) {
-  return { user: { getIdToken: jest.fn(async () => idToken) } };
-}
-
-/** A successful authorization-code result from the system browser. */
-function authorizedCode(code = 'auth-code-123') {
-  return { type: 'success', params: { code } };
-}
-
 beforeEach(() => {
   jest.clearAllMocks();
   mockIsNativeGoogleConfigured.mockReturnValue(true);
-  mockGetFirebaseAuth.mockReturnValue(AUTH);
-  mockIsGoogleConfigured.mockReturnValue(true);
+  mockNativeSignInWithGoogle.mockResolvedValue({ kind: 'idToken', idToken: FIREBASE_ID_TOKEN });
   mockGoogleClientId.mockReturnValue('google-client-id');
   mockMakeRedirectUri.mockReturnValue(REDIRECT_URI);
   mockCodeVerifier = 'pkce-verifier';
@@ -172,8 +159,7 @@ describe('signInWithGoogle — the native path (Phase C)', () => {
     expect(mockPromptAsync).not.toHaveBeenCalled();
     expect(mockAuthRequestCtor).not.toHaveBeenCalled();
     expect(mockExchangeCodeAsync).not.toHaveBeenCalled();
-    expect(mockGoogleCredential).not.toHaveBeenCalled();
-    expect(mockSignInWithCredential).not.toHaveBeenCalled();
+    expect(mockMakeRedirectUri).not.toHaveBeenCalled();
   });
 
   it('reports cancelled when the person closes the sheet, touching nothing else', async () => {
@@ -183,7 +169,7 @@ describe('signInWithGoogle — the native path (Phase C)', () => {
 
     expect(outcome).toEqual({ kind: 'cancelled' });
     expect(mockExchangeCodeAsync).not.toHaveBeenCalled();
-    expect(mockSignInWithCredential).not.toHaveBeenCalled();
+    expect(mockAuthRequestCtor).not.toHaveBeenCalled();
   });
 
   it('classifies a native failure by its code and never relays the native text', async () => {
@@ -233,94 +219,81 @@ describe('signInWithGoogle — the native path (Phase C)', () => {
 });
 
 // ===========================================================================
-// THE BROWSER FLOW — now reached only through the CONFIRMATION path
+// PHASE D — the CONFIRMATION now runs on the same native boundary
 // ===========================================================================
 
-describe('confirmFirebaseSignIn with Google — the success path', () => {
-  it('exchanges the code for a Google token, then authenticates with Firebase', async () => {
-    mockPromptAsync.mockResolvedValue(authorizedCode());
-    mockExchangeCodeAsync.mockResolvedValue({ idToken: GOOGLE_ID_TOKEN, accessToken: 'at' });
-    mockGoogleCredential.mockReturnValue({ __credential: true });
-    mockSignInWithCredential.mockResolvedValue(firebaseCredential());
-
+describe('confirmFirebaseSignIn with Google — the native path (Phase D)', () => {
+  it('authenticates through the boundary and returns only the Firebase token', async () => {
     const outcome = await confirmFirebaseSignIn({ method: 'google' });
 
-    // Order: the authorization code is exchanged FIRST (with the PKCE verifier), and
-    // only then is a Firebase credential built from GOOGLE's token.
-    expect(mockExchangeCodeAsync).toHaveBeenCalledTimes(1);
-    // The verifier travels in `extraParams` as `code_verifier`; it is never a
-    // top-level parameter of the request body.
-    expect(mockExchangeCodeAsync.mock.calls[0][0]).toMatchObject({
-      code: 'auth-code-123',
-      extraParams: { code_verifier: 'pkce-verifier' },
-    });
-    expect(mockGoogleCredential).toHaveBeenCalledWith(GOOGLE_ID_TOKEN);
-    expect(mockSignInWithCredential).toHaveBeenCalledTimes(1);
-
+    expect(mockNativeSignInWithGoogle).toHaveBeenCalledTimes(1);
+    // NOTHING ABOUT THE BROWSER RUNS. This is the phase's claim stated as an absence:
+    // no AuthRequest is constructed, no consent prompt opens, no code is exchanged and
+    // no credential is built outside the boundary.
+    expect(mockAuthRequestCtor).not.toHaveBeenCalled();
+    expect(mockPromptAsync).not.toHaveBeenCalled();
+    expect(mockExchangeCodeAsync).not.toHaveBeenCalled();
+    // Google's token is never in the outcome — only the Firebase token the boundary
+    // minted from it, which is what the caller exchanges once.
     expect(JSON.stringify(outcome)).not.toContain(GOOGLE_ID_TOKEN);
     expect(outcome).toEqual({ kind: 'idToken', idToken: FIREBASE_ID_TOKEN });
   });
 });
 
 describe('confirmFirebaseSignIn with Google — cancellation is ordinary', () => {
-  it.each(['cancel', 'dismiss'])('reports cancelled on %s and touches nothing else', async (type) => {
-    mockPromptAsync.mockResolvedValue({ type });
+  it('reports cancelled without touching the browser or reaching Firebase', async () => {
+    mockNativeSignInWithGoogle.mockResolvedValue({ kind: 'cancelled' });
 
     const outcome = await confirmFirebaseSignIn({ method: 'google' });
 
     expect(outcome).toEqual({ kind: 'cancelled' });
+    expect(mockPromptAsync).not.toHaveBeenCalled();
     expect(mockExchangeCodeAsync).not.toHaveBeenCalled();
-    expect(mockSignInWithCredential).not.toHaveBeenCalled();
   });
 });
 
-describe('confirmFirebaseSignIn with Google — the OAuth step fails', () => {
-  it('surfaces the OAuth error code with safe copy and stops before Firebase', async () => {
-    mockPromptAsync.mockResolvedValue({
-      type: 'error',
-      error: 'access_denied',
-      errorCode: 'access_denied',
-    });
+describe('confirmFirebaseSignIn with Google — a native failure is classified, never relayed', () => {
+  it('keeps the code for the operator and shows the confirmation sentence', async () => {
+    mockNativeSignInWithGoogle.mockRejectedValue(
+      firebaseError('google/play-services-unavailable')
+    );
 
     const outcome = await confirmFirebaseSignIn({ method: 'google' });
 
-    // The GOOGLE sentence, not the confirmation one: a failure produced INSIDE the
-    // OAuth step is returned as-is by `confirmFirebaseSignIn`, because that is where
-    // its copy was chosen. Only a failure thrown outside the OAuth helper — a refused
-    // Firebase credential — takes the confirmation's own wording.
     expect(outcome).toEqual({
       kind: 'failure',
-      code: 'access_denied',
-      message: GOOGLE_FAILED,
+      code: 'google/play-services-unavailable',
+      message: CONFIRM_FAILED,
     });
-    expect(mockExchangeCodeAsync).not.toHaveBeenCalled();
-    expect(mockSignInWithCredential).not.toHaveBeenCalled();
+    // The raw text names the project and a rejected key; none of it may travel, and the
+    // confirmation's own sentence is the one that does.
+    expect((outcome as { message: string }).message).not.toContain('AIzaSyLEAKEDKEY123');
+    expect((outcome as { message: string }).message).not.toContain('Firebase:');
   });
 
-  it('fails when the token response carries no id_token', async () => {
-    mockPromptAsync.mockResolvedValue(authorizedCode());
-    mockExchangeCodeAsync.mockResolvedValue({ accessToken: 'at' });
+  it('gives an unrecognised code the confirmation sentence too', async () => {
+    mockNativeSignInWithGoogle.mockRejectedValue(
+      Object.assign(new Error('something native'), { code: 'google/unheard-of' })
+    );
 
     const outcome = await confirmFirebaseSignIn({ method: 'google' });
 
     expect(outcome).toEqual({
       kind: 'failure',
-      code: 'google/missing-id-token',
-      message: GOOGLE_FAILED,
+      code: 'google/unheard-of',
+      message: CONFIRM_FAILED,
     });
-    expect(mockSignInWithCredential).not.toHaveBeenCalled();
   });
 });
 
 describe('confirmFirebaseSignIn with Google — Firebase refuses the credential', () => {
   it('reports a failure and never relays the SDK message', async () => {
     // `auth/account-exists-with-different-credential` is Firebase's own refusal to
-    // merge on an address match — the R-4/R-9 policy expressed by the provider. It
-    // is reported as an ordinary failure with no detail.
-    mockPromptAsync.mockResolvedValue(authorizedCode());
-    mockExchangeCodeAsync.mockResolvedValue({ idToken: GOOGLE_ID_TOKEN });
-    mockGoogleCredential.mockReturnValue({});
-    mockSignInWithCredential.mockRejectedValue(
+    // merge on an address match — the R-4/R-9 policy expressed by the provider. It is
+    // reported as an ordinary failure with no detail. Phase D moved the authentication
+    // into the boundary, so the code arrives from there rather than from a direct
+    // `signInWithCredential` call, and the classification is unchanged.
+    mockNativeSignInWithGoogle.mockRejectedValue(
       firebaseError('auth/account-exists-with-different-credential')
     );
 
@@ -336,8 +309,8 @@ describe('confirmFirebaseSignIn with Google — Firebase refuses the credential'
 });
 
 describe('confirmFirebaseSignIn with Google — an unconfigured build', () => {
-  it('reports not-configured without opening a browser', async () => {
-    mockIsGoogleConfigured.mockReturnValue(false);
+  it('reports not-configured without reaching the boundary or the browser', async () => {
+    mockIsNativeGoogleConfigured.mockReturnValue(false);
 
     const outcome = await confirmFirebaseSignIn({ method: 'google' });
 
@@ -346,17 +319,15 @@ describe('confirmFirebaseSignIn with Google — an unconfigured build', () => {
       code: 'google/not-configured',
       message: GOOGLE_NOT_CONFIGURED,
     });
+    expect(mockNativeSignInWithGoogle).not.toHaveBeenCalled();
     expect(mockPromptAsync).not.toHaveBeenCalled();
   });
 
-  it('reports not-configured when Firebase itself is absent', async () => {
-    mockGetFirebaseAuth.mockReturnValue(null);
-
-    const outcome = await confirmFirebaseSignIn({ method: 'google' });
-
-    expect(outcome.kind).toBe('failure');
-    expect(mockPromptAsync).not.toHaveBeenCalled();
-  });
+  // ONE PREDICATE, SO ONE CASE. The browser era had a second case here — "Firebase itself
+  // is absent" — because that path asked `getFirebaseAuth()` and `isGoogleConfigured()`
+  // separately. The native gate federates them (`isNativeFirebaseConfigured() &&
+  // GOOGLE_WEB_CLIENT_ID`), so "Firebase absent" is already inside the case above and a
+  // second test would be asserting the same boolean twice.
 });
 
 // ---------------------------------------------------------------------------
@@ -381,33 +352,16 @@ describe('googleRedirectUri', () => {
 });
 
 // ---------------------------------------------------------------------------
-// PKCE fails closed (Phase 32I-N, finding I-1)
+// PKCE fails closed (Phase 32I-N, finding I-1) — RETIRED IN PHASE D
 // ---------------------------------------------------------------------------
-
-describe('confirmFirebaseSignIn with Google — a missing PKCE verifier', () => {
-  const missingVerifiers: [string, string | undefined][] = [
-    ['missing', undefined],
-    ['empty', ''],
-  ];
-
-  it.each(missingVerifiers)(
-    'refuses to reach the token endpoint when the verifier is %s',
-    async (_label, verifier) => {
-      mockCodeVerifier = verifier;
-      mockPromptAsync.mockResolvedValue(authorizedCode());
-
-      const outcome = await confirmFirebaseSignIn({ method: 'google' });
-
-      expect(outcome).toEqual({
-        kind: 'failure',
-        code: 'google/missing-code-verifier',
-        message: GOOGLE_FAILED,
-      });
-      // No exchange is attempted, so no empty `code_verifier` can be sent, and
-      // nothing downstream runs either.
-      expect(mockExchangeCodeAsync).not.toHaveBeenCalled();
-      expect(mockGoogleCredential).not.toHaveBeenCalled();
-      expect(mockSignInWithCredential).not.toHaveBeenCalled();
-    }
-  );
-});
+//
+// This block drove `acquireGoogleIdToken` through `confirmFirebaseSignIn` and asserted that
+// a missing or empty `code_verifier` stopped the token-endpoint call before it was made.
+// Phase D moved the confirmation to the native library, so that helper has no caller and
+// the property has nothing reachable left to assert against — a test of it now would be a
+// test of nothing. The helper is retained by owner decision so Phase F can remove the whole
+// browser mechanism at once, and the finding it encoded is recorded in the Phase D report.
+//
+// What survives from the finding is structural: the helper still fails CLOSED in source, and
+// it is unreachable from the app, so no empty `code_verifier` can be produced by any path a
+// user can take.

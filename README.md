@@ -921,8 +921,9 @@ sentence's second clause: it was the reset flow, not `change-password`, that rep
   not an implementation.**
 
   **The server boundary is ONE route:** `POST /api/auth/firebase/unlink` — `requireAuth` + controller,
-  **no permission** (it acts only on the caller's own account), and no rate limiter, following the
-  standing rule that no authenticated route in this application is limited. Both sides of the
+  **no permission** (it acts only on the caller's own account), and no rate limiter, matching the
+  existing `firebase/link` precedent — every attempt first needs a live session, a verified Firebase
+  credential, a matching identity and a fresh authentication. Both sides of the
   association are **server-derived**: the account is `req.user.id` and the identity is the uid the
   verified token carries, so a body supplying `userId`, `businessId`, `firebaseUid`, `role` or `status`
   is **inert by construction**. **The email is never consulted** — not compared, not used to find an
@@ -937,15 +938,19 @@ sentence's second clause: it was the reset flow, not `change-password`, that rep
   can never move an account between businesses, change its role or change its status. Stale
   authentication answers **`409 FIREBASE_REAUTHENTICATION_REQUIRED`** (a 300-second freshness window
   enforced server-side from the signed claim), never a 401/403, so a stale credential cannot sign the
-  user out. The detach is one conditional update behind the `firebaseUid` unique index, so a racing
-  second unlink matches nothing rather than detaching an identity set microseconds earlier, and
-  `revokeAllSessions` plus the `passwordChangedAt` stamp end every session the account held.
+  user out. The detach is one conditional update guarded on the expected identity (`firebaseUid` is
+  `$unset`, not blanked), so a stale or racing unlink matches nothing rather than detaching an identity
+  set microseconds earlier — the sparse unique index enforces UID uniqueness, it is not this operation's
+  race guard — and `revokeAllSessions` plus the `passwordChangedAt` stamp end every session the account
+  held.
 
   **★ The assumption it refuted.** This repository had recorded that Firebase refuses to remove a user's
-  last provider. Phase 32L's runtime experiment **refuted** that — a provider unlink **succeeded** at a
-  390-second-old authentication while `updatePassword` was **refused** at the same age — which is why
-  **last-authentication-method protection is enforced server-side and never delegated to Firebase**, and
-  why Policy B is what enforces it.
+  last provider. **Two separate measurements settle it, and they are different facts.** The
+  **last-provider** measurement is the refutation: the unlink **succeeded on the account's final provider,
+  leaving the Firebase account with zero providers**. Separately, the **390-second** measurement found a
+  provider unlink **accepted** at an authentication age where `updatePassword` was **refused** — a finding
+  about *recency*, not about the last provider. Together they are why **last-authentication-method
+  protection is enforced server-side and never delegated to Firebase**, and why Policy B enforces it.
 
   **What the server deliberately does NOT do:** Firebase-side provider unlinking ("Disconnect Google") is
   performed by the **Firebase client SDK** against the signed-in Firebase user; the server cannot observe

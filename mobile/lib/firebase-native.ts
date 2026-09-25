@@ -69,8 +69,7 @@
  * `@react-native-firebase` confined.
  */
 
-import { GOOGLE_WEB_CLIENT_ID } from './config';
-import { isFirebaseConfigured } from './firebase';
+import { GOOGLE_WEB_CLIENT_ID, isFirebaseConfigured } from './config';
 
 /**
  * `require` is not part of this project's TypeScript program: `tsconfig.json` pins

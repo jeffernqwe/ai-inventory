@@ -64,23 +64,10 @@ jest.mock('../lib/firebase-native', () => ({
   nativeCurrentIdToken: (...args: unknown[]) => mockNativeCurrentIdToken(...args),
 }));
 
-/**
- * The JavaScript SDK is still imported by this module for the Google flow and the
- * 32L-B confirmation, neither of which Phase B touches — so it is mocked here to
- * keep those imports cheap and inert, and no case below drives them (they have
- * their own suites: `google-auth.test.ts`, `phase32l-b-confirm-signin.test.ts`).
- */
-jest.mock('firebase/auth', () => ({
-  GoogleAuthProvider: { credential: jest.fn() },
-  signInWithCredential: jest.fn(),
-  signInWithEmailAndPassword: jest.fn(),
-}));
-
-const mockGetFirebaseAuth = jest.fn();
-
-jest.mock('../lib/firebase', () => ({
-  getFirebaseAuth: () => mockGetFirebaseAuth(),
-}));
+// THE `firebase/auth` AND `../lib/firebase` MOCKS ARE GONE (Phase F1). The module under
+// test imports neither: every operation reaches Firebase through the mocked
+// `lib/firebase-native` boundary above, and the JS SDK boundary it used to read a gate
+// from no longer exists. Keeping the mocks would describe a path that is not there.
 
 const EMAIL = 'owner@example.com';
 const PASSWORD = 'Password123!';
@@ -106,7 +93,6 @@ function firebaseError(code: string, message: string = NATIVE_SDK_MESSAGE): Erro
 beforeEach(() => {
   jest.clearAllMocks();
   mockIsNativeFirebaseConfigured.mockReturnValue(true);
-  mockGetFirebaseAuth.mockReturnValue({ name: '[DEFAULT]' });
 });
 
 // ---------------------------------------------------------------------------

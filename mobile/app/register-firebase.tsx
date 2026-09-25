@@ -133,15 +133,18 @@ export default function FirebaseRegisterScreen() {
   /**
    * Nothing outstanding means nothing to register.
    *
-   * `firebaseRegistrationRequired` is armed only by the refusal that creates this
-   * journey, so reaching this route without it — a stale deep link, a cold start
-   * after the process was killed — means the Firebase identity it belonged to is
-   * gone too: `inMemoryPersistence` (Phase 32D) means a restart has no Firebase user
-   * at all. Rendering the form anyway would invite the user to type a business name
-   * and then fail on submit, so the honest answer is the one action that helps. This
-   * is the documented cold-start limitation stated plainly rather than papered over,
-   * and it fails SAFE: no request is made, nothing is fabricated, and no credential
-   * is reconstructed.
+   * `firebaseRegistrationRequired` is armed ONLY by the exchange refusal that creates
+   * this journey, and it lives in memory — so it is gone after a cold start. Note that
+   * the identity itself may NOT be gone: under owner decision P2 React Native Firebase
+   * persists DURABLY, so a restart can restore a native `currentUser`. That restored
+   * user is deliberately not used here. A durable native Firebase session never creates
+   * an Inventory AI session by itself — only the Inventory AI JWT does — and it never
+   * authorizes this screen either, because the in-memory flag, not Firebase state, is
+   * what says an identity is waiting for a tenant. Rendering the form anyway would
+   * invite the user to type a business name and then fail on submit, so the honest
+   * answer is the one action that helps. This is the documented cold-start limitation
+   * stated plainly rather than papered over, and it fails SAFE: no request is made,
+   * nothing is fabricated, and no credential is reconstructed.
    */
   if (!firebaseRegistrationRequired) {
     return (

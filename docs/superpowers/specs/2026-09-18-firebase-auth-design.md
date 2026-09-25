@@ -986,7 +986,7 @@ rewritten.)
 
 | # | Open question | Blocks |
 | --- | --- | --- |
-| **O-1** | The **unlink policy** and last-authentication-method protection, accounting for both Firebase's own provider set and the app-side `firebaseUid` password refusal. | Any unlink capability |
+| **O-1** | The **unlink policy** and last-authentication-method protection, accounting for both Firebase's own provider set and the app-side `firebaseUid` password refusal. — **CLOSED 2026-09-26 (Phase 32L) for the server-side path:** the policy is **Policy B** (an account may leave Firebase authority only by establishing a new local password in the same transition), so the server-side last-authentication-method invariant holds structurally and the `firebaseUid` password refusal is never the only remaining method. **Residual, recorded and NOT closed:** Firebase's own provider set is a client-side operation this server cannot observe. See `docs/DEVELOPMENT_ROADMAP.md` §27Q. | ~~Any unlink capability~~ — set as **Policy B**; the server-side capability shipped in Phase 32L |
 | **O-2** | The **linked-account disposition** of `change-password` and the 26B/27 reset flow, which today would change an inert hash and revoke every session as a side effect. | Any phase that writes `firebaseUid` onto password accounts |
 | **O-3** | Whether **`emailVerified` is enforced** (§14.2). | Provider sign-in relying on a provider-asserted address |
 | **O-4** | **M1 vs M2** (§14.5). — **RESOLVED 2026-09-24:** **M1 (React Native Firebase)** approved, with P2 durable persistence; see [`2026-09-24-rnfirebase-p2-persistence-decision.md`](./2026-09-24-rnfirebase-p2-persistence-decision.md). | All Google/Facebook mobile work |
@@ -1518,6 +1518,17 @@ retained `passwordHash` — so an account can be password-linked (Firebase refus
 here) only insofar as Firebase's own rules allow. **O-1 is unchanged and still open**, and Phase 32L
 remains the phase that owns it. Phase 32H added no unlink route, no unlink service and no unlink
 audit action.
+
+> **Superseded 2026-09-26 (Phase 32L — see `docs/DEVELOPMENT_ROADMAP.md` §27Q).** This subsection is the
+> Phase 32H record and is not rewritten. Phase 32L subsequently shipped the unlink capability it records
+> as absent — `POST /api/auth/firebase/unlink`, `requireAuth` + controller with no permission — under
+> **Policy B**, which is the last-authentication-method invariant made structural: an account may leave
+> Firebase authority only by establishing a **new local password in the same transition**, and the
+> retained hash is replaced rather than re-enabled. **The "Firebase refuses the last provider" premise in
+> this subsection was also refuted by runtime measurement** (a provider unlink succeeded at a
+> 390-second-old authentication while `updatePassword` was refused at the same age), which is why that
+> protection is enforced **server-side and never delegated to Firebase**. `O-1`'s row in §14A.5 carries
+> the same dated annotation.
 
 ### 14B.7 Verification
 

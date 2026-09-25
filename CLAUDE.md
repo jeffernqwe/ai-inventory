@@ -1158,6 +1158,31 @@ implemented**. The design authority remains
 `docs/superpowers/specs/2026-09-18-firebase-auth-design.md` §14B; the shipped record is
 `docs/DEVELOPMENT_ROADMAP.md` §27K. **Phase 32I, 32J and 32L were NOT started.**
 
+> **Cross-reference added 2026-09-26 (Phase 32L — documentation close-out).** The unlink finding above is
+> **superseded**: Phase 32L shipped as **32L-A** (server, `01ae73f`) and **32L-B** (mobile, `0c3f87d`),
+> both contained in `main` (`dbdf673`). The sentence "**Phase 32I, 32J and 32L were NOT started**" is the
+> Phase 32H record and is not rewritten. One authenticated route, `POST /api/auth/firebase/unlink`,
+> **`requireAuth` + controller with no permission** — the account is `req.user.id` and the identity is the
+> verified token's uid, so no client-supplied `userId`/`businessId`/`firebaseUid`/`role`/`status` can
+> steer it, and the email is never consulted. **★ Policy B is the unlink policy and the
+> last-authentication-method invariant is enforced server-side:** an account may leave Firebase authority
+> only by establishing a **new local password in the same transition**, so it never passes through a
+> zero-authentication-method state; the retained bcrypt hash is **REPLACED, never re-enabled**, and the
+> write touches only `firebaseUid`, `emailVerified`, `passwordHash` and `passwordChangedAt`, so an unlink
+> can never move a tenant or change a role. Stale authentication answers **`409`
+> `FIREBASE_REAUTHENTICATION_REQUIRED`** (a 300-second window, server-enforced from the signed claim),
+> never 401/403. **The assumption the repository had recorded — that Firebase refuses to remove a user's
+> last provider — was REFUTED by the Phase 32L runtime experiment**, which is why that protection can
+> never be delegated to Firebase. Firebase-side provider unlinking remains a **Firebase client SDK**
+> operation the server cannot observe; no server-side equivalent was faked. **Verification wording is
+> unchanged and must stay so:** Firebase E2E, the Firebase → backend exchange, the Inventory AI
+> JWT/session flow through live Firebase and iOS runtime are **NOT verified**; the 32L-B Google
+> confirmation path was never runtime-verified; iOS remains `[EXTERNAL VERIFICATION REQUIRED]`; the test
+> figures are the phase records' own historical figures and no suite was re-run for this close-out.
+> **Documentation only** — no source, test, dependency, schema, route, permission, Firebase, EAS or Render
+> change, and no protected working-tree file touched. No security/recovery decision is settled here. See
+> `docs/DEVELOPMENT_ROADMAP.md` **§27Q** and `docs/SYSTEM_SPECIFICATION.md` §29.
+
 Phase 18 is an owner-directed mobile UI extension delivered in approved lettered increments (18A,
 18B, …) after Phase 17. It turns the app into a modern SaaS-style product surface WITHOUT changing
 navigation (the existing native-stack stays; a tab bar would require touching the owner-held

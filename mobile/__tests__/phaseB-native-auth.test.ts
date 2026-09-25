@@ -96,7 +96,7 @@ jest.mock('@react-native-firebase/auth', () => {
 /** The one gate both boundaries share; `lib/firebase.ts` owns the real one. */
 const mockIsFirebaseConfigured = jest.fn(() => false);
 
-jest.mock('../lib/firebase', () => ({
+jest.mock('../lib/config', () => ({
   isFirebaseConfigured: mockIsFirebaseConfigured,
 }));
 

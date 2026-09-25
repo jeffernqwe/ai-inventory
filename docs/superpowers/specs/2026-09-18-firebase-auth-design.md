@@ -694,6 +694,12 @@ once native configuration exists.
 | Native config | `google-services.json`, `GoogleService-Info.plist`, SHA-1/SHA-256, `iosUrlScheme` | None |
 | Google UX | Native account sheet | Browser round-trip; subject to Google's embedded-webview policy if implemented incorrectly |
 | EAS impact | **Forces the first EAS build in this project's history** | None |
+
+> **Cross-reference added 2026-09-25 (Phase F1).** The choice this table presents was **made in
+> practice, and M2 is now CLOSED as superseded** rather than pending: the shipped implementation is
+> **M1** (native SDKs), and Phase F1 deleted M2's browser machinery — the `expo-auth-session` import,
+> `acquireGoogleIdToken`, its Google discovery constants, `googleRedirectUri()` and the `firebase` JS
+> SDK dependency itself. The comparison above is historical and is left unedited. See **§14A.9**.
 | Config-plugin burden | Firebase + Google Sign-In + `expo-build-properties` | None |
 | Ongoing dev speed | Dev build rebuild required for native changes | `expo start` as today |
 
@@ -1099,6 +1105,91 @@ session remains*". The shipped client does **not** do that: there is no automati
 exchange anywhere, boot consults only the stored Inventory AI JWT, and a durable Firebase
 `currentUser` grants no session by itself. The clause is superseded by implementation and
 is left as the historical record it is; the accurate statement is the one above.
+
+## 14A.9 Phase F1 — the Firebase JS SDK and browser OAuth path are REMOVED (2026-09-25)
+
+Phase F — the cleanup the earlier phases kept deferring — was split by the owner into two
+controlled phases (**G-1**). **Phase F1 is pure JavaScript and changes no native surface**; **Phase
+F2**, separately approved, removes the Expo browser dependencies, the `expo-web-browser` plugin, the
+second `expo.scheme` entry and is the phase that requires a new native build. This section records
+what F1 removed and, more importantly, the decisions that authorised removing it.
+
+**The JS-SDK boundary is gone, and two imports had to move first.** `mobile/lib/firebase.ts` was the
+only module in the app that imported `firebase/app` and `firebase/auth`. Phase B/C/D moved every
+authentication off it, but two modules still imported `isFirebaseConfigured` **from it** purely
+because that is where the re-export lived — `lib/auth.tsx` and `lib/firebase-native.ts`. Because
+`lib/firebase.ts` carried top-level static SDK imports, asking that boolean pulled the entire
+JavaScript SDK into those modules' bundle graph. The function has always been defined, SDK-free, in
+`lib/config.ts`; F1 redirected both imports there and only then deleted the module and the `firebase`
+dependency. **This ordering is the phase's one real hazard**: deleting the module first would have
+left `isFirebaseConfigured` undefined, and the native gate — `isNativeFirebaseConfigured()`, which is
+the same predicate — would have thrown for every Firebase and Google sign-in.
+
+**The browser OAuth mechanism is gone with it.** Removed from `lib/firebase-auth.ts`: the
+`expo-auth-session` import block, `acquireGoogleIdToken` (the authorization-code + PKCE helper Phase D
+left unreferenced), its Google discovery constants (`GOOGLE_DISCOVERY`, `GOOGLE_SCOPES`), the
+`GoogleIdTokenOutcome` type, and `googleRedirectUri()` (**G-5** — removed with the helper rather than
+retained as a dead export). Nothing was reaching any of them: since Phase C the sign-in authenticates
+natively and since Phase D the disconnect confirmation does too. **No behaviour moved with them** —
+the outcome unions, the codes, the message table, the legacy-fallback rules and the unlink policy are
+byte-identical, and `confirmFirebaseSignIn` still produces the fresh `auth_time` the server's 300-second
+rule requires.
+
+**The three negative browser-seam guards were replaced, not deleted (G-4).** Three suites had asserted
+`expect(mockPromptAsync).not.toHaveBeenCalled()` and peers — the claim that kept a retained-but-unused
+helper provably unreachable. With the helper gone those assertions had nothing to describe, so the
+claim is now made **once, structurally, at the level that matters after a removal**:
+`mobile/__tests__/phaseF1-retired-dependency-guard.test.ts` proves that no module under `lib/` or
+`app/` imports `firebase`, `firebase/app`, `firebase/auth`, `expo-auth-session` or
+`expo-web-browser`, that `lib/firebase.ts` is absent, and that `package.json` declares no `firebase`
+dependency while still declaring the three native packages that replaced it. That is strictly stronger
+than the three assertions it supersedes, which each covered one function's behaviour. The guard strips
+comments before reading, because this module documents its own removals by name, and it proves its own
+extraction with positive controls so an empty or mis-pathed read cannot pass.
+
+**G-2 — the old JS-SDK rollback target is accepted as gone.** Until F1, `lib/firebase.ts`, the browser
+helper and the still-installed `firebase` package were a one-commit rollback from the Phase B/C/D
+native migration; Phase D's own record said the browser code was kept partly for that reason. F1
+removes that target deliberately. **Git history is the rollback mechanism** — the branch point
+`f15995e` and the merge commit `fa87941` are published, so `git revert`/`git checkout` reaches the
+pre-F1 state without the dead code being carried forward indefinitely.
+
+**G-6 — M2 is CLOSED as superseded by the shipped M1 architecture.** §12's mobile-integration table,
+`docs/SYSTEM_SPECIFICATION.md` §M1-vs-M2 and the roadmap's M2 note all presented native SDKs (M1) and
+the `expo-auth-session` system-browser flow (M2) as an open choice. The shipped implementation is
+**M1**: `@react-native-google-signin/google-signin` performs the consent, and F1 deletes M2's browser
+machinery. The M2 option is therefore **not pending** and no future phase may treat it as a live
+alternative for the providers already shipped. It is closed **as superseded** rather than as
+rejected; the historical statements are preserved in place with dated cross-references (**G-7**), not
+rewritten.
+
+**What F1 deliberately did NOT remove, and why.** The three native packages and their `app.json`
+plugins (they are what authenticates now); `EXPO_PUBLIC_FIREBASE_*` and `isFirebaseConfigured()` in
+`lib/config.ts` (the native gate); the `EXPO_PUBLIC_GOOGLE_*` client IDs and `googleClientId()`;
+the `inventoryai` scheme (the Phase 27 `inventoryai://reset-password` deep link);
+`android.package`/`ios.bundleIdentifier` = `com.inventoryai.app`; and
+**`app/+native-intent.ts` with its suite**, which is retained until F2 because the scheme entry whose
+callback it intercepts (`com.inventoryai.app:/oauthredirect`) is not removed until F2 — keeping the
+interceptor while the scheme exists is the stricter ordering. The server's `firebase-admin` stack is a
+separate subsystem and was not touched.
+
+**Verification.** `npm test` **30 suites / 423 tests, 0 failures**; `tsc --noEmit` and `eslint .`
+clean; the server suite unchanged (no server file was touched). **F1 is verified on the EXISTING
+Phase 32G development build**, because it removes no native module — a *superset* of native modules
+still runs the new JavaScript. **F2 is the phase that needs a new build**, and iOS remains
+`[EXTERNAL VERIFICATION REQUIRED]`.
+
+**A finding that must be stated precisely: the JS SDK is no longer a dependency of this project, but
+it is NOT absent from the installed tree.** `@react-native-firebase/app@26.4.0` — which this project
+keeps on purpose, because it is what authenticates now — declares `"firebase": "12.17.1"` as a **hard
+dependency**. npm therefore does not remove the package; it de-hoists it to
+`node_modules/@react-native-firebase/app/node_modules/firebase`, and `npm ls firebase` still resolves
+(a nested `firebase@12.17.1`). What F1 removed is the **duplicate, hoisted copy application code was
+importing** (the direct `firebase@^12.19.0`, together with 45 packages of its own `@firebase/*`
+subtrees). The nested copy is RNFirebase's internal dependency and is **unreachable from application
+code**, which is the fact `npx expo export`/Metro resolution and the import guard both rest on: no
+module under `lib/` or `app/` names it, so nothing bundles it. Anyone re-reading this later should not
+expect `npm ls firebase` to be empty and should not read its output as "the removal did not work".
 
 ---
 

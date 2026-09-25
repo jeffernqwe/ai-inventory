@@ -9,10 +9,12 @@
  *    two functions the sign-in paths use — and this file asserts the CALL, so a change
  *    that quietly re-pointed either one back at the SDK fails here.
  *
- * 2. THE BROWSER SEAMS ARE NOT TOUCHED. The Phase 32I helper is retained by owner decision
- *    so Phase F can remove the whole browser mechanism at once. "Retained" is only safe if
- *    it is also UNREACHABLE, which is a negative claim no type can express: every browser
- *    seam is asserted uncalled.
+ * 2. THE BROWSER MECHANISM IS GONE (Phase F1). This file used to model `expo-auth-session`
+ *    and assert, negatively, that neither method touched a browser seam — the claim that
+ *    kept the retained `acquireGoogleIdToken` helper provably unreachable. Phase F1 deleted
+ *    that helper, its constants, `googleRedirectUri()` and the `expo-auth-session` import,
+ *    so there is no seam left to assert against and nothing to model. The claim is now made
+ *    once, structurally, in `phaseF1-retired-dependency-guard.test.ts`.
  *
  * 3. THE OUTCOME CONTRACT IS UNCHANGED. `ConfirmSignInOutcome` still has exactly four
  *    members, `wrong-method` is still password-only, and every failure still carries this
@@ -24,7 +26,8 @@
  *    must never substitute `reauthenticateWithCredential` or `getIdToken(true)` for a real
  *    authentication — the second would move `iat` and leave `auth_time` alone, and the
  *    server's 300-second rule would refuse the token with a 409 the client could not
- *    explain.
+ *    explain. (Phase F1 removed `lib/firebase.ts` itself, so the accessor guard is now
+ *    guarding against a module that no longer exists — kept as forward defence.)
  *
  * MEASURED FINDING RECORDED HERE (Phase D experiment). The project has Firebase email
  * enumeration protection ON: a read-only probe of `accounts:signInWithPassword` answered
@@ -54,26 +57,6 @@ jest.mock('../lib/firebase-native', () => ({
   nativeSignInWithEmail: (...args: unknown[]) => mockNativeSignInWithEmail(...args),
   nativeSignInWithGoogle: (...args: unknown[]) => mockNativeSignInWithGoogle(...args),
 }));
-
-// The retained browser helper is still present in the module under test, so its seams are
-// modelled too — purely so the negative assertions have something concrete to observe.
-const mockPromptAsync = jest.fn();
-const mockExchangeCodeAsync = jest.fn();
-const mockAuthRequestCtor = jest.fn();
-
-jest.mock('expo-auth-session', () => {
-  function AuthRequest(this: { codeVerifier: string; promptAsync: unknown }, config: unknown) {
-    mockAuthRequestCtor(config);
-    this.codeVerifier = 'pkce-verifier';
-    this.promptAsync = mockPromptAsync;
-  }
-  return {
-    AuthRequest,
-    ResponseType: { Code: 'code' },
-    exchangeCodeAsync: (...args: unknown[]) => mockExchangeCodeAsync(...args),
-    makeRedirectUri: () => 'com.inventoryai.app:/oauthredirect',
-  };
-});
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -211,17 +194,6 @@ describe('Phase D — Google confirmation runs on the native boundary', () => {
     expect(outcome).toEqual({ kind: 'idToken', idToken: ID_TOKEN });
   });
 
-  it('touches no browser seam and no JavaScript-SDK Google machinery', async () => {
-    // THE NEGATIVE CLAIM THIS PHASE STANDS ON. If a later change re-routed the confirmation
-    // back through the retained helper — or left a half-migrated path that did both — this
-    // case fails, because every browser seam is asserted untouched.
-    await confirmFirebaseSignIn({ method: 'google', email: EMAIL });
-
-    expect(mockAuthRequestCtor).not.toHaveBeenCalled();
-    expect(mockPromptAsync).not.toHaveBeenCalled();
-    expect(mockExchangeCodeAsync).not.toHaveBeenCalled();
-  });
-
   it('reports a closed sheet as cancelled rather than as a fault', async () => {
     mockNativeSignInWithGoogle.mockResolvedValue({ kind: 'cancelled' });
 
@@ -257,12 +229,10 @@ describe('Phase D — Google confirmation runs on the native boundary', () => {
   it('keeps the SIGN-IN path on the same boundary, so both Google operations match', async () => {
     // The confirmation and the sign-in must not drift apart: Phase C moved one and Phase D
     // the other, and this is the case that says they ended up in the same place.
-    await signInWithGoogle();
+    const outcome = await signInWithGoogle();
 
     expect(mockNativeSignInWithGoogle).toHaveBeenCalledTimes(1);
-    expect(mockAuthRequestCtor).not.toHaveBeenCalled();
-    expect(mockPromptAsync).not.toHaveBeenCalled();
-    expect(mockExchangeCodeAsync).not.toHaveBeenCalled();
+    expect(outcome).toEqual({ kind: 'idToken', idToken: ID_TOKEN });
   });
 });
 

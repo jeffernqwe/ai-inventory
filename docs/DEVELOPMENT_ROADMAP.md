@@ -3841,6 +3841,12 @@ recorded here rather than left implicit: a development build installs the dev la
 and URL scheme alongside the app's, so a provider redirect handing control back must be verified
 rather than assumed.
 
+> **Cross-reference added 2026-09-25 (Phase F1).** M2 is **CLOSED as superseded**: the shipped
+> architecture is M1 (native SDKs), and Phase F1 removed `expo-auth-session`, the browser
+> authorization-code + PKCE helper, `googleRedirectUri()` and the `firebase` JS SDK dependency. The
+> redirect question recorded above therefore has no phase left to answer it — the flow it describes no
+> longer exists. This section is the Phase 32G record and is not rewritten. See §27N.
+
 ## Blockers and limitations
 
 - **No blocker was hit.** The pipeline worked exactly as committed, and no unrelated configuration was
@@ -4427,6 +4433,108 @@ message.
 - Legacy accounts without a `firebaseUid` behave exactly as before, on every password surface.
 - The client learns whether local password management applies without learning the identity behind it.
 - **No schema, index, migration, dependency, session mechanism or retained hash was changed.**
+
+---
+
+# 27N. Phase F1 — Retire the Firebase JS SDK and the Browser OAuth Path
+
+Phase F is the **cleanup the Firebase migration kept deferring**: after Phases B–E every
+authentication ran on the native SDK, but the JavaScript SDK boundary, the browser OAuth helper and
+the `firebase` package were all still installed and still imported in places. The owner split it into
+two controlled phases (**G-1**):
+
+| | Phase F1 (this section) | Phase F2 (approved separately, NOT started) |
+| --- | --- | --- |
+| Nature | **Pure JavaScript — no native surface change** | Native-surface reduction |
+| Removes | `lib/firebase.ts`, the `firebase` dependency, the `expo-auth-session` import, `acquireGoogleIdToken`, `GOOGLE_DISCOVERY`, `GOOGLE_SCOPES`, `GoogleIdTokenOutcome`, `googleRedirectUri()` | `expo-auth-session`, `expo-web-browser` **and its `app.json` plugin together**, `expo-crypto`, the second `com.inventoryai.app` `expo.scheme` entry, `app/+native-intent.ts` |
+| Native build | **Not required** | **Required** — a new EAS development build |
+| iOS | `[EXTERNAL VERIFICATION REQUIRED]` | `[EXTERNAL VERIFICATION REQUIRED]` |
+
+## The prerequisite that made the removal safe
+
+`lib/firebase.ts` was the only module importing `firebase/app` and `firebase/auth`. It did not need to
+be: **two modules imported `isFirebaseConfigured` from it** — `lib/auth.tsx` and
+`lib/firebase-native.ts` — purely because that is where the re-export sat, and because the module
+carried top-level static SDK imports, asking that boolean pulled the whole JavaScript SDK into their
+bundle graph. The function is defined, SDK-free, in `lib/config.ts`. **F1 redirected both imports
+there first, and only then deleted the module and the package.** Removing the module first would have
+left the native gate (`isNativeFirebaseConfigured()`, the same predicate) throwing for every Firebase
+and Google sign-in — the phase's one real hazard, recorded as **F-2** and closed by ordering.
+
+## What else went, and what deliberately did not
+
+Removed with it: the `expo-auth-session` import in `lib/firebase-auth.ts` and everything only it
+served — `acquireGoogleIdToken` (the Phase 32I authorization-code + PKCE helper Phase D left
+unreferenced), its Google discovery constants, the `GoogleIdTokenOutcome` type, and `googleRedirectUri()`
+(**G-5**: removed with its only caller rather than kept as a dead export). **No behaviour moved with
+them** — the outcome unions, error codes, message table, legacy-fallback rules, the 300-second
+`auth_time` rule and the unlink policy are unchanged, and `confirmFirebaseSignIn` still produces the
+fresh `auth_time` the server requires.
+
+**Kept, on purpose:** the three native packages and their `app.json` plugins; everything in
+`lib/firebase-native.ts`; `EXPO_PUBLIC_FIREBASE_*` and `isFirebaseConfigured()` in `lib/config.ts`;
+the `EXPO_PUBLIC_GOOGLE_*` client IDs and `googleClientId()`; the `inventoryai` scheme (Phase 27's
+`inventoryai://reset-password`); `android.package`/`ios.bundleIdentifier` = `com.inventoryai.app`; and
+**`app/+native-intent.ts` with its suite**, which stays until F2 because the scheme entry whose
+callback it intercepts is not removed until F2 — keeping the interceptor while the scheme exists is
+the stricter ordering (**C-2**).
+
+## The guard that replaced three negative assertions (**G-4**)
+
+Three suites had asserted `expect(mockPromptAsync).not.toHaveBeenCalled()` and peers — the claim that
+kept a retained-but-unused helper provably unreachable. Deleting the helper made those assertions
+tests of nothing, so rather than dropping them the claim was **moved to the level that still means
+something after a removal**: `mobile/__tests__/phaseF1-retired-dependency-guard.test.ts` walks every
+source file under `lib/` and `app/` and proves none imports `firebase`, `firebase/app`,
+`firebase/auth`, `expo-auth-session` or `expo-web-browser`; that `lib/firebase.ts` is absent; and that
+`package.json` declares no `firebase` while still declaring the three native packages that replaced
+it. Comments are stripped before the scan — this codebase documents its removals by name — and the
+suite carries positive controls so an empty traversal cannot pass, plus a `phaseC-native-google` mock
+merge, because two `jest.mock` factories for `lib/config` are rejected by Jest.
+
+## G-2 — the rollback target is accepted as gone
+
+Until F1, `lib/firebase.ts`, the browser helper and the still-installed `firebase` package were a
+one-commit rollback from the native migration, and Phase D said the browser code was retained partly
+for that reason. **F1 removes that target deliberately; git history is the rollback mechanism** —
+`f15995e` (Phase E) and the merge commit `fa87941` are published.
+
+## G-6 — M2 is CLOSED as superseded
+
+The mobile provider integration is **M1** (native SDKs). The `expo-auth-session` / `expo-web-browser`
+browser flow (M2) is not a pending alternative, and its machinery no longer exists. The M2 discussion
+in §27J and in the design authority is preserved as history with a dated cross-reference rather than
+rewritten (**G-7**).
+
+## Verification
+
+- `npm test` — **30 suites / 423 tests, 0 failures** (before F1: 30 suites / 388 tests; `firebase.test.ts`
+  deleted, `phaseF1-retired-dependency-guard.test.ts` added, the reduced baselines recorded in the
+  Phase F1 report).
+- `npm run typecheck` (`tsc --noEmit`) and `npm run lint` (`eslint .`) — clean.
+- **`firebase` is no longer a declared dependency and no source file imports it** — but it is **not
+  absent from the installed tree**, and the expectation that it would be is wrong: `@react-native-firebase/app@26.4.0`
+  declares `"firebase": "12.17.1"` as a hard dependency, so npm de-hoists the JS SDK under
+  `node_modules/@react-native-firebase/app/` rather than removing it, and `npm ls firebase` still
+  resolves. F1 removed the **duplicate hoisted copy application code used** (direct `firebase@^12.19.0`
+  plus 45 packages of its own `@firebase/*` subtrees). The nested copy is unreachable from `lib/` and
+  `app/`, which is what the structural guard proves.
+- `expo-auth-session`, `expo-web-browser` and `expo-crypto` still resolve as direct dependencies,
+  because F2 removes them and F1 must not.
+- Server suite — unchanged, as no server file was touched.
+- **Device smoke test on the EXISTING Phase 32G development build**, which is sufficient for F1 because
+  no native module was removed: a superset of native modules still runs the new JavaScript.
+- **iOS remains `[EXTERNAL VERIFICATION REQUIRED]`** — no iOS build or device exists for this project.
+
+## Definition of Done
+
+- No module under `lib/` or `app/` imports the retired packages, proven structurally and not by
+  inspection.
+- The Firebase JS SDK boundary, the browser OAuth mechanism and the `firebase` dependency are gone.
+- Authentication behaviour is unchanged: native email/password, native Google, the confirmation flow,
+  the 300-second `auth_time` rule, unlink, and every client-facing error code.
+- No native module, plugin, URL scheme, bundle identifier or permission changed — that is F2.
+- **No server file, schema, session mechanism or protected working-tree file was touched.**
 
 ---
 

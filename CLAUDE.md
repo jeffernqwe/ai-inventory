@@ -990,6 +990,14 @@ verified rather than assumed. The design authority remains
 subsequently shipped — see the Phase 32H entry below; this sentence is the Phase 32G record and is
 not rewritten).
 
+> **Cross-reference added 2026-09-25 (Phase F1).** The M2 question recorded above — whether the
+> mobile provider integration would use the `expo-auth-session` / `expo-web-browser` system-browser
+> flow — **is closed as superseded**. The shipped implementation is **M1** (native SDKs:
+> `@react-native-google-signin/google-signin`), and Phase F1 removed M2's browser machinery along with
+> the `firebase` JS SDK dependency. This paragraph is the Phase 32G record and is not rewritten. See
+> `docs/superpowers/specs/2026-09-18-firebase-auth-design.md` §14A.9 and
+> `docs/DEVELOPMENT_ROADMAP.md` §27N.
+
 Phase 32H is an owner-directed account-linking increment delivered as a single approved increment after
 Phase 32G, and it implements the **server half of linking and deliberately nothing else**. The question
 it answers is exactly one: *may this authenticated Inventory AI account carry this verified Firebase

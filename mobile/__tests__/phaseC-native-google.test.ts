@@ -96,17 +96,17 @@ jest.mock('@react-native-firebase/auth', () => ({
   updateProfile: jest.fn(),
 }));
 
-/** The Firebase gate the boundary shares with the JS SDK boundary. */
+/** The Firebase gate the boundary shares with the configuration module. */
 const mockIsFirebaseConfigured = jest.fn(() => true);
-
-jest.mock('../lib/firebase', () => ({
-  isFirebaseConfigured: mockIsFirebaseConfigured,
-}));
 
 /** The Web client ID, which is the second half of the native Google gate. */
 let mockGoogleWebClientId = 'web-client-id.apps.googleusercontent.com';
 
+// ONE factory for `../lib/config` (Phase F1). Both gate values live there now, and Jest
+// rejects a second `jest.mock` of the same path, so the two factories are merged rather
+// than declared twice.
 jest.mock('../lib/config', () => ({
+  isFirebaseConfigured: mockIsFirebaseConfigured,
   get GOOGLE_WEB_CLIENT_ID() {
     return mockGoogleWebClientId;
   },

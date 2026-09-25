@@ -182,7 +182,7 @@ Phase 32L
 Firebase Identity Unlink (server boundary + mobile) — 32L-A / 32L-B
         ↓
 Phase B
-Mobile Firebase Authentication on the Native SDK (RNFirebase foundation)
+Mobile Firebase Authentication on the Native SDK
         ↓
 Phase C
 Mobile Google Sign-In on the Native SDK
@@ -4814,7 +4814,8 @@ authenticating through the Firebase identity it carries** and become a password 
 and shipped as two halves — **32L-A** (server) and **32L-B** (mobile) — and **both were already merged
 before this section was written**. This section is therefore a **documentation close-out and shipped
 record**, not an implementation: it changes no code, and it exists because the roadmap had **no section
-for Phase 32L at all** while three separate sections still asserted that Phase 32L had not started.
+for Phase 32L at all** while **three statements across two sections** — §27K (two) and §27M (one) —
+still asserted that Phase 32L had not started.
 
 ## Status
 
@@ -4836,8 +4837,10 @@ Both are ancestors of `fa87941` (PR #1) and therefore of **`dbdf673`** (PR #2, t
 - **ONE route: `POST /api/auth/firebase/unlink`** — `requireAuth` + controller, **no permission**. It is
   Phase 23's `AUTHENTICATED` bucket, for the reason that bucket exists: it acts only on the caller's own
   account and no catalogue key could express "may unlink an identity" without inventing an authorization
-  concept the catalogue does not have. It carries no rate limiter, following the standing rule that no
-  authenticated route in this application is limited. Body: `{ idToken, newPassword, confirmPassword }`.
+  concept the catalogue does not have. It carries no rate limiter, matching the existing `firebase/link`
+  precedent: every attempt already requires a live session, a verified Firebase credential, a matching
+  identity and a fresh authentication before it can do any work at all. (`POST /api/ai/chat` is the one
+  authenticated route that does carry a limiter.) Body: `{ idToken, newPassword, confirmPassword }`.
 - **Both sides of the association are server-derived.** The account is `req.user.id`; the identity is the
   uid `verifyFirebaseIdToken` returns. So a body carrying `userId`, `businessId`, `firebaseUid`, `role` or
   `status` is **inert by construction** — there is no variable in the module holding it. **The email is
@@ -4854,9 +4857,11 @@ Both are ancestors of `fa87941` (PR #1) and therefore of **`dbdf673`** (PR #2, t
   attached → **freshness** → write. Stale authentication answers **`409`
   `FIREBASE_REAUTHENTICATION_REQUIRED`** (the 300-second window in `src/constants/firebase.ts`), never a
   `401`/`403`, so a stale credential cannot sign the user out.
-- **Concurrency is the database's problem.** The detach is ONE conditional update (`{ _id, firebaseUid:
-  null }`) behind the `firebaseUid` unique index, so a racing second unlink matches nothing rather than
-  detaching an identity set microseconds earlier.
+- **Concurrency is the database's problem, and the guard is the expected identity.** The detach is ONE
+  conditional update — `{ _id: user._id, firebaseUid: identity.uid }` with `$unset: { firebaseUid: 1 }`
+  — so a stale or racing unlink that presents an identity this account no longer carries matches nothing
+  and detaches nothing. The `firebaseUid` sparse unique index enforces UID uniqueness across accounts;
+  it is **not** this operation's race-protection mechanism.
 - **Sessions:** after the write, `revokeAllSessions` runs as well as the `passwordChangedAt` stamp — the
   stamp alone already rejects tokens issued in a strictly earlier second, and the explicit call closes
   the same-second hole.
@@ -4882,9 +4887,17 @@ confirmation (the owner-ratified remediation, FB-D-123). `authMethods` is provid
 ## ★ The refuted assumption that shaped the policy
 
 This repository had recorded, and Phase 32L's own design initially relied on, the belief that **Firebase
-refuses to remove a user's last provider**. The Phase 32L runtime experiment **refuted it**: a provider
-unlink **succeeded** on a 390-second-old authentication while `updatePassword` was **refused** at the same
-session age. Two consequences follow, and both are load-bearing:
+refuses to remove a user's last provider**. **Two separate measurements from the Phase 32L runtime work
+settle it, and they are different facts:**
+
+- **The last-provider measurement — the refutation.** The unlink **succeeded on the account's final
+  provider and left the Firebase account with ZERO providers**, so Firebase does **not** refuse to remove
+  the last one and the belief above is refuted.
+- **The 390-second measurement — the recency distinction, a separate finding.** At an authentication age
+  where `updatePassword` was **refused**, a provider unlink was **accepted**: Firebase does not gate
+  unlinking on recency. *This is evidence about freshness, not about the last provider.*
+
+Two consequences follow, and both are load-bearing:
 
 1. **Last-authentication-method protection must be enforced server-side and never delegated to Firebase.**
 2. **Policy B is what enforces it** — the account always leaves the transition holding a password.

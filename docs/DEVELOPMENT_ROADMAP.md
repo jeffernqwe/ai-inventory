@@ -4958,6 +4958,66 @@ security/recovery item is resolved by this section.
 
 ---
 
+# 27R. Registration Form Required-Field Validation (Preview-Validation Finding "F-1")
+
+## Objective
+
+Close the one real defect found while functionally validating the mobile **Preview** build: the
+registration screen validated only the confirm-password mismatch, so submitting the form **empty**
+produced no client-side errors and instead reached the Firebase sign-up path.
+
+**Naming, stated because three unrelated things share the shape "F-1/F1":** this is the
+**registration "F-1"** found during Preview validation. It is **not** the Phase 30A
+**"F-1" = PDF sharing** finding (§27F), which remains open, and it is **not** the
+**Phase F1 / F2 / F2.9** cleanup series (§27N–§27P). The three names are unrelated, and no historical
+record is rewritten to reconcile them.
+
+## Change
+
+`mobile/app/register.tsx` — `submit()` validates required fields **before** it calls `signUp()`:
+business name, name, email, password and confirmation must each be non-empty. The pre-existing
+confirm-mismatch rule is preserved and sharpened: an empty confirmation reports **"Confirm password is
+required"**, while a non-empty confirmation that differs still reports **"Passwords do not match"**.
+
+## Files changed
+
+| File | Change |
+| --- | --- |
+| `mobile/app/register.tsx` | required-field validation added to `submit()` (+13/−1 lines) |
+| `mobile/__tests__/register-validation.test.tsx` | new focused suite, 6 cases |
+
+## Verification
+
+- **Focused suite:** `npx jest register-validation` — **6 passed, 6 total**. A mutation pass that
+  reverted the required-field checks failed 4 of the 6 cases, confirming the suite distinguishes the
+  fix; the file was restored and its hash re-verified.
+- **Full mobile suite:** `npx jest` — **30 suites / 438 tests, 0 failures**. `npx tsc --noEmit` clean;
+  `npx eslint .` clean.
+- **Device verification (already performed; not part of this documentation change).** EAS `preview`
+  Android build **`75fc3eb6-0a01-4bb3-a42d-5e90c9cff939`** (`FINISHED`, fingerprint
+  `d16abc4e7df419812e73598db676985be3606dc7`) was installed on device `PV4DDMIZZLTCIVSK`; five
+  invalid-submit scenarios passed, with `createUserWithEmailAndPassword` called **0** times.
+
+## Issues
+
+- **The complete-form path was not exercised on device**, because it would create data; it is covered
+  by the focused suite only.
+- **iOS is not runtime-verified** — no iOS build exists on this host.
+- No backend, dependency, permission, route, session or schema change; no protected working-tree file
+  touched.
+
+## Documentation
+
+- `CLAUDE.md` numbered index: entries added for Phases **32J, 32K, 32L, F1, F2 and F2.9** (the list
+  previously stopped at 32H), plus an unnumbered entry for this fix that disambiguates it from the
+  Phase 30A "F-1".
+- `docs/SYSTEM_SPECIFICATION.md` §29 and §48, and the design authority §14A.1/§14A.7: the stale
+  "Google Sign-In not implemented" statements are corrected, and the design authority gains the missing
+  Phase 32L **unlink** supersession note.
+- `README.md` Phase Status: an entry for this fix.
+
+---
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

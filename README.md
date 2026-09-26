@@ -1053,3 +1053,16 @@ sentence's second clause: it was the reset flow, not `change-password`, that rep
   deliberately unverified and is not an F2 failure** — the blockers are pre-existing and environmental
   (no live Firebase project), and **iOS remains `[EXTERNAL VERIFICATION REQUIRED]`**. See
   `docs/DEVELOPMENT_ROADMAP.md` §27P.
+
+- **Registration required-field validation fix (mobile; the "F-1" found during Preview validation):**
+  fixed and device-verified. The register screen had validated only the confirm-password mismatch, so
+  submitting the form **empty** produced no client-side errors and reached the Firebase sign-up path.
+  `mobile/app/register.tsx` `submit()` now checks that business name, name, email, password and
+  confirmation are each non-empty **before** it calls `signUp()`, and the confirm-mismatch rule is
+  preserved (an empty confirmation reports "required"; a differing non-empty one still reports
+  "Passwords do not match"). **Naming:** this is *not* the Phase 30A **"F-1 (PDF sharing)"** finding
+  recorded above, and *not* a Phase F1/F2/F2.9 cleanup phase — the three names are unrelated. Guarded by
+  the new focused suite `mobile/__tests__/register-validation.test.tsx` (**6 cases**); full mobile suite
+  **30 suites / 438 tests, 0 failures**; `tsc --noEmit` and `eslint .` clean; verified on device through
+  the `preview` EAS build **`75fc3eb6-…`**. **No backend, dependency, permission, route or session
+  change.** See `docs/DEVELOPMENT_ROADMAP.md` §27R.

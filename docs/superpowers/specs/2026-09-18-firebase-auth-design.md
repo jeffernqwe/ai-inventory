@@ -904,7 +904,7 @@ permissions, business status, subscription/billing state, application sessions, 
 | Method | Status |
 | --- | --- |
 | Email/password via Firebase Authentication | **Implemented** (32B–32E) |
-| Google via Firebase Authentication | **Approved · NOT implemented** |
+| Google via Firebase Authentication | **Implemented** (Phase C, native `@react-native-google-signin/google-signin`) — existing-account Android flow **E2E verified 2026-09-26**; the new-identity `REGISTRATION_REQUIRED` path is ENVIRONMENT-BLOCKED |
 | Facebook via Firebase Authentication | **Approved · NOT implemented** |
 | Apple Sign-In | **Future scope · NOT part of the current implementation** |
 
@@ -1008,14 +1008,23 @@ Neither is settled by this phase, and both gate **later** work rather than this 
 ## 14A.7 Implementation status (stated so it cannot be assumed)
 
 - **Google Sign-In: NOT started.** No provider SDK, no OAuth client, no route, no screen.
+  *(**Superseded 2026-09-26 (Phase C):** native Google Sign-In **is implemented** — the
+  `@react-native-google-signin/google-signin` provider SDK is installed and the existing-account
+  Android flow is **E2E verified**; the new-identity `REGISTRATION_REQUIRED` path is
+  ENVIRONMENT-BLOCKED. This sentence is the Phase 32F record and is not rewritten.)*
 - **Facebook Login: NOT started.** Same.
 - **Apple Sign-In: future scope**, not scheduled.
 - **Account linking: NOT implemented. Account unlinking: NOT implemented.** (**Superseded in part by
-  §14B** — as of Phase 32H the server-side linking *boundary* is implemented. Every provider-side
-  statement in this section still holds: no provider SDK, no provider route, no provider screen, and
-  no unlinking. The sentence above is the Phase 32F record and is not rewritten.)
+  §14B** — as of Phase 32H the server-side linking *boundary* is implemented, and as of **Phase 32L**
+  (`POST /api/auth/firebase/unlink`, Policy B — specification §29, roadmap §27Q) the server-side
+  **unlinking** boundary is implemented too. Every provider-side statement in this section still holds:
+  no provider screen, no ownership-proof flow beyond the authenticated session, and Firebase-side
+  provider linking/unlinking remains a client-SDK operation the server cannot observe. The sentence
+  above is the Phase 32F record and is not rewritten.)
 - **Invitations: NOT implemented.** The `users.manage` create route still exists unchanged.
-- **No provider SDK is installed** on either platform.
+- **No provider SDK is installed** on either platform. *(**Superseded 2026-09-26 (Phases B–C):** the
+  native Firebase (`@react-native-firebase/*`) and Google Sign-In provider SDKs are installed. The
+  Phase 32F record is not rewritten.)*
 - **No EAS build, submit or prebuild has been created.** The first EAS development build remains a
   **prerequisite** for validating the selected mobile provider integration path; until it exists, no
   provider integration has been tested — and none is claimed to have been. (**Superseded by Phase 32G**,

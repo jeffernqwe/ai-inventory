@@ -123,6 +123,47 @@ cookies, request bodies, query strings, or full AI prompts/responses. The per-re
 on by default; set `LOG_REQUESTS=0` in `server/.env` to disable it (error logs still emit). The
 test runner forces `LOG_REQUESTS=0` so suites stay quiet.
 
+### Deployment & auto-deploy (Render)
+
+The backend is deployed to Render as the service **`ai-inventory`**, which runs **only the
+backend** — its build and start commands are relative to the repository's `server/` directory,
+configured as **`rootDir: server`**. The service's Auto-Deploy setting is **`On Commit`**.
+
+Together these two settings have one important consequence: **Render receives every push to the
+repository, but a push does not necessarily trigger a deployment.** With a root directory set,
+Render only auto-deploys when the pushed change affects at least one file **under that root
+directory** — here, under `server/`. A push that touches only `mobile/`, `docs/`, `README.md`,
+`CLAUDE.md`, or any other path outside `server/` is **correctly skipped**, and no deployment is
+created.
+
+> **`GitHub push received by Render` ≠ `Render deployment triggered`.**
+>
+> **`Auto-Deploy: On Commit` + `rootDir: server`** means *deploy the backend when the backend
+> changes* — not *deploy on every repository change*.
+
+A skipped deploy is **expected Render behavior, not necessarily an auto-deploy failure**. Observed
+examples:
+
+| Push | Files changed under `server/` | Auto-deployed? |
+| ---- | ----------------------------- | -------------- |
+| `fa87941` (PR #1 merge) | 22 | ✅ yes |
+| `dbdf673` (PR #2 merge) | 0 (`mobile/**` + `docs/**` only) | ❌ skipped (expected) |
+| `37f5535` (PR #3 merge) | 0 (`docs/**` only) | ❌ skipped (expected) |
+
+**Troubleshooting a "missing" Render deployment**
+
+1. **First, check whether the pushed change actually affects `server/`.** If it does not
+   (docs/mobile-only), there is nothing to fix — Render intentionally skipped a backend deploy
+   that was not needed. Do **not** reconnect GitHub, create webhooks, or manually deploy in
+   response.
+2. Confirm Render received the push: a **GitHub check suite created by the `render` app** on the
+   commit proves delivery. **The absence of a deployment does not, by itself, mean the GitHub
+   connection is broken.**
+3. Only if the commit **clearly changes files under `server/`** and still did not auto-deploy
+   should you look at Render's Auto-Deploy configuration and its service Events/Deploys. The usual
+   causes there are the Auto-Deploy mode, the linked branch, build filters, a `[skip render]`-style
+   directive in the commit message, or a suspended service.
+
 ### Commercialization foundation (Phase 10)
 
 `Business.planCode`, the centralized plan catalog (`server/src/constants/plans.ts`), and

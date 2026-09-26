@@ -1367,6 +1367,27 @@ account for both sides are OPEN** and must be settled before an unlink capabilit
 implemented **no** unlink capability of any kind, server-side or otherwise, and left this open rather
 than deciding it.
 
+**Superseded in part, 2026-09-26 (Phase 32L — see `docs/DEVELOPMENT_ROADMAP.md` §27Q).** The paragraph
+above is the Phase 32H record and is not rewritten. **The unlink policy is now settled and the
+server-side capability shipped:** one authenticated route, `POST /api/auth/firebase/unlink`
+(`requireAuth` + controller, no permission), detaches the caller's **own** `firebaseUid`. **Policy B is
+the policy, and it is the last-authentication-method invariant made structural:** an account may leave
+Firebase authority **only by establishing a NEW local password in the same transition**, so it never
+passes through a zero-authentication-method state; the retained legacy hash is **REPLACED, never
+re-enabled**, and the write touches only `firebaseUid`, `emailVerified`, `passwordHash` and
+`passwordChangedAt`, so an unlink can never move a tenant or change a role. Stale authentication answers
+`409 FIREBASE_REAUTHENTICATION_REQUIRED` (a 300-second window, enforced server-side from the signed
+claim). **The premise above was also refuted by measurement, and the two measurements are distinct
+facts:** in the **last-provider** measurement the unlink **succeeded on the account's final provider and
+left the Firebase account with zero providers**, which is what refutes "Firebase refuses to remove the
+last provider"; in the separate **390-second** measurement a provider unlink was **accepted** at an
+authentication age where `updatePassword` was **refused** — a finding about *recency* rather than about
+the last provider. Firebase's "last provider" protection therefore cannot be relied on, and
+**last-authentication-method protection is enforced server-side and never delegated to Firebase**.
+**Residual, recorded and not closed:** Firebase's own provider set remains a client-side operation this
+server cannot observe; the server owns only the MongoDB `firebaseUid` detachment, and no server-side
+provider-unlink capability was faked.
+
 Ending an Inventory AI session revokes that session only. It never revokes the Firebase identity, and
 disabling an Inventory AI user does not disable the corresponding Firebase user — the exchange refuses
 the disabled account, which is what denies access.
@@ -1389,7 +1410,7 @@ requires an explicit owner decision before the phase that would implement it:
 
 | Open item | Blocks |
 | --- | --- |
-| The unlink policy and last-authentication-method protection | Any unlink capability |
+| The unlink policy and last-authentication-method protection — **RESOLVED FOR THE SERVER-SIDE PATH 2026-09-26 (Phase 32L): the policy is Policy B** (an account may leave Firebase authority only by establishing a new local password in the same transition, so the server-side last-authentication-method invariant holds structurally). **Residual, recorded and NOT closed:** Firebase's own provider set is a client-side operation the server cannot observe. | ~~Any unlink capability~~ — the server-side capability shipped in Phase 32L; the residual above is recorded rather than closed |
 | Whether `emailVerified` is enforced | Provider sign-in that relies on a provider-asserted address |
 | M1 (native SDK) vs M2 (`expo-auth-session`) for the mobile provider integration — **CLOSED 2026-09-25 (Phase F1): RESOLVED as M1, the shipped architecture; M2 is superseded and its browser machinery removed** | ~~All Google/Facebook mobile work~~ — this row no longer blocks Google, which ships natively. Facebook Login remains future scope, and it inherits the M1 decision |
 | The Facebook missing-email onboarding flow | Facebook Login |
@@ -1590,7 +1611,10 @@ implementation. Enforcing `emailVerified` is likewise not implemented.
 Account linking is **half** implemented, and the half matters: since Phase 32H the **server-side
 boundary** exists (`POST /api/auth/firebase/link`, authenticated — see §29), while the provider side
 does not. There is no "Connect Google", no OAuth redirect, no unlink, and no provider field on any
-model. The boundary is what Google and Facebook will converge on; it is not Google or Facebook.
+model. *(**Superseded in part 2026-09-26 (Phase 32L): the server-side unlink boundary now exists** —
+`POST /api/auth/firebase/unlink`, under Policy B — while Firebase-side provider unlinking remains a
+client-SDK operation the server cannot observe and no provider SDK was installed. This sentence is the
+Phase 32F record and is not rewritten.)* The boundary is what Google and Facebook will converge on; it is not Google or Facebook.
 
 ---
 

@@ -177,6 +177,30 @@ Mobile Firebase Registration Onboarding (Google → register → exchange → se
         ↓
 Phase 32K
 Firebase Password Authority Boundary & Timing-Equalizer Credential Fix
+        ↓
+Phase 32L
+Firebase Identity Unlink (server boundary + mobile) — 32L-A / 32L-B
+        ↓
+Phase B
+Mobile Firebase Authentication on the Native SDK
+        ↓
+Phase C
+Mobile Google Sign-In on the Native SDK
+        ↓
+Phase D
+Native Firebase Confirmation Flows
+        ↓
+Phase E
+Native Firebase Session Teardown & Session Reconciliation
+        ↓
+Phase F1
+Retire the Firebase JS SDK and the Browser OAuth Path
+        ↓
+Phase F2
+Retire the Browser Dependencies, the Plugin, the Second Scheme and the Native-Intent Hook
+        ↓
+Phase F2.9
+EAS Development Build & Android Runtime/Native Verification of F2
 ```
 
 ---
@@ -4014,6 +4038,14 @@ server cannot observe, and Firebase's "last provider" protection remains unaware
 `passwordHash`. **O-1 is unchanged and still open**, and Phase 32L remains the phase that owns it.
 Phase 32H added no unlink route, no unlink service and no unlink audit action.
 
+> **Superseded 2026-09-26 (Phase 32L — see §27Q).** The unlink capability this subsection records as
+> absent **shipped** in `01ae73f` (32L-A, server) and `0c3f87d` (32L-B, mobile), both contained in
+> `main` (`dbdf673`): one authenticated route `POST /api/auth/firebase/unlink`, its service, its audit
+> actions. The last-authentication-method invariant is enforced **server-side** by **Policy B** — an
+> account may leave Firebase authority only by establishing a new local password in the same transition
+> — because the Phase 32L runtime experiment **refuted** the "Firebase refuses to remove the last
+> provider" belief this paragraph rests on. This paragraph is the Phase 32H record and is not rewritten.
+
 ## Google / Facebook / Apple status
 
 **Not implemented, and not partially implemented.** No provider SDK was installed on either platform,
@@ -4092,7 +4124,8 @@ both layers at once.
 - The Phase 32E guard is intact and unweakened.
 - **Google Sign-In, Facebook Login, Apple Sign-In, account linking via a provider, account unlinking
   and invitations are NOT implemented**, and no provider SDK was installed.
-- **Phase 32I, 32J and 32L were NOT started.**
+- **Phase 32I, 32J and 32L were NOT started.** *(Superseded 2026-09-26: **32J** shipped — §27L — and
+  **32L** shipped — §27Q. The Phase 32H record is not rewritten.)*
 
 ---
 
@@ -4372,7 +4405,10 @@ message.
 
 - **No retained `passwordHash` was deleted.** The unlink / last-authentication-method disposition is
   still open (Phase 32L owns O-1), and deleting a hash now could make a later unlink irreversible. The
-  hash is retained and made inert.
+  hash is retained and made inert. *(Superseded 2026-09-26: **Phase 32L shipped** and settled the
+  disposition as **Policy B** — an unlink requires a new local password in the same transition and the
+  retained hash is **REPLACED, never re-enabled**. This is the Phase 32K record and is not rewritten;
+  see §27Q.)*
 - **No schema change.** `passwordHash` was already optional and `firebaseUid` already present, so the
   existing schema was sufficient. No field, index or migration was added.
 - **No unlinking, no provider SDK, no Facebook/Apple, no session-model change, no new dependency.**
@@ -4768,6 +4804,157 @@ Android runtime/native verification above. They remain in place as the historica
   presented as an F2 failure.
 - **iOS remains `[EXTERNAL VERIFICATION REQUIRED]`.**
 - **No source, configuration or protected file was modified to obtain these results.**
+
+---
+
+# 27Q. Phase 32L — Firebase Identity Unlink (32L-A / 32L-B) and Its Documentation Close-out
+
+Phase 32L is the owner-directed increment that gave an authenticated account a way to **stop
+authenticating through the Firebase identity it carries** and become a password account. It was approved
+and shipped as two halves — **32L-A** (server) and **32L-B** (mobile) — and **both were already merged
+before this section was written**. This section is therefore a **documentation close-out and shipped
+record**, not an implementation: it changes no code, and it exists because the roadmap had **no section
+for Phase 32L at all** while **three statements across two sections** — §27K (two) and §27M (one) —
+still asserted that Phase 32L had not started.
+
+## Status
+
+| Half | Commit | Scope |
+| --- | --- | --- |
+| **32L-A** (server) | **`01ae73f`** | The unlink endpoint, its service, validator, audit actions and the Policy B write. |
+| **32L-B** (mobile) | **`0c3f87d`** | The disconnect screen, the Profile entry point, `firebaseUnlink`, the `disconnectFirebase` orchestration and `authMethods` widening. |
+
+Both are ancestors of `fa87941` (PR #1) and therefore of **`dbdf673`** (PR #2, the current `main`).
+**The implementation was shipped before this close-out; the close-out documents it.**
+
+**Decision authority:** `docs/freebuff/tasks/FB-007-unlink-last-method-design.md` (design freeze),
+`FB-008-phase-32l-a-unlink-backend.md`, `FB-010-phase-32l-b-mobile-unlink.md`; owner decisions
+**FB-D-119** (architecture FROZEN), **FB-D-120** (★ the last-provider belief refuted), **FB-D-123**
+(the Q6 email parameter ratified).
+
+## What shipped — 32L-A (server)
+
+- **ONE route: `POST /api/auth/firebase/unlink`** — `requireAuth` + controller, **no permission**. It is
+  Phase 23's `AUTHENTICATED` bucket, for the reason that bucket exists: it acts only on the caller's own
+  account and no catalogue key could express "may unlink an identity" without inventing an authorization
+  concept the catalogue does not have. It carries no rate limiter, matching the existing `firebase/link`
+  precedent: every attempt already requires a live session, a verified Firebase credential, a matching
+  identity and a fresh authentication before it can do any work at all. (`POST /api/ai/chat` is the one
+  authenticated route that does carry a limiter.) Body: `{ idToken, newPassword, confirmPassword }`.
+- **Both sides of the association are server-derived.** The account is `req.user.id`; the identity is the
+  uid `verifyFirebaseIdToken` returns. So a body carrying `userId`, `businessId`, `firebaseUid`, `role` or
+  `status` is **inert by construction** — there is no variable in the module holding it. **The email is
+  never consulted** — not compared, not used to find an account, not used to resolve anything.
+- **★ Policy B — the unlink policy.** An account may leave Firebase authority **only by establishing a NEW
+  local password in the same transition**, so it never passes through a zero-authentication-method state.
+  That is why `newPassword` is required, and why the retained legacy bcrypt hash is **REPLACED rather than
+  re-enabled** — re-enabling it could silently resurrect a credential the user abandoned, or one an
+  attacker still knows.
+- **The write touches exactly four fields** — `firebaseUid`, `emailVerified`, `passwordHash`,
+  `passwordChangedAt` — so an unlink can never move an account between businesses, change its role or
+  change its status. `businessId` and `role` are read for the audit row and never assigned.
+- **Order is load-bearing:** verify the ID token → confirm the presented identity is the one already
+  attached → **freshness** → write. Stale authentication answers **`409`
+  `FIREBASE_REAUTHENTICATION_REQUIRED`** (the 300-second window in `src/constants/firebase.ts`), never a
+  `401`/`403`, so a stale credential cannot sign the user out.
+- **Concurrency is the database's problem, and the guard is the expected identity.** The detach is ONE
+  conditional update — `{ _id: user._id, firebaseUid: identity.uid }` with `$unset: { firebaseUid: 1 }`
+  — so a stale or racing unlink that presents an identity this account no longer carries matches nothing
+  and detaches nothing. The `firebaseUid` sparse unique index enforces UID uniqueness across accounts;
+  it is **not** this operation's race-protection mechanism.
+- **Sessions:** after the write, `revokeAllSessions` runs as well as the `passwordChangedAt` stamp — the
+  stamp alone already rejects tokens issued in a strictly earlier second, and the explicit call closes
+  the same-second hole.
+- **Audit:** `FIREBASE_IDENTITY_UNLINKED` (success; its metadata records only
+  `{ passwordEstablished: true }` and **never the detached uid**, because the audit viewer is readable by
+  every ADMIN of the business and the uid is the identity join key) and `FIREBASE_IDENTITY_UNLINK_CONFLICT`.
+  "Nothing linked" is answered `409 FIREBASE_IDENTITY_NOT_LINKED` and is deliberately **not** audited — an
+  event that did not happen makes a false trail.
+- **What the server does NOT do:** Firebase-side provider unlinking (`unlink()`, "Disconnect Google") is
+  performed by the **Firebase client SDK** against the signed-in Firebase user; the server cannot observe
+  it and offers no API for it. The Admin SDK's `providersToUnlink` capability was runtime-verified and
+  deliberately kept out of this flow. The server owns only the MongoDB `firebaseUid` detachment.
+
+## What shipped — 32L-B (mobile)
+
+A dedicated gated screen (`app/(app)/disconnect-firebase.tsx`) reached from a Profile entry point, the
+`firebaseUnlink` API wrapper, and a `disconnectFirebase` orchestration in the session layer. The frozen
+contract is **reauth-first**; a server **`200` is the only thing that produces a teardown**, and the
+Firebase session is ended **after** the 200. The retry no longer holds the new password across a second
+confirmation (the owner-ratified remediation, FB-D-123). `authMethods` is provider-neutral —
+`{ password, firebase }` — so no provider-specific session or user shape was introduced.
+
+## ★ The refuted assumption that shaped the policy
+
+This repository had recorded, and Phase 32L's own design initially relied on, the belief that **Firebase
+refuses to remove a user's last provider**. **Two separate measurements from the Phase 32L runtime work
+settle it, and they are different facts:**
+
+- **The last-provider measurement — the refutation.** The unlink **succeeded on the account's final
+  provider and left the Firebase account with ZERO providers**, so Firebase does **not** refuse to remove
+  the last one and the belief above is refuted.
+- **The 390-second measurement — the recency distinction, a separate finding.** At an authentication age
+  where `updatePassword` was **refused**, a provider unlink was **accepted**: Firebase does not gate
+  unlinking on recency. *This is evidence about freshness, not about the last provider.*
+
+Two consequences follow, and both are load-bearing:
+
+1. **Last-authentication-method protection must be enforced server-side and never delegated to Firebase.**
+2. **Policy B is what enforces it** — the account always leaves the transition holding a password.
+
+## The native migration series B–E, which F1/F2 cleaned up
+
+F1, F2 and F2.9 have their own sections (§27N, §27O, §27P). The migration those phases *retired* had no
+roadmap record; it is listed here for completeness, with its detail in the design authority §14A.8/§14A.9.
+
+| Phase | Commit | Scope |
+| --- | --- | --- |
+| RNFirebase native foundation | `c5d07f5` | The native Firebase packages and their `app.json` plugins. |
+| **B** | `0c3f87d` | Mobile Firebase authentication moved onto the native SDK (shipped together with 32I, 32J and 32L-B). |
+| **C** | `ea52c2c` | Mobile Google Sign-In moved onto the native SDK. |
+| **D** | `63826f4` | Native Firebase confirmation flows. |
+| **E** | `f15995e` | Native Firebase session teardown and the session-reconciliation decisions (design authority §14A.8). |
+
+All are ancestors of `fa87941` and therefore of `dbdf673`.
+
+## Verification status — stated so it cannot be overstated
+
+- The test, typecheck and lint figures that belong to 32L are the **Phase 32L records' own historical
+  figures**. **No suite was re-run for this close-out**, because this close-out changes documentation only.
+- **Firebase end-to-end is NOT verified, and this is not a 32L failure.** Email/password is **PARTIAL**
+  (the native path executes but no live Firebase project or valid credentials exist), and native Google
+  Sign-In, the Firebase → backend exchange, the Inventory AI JWT/session flow and Firebase
+  logout/session teardown are **BLOCKED/PARTIAL** for that environmental reason (see §27P).
+- **iOS remains `[EXTERNAL VERIFICATION REQUIRED]`** — no iOS build can be produced on this host.
+- The **32L-B Google confirmation path was never runtime-verified** (FB-010 handoff note 4); a live
+  Firebase project and a development build are required.
+
+## Superseded statements
+
+Written before 32L shipped, true when written, and **preserved in place** with dated notes rather than
+rewritten:
+
+- §27K — "**O-1 is unchanged and still open**, and Phase 32L remains the phase that owns it."
+- §27K — "**Phase 32I, 32J and 32L were NOT started.**"
+- §27M — "The unlink / last-authentication-method disposition is still open (Phase 32L owns O-1)…"
+- `README.md` — its three "**Phase 32L was NOT started.**" sentences.
+- `CLAUDE.md` — "**Phase 32I, 32J and 32L were NOT started.**"
+
+## Scope of this close-out
+
+**Documentation only.** No source file, test, dependency, schema, index, route, permission, middleware,
+Firebase configuration, EAS configuration or Render setting was changed, and **none of the five protected
+working-tree entries was touched**. No security or recovery architecture is decided here, and no open
+security/recovery item is resolved by this section.
+
+## Definition of Done
+
+- Phase 32L has a roadmap record, and the native migration series B–E is listed.
+- Every stale "Phase 32L was NOT started" statement carries a dated supersession note.
+- The specification §29 records the shipped unlink capability and Policy B.
+- `README.md` records 32L, F1, F2 and F2.9.
+- **No implementation claim is made beyond what was actually verified**, and no open security/recovery
+  decision is settled or silently closed.
 
 ---
 

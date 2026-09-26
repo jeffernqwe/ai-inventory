@@ -835,7 +835,8 @@ Phase 07 (testing + production hardening) and Phase 08 (owner-directed hardening
   new **25-test** suite (unit + DB-backed) whose every assertion was **proven able to fail** by a
   seven-mutation pass — including two doubly-enforced guards that only fall when *both* layers are
   removed. **Phase 32I, 32J and 32L were NOT started.** (Phase 32J subsequently shipped — see its
-  entry below; this sentence is the Phase 32H record and is not rewritten.)
+  entry below — and Phase 32L subsequently shipped as 32L-A/32L-B; this sentence is the Phase 32H record
+  and is not rewritten.)
 
 - **Phase 32J — Mobile Firebase Registration Onboarding:** an identity that Firebase has **already
 authenticated** but that owns no Inventory AI account can now finish registration and enter the app,
@@ -869,7 +870,8 @@ or JS errors in logcat. **iOS remains unverified**, and **O-2 is now reachable i
 business**: the first Google-registered OWNER is Firebase-native, so `change-password` and the reset flow
 would report success while changing nothing — **left undecided on purpose**. **Phase 32L was NOT
 started.** *(**Resolved by Phase 32K — see its entry below.** The audit there also corrected this
-sentence's second clause: it was the reset flow, not `change-password`, that reported success.)*
+sentence's second clause: it was the reset flow, not `change-password`, that reported success.
+**Phase 32L subsequently shipped** — see its entry at the end of this list.)*
 
 - **Phase 32K — Firebase Password Authority Boundary & Timing-Equalizer Credential Fix:** the boundary
   Phase 32H escalated to a live defect is now true in code — **for every user carrying a `firebaseUid`,
@@ -907,4 +909,106 @@ sentence's second clause: it was the reset flow, not `change-password`, that rep
   `phase32c-firebase-exchange`, which pin the **exact key set** of a user payload — and each now asserts
   the `firebaseUid`-absent property explicitly. **No runtime verification:** no development build, no
   device run and no live Firebase project, so every figure is a test result rather than an observation.
-  **Phase 32L was NOT started.**
+  **Phase 32L was NOT started.** *(Superseded 2026-09-26: **Phase 32L shipped** as 32L-A (`01ae73f`,
+  server) and 32L-B (`0c3f87d`, mobile), both contained in `main` `dbdf673`. This is the Phase 32K record
+  and is not rewritten; see the Phase 32L entry below.)*
+
+- **Phase 32L — Firebase Identity Unlink (32L-A server, 32L-B mobile):** the owner-directed increment
+  that lets an authenticated account **stop authenticating through the Firebase identity it carries** and
+  become a password account. It was approved and shipped in two halves, and **both were already merged
+  before this entry was written** — 32L-A is the server boundary (`01ae73f`) and 32L-B is the mobile flow
+  (`0c3f87d`), and both are contained in `main` (`dbdf673`). **This entry is the documentation close-out,
+  not an implementation.**
+
+  **The server boundary is ONE route:** `POST /api/auth/firebase/unlink` — `requireAuth` + controller,
+  **no permission** (it acts only on the caller's own account), and no rate limiter, matching the
+  existing `firebase/link` precedent — every attempt first needs a live session, a verified Firebase
+  credential, a matching identity and a fresh authentication. Both sides of the
+  association are **server-derived**: the account is `req.user.id` and the identity is the uid the
+  verified token carries, so a body supplying `userId`, `businessId`, `firebaseUid`, `role` or `status`
+  is **inert by construction**. **The email is never consulted** — not compared, not used to find an
+  account, not used to resolve anything.
+
+  **★ Policy B is the unlink policy, and it is the last-authentication-method invariant made structural:**
+  an account may leave Firebase authority **only by establishing a NEW local password in the same
+  transition**, so it never passes through a zero-authentication-method state. That is why `newPassword`
+  is required and why the retained legacy bcrypt hash is **REPLACED, never re-enabled** — re-enabling it
+  could resurrect a credential the user abandoned, or one an attacker still knows. The write touches
+  exactly four fields — `firebaseUid`, `emailVerified`, `passwordHash`, `passwordChangedAt` — so an unlink
+  can never move an account between businesses, change its role or change its status. Stale
+  authentication answers **`409 FIREBASE_REAUTHENTICATION_REQUIRED`** (a 300-second freshness window
+  enforced server-side from the signed claim), never a 401/403, so a stale credential cannot sign the
+  user out. The detach is one conditional update guarded on the expected identity (`firebaseUid` is
+  `$unset`, not blanked), so a stale or racing unlink matches nothing rather than detaching an identity
+  set microseconds earlier — the sparse unique index enforces UID uniqueness, it is not this operation's
+  race guard — and `revokeAllSessions` plus the `passwordChangedAt` stamp end every session the account
+  held.
+
+  **★ The assumption it refuted.** This repository had recorded that Firebase refuses to remove a user's
+  last provider. **Two separate measurements settle it, and they are different facts.** The
+  **last-provider** measurement is the refutation: the unlink **succeeded on the account's final provider,
+  leaving the Firebase account with zero providers**. Separately, the **390-second** measurement found a
+  provider unlink **accepted** at an authentication age where `updatePassword` was **refused** — a finding
+  about *recency*, not about the last provider. Together they are why **last-authentication-method
+  protection is enforced server-side and never delegated to Firebase**, and why Policy B enforces it.
+
+  **What the server deliberately does NOT do:** Firebase-side provider unlinking ("Disconnect Google") is
+  performed by the **Firebase client SDK** against the signed-in Firebase user; the server cannot observe
+  it and offers no API for it. Two audit actions were added — `FIREBASE_IDENTITY_UNLINKED` and
+  `FIREBASE_IDENTITY_UNLINK_CONFLICT` — and the **detached uid is never written to the trail**, because
+  the audit viewer is readable by every ADMIN of the business.
+
+  **Verification status, stated so it cannot be overstated:** the 32L test/typecheck/lint figures are the
+  phase records' own **historical** figures and **no suite was re-run for this close-out**. **Firebase
+  end-to-end is NOT verified and is not described as production-verified anywhere:** email/password is
+  **PARTIAL**, and native Google Sign-In, the Firebase → backend exchange, the Inventory AI JWT/session
+  flow through live Firebase and Firebase logout/session teardown are all **BLOCKED/PARTIAL** because no
+  live Firebase project or credentials have ever existed. The 32L-B Google confirmation path was **never
+  runtime-verified**. **iOS remains `[EXTERNAL VERIFICATION REQUIRED]`.**
+
+  **Stale statements superseded by this entry (preserved in place, not rewritten):** the three
+  "**Phase 32L was NOT started.**" sentences in the Phase 32H, Phase 32J and Phase 32K entries above.
+  **Documentation only:** no source, test, dependency, schema, route, permission, Firebase, EAS or Render
+  change, and no protected working-tree file touched. See `docs/DEVELOPMENT_ROADMAP.md` §27Q.
+
+- **Phase F1 — Retire the Firebase JS SDK and the Browser OAuth Path:** the first half of the cleanup the
+  Firebase migration kept deferring, and **pure JavaScript — no native surface changed, so no new build
+  was required.** It removed the JavaScript SDK boundary (`mobile/lib/firebase.ts`), the `firebase`
+  dependency, the `expo-auth-session` import and everything only it served (`acquireGoogleIdToken`, its
+  Google discovery constants, `GOOGLE_SCOPES`, `GoogleIdTokenOutcome`, `googleRedirectUri()`). **The
+  prerequisite that made it safe was ordering, not luck:** `lib/firebase.ts` had been the only SDK
+  importer but two modules pulled `isFirebaseConfigured` through it, so those imports were redirected to
+  the SDK-free `lib/config.ts` **first**; deleting the module first would have broken the native gate for
+  every Firebase and Google sign-in. Three negative browser-seam assertions were **replaced, not
+  dropped**, by a structural guard that walks every source file under `lib/` and `app/` and proves none
+  imports the retired packages. **The Firebase JS SDK is still not absent from `node_modules`** and no
+  record claims otherwise: `@react-native-firebase/app@26.4.0` — kept on purpose, because it is what
+  authenticates — declares `firebase@12.17.1`, so the JS SDK remains nested beneath it; the invariant is
+  that **no module under `lib/` or `app/` can resolve or import it.** `npm test` **30 suites / 423 tests,
+  0 failures**; `tsc` and `eslint` clean; authentication behaviour unchanged. **iOS remains
+  `[EXTERNAL VERIFICATION REQUIRED]`.** See `docs/DEVELOPMENT_ROADMAP.md` §27N.
+
+- **Phase F2 — Retire the Browser Dependencies, the Plugin, the Second Scheme and the Native-Intent
+  Hook:** the **native-surface** half of the same cleanup, delivered in six approved sub-steps with two
+  verification steps, and the phase that required a new development build. `expo-auth-session`,
+  `expo-web-browser` (together with its `app.json` plugin, removed atomically) and `expo-crypto` are gone
+  from the manifest and the lockfile; `expo.scheme` is exactly `["inventoryai"]`; `app/+native-intent.ts`
+  and its suite are deleted, because the `com.inventoryai.app:/oauthredirect` callback it intercepted can
+  no longer be delivered by any configured scheme. Kept on purpose: the three native packages and their
+  plugins, the `inventoryai` scheme (Phase 27's `inventoryai://reset-password`), and both identifiers
+  `com.inventoryai.app`. **No authentication behaviour changed, no server file was touched, and no
+  protected working-tree file was touched.** See `docs/DEVELOPMENT_ROADMAP.md` §27O.
+
+- **Phase F2.9 — EAS Development Build & Android Runtime/Native Verification:** the step F2 left open,
+  and it changed **no source or configuration file** — the minimum change set was empty. EAS build
+  **`f3038fa1-1cab-476e-b0f9-d6a9178f955b`** (`FINISHED`, `development` / Android, fingerprint
+  **`d16abc4e7df419812e73598db676985be3606dc7`**) was installed and run on emulator `emulator-5554` with
+  **0** fatal exceptions, and the fingerprint **exactly matched the current working tree's**, proving the
+  uncommitted F2 tree was what EAS built. The F2 native surface is now **Android-runtime verified**: the
+  retained `inventoryai://reset-password` deep link renders the reset screen, the retired
+  `com.inventoryai.app:/oauthredirect` callback is **unresolvable at the OS level**, and the retired
+  browser module is **absent from the APK dex** while RNFirebase and native Google Sign-In remain. A real
+  **local-backend** round trip was proven and **Render was not used**. **Authentication E2E remains
+  deliberately unverified and is not an F2 failure** — the blockers are pre-existing and environmental
+  (no live Firebase project), and **iOS remains `[EXTERNAL VERIFICATION REQUIRED]`**. See
+  `docs/DEVELOPMENT_ROADMAP.md` §27P.

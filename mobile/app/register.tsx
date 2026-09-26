@@ -50,10 +50,17 @@ export default function RegisterScreen() {
   if (status === 'signedIn') return <Redirect href={defaultHomePath(user)} />;
 
   async function submit(): Promise<void> {
+    // Required-field validation runs first, so an empty form never reaches the
+    // Firebase sign-up path. The password/confirm-match rule is preserved: an
+    // empty confirmation reports its own required error, and a non-empty one
+    // that differs still reports 'Passwords do not match'.
     const next: Record<string, string> = {};
-    if (confirm && confirm !== password) {
-      next.confirm = 'Passwords do not match';
-    }
+    if (!businessName.trim()) next.businessName = 'Business name is required';
+    if (!name.trim()) next.name = 'Name is required';
+    if (!email.trim()) next.email = 'Email is required';
+    if (!password) next.password = 'Password is required';
+    if (!confirm) next.confirm = 'Confirm password is required';
+    else if (confirm !== password) next.confirm = 'Passwords do not match';
     if (Object.keys(next).length) {
       setFieldErrors(next);
       return;

@@ -187,3 +187,29 @@ is an index of pointers, not a history and not an architecture summary.
    listed in `HANDOFF.md` separately from the protected entries.
 3. This baseline is not edited. New captures are recorded as new dated sections or new task records
    (append-oriented), so the comparison history survives.
+
+---
+
+## 13. SUPERSEDING CLARIFICATION — status of this baseline (2026-09-28)
+
+> **Appended under §12 rule 3.** Nothing above this line is edited, re-hashed, normalized or removed.
+> This note exists so the historical **FB-002** capture is not mistaken for the present repository state.
+
+- **§1–§12 remain historical FB-002 snapshot evidence**, captured `2026-09-21T18:58:35Z` on branch
+  `experiment/freebuff-evaluation` at HEAD `d8b693a`. Their branch, HEAD, status and test-count values
+  describe that date and are preserved as evidence. They are **not** corrected here.
+- **The §3 SHA-256 register is historical and MUST NOT be read as the current protected-file
+  register.** Later **authorized** commits legitimately changed four of the five recorded values:
+  - `server/src/services/ai/providers/http.ts` — **line-ending difference only**; the value recorded in
+    §3 still equals the file's *content* hash.
+  - `server/test/phase06-ai-wire.test.mjs` — an authorized later content change.
+  - `docs/superpowers/plans/2026-09-11-phase-18c-core-list-screens.md` — authorized Phase 1 change.
+  - `docs/superpowers/plans/2026-09-11-phase-18e-secondary-screens.md` — authorized Phase 1 change.
+  - `mobile/eas.json` — **still matches its historical hash.**
+- **§12 rule 1's STOP condition belongs to this historical snapshot.** A hash delta caused by a later
+  authorized commit is expected drift, not unexplained tampering; the rule guards *unexplained* change
+  against the capture it was taken from.
+- **Current protected-file integrity is maintained in
+  `docs/AUTH_SECURITY_MASTER_CHECKLIST.md` §32/§37** — not in §3 of this file.
+- **`docs/freebuff/HANDOFF.md` is the living current-state document.** Read it, not this baseline, for
+  present Git/branch/commit state and current protected-file status.

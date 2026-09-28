@@ -1,10 +1,10 @@
-// Phase 06 — AgentRouter wire mapping (no database, no live credentials).
+// Phase 06 — OpenRouter wire mapping (no database, no live credentials).
 //
-// Verifies the AgentRouter provider (an Anthropic-compatible gateway) sends the
+// Verifies the OpenRouter provider (an Anthropic-compatible gateway) sends the
 // exact /v1/messages payload, carries its key only in the Authorization header,
-// parses tool_use/text responses, and sanitizes upstream failures so no secret
-// ever reaches the caller. Runs against a local HTTP server so it is fully
-// deterministic and offline.
+// sends no client-impersonation headers, parses tool_use/text responses, and
+// sanitizes upstream failures so no secret ever reaches the caller. Runs against
+// a local HTTP server so it is fully deterministic and offline.
 
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -12,9 +12,12 @@ import http from 'node:http';
 
 import { aiConfig } from '../src/services/ai/aiConfig.ts';
 import { AiProviderError } from '../src/services/ai/aiErrors.ts';
-import { createAgentrouterProvider } from '../src/services/ai/providers/agentrouterProvider.ts';
+import { createOpenrouterProvider } from '../src/services/ai/providers/openrouterProvider.ts';
 
-const TEST_KEY = 'ar_wire_test_key';
+const TEST_KEY = 'or_wire_test_key';
+// AI_MODEL_OPENROUTER is required (a gateway has no defensible default model), so
+// the stub always supplies one and the payload assertion below names it here.
+const TEST_MODEL = 'openrouter/test-model';
 const TEST_TOOLS = [
   {
     name: 'getLowStockProducts',
@@ -43,7 +46,9 @@ let port;
 const requests = [];
 // `raw` (a verbatim body) and `contentType` exist so the non-JSON branch is
 // reachable from a test at all; unset, the stub behaves exactly as before.
-let respond = { status: 200, json: {}, raw: undefined, contentType: 'application/json' };
+// `headers` carries any extra response header (e.g. a `Location`) that the
+// Phase 31D.6 non-2xx diagnostic reports.
+let respond = { status: 200, json: {}, raw: undefined, contentType: 'application/json', headers: {} };
 
 async function listen() {
   server = http.createServer((req, res) => {
@@ -57,7 +62,7 @@ async function listen() {
         body = { _raw: raw };
       }
       requests.push({ method: req.method, url: req.url, headers: req.headers, body });
-      res.writeHead(respond.status, { 'content-type': respond.contentType });
+      res.writeHead(respond.status, { 'content-type': respond.contentType, ...respond.headers });
       res.end(respond.raw !== undefined ? respond.raw : JSON.stringify(respond.json));
     });
   });
@@ -70,13 +75,15 @@ function lastRequest() {
 }
 
 function providerFor(baseUrl) {
-  const restoreKey = withEnv('AGENTROUTER_API_KEY', TEST_KEY);
-  const restoreBase = withEnv('AGENTROUTER_BASE_URL', baseUrl);
+  const restoreKey = withEnv('OPENROUTER_API_KEY', TEST_KEY);
+  const restoreBase = withEnv('OPENROUTER_BASE_URL', baseUrl);
+  const restoreModel = withEnv('AI_MODEL_OPENROUTER', TEST_MODEL);
   try {
-    return createAgentrouterProvider();
+    return createOpenrouterProvider();
   } finally {
     restoreKey();
     restoreBase();
+    restoreModel();
   }
 }
 
@@ -90,7 +97,7 @@ after(async () => {
 
 beforeEach(() => {
   requests.length = 0;
-  respond = { status: 200, json: {}, raw: undefined, contentType: 'application/json' };
+  respond = { status: 200, json: {}, raw: undefined, contentType: 'application/json', headers: {} };
 });
 
 /** Run a provider call with console.error captured, returning logs + the error. */
@@ -112,7 +119,11 @@ function diagnosticsLine(lines) {
   return lines.find((l) => l.includes('upstream non-JSON diagnostics'));
 }
 
-describe('Phase 06 — AgentRouter (Anthropic-compatible) wire mapping', () => {
+function httpErrorDiagnosticsLine(lines) {
+  return lines.find((l) => l.includes('upstream HTTP error diagnostics'));
+}
+
+describe('Phase 06 — OpenRouter (Anthropic-compatible) wire mapping', () => {
   it('posts an Anthropic /v1/messages request with Bearer auth and the configured model', async () => {
     const provider = providerFor(`http://127.0.0.1:${port}`);
     respond.json = {
@@ -137,13 +148,15 @@ describe('Phase 06 — AgentRouter (Anthropic-compatible) wire mapping', () => {
     assert.equal(req.headers['content-type'], 'application/json');
     // Key travels only in the Authorization header.
     assert.equal(req.headers.authorization, `Bearer ${TEST_KEY}`);
-    assert.equal(req.headers['anthropic-version'], '2023-06-01');
-    // AgentRouter only accepts traffic that looks like the Claude Code client.
-    assert.match(req.headers['user-agent'], /^claude-cli\/\S+ \(external, sdk-cli\)/);
-    assert.equal(req.headers['anthropic-beta'], 'claude-code-20250219');
+    // OpenRouter documents a bare bearer token and nothing else: it requires no
+    // anthropic-version, no client fingerprint and no claude-code beta header, so
+    // none may be sent.
+    assert.equal(req.headers['anthropic-version'], undefined);
+    assert.ok(!String(req.headers['user-agent'] ?? '').includes('claude-cli'));
+    assert.equal(req.headers['anthropic-beta'], undefined);
 
     const cfg = aiConfig();
-    assert.equal(req.body.model, cfg.agentrouterModel);
+    assert.equal(req.body.model, TEST_MODEL);
     assert.equal(req.body.max_tokens, cfg.maxOutputTokens);
     assert.equal(req.body.system, 'You are read-only.');
     assert.equal(req.body.tools[0].name, 'getLowStockProducts');
@@ -315,6 +328,94 @@ describe('Phase 06 — AgentRouter (Anthropic-compatible) wire mapping', () => {
     // The non-secret classifications survive the withholding.
     assert.match(line, /classification=HTML/);
     assert.ok(line.includes(`bodyLength=${body.length}`));
+  });
+
+  // --- Phase 31D.6 temporary non-2xx diagnostics ----------------------------
+
+  it('captures the status, headers and body of a 401 carrying JSON', async () => {
+    const provider = providerFor(`http://127.0.0.1:${port}`);
+    const payload = JSON.stringify({ error: { message: 'invalid credentials' } });
+    respond.status = 401;
+    respond.contentType = 'application/json';
+    respond.raw = payload;
+
+    const { lines, err } = await completeCapturingLogs(provider);
+
+    assert.ok(err instanceof AiProviderError);
+    const line = httpErrorDiagnosticsLine(lines);
+    assert.ok(line, 'non-2xx diagnostics are generated');
+    assert.match(line, /status=401/);
+    assert.match(line, /contentType=application\/json/);
+    assert.match(line, /contentLength=/);
+    assert.ok(line.includes(`bodyLength=${payload.length}`));
+    assert.match(line, /classification=JSON_LIKE/);
+    assert.match(line, /invalid credentials/);
+  });
+
+  it('reports a Location header and classifies a 401 text body as TEXT', async () => {
+    const provider = providerFor(`http://127.0.0.1:${port}`);
+    respond.status = 401;
+    respond.contentType = 'text/plain';
+    respond.raw = 'Unauthorized';
+    respond.headers = { location: 'https://openrouter.ai/api/v1/messages' };
+
+    const { lines, err } = await completeCapturingLogs(provider);
+
+    assert.ok(err instanceof AiProviderError);
+    const line = httpErrorDiagnosticsLine(lines);
+    assert.match(line, /location=https:\/\/openrouter\.ai\/api\/v1\/messages/);
+    assert.match(line, /classification=TEXT/);
+    assert.match(line, /Unauthorized/);
+  });
+
+  it('classifies a 401 HTML body as HTML', async () => {
+    const provider = providerFor(`http://127.0.0.1:${port}`);
+    const html = '<!DOCTYPE html><html><body>denied</body></html>';
+    respond.status = 401;
+    respond.contentType = 'text/html';
+    respond.raw = html;
+
+    const { lines, err } = await completeCapturingLogs(provider);
+
+    assert.ok(err instanceof AiProviderError);
+    const line = httpErrorDiagnosticsLine(lines);
+    assert.match(line, /status=401/);
+    assert.match(line, /classification=HTML/);
+    assert.ok(line.includes(`bodyLength=${html.length}`));
+    assert.match(line, /bodyPrefix="<!DOCTYPE html>/);
+  });
+
+  it('withholds a 401 body prefix that looks like credential material', async () => {
+    const provider = providerFor(`http://127.0.0.1:${port}`);
+    respond.status = 401;
+    respond.contentType = 'text/plain';
+    respond.raw = 'Bearer sk-live-abc123XYZ rejected';
+
+    const { lines, err } = await completeCapturingLogs(provider);
+
+    assert.ok(err instanceof AiProviderError);
+    const line = httpErrorDiagnosticsLine(lines);
+    assert.match(line, /WITHHELD/);
+    assert.ok(!line.includes('abc123XYZ'), 'secret material must never be logged');
+    assert.ok(!line.includes('sk-live'), 'secret material must never be logged');
+    // The non-secret fields survive the withholding.
+    assert.match(line, /status=401/);
+    assert.match(line, /classification=TEXT/);
+  });
+
+  it('leaves the non-2xx error mapping and the status line unchanged', async () => {
+    const provider = providerFor(`http://127.0.0.1:${port}`);
+    respond.status = 401;
+    respond.contentType = 'application/json';
+    respond.raw = JSON.stringify({ error: { message: 'invalid credentials' } });
+
+    const { lines, err } = await completeCapturingLogs(provider);
+
+    assert.ok(err instanceof AiProviderError);
+    assert.equal(err.message, 'The AI service returned an error. Please try again.');
+    assert.ok(!err.message.includes('invalid credentials'), 'the upstream body never reaches the client');
+    // The pre-existing one-line status log is still emitted, ahead of the detail.
+    assert.ok(lines.includes('[ai:openrouter] upstream HTTP 401'));
   });
 
   it('parses a BOM-prefixed JSON body exactly as res.json() did', async () => {

@@ -13,7 +13,7 @@
 //
 // Two parts:
 //   * DB-free unit tests that ALWAYS run — provider message shape, tool-call
-//     context and the AgentRouter/Anthropic wire mapping, with no database and
+//     context and the Anthropic wire mapping, with no database and
 //     no real credentials.
 //   * DB-gated integration tests over the real routes (Cases A–D from the M7
 //     brief) plus conversationId ownership semantics. DB-gated: fails loudly
@@ -145,7 +145,7 @@ unitSuite('M6 provider message shape (Phase 07E, DB-free)', () => {
     assert.equal(toolResult.code, 'TOOL_NOT_FOUND');
   });
 
-  it('maps the deduplicated tool context to a well-formed AgentRouter/Anthropic payload', async () => {
+  it('maps the deduplicated tool context to a well-formed Anthropic payload', async () => {
     // The exact neutral message sequence runAiChat emits for a tool turn
     // (produced by the previous test) mapped through the Anthropic wire:
     const neutral = [

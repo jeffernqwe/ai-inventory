@@ -33,16 +33,23 @@ export interface PostJsonOptions {
 }
 
 /**
- * TEMPORARY — Phase 31D.3 diagnostics for the non-JSON branch.
+ * TEMPORARY — Phase 31D.3 / 31D.6 diagnostics for upstream failures.
  *
- * A production AgentRouter call answered 2xx with a body `res.json()` could not
- * parse, and the branch below recorded only that fact: the status, the
+ * Phase 31D.3: a production AgentRouter call answered 2xx with a body `res.json()`
+ * could not parse, and the branch below recorded only that fact: the status, the
  * Content-Type and the body itself were all discarded, which left the failure
  * un-diagnosable. These helpers record what that branch was throwing away.
  *
+ * Phase 31D.6: the same blindness applied to every non-2xx. `!res.ok` logged the
+ * status alone and threw without reading the body, so the 401 the gateway
+ * returned after the origin migration — the failure that replaced the Aliyun WAF
+ * challenge — was un-diagnosable by construction. That branch now reads its body
+ * and reports it through this same helper.
+ *
  * They are logging only. Nothing here alters control flow, the thrown error or
- * the response: the same AiProviderError is raised, and the response is read
- * exactly once (the single `res.text()` below) — never re-read, never retried.
+ * the response: the same AiProviderError is raised on every path, and a response
+ * body is read exactly once (one `res.text()` per branch) — never re-read, never
+ * retried.
  */
 
 /** Longest body prefix ever logged; everything past this is never inspected. */
@@ -82,15 +89,29 @@ function classifyUpstreamBody(contentType: string, body: string) {
 }
 
 /**
- * Log what the non-JSON branch would otherwise discard. Reports response
- * metadata and a bounded, sanitized body prefix only — never the request, its
- * headers, the caller's prompt or the upstream body in full.
+ * Log what a failing branch would otherwise discard. Reports response metadata
+ * and a bounded, sanitized body prefix only — never the request, its headers,
+ * the caller's prompt or the upstream body in full.
+ *
+ * `reason` distinguishes the branches in the header line (`non-JSON`, `HTTP
+ * error`) while every field below it is produced identically for both, so a
+ * non-2xx and an unparseable 2xx are read the same way.
  */
-function logNonJsonDiagnostics({ providerName, res, body }: { providerName: string; res: Response; body: string }) {
+function logUpstreamDiagnostics({
+  providerName,
+  res,
+  body,
+  reason,
+}: {
+  providerName: string;
+  res: Response;
+  body: string;
+  reason: string;
+}) {
   const contentType = res.headers.get('content-type') ?? '';
   console.error(
     [
-      `[ai:${providerName}] upstream non-JSON diagnostics`,
+      `[ai:${providerName}] upstream ${reason} diagnostics`,
       `status=${res.status}`,
       `contentType=${contentType || 'none'}`,
       `contentLength=${res.headers.get('content-length') ?? 'none'}`,
@@ -137,6 +158,13 @@ export async function postJson({ url, headers = {}, body, timeoutMs = 60000, pro
 
   if (!res.ok) {
     console.error(`[ai:${providerName}] upstream HTTP ${res.status}`);
+    // Phase 31D.6: this branch used to throw without reading the body, so a
+    // non-2xx was diagnosable only by its status code. The read is guarded
+    // because an error body may itself fail to arrive (a truncated stream, a
+    // connection dropped mid-body) and that must not replace the
+    // AiProviderError this branch has always thrown.
+    const errorBody = await res.text().catch(() => '');
+    logUpstreamDiagnostics({ providerName, res, body: errorBody, reason: 'HTTP error' });
     throw new AiProviderError('The AI service returned an error. Please try again.');
   }
 
@@ -155,7 +183,7 @@ export async function postJson({ url, headers = {}, body, timeoutMs = 60000, pro
     data = JSON.parse(bodyText.charCodeAt(0) === 0xfeff ? bodyText.slice(1) : bodyText);
   } catch {
     console.error(`[ai:${providerName}] upstream returned a non-JSON body`);
-    logNonJsonDiagnostics({ providerName, res, body: bodyText });
+    logUpstreamDiagnostics({ providerName, res, body: bodyText, reason: 'non-JSON' });
     throw new AiProviderError('The AI service returned an unexpected response.');
   }
   if (data === null || typeof data !== 'object' || Array.isArray(data)) {

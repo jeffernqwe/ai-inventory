@@ -1,13 +1,12 @@
 /**
  * Shared Anthropic Messages wire mapping for Anthropic-compatible providers.
  *
- * Both the Claude provider and the AgentRouter gateway provider speak this exact
- * protocol over HTTPS. AgentRouter is an Anthropic-compatible gateway (it exposes
- * /v1/messages to Anthropic clients and routes the request to another model,
- * e.g. DeepSeek-V4-Flash), so the neutral provider contract — see the contract
- * note in claudeProvider.js — maps to/from the Anthropic shape in exactly one
- * place. A future Anthropic-compatible gateway is then a short factory call, not
- * another ~100 lines of mapping.
+ * Both the Claude provider and the OpenRouter gateway provider speak this exact
+ * protocol over HTTPS. OpenRouter is an Anthropic-compatible gateway (it exposes
+ * /v1/messages and routes the request to the model it is asked for), so the
+ * neutral provider contract — see the contract note in claudeProvider.js — maps
+ * to/from the Anthropic shape in exactly one place. A future Anthropic-compatible
+ * gateway is then a short factory call, not another ~100 lines of mapping.
  *
  * The factory reads its API key from the environment at creation time (never at
  * module load, and never from the client). Keys are sent only in the request

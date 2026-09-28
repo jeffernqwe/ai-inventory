@@ -5172,6 +5172,70 @@ required whenever it is relevant.
 
 ---
 
+# 27T. Deployment-Configuration Reconciliation (Phases 4A–4B)
+
+A read-only verification of the deployed **EAS** and **Render** configuration, and the two
+repository-visible corrections it justified. **Documentation and one configuration value only:** no
+application source, test, dependency, schema, route, permission, mobile code, Render setting or EAS
+dashboard value was changed.
+
+## What shipped
+
+- **Phase 4A (`d309252`)** — the EAS **`production`** profile's `EXPO_PUBLIC_API_URL` was the literal
+  `https://REPLACE-WITH-PRODUCTION-ORIGIN`. The project owner confirmed
+  `https://ai-inventory-l1mi.onrender.com` as the intended production origin, and the value was replaced.
+  One line in `mobile/eas.json`; `preview` already pointed at the same origin (`934b15a`). No other
+  profile, variable, plugin or native setting changed.
+- **Phase 4B (this record)** — the deployment audit's findings were reconciled into
+  `docs/AUTH_SECURITY_MASTER_CHECKLIST.md` §38 and the Render section of `README.md`.
+
+## Findings — repository evidence vs. dashboard verification
+
+| Item | Evidence | Status |
+| --- | --- | --- |
+| G-1 production EAS API origin was a placeholder | repository | **DONE / FIXED** (`d309252`) |
+| G-2 EAS Firebase/Google client configuration | dashboard (owner-verified) | **VERIFIED — NO ACTION REQUIRED** |
+| G-3 Render `TRUST_PROXY=1` | dashboard (owner-verified) + code-derived | **VERIFIED** |
+| G-4 Render production configuration documentation | repository | **DONE** — now enumerated in `README.md` |
+| Mail configuration | code-derived | **VERIFIED — NO ACTION REQUIRED** for startup; **OPEN** for password recovery |
+| Auth/rate-limit configuration | code-derived | **VERIFIED — NO ACTION REQUIRED** |
+
+`EXPO_PUBLIC_FIREBASE_*` (all six client values), `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID`,
+`GOOGLE_SERVICES_JSON` and `GOOGLE_SERVICE_INFO_PLIST` are **EAS dashboard environment variables**,
+not values missing from `mobile/eas.json`. The Firebase Android SHA-1/SHA-256 fingerprints are
+configured in the Firebase console. **No secret value is recorded anywhere in this record.**
+
+## The one genuinely open item
+
+Password recovery is **disabled in production** because the Render service carries none of
+`MAIL_PROVIDER`, `MAIL_FROM`, `RESEND_API_KEY` or `PASSWORD_RESET_URL`; `POST /api/auth/forgot-password`
+correctly answers a fixed 503 `MAIL_NOT_CONFIGURED`, and the server still boots. Enabling it needs four
+dashboard values — with `PASSWORD_RESET_URL=inventoryai://reset-password`, the mobile custom scheme
+Phase 27 ships — and **no code change**. **Not implemented here:** the owner must decide whether
+recovery ships enabled. `AI_MAX_TOOL_RESULT_CHARS` (default `12000`, read by `aiConfig.ts`) is also
+absent from `server/.env.example` — cosmetic drift, recorded so it is not rediscovered as a defect.
+
+## Verification
+
+`mobile/eas.json` parses and keeps its four profiles, `cli.appVersionSource: "remote"` and **no
+`channel`** key; its worktree EOL is unchanged (`i/lf w/lf`). `git diff --check` is clean and the change
+is one line. The other four protected files are byte-identical to `HEAD`. No build, no deployment, no
+DB-backed test, no live AI/API call, no `.env` change, and no secret recorded.
+
+## Documentation
+
+- `docs/AUTH_SECURITY_MASTER_CHECKLIST.md` — **§38** added: the current-state deployment baseline, the
+  auth/rate-limit and mail audits, the refreshed protected-file register and the future-audit guidance.
+- `README.md` — the Render deployment section now enumerates the required production variables and
+  explains `TRUST_PROXY`; the environment section records which values are dashboard-managed.
+- `docs/freebuff/HANDOFF.md` §2 and `docs/freebuff/BASELINE.md` §13 — the living pointer to the
+  protected-file integrity register re-pointed from §32/§37 to §32/§38.
+- No historical record, snapshot or test-count figure was rewritten, and no file was deleted. In
+  particular §27J's Phase 32G text still says the `production` profile holds the placeholder: that is a
+  **frozen historical record**, superseded rather than edited.
+
+---
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

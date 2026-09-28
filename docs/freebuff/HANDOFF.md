@@ -75,20 +75,20 @@ to Firebase.** See `DECISIONS.md` **FB-D-119** / **FB-D-120**.
 | Field | Value |
 | --- | --- |
 | Branch | `main` |
-| HEAD | `751d796c575de3ace100f9f22e2102ff4cb62598` — "test: pin the OpenRouter suite's model instead of reading the ambient env" (Phase 1 of the OpenRouter test-verification thread, followed by the Phase 2 documentation reconciliation). The historical chain recorded above (`8af1d49` → `6bac86e2` → `d8b693a`) is intact and fully contained in `main` |
+| HEAD | `d3092523cc94dc93f58943793e3da19fdb57bbaa` — "chore: set EAS production API URL to Render" (Phase 4A of the deployment-configuration thread, preceded by `6e32717` and `751d796`). The historical chain recorded above (`8af1d49` → `6bac86e2` → `d8b693a`) is intact and fully contained in `main` |
 | Freebuff-touched commits | `6bac86e2` (FB-005), `8af1d49` (FB-006), `01ae73f` and `9917447` (Phase 32L-A records) and `0c3f87d` (Phase B / 32I / 32J / 32L-B) — every commit that has touched `docs/freebuff/`. All are ancestors of `main` |
 | Files added by Freebuff | **20 tracked files under `docs/freebuff/`** — six top-level trail files (`README`, `MASTER_LOG`, `BASELINE`, `DECISIONS`, `TEST_BASELINE`, `HANDOFF`) plus 14 under `tasks/` (`_TEMPLATE.md` and records FB-001 … FB-012). The directory is **tracked, committed and clean** |
 | Files modified/deleted by Freebuff | **Modified (FB-005):** the four trail files in Q5 + `TEST_BASELINE.md` §4 + the design doc **§2.6 only**. **Modified (FB-006 – FB-012):** the surfaces recorded in §1a, §1b and the corresponding task records. **Deleted: none** |
 | Tests run by Freebuff | **FB-006 and FB-008: yes** (see §1a, §1b). FB-001–FB-005 and FB-007: none. Later trail tasks (FB-009 … FB-012) are not summarized here — see their own task records |
-| Repository commit state | **Committed and pushed.** `main` and `origin/main` both stand at `751d796`, **0 ahead / 0 behind**; the working tree holds only `?? .freebuff/`. This supersedes the "partially committed / nothing has been pushed" state recorded in §1a and §1b — `docs/freebuff/` is tracked and clean, and the Phase 32I / 32J / 32K / 32L work is committed |
+| Repository commit state | **Committed and pushed.** `main` and `origin/main` both stand at `d309252`, **0 ahead / 0 behind**; the working tree holds only `?? .freebuff/`. This supersedes the "partially committed / nothing has been pushed" state recorded in §1a and §1b — `docs/freebuff/` is tracked and clean, and the Phase 32I / 32J / 32K / 32L work is committed |
 | AI provider (current) | **OpenRouter** — an Anthropic-compatible gateway, selected server-side by `AI_PROVIDER` and requiring `OPENROUTER_API_KEY` + `OPENROUTER_BASE_URL` + `AI_MODEL_OPENROUTER` (no default model). The retired **AgentRouter** gateway has been removed. The integration **is working in test production**; the historical `server/test/phase-openrouter-provider.test.mjs` failure was **test isolation, not a production defect** — that suite runs against a local HTTP stub, never contacts the real API and cannot consume credits. Record: `docs/DEVELOPMENT_ROADMAP.md` §27S; fix commit `751d796` |
-| Current phase | **No application phase is active.** Phases 1–7 of the earlier documentation-reconciliation programme and **Phases 1–2 of the OpenRouter test-verification thread** are committed and pushed, and **Phase 32L is fully shipped** — 32L-A in `01ae73f`, 32L-B in `0c3f87d`, recorded in `docs/DEVELOPMENT_ROADMAP.md` §27Q. The "32L-A uncommitted / 32L-B does not exist" state recorded above is superseded |
+| Current phase | **No application phase is active.** Phases 1–7 of the earlier documentation-reconciliation programme, **Phases 1–2 of the OpenRouter test-verification thread** and **Phases 4A–4B of the deployment-configuration thread** are committed and pushed, and **Phase 32L is fully shipped** — 32L-A in `01ae73f`, 32L-B in `0c3f87d`, recorded in `docs/DEVELOPMENT_ROADMAP.md` §27Q. Deployment configuration is recorded in `docs/DEVELOPMENT_ROADMAP.md` §27T and `docs/AUTH_SECURITY_MASTER_CHECKLIST.md` §38. The "32L-A uncommitted / 32L-B does not exist" state recorded above is superseded |
 
 ## 3. Inspect first
 
 1. `docs/freebuff/MASTER_LOG.md` — the trail entries, now **FB-001 through FB-012** (FB-001–FB-004 are `RETROACTIVE ENTRY`).
 2. `docs/freebuff/tasks/FB-002-create-freebuff-audit-trail.md` — exactly what FB-002 created and verified.
-3. `docs/AUTH_SECURITY_MASTER_CHECKLIST.md` §32/§37 — the **current** protected-file integrity register. (`docs/freebuff/BASELINE.md` §3 holds the **historical FB-002** hashes and is not the live register — see BASELINE §13.)
+3. `docs/AUTH_SECURITY_MASTER_CHECKLIST.md` §32/§38 — the **current** protected-file integrity register. (`docs/freebuff/BASELINE.md` §3 holds the **historical FB-002** hashes and is not the live register — see BASELINE §13.)
 4. `docs/freebuff/DECISIONS.md` — owner decisions vs Freebuff observations (FB-D-101…FB-D-111 are **observation only**; FB-D-112 is the corrected route-inventory observation; FB-D-113 authorises the §2.6 correction).
 5. `docs/freebuff/TEST_BASELINE.md` §5 — every quoted test count is `DOCUMENTED HISTORICAL RESULT — NOT REPRODUCED BY FREEBUFF`.
 6. `docs/freebuff/tasks/FB-004-verify-route-inventory-drift.md` — the drift evidence (68 vs 67, two independent counting methods).
@@ -106,7 +106,7 @@ docs/superpowers/plans/2026-09-11-phase-18c-core-list-screens.md
 docs/superpowers/plans/2026-09-11-phase-18e-secondary-screens.md
 ```
 
-Verified byte-identical before and after FB-002. The FB-002 SHA-256 values in `BASELINE.md` §3 are **historical evidence**, not the current register; current protected-file integrity is maintained in `docs/AUTH_SECURITY_MASTER_CHECKLIST.md` §32/§37. Their content was **not
+Verified byte-identical before and after FB-002. The FB-002 SHA-256 values in `BASELINE.md` §3 are **historical evidence**, not the current register; current protected-file integrity is maintained in `docs/AUTH_SECURITY_MASTER_CHECKLIST.md` §32/§38. Their content was **not
 read** by Freebuff; their intent is `AUTHORSHIP UNKNOWN`.
 
 ## 5. Project-side open items — references only (Freebuff decided nothing)

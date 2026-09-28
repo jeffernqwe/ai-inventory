@@ -210,6 +210,6 @@ is an index of pointers, not a history and not an architecture summary.
   authorized commit is expected drift, not unexplained tampering; the rule guards *unexplained* change
   against the capture it was taken from.
 - **Current protected-file integrity is maintained in
-  `docs/AUTH_SECURITY_MASTER_CHECKLIST.md` §32/§37** — not in §3 of this file.
+  `docs/AUTH_SECURITY_MASTER_CHECKLIST.md` §32/§38** — not in §3 of this file.
 - **`docs/freebuff/HANDOFF.md` is the living current-state document.** Read it, not this baseline, for
   present Git/branch/commit state and current protected-file status.

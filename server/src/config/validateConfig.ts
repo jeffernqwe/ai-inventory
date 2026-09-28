@@ -108,7 +108,7 @@ export function validateProductionConfig(
       problems.push({
         variable: 'AI_PROVIDER',
         message:
-          'AI_PROVIDER is set to an unsupported provider. Use "claude", "gemini", "agentrouter", or "openrouter", or leave it empty to disable the AI assistant.',
+          'AI_PROVIDER is set to an unsupported provider. Use "claude", "gemini", or "openrouter", or leave it empty to disable the AI assistant.',
       });
     } else {
       for (const variable of required) {

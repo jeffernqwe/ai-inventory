@@ -3,18 +3,16 @@
  *
  * selectProvider() resolves the provider named by AI_PROVIDER at call time by
  * reading process.env lazily (see aiConfig.ts for why). Built-in providers are
- * Claude, Gemini, agentrouter (an Anthropic-compatible gateway that routes to
- * models such as DeepSeek-V4-Flash) and openrouter (another Anthropic-compatible
- * gateway, see openrouterProvider.ts); test suites register a 'fake' provider
- * via registerProvider so the full orchestration loop and routes can be
- * exercised without an API key.
+ * Claude, Gemini and openrouter (an Anthropic-compatible gateway, see
+ * openrouterProvider.ts); test suites register a 'fake' provider via
+ * registerProvider so the full orchestration loop and routes can be exercised
+ * without an API key.
  *
  * Never expose provider keys to the mobile app — selection happens server-side
  * and only the resulting text reaches the client.
  */
 
 import { AiNotConfigured } from '../aiErrors.ts';
-import { createAgentrouterProvider } from './agentrouterProvider.ts';
 import { createClaudeProvider } from './claudeProvider.ts';
 import { createGeminiProvider } from './geminiProvider.ts';
 import { createOpenrouterProvider } from './openrouterProvider.ts';
@@ -113,10 +111,6 @@ const BUILTINS: Record<string, AIProviderEntry> = {
     factory: createGeminiProvider,
     requiredEnv: ['GEMINI_API_KEY'],
   },
-  agentrouter: {
-    factory: createAgentrouterProvider,
-    requiredEnv: ['AGENTROUTER_API_KEY', 'AGENTROUTER_BASE_URL'],
-  },
   // OpenRouter also demands a model: it fronts hundreds of models with different
   // tool-calling ability, so there is no safe default to fall back on.
   openrouter: {
@@ -159,7 +153,7 @@ export function selectProvider(): AIProvider {
   const builtin = BUILTINS[name];
   if (builtin) return builtin.factory();
   throw new AiNotConfigured(
-    `The configured AI provider "${raw}" is not supported. Set AI_PROVIDER to "claude", "gemini", "agentrouter", or "openrouter".`
+    `The configured AI provider "${raw}" is not supported. Set AI_PROVIDER to "claude", "gemini", or "openrouter".`
   );
 }
 

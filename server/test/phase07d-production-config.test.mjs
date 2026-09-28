@@ -31,8 +31,6 @@ const ENV_KEYS = [
   'AI_PROVIDER',
   'ANTHROPIC_API_KEY',
   'GEMINI_API_KEY',
-  'AGENTROUTER_API_KEY',
-  'AGENTROUTER_BASE_URL',
 ];
 
 const savedEnv = {};
@@ -131,23 +129,6 @@ describe('H7 production config validation (Phase 07D)', () => {
           messages(problems).every((m) => !m.includes('sentinel-gemini-key-not-required')),
           'unused key value never leaks'
         );
-      }
-    );
-  });
-
-  it('agentrouter requires both its API key and its base URL', async () => {
-    await withEnv(
-      {
-        MONGODB_URI: DUMMY_URI,
-        JWT_SECRET: LONG_SECRET,
-        AI_PROVIDER: 'agentrouter',
-        AGENTROUTER_API_KEY: '',
-        AGENTROUTER_BASE_URL: '',
-      },
-      () => {
-        const problems = validateProductionConfig();
-        assert.ok(hasVariable(problems, 'AGENTROUTER_API_KEY'));
-        assert.ok(hasVariable(problems, 'AGENTROUTER_BASE_URL'));
       }
     );
   });

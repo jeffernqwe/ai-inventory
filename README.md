@@ -366,11 +366,12 @@ committed.
 
 - Copy `server/.env.example` to `server/.env` for local development.
 - `.env` files are git-ignored; `.env.example` contains variable **names only**.
-- **AI provider (Phase 06):** set `AI_PROVIDER` to `claude`, `gemini`, or `agentrouter`
-  (an Anthropic-compatible gateway, e.g. routing to DeepSeek-V4-Flash) in `server/.env`
+- **AI provider (Phase 06):** set `AI_PROVIDER` to `claude`, `gemini`, or `openrouter`
+  (an Anthropic-compatible gateway in front of many models) in `server/.env`
   and add the matching `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, or
-  `AGENTROUTER_API_KEY` + `AGENTROUTER_BASE_URL`. AI credentials stay server-side —
-  they are never sent to the mobile app.
+  `OPENROUTER_API_KEY` + `OPENROUTER_BASE_URL` + `AI_MODEL_OPENROUTER`
+  (the model is required — OpenRouter has no default). AI credentials stay
+  server-side — they are never sent to the mobile app.
 - **Firebase Authentication (Phases 32B–32E):** the server verifies Firebase ID tokens and
   needs a service account, supplied either as `FIREBASE_PROJECT_ID`,
   `FIREBASE_CLIENT_EMAIL` and `FIREBASE_PRIVATE_KEY`, or — preferred, because it removes

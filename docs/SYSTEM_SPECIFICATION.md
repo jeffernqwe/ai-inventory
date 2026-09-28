@@ -95,10 +95,15 @@ These may be considered in future versions.
 
 The application must use an AI provider abstraction.
 
-Initial providers may include:
+Providers:
 
 - Anthropic Claude
 - Google Gemini
+- **OpenRouter** — an Anthropic-compatible gateway, and the **currently deployed provider**. It speaks
+  the same Anthropic Messages wire as the Claude provider through one shared mapping layer, so it is a
+  configuration over that layer rather than a second protocol implementation. Because it fronts many
+  models with differing tool-calling ability, `AI_MODEL_OPENROUTER` is required and has no default.
+- The retired AgentRouter gateway is **not** a provider: it was removed and must not be reintroduced.
 
 The application must not tightly couple the business logic to one AI provider.
 
@@ -108,7 +113,8 @@ Example conceptual architecture:
 AI Service
 ├── Provider Interface
 ├── Claude Provider
-└── Gemini Provider
+├── Gemini Provider
+└── OpenRouter Provider
 ```
 
 The active provider should be configurable through server-side environment variables.
@@ -2304,6 +2310,10 @@ User from Business A must never access Business B data.
 - Tool authorization
 - Read-only restrictions
 - Correct database-derived answers
+- Provider wire mapping against a **local HTTP stub**: the provider suites assert what Inventory AI
+  sends, and how it parses a reply, without ever contacting a live gateway, holding a gateway
+  credential or consuming provider credits. Live-endpoint behaviour is verified by production smoke
+  testing, not by the suite. See `docs/DEVELOPMENT_ROADMAP.md` §27S.
 
 ---
 

@@ -69,7 +69,11 @@ planned and require an owner-approved phase each.
 ### AI
 
 - AI provider abstraction
-- Claude and/or Gemini
+- Providers: the Claude and Gemini built-ins, plus **OpenRouter** — an Anthropic-compatible gateway that
+  is the **currently deployed provider**. It is selected server-side by `AI_PROVIDER` and requires
+  `OPENROUTER_API_KEY` + `OPENROUTER_BASE_URL` + `AI_MODEL_OPENROUTER`, with **no default model**. The
+  retired AgentRouter gateway has been removed and must not be reintroduced. See
+  `docs/DEVELOPMENT_ROADMAP.md` §27S.
 - AI credentials must remain server-side
 
 ---

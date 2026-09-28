@@ -5,6 +5,7 @@ import type { TextInputProps } from 'react-native';
 import { radius, spacing, type } from '../lib/theme';
 import type { Palette } from '../lib/theme';
 import { useTheme } from '../lib/theme-context';
+import IconButton from './IconButton';
 
 const createStyles = (colors: Palette) =>
   StyleSheet.create({
@@ -32,6 +33,15 @@ const createStyles = (colors: Palette) =>
     },
     inputError: { borderColor: colors.danger },
     inputDisabled: { backgroundColor: colors.surfaceMuted, color: colors.textMuted },
+    // The positioned wrapper a SECRET field's trailing control sits in, and the
+    // room that control needs so long secrets never run underneath it. Both apply
+    // only when `secureTextEntry` is set; a non-secret field renders the bare input
+    // it always did (see the render below).
+    fieldWrap: { position: 'relative' },
+    secretInput: { paddingRight: 52 },
+    // `top`/`bottom` stretch the control to the field's own height, so the 44px
+    // target `IconButton` guarantees is kept without inflating the input.
+    toggle: { position: 'absolute', right: 2, top: 0, bottom: 0 },
     error: { ...type.caption, color: colors.danger, marginTop: 6 },
     helper: { ...type.caption, color: colors.textMuted, marginTop: 6 },
   });
@@ -92,7 +102,67 @@ export default function Input({
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [focused, setFocused] = useState(false);
+
+  /**
+   * Phase 32N — whether this field's secret is currently REVEALED.
+   *
+   * COMPONENT-LOCAL, AND THAT IS THE WHOLE DESIGN. It is never lifted to a parent,
+   * never persisted, never written to a log, never sent anywhere and never part of a
+   * form's state: it changes only how THIS input renders the value it already holds.
+   * So the value the parent owns, the validation that runs on it and the request
+   * body built from it are identical whether the secret is showing or masked.
+   *
+   * It starts masked, and it is per-mount — a field is therefore never revealed by
+   * default, and never revealed because some earlier screen left a toggle on.
+   */
+  const [revealed, setRevealed] = useState(false);
   const problem = error || errors?.[name ?? ''];
+
+  /**
+   * A field declares that it holds a secret by setting `secureTextEntry`, so that
+   * prop — not a second, parallel flag — is what triggers the reveal control. Every
+   * password field therefore gets one automatically, and a new one cannot be added
+   * without one. A field that does not set it renders exactly as it always did.
+   */
+  const secure = Boolean(secureTextEntry);
+
+  /**
+   * The input, built once so the secure and non-secure branches below render the SAME
+   * element rather than two that could drift apart. `secureTextEntry` keeps its
+   * original value for a non-secret field; revealing only ever masks it off.
+   */
+  const field = (
+    <TextInput
+      style={[
+        styles.input,
+        multiline && styles.multiline,
+        secure && styles.secretInput,
+        focused && !problem && styles.focused,
+        problem && styles.inputError,
+        !editable && styles.inputDisabled,
+      ]}
+      value={value}
+      onChangeText={onChangeText}
+      placeholder={placeholder}
+      placeholderTextColor={colors.placeholder}
+      secureTextEntry={secureTextEntry && !revealed}
+      keyboardType={keyboardType}
+      autoCapitalize={autoCapitalize}
+      autoCorrect={autoCorrect}
+      editable={editable}
+      multiline={multiline}
+      maxLength={maxLength}
+      returnKeyType={returnKeyType}
+      onSubmitEditing={onSubmitEditing}
+      onFocus={() => setFocused(true)}
+      onBlur={() => {
+        setFocused(false);
+        onBlur?.();
+      }}
+      autoFocus={autoFocus}
+    />
+  );
+
   return (
     <View style={styles.wrap}>
       {label ? (
@@ -101,34 +171,26 @@ export default function Input({
           {required ? <Text style={styles.req}> *</Text> : null}
         </Text>
       ) : null}
-      <TextInput
-        style={[
-          styles.input,
-          multiline && styles.multiline,
-          focused && !problem && styles.focused,
-          problem && styles.inputError,
-          !editable && styles.inputDisabled,
-        ]}
-        value={value}
-        onChangeText={onChangeText}
-        placeholder={placeholder}
-        placeholderTextColor={colors.placeholder}
-        secureTextEntry={secureTextEntry}
-        keyboardType={keyboardType}
-        autoCapitalize={autoCapitalize}
-        autoCorrect={autoCorrect}
-        editable={editable}
-        multiline={multiline}
-        maxLength={maxLength}
-        returnKeyType={returnKeyType}
-        onSubmitEditing={onSubmitEditing}
-        onFocus={() => setFocused(true)}
-        onBlur={() => {
-          setFocused(false);
-          onBlur?.();
-        }}
-        autoFocus={autoFocus}
-      />
+      {/**
+       * The control is a SIBLING of the input inside a positioned wrapper, so the
+       * field's border, focus ring and error colour still describe the input itself
+       * while the toggle sits inside that border. Only a secret field gets the
+       * wrapper — a non-secret one is rendered bare, with an unchanged element tree.
+       */}
+      {secure ? (
+        <View style={styles.fieldWrap}>
+          {field}
+          <IconButton
+            icon={revealed ? 'eyeOff' : 'eye'}
+            accessibilityLabel={revealed ? 'Hide password' : 'Show password'}
+            size={20}
+            onPress={() => setRevealed((shown) => !shown)}
+            style={styles.toggle}
+          />
+        </View>
+      ) : (
+        field
+      )}
       {problem ? <Text style={styles.error}>{problem}</Text> : helper ? <Text style={styles.helper}>{helper}</Text> : null}
     </View>
   );

@@ -36,6 +36,9 @@ const ICONS = {
   barcode: { family: 'mci', name: 'barcode' },
   print: { family: 'ion', name: 'print-outline' },
   share: { family: 'ion', name: 'share-outline' },
+  // Visibility
+  eye: { family: 'ion', name: 'eye-outline' },
+  eyeOff: { family: 'ion', name: 'eye-off-outline' },
   // Movement
   stockIn: { family: 'ion', name: 'arrow-down-circle-outline' },
   stockOut: { family: 'ion', name: 'arrow-up-circle-outline' },

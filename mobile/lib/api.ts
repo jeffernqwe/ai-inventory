@@ -225,6 +225,45 @@ export function firebaseRegister({ idToken, businessName, name }: FirebaseRegist
   });
 }
 
+export interface FirebaseLinkPayload {
+  /** A Firebase ID token from `lib/firebase-auth`. Consumed once, never stored. */
+  idToken: string;
+}
+
+/**
+ * POST /api/auth/firebase/link -> { linked, user } (200, Phase 32H).
+ * AUTHENTICATED — the caller's own session token is required.
+ *
+ * Records that the CALLER'S OWN account carries the identity the verified ID token
+ * names. It is the explicit "connect a provider" operation, and the only way a
+ * `firebaseUid` is ever attached to an existing account.
+ *
+ * THE ACCOUNT AND THE IDENTITY ARE BOTH SERVER-DERIVED, so the body below is the
+ * WHOLE request: no id, uid, businessId or role is sent, and the server reads none
+ * of them anyway. The caller's session is the ownership proof; the token is the
+ * identity. Nothing here compares an email address to anything.
+ *
+ * `linked: false` is a SUCCESS, not a refusal — it is the idempotent answer when the
+ * account already carries this identity. Every real refusal throws:
+ *
+ *   409 `FIREBASE_IDENTITY_CONFLICT` — the identity belongs to another account, or
+ *       this account already carries a different one. One deliberately generic
+ *       message covers both, so a screen relays it rather than explaining it.
+ *   400 `FIREBASE_TOKEN_INVALID` — a bad provider credential. A 400 here is a bad
+ *       REQUEST FIELD, not a dead session; the server moved it off 401 for exactly
+ *       that reason, and `lib/client.ts` reports session loss only for 401/403, so
+ *       this cannot sign the caller out.
+ *   403 `BUSINESS_NOT_ACTIVE` / 503 `FIREBASE_NOT_CONFIGURED` — as on the other
+ *       Firebase routes.
+ */
+export function firebaseLink(token: string, { idToken }: FirebaseLinkPayload): Promise<ApiResponse> {
+  return apiFetch('/api/auth/firebase/link', {
+    token,
+    method: 'POST',
+    body: { idToken },
+  });
+}
+
 export interface FirebaseUnlinkPayload {
   /** A Firebase ID token from `lib/firebase-auth`. Consumed once, never stored. */
   idToken: string;
@@ -598,6 +637,7 @@ export default {
   resetPassword,
   firebaseExchange,
   firebaseRegister,
+  firebaseLink,
   firebaseUnlink,
   updateMe,
   logout,

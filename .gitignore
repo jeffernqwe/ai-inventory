@@ -36,5 +36,16 @@ Desktop.ini
 # Local tooling artifacts (Playwright MCP browser console/page captures)
 .playwright-mcp/
 
+# Local AI tooling state (Freebuff project/session metadata) — never commit.
+# Until now this was protected by convention only ("stage by explicit path; never
+# git add -A"), so a blanket stage would have committed it. This rule makes the
+# boundary enforced rather than remembered.
+.freebuff/
+
+# Local editor/agent state (Claude Code local settings) — never commit.
+# Previously ignored only by a MACHINE-LOCAL global excludes file
+# (~/.config/git/ignore), so any other clone saw this file as untracked.
+.claude/settings.local.json
+
 # Local smoke-test artifacts (UIAutomator dumps, screenshots) — never commit
 .smoke/

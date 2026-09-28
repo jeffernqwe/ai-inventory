@@ -5222,12 +5222,56 @@ absent from `server/.env.example` — cosmetic drift, recorded so it is not redi
 is one line. The other four protected files are byte-identical to `HEAD`. No build, no deployment, no
 DB-backed test, no live AI/API call, no `.env` change, and no secret recorded.
 
+## Ignore / configuration boundary audit
+
+A read-only audit of every ignore and exclusion rule in the repository, added because "the file is not
+committed" is **not** by itself evidence of a defect: this project deliberately keeps several classes of
+value outside Git and outside the EAS archive. `git check-ignore -v` was run for every rule below.
+
+| File / rule | Purpose | Evidence | Status | Action |
+| --- | --- | --- | --- | --- |
+| root `.gitignore` → `node_modules/` | keep dependencies out of Git | `server/node_modules` and `mobile/node_modules` both match | **INTENTIONAL — VERIFIED** | none |
+| root `.gitignore` → `.env`, `.env.*`, `!.env.example` | never commit secrets; keep the **names** template trackable | `server/.env` and `mobile/.env` are present locally and ignored; both `.env.example` files are tracked and **not** ignored | **INTENTIONAL — VERIFIED** | none |
+| root `.gitignore` → `logs/`, `*.log`, `*-debug.log*` | local log artifacts | `mobile/.emulator-boot.log`, `mobile/.metro-check/metro.log` match | **INTENTIONAL — VERIFIED** | none |
+| root `.gitignore` → `.expo/`, `dist/`, `web-build/`, `expo-env.d.ts` | Expo build output and generated types | `mobile/.expo/`, `mobile/dist/` match | **INTENTIONAL — VERIFIED** | none |
+| root `.gitignore` → `mobile/android/`, `mobile/ios/` | CNG: generated native projects stay out of source control | neither directory exists; both paths match | **INTENTIONAL — VERIFIED** | none |
+| root `.gitignore` → `.playwright-mcp/`, `.smoke/` | local tooling and smoke-test captures | both match | **INTENTIONAL — VERIFIED** | none |
+| `mobile/.gitignore` → `google-services.json`, `GoogleService-Info.plist` | Firebase native config is **never committed** (owner decision **P-1** / **O-7 RESOLVED**); a build receives it as file environment variables | neither file is present locally | **INTENTIONAL — VERIFIED** | none |
+| `mobile/.gitignore` → `*.jks`, `*.p8`, `*.p12`, `*.key`, `*.pem`, `*.mobileprovision` | signing and provisioning material | present in both ignore files | **INTENTIONAL — VERIFIED** (security-sensitive) | none |
+| `mobile/.easignore` as a whole | EAS CLI uses `.easignore` **instead of** `.gitignore`, so it must carry the **union** of the mobile and relevant root rules | its own header states this; the file is tracked | **INTENTIONAL — VERIFIED** | none |
+| `mobile/.easignore` → `.env`, `.env.*`, `!.env.example` | **security-critical:** without it the developer's local `mobile/.env` — holding the eight `EXPO_PUBLIC_*` client values — would be uploaded into a remote build archive | file inspected; `mobile/.env` present locally | **INTENTIONAL — VERIFIED** | none |
+| `mobile/.easignore` → `google-services.json`, `GoogleService-Info.plist` | a remote build gets them from `GOOGLE_SERVICES_JSON` / `GOOGLE_SERVICE_INFO_PLIST`, not as an uploaded copy | `mobile/app.config.js:50,54`; owner-verified dashboard variables | **INTENTIONAL — VERIFIED** | none |
+| `mobile/.easignore` → `.smoke/` | the rule the file was created for (Phase 31B.2) | its header comment | **INTENTIONAL — VERIFIED** | none |
+| root `mobile/android/`, `mobile/ios/` vs `.easignore` `/android`, `/ios` | equivalent — `.easignore` is rooted at `mobile/` | rule-by-rule comparison of the two files | **INTENTIONAL — VERIFIED** | none |
+| **no `server/.gitignore`** | the root rules already cover `server/` | `git check-ignore server/node_modules server/.env` both match root rules | **INTENTIONAL — VERIFIED** | none |
+| **no `render.yaml` / `Procfile` / `Dockerfile` / `.dockerignore` / `.npmignore`** | Render configuration is dashboard-side (`rootDir: server`, branch, Auto Deploy, health check); this is neither a containerised nor a published deploy | repository-wide search found none | **INTENTIONAL — VERIFIED** | none |
+| **no `.gitattributes`** | line endings are governed by `core.autocrlf=true`, a local Git setting rather than a repository attribute | the file does not exist; `git ls-files --eol` reports an empty `attr/` column for every file | **INTENTIONAL — VERIFIED** | none. *Consequence recorded:* EOL handling is **operator-local**, so a clone with a different `autocrlf` shows whole-file EOL differences — which is why this project verifies **git blob hashes**, not worktree text |
+| root `.env` (present locally, ignored) | a local developer artifact, **read by nothing**: `dotenv` resolves from the process working directory, which is `server/` | `server/src/index.ts:2` (`import 'dotenv/config'`) | **INTENTIONAL — VERIFIED** | none |
+| `mobile/google-services.json` / plist **absent locally** | consequence: `app.config.js`'s local-path fallback points at a file that is not there, so a *local* prebuild would fail; the EAS build is the supported path and supplies them through the file environment variables | `mobile/app.config.js:50,54`; the ENOENT class is already recorded in §27J | **INTENTIONAL — VERIFIED** | none |
+| **`.freebuff/` — untracked and matched by NO ignore rule** | local tooling state, deliberately outside Git; **0 commit entries across every ref** | `git check-ignore .freebuff/project-id` returns **no match**; `git log --all -- .freebuff` is empty | **POSSIBLE GAP — NEEDS OWNER DECISION** | The protection is **convention only** ("stage by explicit path; never `git add -A`"), so a future blanket stage would commit it. Smallest proposed action: add `.freebuff/` to the root `.gitignore`. **Not done** — an ignore-file change is outside this phase's authority |
+| **`~/.config/git/ignore` → `**/.claude/settings.local.json`** | a **machine-local** global excludes file, not a repository rule | `git check-ignore -v .claude/settings.local.json` resolves to `C:\Users\jeffe/.config/git/ignore:1` | **POSSIBLE GAP — NEEDS OWNER DECISION** | `.claude/settings.local.json` is ignored **only on this machine**; on another clone it appears as untracked. Smallest proposed action: add the rule to the root `.gitignore` if that file should stay out of the repository everywhere. **Not done** |
+| **`wip/backup-working-tree` @ `e9616cf`** | the preserved pre-reconciliation working-tree snapshot | `git ls-remote` equals the local ref; its tree still holds the pre-Phase-4A `mobile/eas.json` (`c1ab09c8…`), `http.ts` and `mobile/.easignore` | **INTENTIONAL — VERIFIED** | **preserve.** Ignore rules cannot affect refs, so no ignore file can damage or expose it |
+
+**Integrity result: `git ls-files -i -c --exclude-standard` is EMPTY** — no tracked file is matched by
+any ignore rule, and no file under `server/src/`, `server/test/`, `mobile/app/` or `mobile/lib/` is
+silently outside Git. Every exclusion above is **INTENTIONAL**; the two **POSSIBLE GAP** rows are
+documentation-level decisions rather than configuration defects, and **no ignore file was changed.**
+
+Two historical Freebuff notes describe a `mobile/.gitignore` entry for the Firebase native files as
+"not the mechanism" (`tasks/FB-012…:192`, `MASTER_LOG.md:515`). Those notes predate the entries now
+present at `mobile/.gitignore:45,46`, and the point they make still holds and is the reason both files
+carry the rule: **`.easignore` replaces rather than extends `.gitignore`**.
+
 ## Documentation
 
 - `docs/AUTH_SECURITY_MASTER_CHECKLIST.md` — **§38** added: the current-state deployment baseline, the
-  auth/rate-limit and mail audits, the refreshed protected-file register and the future-audit guidance.
+  auth/rate-limit and mail audits, the refreshed protected-file register, the security-relevant
+  ignore-boundary result and the future-audit guidance.
 - `README.md` — the Render deployment section now enumerates the required production variables and
-  explains `TRUST_PROXY`; the environment section records which values are dashboard-managed.
+  explains `TRUST_PROXY`, and records what is deliberately absent from the repository; the environment
+  section records which values are dashboard-managed.
+- `docs/DEVELOPMENT_ROADMAP.md` §27T — the rule-by-rule **ignore / configuration boundary audit** table
+  above, added as the addendum to this phase.
 - `docs/freebuff/HANDOFF.md` §2 and `docs/freebuff/BASELINE.md` §13 — the living pointer to the
   protected-file integrity register re-pointed from §32/§37 to §32/§38.
 - No historical record, snapshot or test-count figure was rewritten, and no file was deleted. In

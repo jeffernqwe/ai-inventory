@@ -3,7 +3,9 @@
 > Operational summary. **Not** architecture, **not** project history, **not** a specification.
 > Authoritative sources remain `docs/SYSTEM_SPECIFICATION.md`, `docs/DEVELOPMENT_ROADMAP.md`,
 > `CLAUDE.md`, `docs/superpowers/specs/2026-09-18-firebase-auth-design.md`.
-> Last updated by **FB-005** (covers FB-003, FB-004, FB-005).
+> Last updated by the **Phase 7 current-state reconciliation** (2026-09-28). The historical blocks §1
+> (FB-002 → FB-005), §1a (FB-006) and §1b (FB-007 / FB-008) are preserved as written; **FB-012** is the
+> latest trail task.
 
 ---
 
@@ -58,7 +60,7 @@ implementation (the brief states: *"This implementation is authorized as: `FB-00
 | 8 | Tests created / modified? | **Yes, by FB-008 only.** One new server suite (43 cases, `MIXED`). Three pre-existing suites modified — one to **declare** the new route, two because a pinned injection point moved. No assertion was weakened (trail rule 5) |
 | 9 | Tests executed? | **Yes, by FB-008:** full server suite **838 / 109 suites / 0 fail**, `test:unit` 348 (324 pass), `test:db` 540 (514 pass), typecheck and lint clean. FB-007 executed **no** repository test (its runtime experiment measured *Firebase*, not Inventory AI) |
 | 10 | Runtime verified? | **No.** FB-008 was **not** runtime-verified — no build, no device, no emulator, no live API call, and **no real unlink executed**. The Phase 32L runtime experiment exercised the **real Firebase project**, not the Inventory AI endpoint |
-| 16 | Committed? | **No.** HEAD is unchanged at `8af1d49`; nothing staged; nothing pushed. FB-008's proposed message is recorded in its task record |
+| 16 | Committed? | **No** (as of FB-008). HEAD was unchanged at `8af1d49`; nothing staged; nothing pushed. FB-008's proposed message is recorded in its task record |
 | 17 | Deployed / Console / schema touched? | **No** on every count. **No schema or index change** — the design is deliberately schema-free |
 
 **The single most important answer:** the Phase 32L runtime experiment **refuted the project's own
@@ -71,20 +73,20 @@ to Firebase.** See `DECISIONS.md` **FB-D-119** / **FB-D-120**.
 
 | Field | Value |
 | --- | --- |
-| Branch | `experiment/freebuff-evaluation` |
-| HEAD | `8af1d49` — "feat: enforce firebase password authority boundary (Phase 32K)", the **first Freebuff commit ever made** (FB-006, owner-authorized scope). It sits above `6bac86e2`, which was HEAD through FB-001–FB-005 and in turn above `d8b693a` (Phase 32H). **Unchanged through FB-007 and FB-008** |
-| Freebuff commits | **1:** `8af1d49` (FB-006) — 15 files, +1488/−36: the FB-006-clean set only. **FB-007 and FB-008 created none** (FB-008 stops before the commit and reports its proposed message) |
-| Files added by Freebuff | **15:** 12 under `docs/freebuff/` — 9 at FB-002 + task records FB-003/004/005, all now **tracked** (committed by the `docs:` FB-005 commit `6bac86e2`) — plus, at FB-006, `server/test/phase32k-firebase-password-boundary.test.mjs`, `mobile/__tests__/phase32k-password-capability-gating.test.tsx` and `docs/freebuff/tasks/FB-006-firebase-password-boundary.md` |
-| Files modified/deleted by Freebuff | **Modified (FB-005):** the four trail files in Q5 + `TEST_BASELINE.md` §4 + the design doc **§2.6 only**. **Modified (FB-006):** 11 production/doc files — see §1a. **Deleted: none** |
-| Tests run by Freebuff | **FB-006 and FB-008: yes** (see §1a, §1b). FB-001–FB-005 and FB-007: none |
-| Repository commit state | **Partially committed.** FB-006's clean set is in `8af1d49`. Everything else remains deliberately uncommitted, and each reason is recorded: `docs/freebuff/`'s post-commit notes are uncommitted by construction; `README.md` and `docs/DEVELOPMENT_ROADMAP.md` carry the Phase 32K entries **plus** uncommitted Phase 32I/32J work; `mobile/lib/auth.tsx`, `mobile/app/login.tsx` and `mobile/lib/firebase-auth.ts` are Phase 32J work. **FB-007 and FB-008 added more to that uncommitted set** — the FB-008 server files and the trail records — and are likewise uncommitted. Staging/committing any of it requires a separate explicit instruction. **Nothing has been pushed.** |
-| Current phase | **Phase 32L-A is implemented but NOT committed and NOT runtime-verified.** The unlink endpoint exists server-side; **the mobile half (Phase 32L-B) does not exist**, so nothing in the running app can reach it yet |
+| Branch | `main` |
+| HEAD | `0c28e74a2f34ab4df841e031099e9dcd507adc2d` — "docs: clarify historical roadmap main reference" (Phase 6 of the current documentation-reconciliation programme). The historical chain recorded above (`8af1d49` → `6bac86e2` → `d8b693a`) is intact and fully contained in `main` |
+| Freebuff-touched commits | `6bac86e2` (FB-005), `8af1d49` (FB-006), `01ae73f` and `9917447` (Phase 32L-A records) and `0c3f87d` (Phase B / 32I / 32J / 32L-B) — every commit that has touched `docs/freebuff/`. All are ancestors of `main` |
+| Files added by Freebuff | **20 tracked files under `docs/freebuff/`** — six top-level trail files (`README`, `MASTER_LOG`, `BASELINE`, `DECISIONS`, `TEST_BASELINE`, `HANDOFF`) plus 14 under `tasks/` (`_TEMPLATE.md` and records FB-001 … FB-012). The directory is **tracked, committed and clean** |
+| Files modified/deleted by Freebuff | **Modified (FB-005):** the four trail files in Q5 + `TEST_BASELINE.md` §4 + the design doc **§2.6 only**. **Modified (FB-006 – FB-012):** the surfaces recorded in §1a, §1b and the corresponding task records. **Deleted: none** |
+| Tests run by Freebuff | **FB-006 and FB-008: yes** (see §1a, §1b). FB-001–FB-005 and FB-007: none. Later trail tasks (FB-009 … FB-012) are not summarized here — see their own task records |
+| Repository commit state | **Committed and pushed.** `main` and `origin/main` both stand at `0c28e74`, **0 ahead / 0 behind**; the working tree holds only `?? .freebuff/`. This supersedes the "partially committed / nothing has been pushed" state recorded in §1a and §1b — `docs/freebuff/` is tracked and clean, and the Phase 32I / 32J / 32K / 32L work is committed |
+| Current phase | **No implementation phase is active.** Phases 1–6 of the current documentation-reconciliation programme are committed and pushed, and **Phase 32L is fully shipped** — 32L-A in `01ae73f`, 32L-B in `0c3f87d`, recorded in `docs/DEVELOPMENT_ROADMAP.md` §27Q. The "32L-A uncommitted / 32L-B does not exist" state recorded above is superseded |
 
 ## 3. Inspect first
 
-1. `docs/freebuff/MASTER_LOG.md` — the FB-001 through FB-005 entries (FB-001–FB-004 are `RETROACTIVE ENTRY`; FB-005 is self-recorded).
+1. `docs/freebuff/MASTER_LOG.md` — the trail entries, now **FB-001 through FB-012** (FB-001–FB-004 are `RETROACTIVE ENTRY`).
 2. `docs/freebuff/tasks/FB-002-create-freebuff-audit-trail.md` — exactly what FB-002 created and verified.
-3. `docs/freebuff/BASELINE.md` §3 — the protected-file hashes, so you can confirm they are still intact.
+3. `docs/AUTH_SECURITY_MASTER_CHECKLIST.md` §32/§37 — the **current** protected-file integrity register. (`docs/freebuff/BASELINE.md` §3 holds the **historical FB-002** hashes and is not the live register — see BASELINE §13.)
 4. `docs/freebuff/DECISIONS.md` — owner decisions vs Freebuff observations (FB-D-101…FB-D-111 are **observation only**; FB-D-112 is the corrected route-inventory observation; FB-D-113 authorises the §2.6 correction).
 5. `docs/freebuff/TEST_BASELINE.md` §5 — every quoted test count is `DOCUMENTED HISTORICAL RESULT — NOT REPRODUCED BY FREEBUFF`.
 6. `docs/freebuff/tasks/FB-004-verify-route-inventory-drift.md` — the drift evidence (68 vs 67, two independent counting methods).
@@ -102,7 +104,7 @@ docs/superpowers/plans/2026-09-11-phase-18c-core-list-screens.md
 docs/superpowers/plans/2026-09-11-phase-18e-secondary-screens.md
 ```
 
-Verified byte-identical before and after FB-002 (hashes in `BASELINE.md` §3). Their content was **not
+Verified byte-identical before and after FB-002. The FB-002 SHA-256 values in `BASELINE.md` §3 are **historical evidence**, not the current register; current protected-file integrity is maintained in `docs/AUTH_SECURITY_MASTER_CHECKLIST.md` §32/§37. Their content was **not
 read** by Freebuff; their intent is `AUTHORSHIP UNKNOWN`.
 
 ## 5. Project-side open items — references only (Freebuff decided nothing)
@@ -110,36 +112,40 @@ read** by Freebuff; their intent is `AUTHORSHIP UNKNOWN`.
 Freebuff lists these **only** so a returning agent knows they exist. They live in
 `docs/SYSTEM_SPECIFICATION.md` §29 and `docs/superpowers/specs/2026-09-18-firebase-auth-design.md`
 §14A.5 (`O-1` … `O-11`), with dispositions recorded in `docs/DEVELOPMENT_ROADMAP.md` §27B/§27D/§27E.
-Freebuff neither restates nor resolves any of them, and **Phase 32I remains undefined** — Freebuff
-did not infer it (`FB-I-01`).
+Freebuff neither restates nor resolves any of them. **Phase 32I is no longer undefined** — it shipped
+with Phase 32J and 32L-B in `0c3f87d`; Freebuff simply never inferred it (`FB-I-01`).
 
 ## 6. Known risks Freebuff flags for the next agent
 
 | Risk | Why it matters | Freebuff's mitigation |
 | --- | --- | --- |
 | Line-ending normalization on the protected tracked files | A `git add` or an edit could rewrite whole files and bury the real diff | Hashes recorded; never stage; never format |
-| `docs/freebuff/` is untracked | A future `git add -A` would sweep the audit files in (and possibly the protected ones too) | Stage by explicit path only; this directory is intentionally uncommitted |
+| Blanket staging (`git add -A`) | This directory was untracked once and would have been swept in; it is now **tracked and committed** (20 files), but the protected files remain sensitive to a blanket add | Stage by explicit path only — never `git add -A` |
 | Drift temptation | The drift list looks like a TODO list; it is not | `DECISIONS.md` FB-D-100 states it is observation only |
 | Test-count drift in docs | Quoted totals are historical snapshots | `TEST_BASELINE.md` §0/§5 labelling rule |
 | New test file breaks `npm test` | `scripts/run-tests.mjs` exits 2 on an unclassified file | Documented in `TEST_BASELINE.md` §1; allowlist that file if a task adds a test |
 | Freebuff has now edited a Claude-authored authority (design doc §2.6) | A one-off, owner-authorized, minimal correction — not a precedent | FB-D-112/FB-D-113 record it; scope was §2.6 only; any further edit needs fresh authorization |
 | Freebuff has now modified **pre-existing tests** (FB-006) | Trail rule 5 forbids modifying a pre-existing test to make new work pass, and two exact-allowlist guards genuinely failed against the authorized additive field | FB-D-114 records it; both were **strengthened, not weakened** (no assertion removed) — they remain the only such files |
-| A **commit** is now overdue and its scope is non-obvious | The brief asked for a commit, but the changed files also carry uncommitted Phase 32I/32J hunks; committing sweeps that work in | Deliberately **not** taken unilaterally; the scope is the owner's call and was flagged in the FB-006 report |
+| The **commit scope** was non-obvious at FB-006 | The changed files also carried Phase 32I/32J hunks, so committing the FB-006 set alone would have swept that work in | **Resolved.** The owner decided the scope and the commits landed; nothing from the FB-006 era remains uncommitted |
 | FB-006 has **no runtime verification** | Everything it proves is a test/lint/typecheck result; the boundary has never been exercised on a device | Stated in the record, the roadmap §27M and the README entry — do not read it as observed behaviour |
 
 ## 7. Pending work
 
-**FB-006 is the last executed task** (Phase 32K — the Firebase password authority boundary). It is
-implemented and statically verified; `docs/freebuff/` and every production change remain deliberately
-**uncommitted**.
+**FB-012 is the latest Freebuff trail task** (Phase 1 owner decisions frozen). The historical record of
+what FB-006 executed, and of the FB-007 / FB-008 work, is preserved in §1a and §1b; **every change it
+describes is now committed and pushed.**
 
-Waiting on the owner, in priority order:1. **The remaining uncommitted work** — the Phase 32K README entry and roadmap §27M are written but
-   uncommitted because those files also carry Phase 32I/32J changes; so is all of Phase 32I/32J itself,
-   and so are the two FB-006 post-commit notes.
-2. **O-1 / Phase 32L** — the unlink policy and last-authentication-method protection. Now more
-   pointed: a retained `passwordHash` is **inert while `firebaseUid` is set**, so clearing the uid
-   without a last-method rule would make it live again.
-3. **Whatever Phase 32L's authorization is** — not inferred by Freebuff (FB-I-01).
+Waiting on the owner, in priority order:
+
+1. **The uncommitted work recorded at FB-006** — the Phase 32K README entry, roadmap §27M, Phase
+   32I/32J, and the two FB-006 post-commit notes — **is resolved**: all of it is committed, and `main`
+   equals `origin/main` at `0c28e74`.
+2. **O-1** — the unlink policy and last-authentication-method protection. Phase 32L shipped under
+   **Policy B** (`01ae73f` server, `0c3f87d` mobile; recorded in `docs/DEVELOPMENT_ROADMAP.md` §27Q)
+   and the last-authentication-method invariant is enforced server-side. **O-1 is not declared
+   formally closed here** — that belongs to the project's own authoritative security records.
+3. **Phase 32L's authorization** — no longer undefined: the phase was authorized and shipped
+   (`01ae73f` server, `0c3f87d` mobile).
 
 The remaining FB-D drift entries are observations, not tasks. Any next task requires a fresh,
 explicit approval naming its scope — an earlier approval is not transferable.

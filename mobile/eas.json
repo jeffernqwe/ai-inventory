@@ -28,7 +28,7 @@
     "production": {
       "autoIncrement": true,
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://REPLACE-WITH-PRODUCTION-ORIGIN"
+        "EXPO_PUBLIC_API_URL": "https://ai-inventory-l1mi.onrender.com"
       }
     }
   }

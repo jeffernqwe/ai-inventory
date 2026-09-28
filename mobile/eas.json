@@ -22,7 +22,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "http://192.168.1.4:4000"
+        "EXPO_PUBLIC_API_URL": "https://ai-inventory-l1mi.onrender.com"
       }
     },
     "production": {

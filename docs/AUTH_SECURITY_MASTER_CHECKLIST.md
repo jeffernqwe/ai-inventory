@@ -1150,6 +1150,157 @@ remains in §24 and §28 and was **not** extracted.
 
 ---
 
+## 38. BASELINE — Phase 4 deployment-configuration reconciliation (2026-09-29)
+
+A **new dated baseline**. §36 and §37 above are preserved exactly; this section supersedes §37 as the
+current state and rewrites nothing before it. It adds no security decision, changes no behaviour and
+records no secret.
+
+| Field | Value |
+| --- | --- |
+| Branch | `main` |
+| HEAD | `d3092523cc94dc93f58943793e3da19fdb57bbaa` |
+| `origin/main` | `d3092523cc94dc93f58943793e3da19fdb57bbaa` |
+| Divergence | **0 ahead / 0 behind** |
+| Phase 4A commit | `d309252` — set the EAS **production** API URL to the Render origin (one line in `mobile/eas.json`) |
+| Preceding commits | `6e32717` (Phase 2 — OpenRouter documentation reconciliation), `751d796` (Phase 1 — pin the OpenRouter suite's model) |
+| Push state | Phases 1, 2 and 4A pushed; `main` and `origin/main` agree |
+| Working tree | `?? .freebuff/` only |
+| Open PRs | **0** |
+| Merged PRs | #1 `fa87941`, #2 `dbdf673`, #3 `37f5535`, #4 `924f8bc`, #5 `14de2af`, #6 `e97497b` |
+| WIP backup | `wip/backup-working-tree` @ `e9616cfa19be05dd70abbf0702a1c3ca541fa3c5` — intact locally and on `origin` |
+| Prior baseline | Phase 3 (`934b15a`), preserved in §37 |
+
+### Protected-file register at this baseline (git blob hashes)
+
+```
+9060e8c3a120984d88530dcfb3284eeb43f66a74  mobile/eas.json                        (== HEAD)
+86688b7b8468e57b9abeaf3986f23b17bb23b57a  server/src/services/ai/providers/http.ts            (== HEAD)
+07601c7ab31009263d0045f20a9b940539184094  server/test/phase06-ai-wire.test.mjs               (== HEAD)
+12627bae19ec693bd8d609ac00bd57b602139dce  docs/superpowers/plans/2026-09-11-phase-18c-core-list-screens.md   (== HEAD)
+347bcc1365939bed92879f00d781f63f71cf670e  docs/superpowers/plans/2026-09-11-phase-18e-secondary-screens.md   (== HEAD)
+```
+
+> **`mobile/eas.json` moved from `c1ab09c8998221fa077dcdf053a17e65f398cffd` (§37) to
+> `9060e8c3a120984d88530dcfb3284eeb43f66a74`**, by the authorised Phase 4A commit `d309252`. The file's
+> `production` profile no longer contains `https://REPLACE-WITH-PRODUCTION-ORIGIN`. §37's value is
+> **superseded, not rewritten**.
+
+### Deployment configuration — the two evidence classes
+
+| Setting | Evidence class | Status |
+| --- | --- | --- |
+| EAS `preview` `EXPO_PUBLIC_API_URL` = `https://ai-inventory-l1mi.onrender.com` | repository | **VERIFIED** (`934b15a`) |
+| EAS `production` `EXPO_PUBLIC_API_URL` = `https://ai-inventory-l1mi.onrender.com` | repository | **DONE / FIXED** (`d309252`, Phase 4A) |
+| EAS `EXPO_PUBLIC_FIREBASE_*` (all four) + `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID` | **dashboard-managed** | **VERIFIED** by the project owner |
+| EAS `GOOGLE_SERVICES_JSON` / `GOOGLE_SERVICE_INFO_PLIST` (file env vars) | **dashboard-managed** | **VERIFIED** by the project owner |
+| Firebase Android SHA-1 / SHA-256 fingerprints | **external console** | **VERIFIED** by the project owner |
+| Render service `ai-inventory`, `rootDir: server`, branch `main`, Auto Deploy `On Commit`, health check `/api/health/ready` | **dashboard-managed** | **VERIFIED** by the project owner |
+| Render `NODE_ENV=production`, `NODE_VERSION=24`, `MONGODB_URI`, `JWT_SECRET`, `JWT_EXPIRES_IN=7d` | **dashboard-managed** | **VERIFIED** by the project owner |
+| Render `AI_PROVIDER=openrouter`, `OPENROUTER_API_KEY`, `OPENROUTER_BASE_URL`, `AI_MODEL_OPENROUTER` | **dashboard-managed** | **VERIFIED** by the project owner |
+| Render `FIREBASE_SERVICE_ACCOUNT_JSON` | **dashboard-managed** | **VERIFIED** by the project owner |
+| Render `TRUST_PROXY=1` | **dashboard-managed** | **VERIFIED** by the project owner |
+
+**The repository cannot see any dashboard-managed value, and its absence from `mobile/eas.json` or
+from a repository config file is not evidence that it is unset.** No secret value is recorded here.
+
+### Auth / rate-limit configuration audit (code-derived)
+
+All eleven `AUTH_*` variables are **optional** and read lazily at limiter-creation time
+(`server/src/middlewares/rateLimit.ts`, `authRateConfig`), each with a documented default; none is in
+the production fail-fast set (`server/src/config/validateConfig.ts`). **Render needs no override.**
+
+| Variable | Default | Consumed by |
+| --- | --- | --- |
+| `AUTH_LOGIN_RATE_LIMIT_WINDOW_MS` / `_MAX` | 900000 / 10 | `createLoginAccountLimiter` (`POST /api/auth/login`, `skipSuccessfulRequests`) |
+| `AUTH_LOGIN_IP_RATE_LIMIT_WINDOW_MS` / `_MAX` | 900000 / 60 | `createLoginIpLimiter` (same route) |
+| `AUTH_REGISTER_RATE_LIMIT_WINDOW_MS` / `_MAX` | 3600000 / 30 | `createRegisterLimiter` (`POST /api/auth/register`) |
+| `AUTH_PASSWORD_RESET_RATE_LIMIT_WINDOW_MS` / `_MAX` | 3600000 / 5 | `createPasswordResetRequestAccountLimiter` (`forgot-password`) |
+| `AUTH_PASSWORD_RESET_IP_RATE_LIMIT_WINDOW_MS` / `_MAX` | 3600000 / 20 | `createPasswordResetRequestIpLimiter` (same route) |
+| `AUTH_PASSWORD_RESET_CONFIRM_RATE_LIMIT_WINDOW_MS` / `_MAX` | 900000 / 20 | `createPasswordResetConfirmLimiter` (`reset-password`) |
+| `AUTH_FIREBASE_EXCHANGE_RATE_LIMIT_WINDOW_MS` / `_MAX` | 900000 / 30 | `createFirebaseExchangeLimiter` (`POST /api/auth/firebase/exchange`) |
+| `AUTH_FIREBASE_REGISTER_RATE_LIMIT_WINDOW_MS` / `_MAX` | 3600000 / 30 | `createFirebaseRegisterLimiter` (`POST /api/auth/firebase/register`) |
+| `TRUST_PROXY` | **0** (trust no proxy) | `server/src/config/env.ts` → `app.set('trust proxy', …)` in `server/src/app.ts`; decides what `req.ip` — and therefore every per-IP limiter — resolves to |
+| `JWT_SECRET` / `JWT_EXPIRES_IN` | — / `7d` | production fail-fast (≥ 32 chars, parseable timespan) |
+
+`TRUST_PROXY=1` is **effectively required behind Render**, and it is not a hardening reduction: under
+trust 0 every client shares the proxy's address, so the per-IP buckets would be global; under trust 1
+`req.ip` is the real client and the limiters key as designed. `true` is never acceptable — an unbounded
+forwarded chain lets anyone spoof `X-Forwarded-For`. The limiters deliberately key on `request.ip` using
+`ipKeyGenerator` (IPv6 masked to /56) rather than the library default, which throws on an
+`X-Forwarded-For` header while trust proxy is off.
+
+**Production consistency: yes.** The verified Render configuration — defaults for every `AUTH_*` value,
+`TRUST_PROXY=1`, `NODE_ENV=production`, `JWT_EXPIRES_IN=7d`, `CORS_ORIGINS` unset (correct: there are no
+browser clients), `JSON_BODY_LIMIT` / `SHUTDOWN_TIMEOUT_MS` / `LOG_REQUESTS` at their defaults — matches
+the implemented limiter behaviour. The known in-memory, per-process store limitation (E3) and B2 remain
+**open and deferred to V4**, untouched by this baseline.
+
+### Mail configuration audit (code-derived)
+
+Password recovery **is implemented** (Phases 26B-1/2/3, 27, 28) and is **optional by design**: no mail
+variable appears in the production fail-fast set, so a deployment boots without them and
+`POST /api/auth/forgot-password` answers a fixed **503 `MAIL_NOT_CONFIGURED`**.
+
+| Variable | Requirement | Consumed by |
+| --- | --- | --- |
+| `MAIL_PROVIDER` | optional; **empty = recovery disabled** | `mailConfig()`, `providers/index.ts` `selectProvider()` |
+| `MAIL_FROM` | required when `MAIL_PROVIDER=resend` | `providers/index.ts` (`BUILTINS.resend.requiredEnv`), `resendProvider.ts` |
+| `RESEND_API_KEY` | required when `MAIL_PROVIDER=resend` | `resendProvider.ts` (read directly; never a field of `mailConfig()`) |
+| `PASSWORD_RESET_URL` | **conditionally required** — `forgot-password` refuses before minting a token without it | `passwordReset.service.ts` (`requestPasswordReset`) |
+| `MAIL_APP_NAME` | optional, default `Inventory AI` | `mailConfig()` → the reset template |
+| `MAIL_REQUEST_TIMEOUT_MS` | optional, default `10000` | `resendProvider.ts` (`AbortController`) |
+
+None is legacy or unused. The only feature that can fail when they are absent is password recovery, and
+it fails as a clean 503 rather than a crash or a boot failure. **Render currently carries none of the
+four required mail variables**, so **production password recovery is disabled** — the one genuinely OPEN
+item below.
+
+### Status of the Phase 3 deployment findings
+
+| Finding | Status |
+| --- | --- |
+| **G-1** production EAS API origin was a placeholder | **DONE / FIXED** — `d309252` (Phase 4A) |
+| **G-2** Firebase/Google client configuration absent from `mobile/eas.json` | **VERIFIED — NO ACTION REQUIRED** — dashboard-managed EAS environment variables, verified by the project owner; SHA-1/SHA-256 fingerprints configured |
+| **G-3** Render `TRUST_PROXY` unset and undocumented | **VERIFIED** on Render (`TRUST_PROXY=1`, project owner); the repository-side documentation gap is closed by this section and by `README.md` |
+| **G-4** Render production configuration not enumerated in the repository | **DONE** — the required-variable table is now in `README.md` under the Render deployment section; the environment audit is this section |
+| **Mail configuration** | **VERIFIED — NO ACTION REQUIRED** for startup; **OPEN** for password recovery (the feature is correctly disabled because its four variables are not set on Render) |
+| **Auth/rate-limit configuration** | **VERIFIED — NO ACTION REQUIRED** — defaults are the production values and `TRUST_PROXY=1` is present and correct |
+
+### Known documentation drift found by this audit
+
+- `AI_MAX_TOOL_RESULT_CHARS` is read by `server/src/services/ai/aiConfig.ts` (default `12000`) but is
+  **not listed in `server/.env.example`**. Cosmetic; recorded so it is not rediscovered as a defect.
+- `docs/DEVELOPMENT_ROADMAP.md` §27J's Phase 32G record still says the `production` profile holds the
+  placeholder. That is a **frozen historical record** and is deliberately not rewritten; the current
+  value is recorded in §27T.
+
+### Smallest proposed action for the one OPEN item
+
+Decide whether production password recovery should be enabled. If yes, set four values on the Render
+service — `MAIL_PROVIDER=resend`, `MAIL_FROM` (a Resend-verified sender), `RESEND_API_KEY`, and
+`PASSWORD_RESET_URL=inventoryai://reset-password` (the mobile custom scheme Phase 27 ships) — with no
+code change and no migration. If no, record the feature as intentionally disabled. **Nothing was
+implemented in this phase.**
+
+### For future audits
+
+> Deployment configuration for this project is split by design. The repository holds the code, the
+> `mobile/eas.json` profiles and the **names** of every variable (`server/.env.example`); the **values**
+> live in the Render service and the EAS project dashboards. A variable's absence from a repository file
+> is therefore **not** evidence that it is unset, and the correct audit is to verify the current
+> dashboard configuration rather than to re-flag its absence. Re-derive the code-side list with
+> `grep -rhoE 'process\.env\.[A-Z0-9_]+' server/src` and compare it with the dashboards; only a variable
+> that the code **requires** and the deployment **lacks** is a finding.
+
+### Changed in this reconciliation
+
+Current-state metadata only: this new §38, the pointer updates in `docs/freebuff/HANDOFF.md` and
+`docs/freebuff/BASELINE.md` §13, and the `README.md` deployment table. §0–§37 behaviour and security
+tables, O-1…O-11, §28 deferred work, §29 phase history, §35 conflicts and **§36/§37** are **unchanged**.
+
+---
+
 > **MAINTENANCE.** This is a living navigation document. On any authentication/security change:
 > reconcile against evidence, update only evidence-supported statuses, record newly completed and
 > remaining work, preserve unresolved decisions and deferred items, update external-verification

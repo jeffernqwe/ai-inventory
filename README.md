@@ -164,6 +164,50 @@ examples:
    causes there are the Auto-Deploy mode, the linked branch, build filters, a `[skip render]`-style
    directive in the commit message, or a suspended service.
 
+### Required production configuration (Render + EAS)
+
+**Deployment configuration is split by design.** The repository holds the code, the `mobile/eas.json`
+profiles and the **names** of every variable (`server/.env.example`); the **values** live in the Render
+service and the EAS project dashboards. A variable's absence from a repository file is therefore **not**
+evidence that it is unset.
+
+**Server (Render service `ai-inventory`).** The server fails fast at boot when a **required** variable
+is missing or unusable (`server/src/config/validateConfig.ts`); everything else has a documented
+default and needs no dashboard entry. Verify the current values in the Render dashboard, not here.
+
+| Variable | Required in production | Notes |
+| --- | --- | --- |
+| `MONGODB_URI` | **required** | startup exits when missing |
+| `JWT_SECRET` | **required** | at least 32 characters |
+| `JWT_EXPIRES_IN` | optional | default `7d`; an unparseable value fails fast |
+| `AI_PROVIDER` | optional | empty = AI disabled; when set, that provider's own keys become required |
+| `OPENROUTER_API_KEY`, `OPENROUTER_BASE_URL`, `AI_MODEL_OPENROUTER` | **required when `AI_PROVIDER=openrouter`** | the model has no default |
+| `FIREBASE_SERVICE_ACCOUNT_JSON` — or the three-variable form | **all-or-nothing** | a partially supplied service account fails fast; none at all = Firebase disabled |
+| `TRUST_PROXY` | **effectively required behind Render** | set to `1`; see below |
+| `MAIL_PROVIDER`, `MAIL_FROM`, `RESEND_API_KEY`, `PASSWORD_RESET_URL` | optional | with any of them missing, password recovery is **disabled** and `forgot-password` answers 503 |
+| `AUTH_*_RATE_LIMIT_*` (eleven variables) | optional | the documented defaults are the production values |
+| `CORS_ORIGINS`, `JSON_BODY_LIMIT`, `SHUTDOWN_TIMEOUT_MS`, `LOG_REQUESTS` | optional | the documented defaults are the production values |
+
+**`TRUST_PROXY=1`.** Render terminates TLS at a proxy, so without this setting `req.ip` is the proxy's
+address for every request and the per-IP auth rate limiters would share one bucket across all clients.
+Setting the exact hop count (`1`) restores real client addresses. Never set it to `true` — an unbounded
+forwarded chain lets anyone spoof `X-Forwarded-For`. See `server/src/config/env.ts`.
+
+**Mobile (EAS project).** Only `preview` and `production` carry an explicit `env` block in
+`mobile/eas.json`, and only for `EXPO_PUBLIC_API_URL` (both point at `https://ai-inventory-l1mi.onrender.com`).
+Everything else the app needs at build time is a **dashboard environment variable**, not a value missing
+from the repository:
+
+| EAS environment variable | Purpose |
+| --- | --- |
+| `EXPO_PUBLIC_FIREBASE_API_KEY`, `EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN`, `EXPO_PUBLIC_FIREBASE_PROJECT_ID`, `EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET`, `EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID`, `EXPO_PUBLIC_FIREBASE_APP_ID` | public Firebase client configuration — not a credential and unable to authorize anything on its own |
+| `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID` | native Google Sign-In |
+| `GOOGLE_SERVICES_JSON`, `GOOGLE_SERVICE_INFO_PLIST` | **file** variables feeding `android.googleServicesFile` / `ios.googleServicesFile` (`mobile/app.config.js`) — a missing or renamed variable fails from inside Gradle, so the names are load-bearing |
+
+The Firebase Android **SHA-1 / SHA-256** fingerprints are configured in the Firebase console, not in
+the repository. `mobile/.easignore` excludes `.env`, `.env.*`, `google-services.json` and
+`GoogleService-Info.plist` from a remote build, so a build must receive these through the dashboard.
+
 ### Commercialization foundation (Phase 10)
 
 `Business.planCode`, the centralized plan catalog (`server/src/constants/plans.ts`), and

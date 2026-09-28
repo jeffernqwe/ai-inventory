@@ -19,7 +19,7 @@
 // claimed. The stub stands in for the gateway, so everything asserted here is
 // about what Inventory AI SENDS and how it INTERPRETS the reply.
 
-import { it, before, after, beforeEach } from 'node:test';
+import { it, before, after, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 
@@ -72,19 +72,36 @@ function withEnv(key, value) {
   };
 }
 
-/** Build the provider with the three OpenRouter variables set, then restore. */
+/**
+ * Build the provider with the three OpenRouter variables set, pinned for the
+ * WHOLE TEST rather than only for the construction call.
+ *
+ * The provider does not freeze all of its configuration at construction time:
+ * anthropicWire.ts reads the API key once, but resolves the model per request
+ * (`aiConfig()[modelKey] || defaultModel`), and aiConfig() reads process.env
+ * lazily. Restoring the values the moment the provider is built would therefore
+ * leave complete() reading whatever AI_MODEL_OPENROUTER the ambient environment
+ * holds — and this file imports support.mjs, which imports `dotenv/config`, so on
+ * a developer machine that is the real server/.env model (the production one)
+ * rather than the stub's. Restoring after the test keeps the suite deterministic
+ * and leaves it owning its own inputs.
+ */
+let pendingRestores = [];
+
 function providerFor(base, { key = TEST_KEY, model = MODEL } = {}) {
-  const restores = [
+  pendingRestores.push(
     withEnv('OPENROUTER_API_KEY', key),
     withEnv('OPENROUTER_BASE_URL', base),
-    withEnv('AI_MODEL_OPENROUTER', model),
-  ];
-  try {
-    return createOpenrouterProvider();
-  } finally {
-    restores.reverse().forEach((r) => r());
-  }
+    withEnv('AI_MODEL_OPENROUTER', model)
+  );
+  return createOpenrouterProvider();
 }
+
+/** Undo, in reverse, every env value this file pinned; never leaks a stub value. */
+afterEach(() => {
+  [...pendingRestores].reverse().forEach((r) => r());
+  pendingRestores = [];
+});
 
 // ---------------------------------------------------------------------------
 // Local OpenRouter stub: one record per received request, scripted responses.

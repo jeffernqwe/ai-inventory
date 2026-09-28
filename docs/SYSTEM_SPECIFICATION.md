@@ -1170,7 +1170,7 @@ sessions and audit records.
 | Method | Status |
 | --- | --- |
 | Email/password via Firebase Authentication | **Implemented** (Phases 32B–32E) |
-| Google via Firebase Authentication | **Planned — not implemented** |
+| Google via Firebase Authentication | **Implemented** (Phase C, native `@react-native-google-signin/google-signin`) — existing-account Android flow E2E verified 2026-09-26; the new-identity path is environment-blocked |
 | Facebook via Firebase Authentication | **Planned — not implemented** |
 | Apple Sign-In | **Future scope — not part of the current implementation** |
 
@@ -1598,15 +1598,19 @@ in §27D.
 
 Future authentication may include:
 
-- Google OAuth — **planned** (§29); approved as a provider, not implemented
 - Facebook Login — **planned** (§29); approved as a provider, not implemented
 - Apple Sign-In — future scope
 - MFA — future scope
 
-Firebase Authentication **is** implemented as the identity provider (§29). Google and Facebook are
-approved providers reachable through it, and neither is implemented: **no provider SDK is installed
-and no provider route exists.** Apple Sign-In is future scope and is not part of the current
-implementation. Enforcing `emailVerified` is likewise not implemented.
+*(**Google Sign-In was removed from this list when it shipped.** It is **implemented** — see §29.)*
+
+Firebase Authentication **is** implemented as the identity provider (§29). **Google Sign-In is also
+implemented** — the native provider SDK (`@react-native-google-signin/google-signin`) is installed and
+the existing-account Android flow is E2E verified (2026-09-26), while the new-identity
+`REGISTRATION_REQUIRED` path remains environment-blocked. Facebook is the one approved provider still
+unimplemented: **no Facebook provider SDK is installed and no Facebook provider route exists.** Apple
+Sign-In is future scope and is not part of the current implementation. Enforcing `emailVerified` is
+likewise not implemented.
 
 Account linking is **half** implemented, and the half matters: since Phase 32H the **server-side
 boundary** exists (`POST /api/auth/firebase/link`, authenticated — see §29), while the provider side
@@ -2545,16 +2549,16 @@ Document Upload
 RAG
 MongoDB Vector Search
 Improved AI Context
-Google Sign-In (Firebase provider)
 Facebook Login (Firebase provider)
 ```
 
 Firebase Authentication itself is **not** future work — it shipped in Phases 32B–32E as the identity
-provider (§29). The two provider entries above are the approved-but-unimplemented part: each needs its
-own phase, and each is bound by §29's linking policy (no automatic linking on an email match) and by
-its open items. **Apple Sign-In remains future scope** and is not scheduled. Neither provider SDK is
-installed, and no EAS development build has been created, which is a prerequisite for validating the
-mobile integration path.
+provider (§29). **Google Sign-In is likewise no longer future work:** it shipped as a native provider
+(Phase C) and its existing-account Android flow is E2E verified, so it has been removed from the list
+above; only the new-identity `REGISTRATION_REQUIRED` path remains environment-blocked. The one provider
+entry that remains is Facebook, which is approved but unimplemented — it needs its own phase and is
+bound by §29's linking policy (no automatic linking on an email match) and by its open items (O-5), and
+**no Facebook provider SDK is installed**. **Apple Sign-In remains future scope** and is not scheduled.
 
 Shipped since this list was written, and therefore no longer future work: the barcode/QR scanner
 (Phases 12B–12D), supplier management (Phases 13A and 17) and stock transfers (Phase 19). They were

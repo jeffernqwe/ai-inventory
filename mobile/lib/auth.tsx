@@ -257,6 +257,20 @@ export interface DisconnectFirebaseOptions {
   retry?: boolean;
 }
 
+/**
+ * What ONE Connect Google attempt produced (Phase 32M).
+ *
+ * `cancelled` is an ORDINARY state rather than an error, for the same reason
+ * `signInWithGoogle` resolves `null` for it: the person closed the Google sheet, so
+ * nothing was sent and nothing changed. `in-flight` means a previous attempt is still
+ * running, so this one started nothing — a duplicate tap must not open a second consent
+ * sheet or send a second link request.
+ */
+export type ConnectFirebaseOutcome =
+  | { kind: 'linked' }
+  | { kind: 'cancelled' }
+  | { kind: 'in-flight' };
+
 /** The value exposed by {@link useSession}. */
 export interface AuthValue {
   user: AuthUser | null;
@@ -347,6 +361,30 @@ export interface AuthValue {
     input: DisconnectFirebaseInput,
     options?: DisconnectFirebaseOptions
   ) => Promise<DisconnectFirebaseOutcome>;
+  /**
+   * Phase 32M — CONNECTS a verified Google/Firebase identity to THIS account: the
+   * mobile half of Phase 32H's linking boundary.
+   *
+   * IT IS NOT A SIGN-IN, and it shares nothing with `signInWithGoogle` beyond the
+   * Firebase consent step. `signInWithGoogle` EXCHANGES the token for a session; this
+   * ATTACHES the identity to the session the caller already holds. The Inventory AI
+   * token, the session and the signed-in user are unchanged by a successful link
+   * except for the account's own `authMethods` capability, which the server returns in
+   * the response and this layer applies.
+   *
+   * The ID token is read here, from the live Firebase user, and never passed in by a
+   * caller — so no screen holds a credential. The request carries only `{ idToken }`;
+   * the account is the session and the identity is the verified token's uid, so no
+   * client-supplied id, uid, businessId or role can steer it, and no email is compared.
+   *
+   * `linked` is a success, including the idempotent CASE A answer where the server
+   * reports `linked: false` because the account already carries this identity. Every
+   * real refusal throws the server's `ApiError` (409 conflict, 400 bad provider
+   * credential, 403/503) or a `FirebaseAuthError` for a Firebase fault before the
+   * request. A 400/409 can never be session loss: the client's session-loss rule keys
+   * on 401/403, and the server answers a rejected Firebase token as 400 for that reason.
+   */
+  connectFirebase: () => Promise<ConnectFirebaseOutcome>;
   refresh: () => Promise<AuthUser | null>;
   clearSession: () => Promise<void>;
 }
@@ -491,6 +529,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // tokens from one live Firebase session opens two sessions, which is what the
   // server documents as intended). So the retry must resume at the exchange.
   const firebaseAccountRegisteredRef = useRef(false);
+
+  /**
+   * Phase 32M — the claim that a Connect Google call is running.
+   *
+   * See `connectFirebase` for why this cannot live in the screen's `busy` state. A ref
+   * rather than state because it never changes what is rendered and must be readable
+   * inside the callback without re-creating it.
+   */
+  const connectInFlightRef = useRef(false);
 
   /**
    * Arms the onboarding route for a refusal that has just happened. Resets the
@@ -932,6 +979,66 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [signOut]
   );
 
+  /**
+   * Phase 32M — attaches a Google/Firebase identity to the signed-in account.
+   *
+   * THE ORDER IS FIREBASE FIRST, AND IT IS FORCED. The credential must exist before
+   * there is anything to attach, so the consent step runs first and only its token
+   * authorises a request. A cancellation therefore ends the operation having sent
+   * nothing and changed nothing.
+   *
+   * A REFUSAL TEARS NOTHING DOWN LOCALLY, and that is deliberate rather than an
+   * omission. The device may now hold a durable Firebase session for an identity the
+   * server declined to associate, but every path that ends the Inventory AI session
+   * already ends the Firebase session too (`endSession`, the centralized session-loss
+   * handler, and the boot restore's own cleanup), and nothing in between consults a
+   * restored Firebase user — there is no auth-state listener and the boot path never
+   * exchanges one. Ending it here as well would mean writing the sign-out-pending marker
+   * from a second place, which the D-E1 decision deliberately keeps to `endFirebaseSession`'s
+   * one consumer. A 401/403 here would still be acted on as session loss; a 400 and a 409
+   * are not, so the caller stays signed in and may retry.
+   *
+   * THE RESPONSE IS APPLIED RATHER THAN RE-FETCHED. The server answers with the account
+   * as it now stands (`toPublicUser`), so `authMethods.firebase` is already true in the
+   * payload. Applying it is both the accurate state and one request fewer than a
+   * `refresh()` round-trip, and it is what removes the Connect action the moment it has
+   * succeeded. A `linked: false` (CASE A) answer carries the same account and is treated
+   * as the success it is: either way this account can now sign in with Google.
+   *
+   * THE IN-FLIGHT GUARD IS NOT THE SCREEN'S. A screen disables its button while busy,
+   * but a duplicate tap, a double-invoked handler or a second screen reading the same
+   * session would otherwise open a second consent sheet and send a second link request.
+   * The claim is taken for the call's duration and released in a `finally`, so a failure
+   * cannot leave it stuck, and the loser is told so as an OUTCOME rather than by throwing
+   * — "a connection is already running" is not an error the person caused.
+   *
+   * It deliberately does not touch `firebaseRegistrationRequired`: nothing here reaches
+   * the exchange, so no `REGISTRATION_REQUIRED` can arise.
+   */
+  const connectFirebase = useCallback(async (): Promise<ConnectFirebaseOutcome> => {
+    const session = tokenRef.current;
+    if (!session) {
+      throw new FirebaseAuthError(NO_SESSION_CODE, NO_SESSION_MESSAGE);
+    }
+
+    if (connectInFlightRef.current) return { kind: 'in-flight' };
+    connectInFlightRef.current = true;
+
+    try {
+      const outcome = await firebaseSignInWithGoogle();
+      if (outcome.kind === 'cancelled') return { kind: 'cancelled' };
+      if (outcome.kind === 'failure') {
+        throw new FirebaseAuthError(outcome.code, outcome.message);
+      }
+
+      const result = await api.firebaseLink(session, { idToken: outcome.idToken });
+      if (result?.user) setUser(result.user);
+      return { kind: 'linked' };
+    } finally {
+      connectInFlightRef.current = false;
+    }
+  }, []);
+
   /** Re-validate the current token against /api/auth/me and refresh the user. */
   const refresh = useCallback(async (): Promise<AuthUser | null> => {
     if (!token) {
@@ -1029,6 +1136,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signOutEverywhere,
       confirmFirebaseSignIn,
       disconnectFirebase,
+      connectFirebase,
       refresh,
       clearSession,
     }),
@@ -1045,6 +1153,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signOutEverywhere,
       confirmFirebaseSignIn,
       disconnectFirebase,
+      connectFirebase,
       refresh,
       clearSession,
     ]

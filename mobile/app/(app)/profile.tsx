@@ -1,9 +1,10 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { router } from 'expo-router';
 import { StyleSheet, Text, View } from 'react-native';
 
 import Badge from '../../components/Badge';
+import Banner from '../../components/Banner';
 import Button from '../../components/Button';
 import Card from '../../components/Card';
 import ListRow from '../../components/ListRow';
@@ -39,7 +40,51 @@ function DetailRow({ label, value, divider }: { label: string; value?: ReactNode
 export default function ProfileScreen() {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const { user, signOut, refresh } = useSession();
+  const { user, signOut, refresh, connectFirebase } = useSession();
+  const [connectBusy, setConnectBusy] = useState(false);
+  const [connectError, setConnectError] = useState<string | null>(null);
+  const [connectNotice, setConnectNotice] = useState<string | null>(null);
+
+  /**
+   * Phase 32M — Connect Google, from the Security card.
+   *
+   * THE SERVER DECIDES EVERYTHING. This handler starts the flow, reports what came
+   * back, and does nothing else: it holds no token, no uid and no email, and it sends
+   * none of them. `connectFirebase` obtains the credential from the Firebase layer at
+   * the moment of use, and the server's account (from the session) and identity (from
+   * the verified token) are what it links.
+   *
+   * `cancelled` and `in-flight` are ORDINARY, so neither shows anything: closing the
+   * Google sheet is not a failure, and a duplicate tap that started nothing must not
+   * report one. A success shows a notice rather than a banner-only silence, because the
+   * Connect action disappears in the same commit — the visible change is that the
+   * account now offers Disconnect instead, and the sentence is what explains it.
+   *
+   * A REFUSAL SHOWS THE SERVER'S OWN SENTENCE. The conflict message is deliberately
+   * generic server-side — it may not say whether the identity belongs to someone else or
+   * this account already carries a different one — so this screen relays it rather than
+   * inventing an explanation it cannot support. A 400 for a rejected provider credential
+   * renders here too and is NOT session loss: the Inventory AI session is untouched, and
+   * the client only treats a 401/403 on a token-carrying request as a dead session.
+   */
+  async function onConnectGoogle(): Promise<void> {
+    setConnectBusy(true);
+    setConnectError(null);
+    setConnectNotice(null);
+    try {
+      const outcome = await connectFirebase();
+      if (outcome.kind === 'linked') {
+        setConnectNotice('Google is now connected. You can sign in with Google or your password.');
+      }
+    } catch (err) {
+      setConnectError(
+        (err as { message?: string } | null)?.message ||
+          'Unable to connect Google. Please try again.'
+      );
+    } finally {
+      setConnectBusy(false);
+    }
+  }
 
   async function onSignOut(): Promise<void> {
     const ok = await confirm('Sign out', 'You will need to sign in again to manage inventory.', {
@@ -82,6 +127,9 @@ export default function ProfileScreen() {
 
       <SectionHeader title="Security" style={styles.section} />
       <Card>
+        {/* Both render nothing when empty, so only the live feedback shows. */}
+        <Banner type="success" text={connectNotice} />
+        <Banner type="error" text={connectError} />
         <Text style={styles.securityText}>
           Inventory AI keeps your sign-in on this device&apos;s secure storage. Permissions and business data are
           always enforced by the server — the app never stores your password.
@@ -136,6 +184,34 @@ export default function ProfileScreen() {
          * Nothing here is a security control: the screen re-checks the same
          * capability, and the server is the boundary in every case.
          */}
+        {/**
+         * Phase 32M — the Connect Google entry point, offered only where reconnecting
+         * is both possible and meaningful.
+         *
+         * THE GATE IS THE SERVER'S OWN CAPABILITY BLOCK, tested with `===` on BOTH
+         * halves so an older server's user object — one without `authMethods` at all —
+         * simply shows nothing rather than offering a flow whose preconditions are
+         * unknown. `firebase === false` means no Firebase identity is attached, and
+         * `password === true` means the account has a local password, which is the
+         * credential the caller uses to prove ownership of the account being linked.
+         * An account whose password the provider manages is therefore NOT offered this:
+         * it already authenticates through Firebase, and the server is the boundary that
+         * would refuse or allow the link in any case.
+         *
+         * Nothing here is a security control. It only stops the UI from offering an
+         * action whose precondition it cannot see; the server decides the link itself,
+         * from the session and the verified token, and no client value reaches it.
+         */}
+        {user?.authMethods?.firebase === false && user?.authMethods?.password === true ? (
+          <Button
+            title="Connect Google"
+            variant="secondary"
+            style={styles.spaced}
+            loading={connectBusy}
+            disabled={connectBusy}
+            onPress={onConnectGoogle}
+          />
+        ) : null}
         {user?.authMethods?.firebase === true ? (
           <Button
             title="Disconnect Firebase"

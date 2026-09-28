@@ -63,6 +63,7 @@ const PURE_DB = [
   'phase32k-firebase-password-boundary.test.mjs', // the Firebase password boundary (change-password + forgot/reset refused for a Firebase-owned account, silently on the recovery path) and the timing equalizer that must never be a credential
 ];
 const MIXED = [
+  'phase-openrouter-provider.test.mjs', // unit: provider selection + Anthropic wire mapping + DB-free loop compatibility; db: the real 9-tool workload over MongoDB
   'phase06-ai-provider.test.mjs',     // unit: provider selection; db: loop + mapping
   'phase07c-http-security.test.mjs',  // unit: headers/body-limit/CORS; db: auth cases + M4
   'phase07d-db-reliability.test.mjs', // unit: error mapping; db: readiness + DB-down

@@ -21,9 +21,15 @@ export function aiConfig() {
     provider: (process.env.AI_PROVIDER || '').trim().toLowerCase(),
     claudeModel: (process.env.AI_MODEL_CLAUDE || 'claude-sonnet-5').trim(),
     geminiModel: (process.env.AI_MODEL_GEMINI || 'gemini-2.5-flash').trim(),
-    // AgentRouter is an Anthropic-compatible gateway (see agentrouterProvider.js).
+    // AgentRouter is an Anthropic-compatible gateway (see agentrouterProvider.ts).
     agentrouterModel: (process.env.AI_MODEL_AGENTROUTER || 'deepseek-v4-flash').trim(),
     agentrouterBaseUrl: (process.env.AGENTROUTER_BASE_URL || '').trim(),
+    // OpenRouter is an Anthropic-compatible gateway too (see openrouterProvider.ts).
+    // No default model on purpose: OpenRouter fronts hundreds of models with very
+    // different tool-calling ability, so the model is REQUIRED — the provider
+    // factory refuses to build without it rather than silently guessing one here.
+    openrouterModel: (process.env.AI_MODEL_OPENROUTER || '').trim(),
+    openrouterBaseUrl: (process.env.OPENROUTER_BASE_URL || '').trim(),
 
     // Cost / rate protection (V1). See SYSTEM_SPECIFICATION.md §25.
     maxMessageChars: positiveInt(process.env.AI_MAX_MESSAGE_CHARS, 4000),

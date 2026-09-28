@@ -17,8 +17,9 @@
 > | `[⏸]` | **DEFERRED** — intentionally postponed by an existing decision. |
 > | `[—]` | **NOT APPLICABLE** — considered and explicitly not applicable. |
 >
-> **Evidence base.** Re-reconciled against the working tree at branch `main` @ `48969e0`
-> (2026-09-28) — the **Phase 2 baseline** recorded in §36. The prior baseline was branch
+> **Evidence base.** Re-reconciled against the working tree at branch `main` @ `934b15a`
+> (2026-09-28) — the **Phase 3 / current baseline** recorded in §37. The Phase 2 baseline
+> (`48969e0`) remains historical in §36, and the baseline before it was branch
 > `docs/phase-32l-documentation-closeout` @ `f90d45d` (2026-09-26). Sources are listed in §34.
 > Where sources disagree, the conflict is recorded in §35 rather than silently resolved.
 >
@@ -852,7 +853,7 @@ Chronological. **History is not rewritten.**
 | Blockers | iOS build host (P-6); new-identity path ENVIRONMENT-BLOCKED (§5b); P-3/P-4 and Gates 1/2; owner decisions (§27). |
 | Acceptance criteria | — |
 | Verification state | Android Google existing-account E2E VERIFIED (§5a); Render Firebase Admin config verified live; dependency-level PII finding open (§24/§28). |
-| Git/branch state | branch `main` @ `48969e0`; PRs **#1–#6 merged** (#4 `924f8bc`, #5 `14de2af`, #6 `e97497b`); **0 open PRs**; local `main` is **1 commit ahead** of `origin/main` (`e97497b`) — the Phase 1 reconciliation commit `48969e0` is not yet pushed. |
+| Git/branch state | branch `main` @ `934b15a`; `origin/main` @ `934b15a`; **0 ahead / 0 behind**; PRs **#1–#6 merged** (#4 `924f8bc`, #5 `14de2af`, #6 `e97497b`); **0 open PRs**. Phases **1–3 pushed** (`48969e0`, `d340735`, `934b15a`). |
 
 ---
 
@@ -869,7 +870,7 @@ Before Freebuff starts coding any authentication/security work, **all** must be 
 | G-5 | Required owner decisions resolved? | **No** (O-3, O-5, O-6, O-8, O-9, O-10, O-11 open) |
 | G-6 | External blockers resolved? | **No** (§25) |
 | G-7 | Git working tree understood? | **Yes** |
-| G-8 | Protected files preserved? | **Yes** — no protected file was modified. Only **1** entry is still uncommitted (`mobile/eas.json`); the other four are committed and equal to `HEAD`. The two older SHA-256 mismatches (`http.ts`, `phase06-ai-wire.test.mjs`) were **CRLF-normalisation differences, not content changes** (§32). |
+| G-8 | Protected files preserved? | **Yes** — no protected file was modified. There are now **zero uncommitted protected entries**: all five are committed and equal to `HEAD` (Phase 3 committed the last one, `mobile/eas.json`). The two older SHA-256 mismatches (`http.ts`, `phase06-ai-wire.test.mjs`) were **CRLF-normalisation differences, not content changes** (§32). |
 | G-9 | Acceptance criteria defined? | **No** |
 | G-10 | Owner explicitly approved implementation? | **No** |
 
@@ -902,23 +903,24 @@ delete protected files · modify protected uncommitted work.
 
 ### Protected working-tree entries — current set (2026-09-28)
 
-Only **one** entry is still uncommitted. Git blob hashes are used for the current baseline because
-they are immune to LF/CRLF normalisation (see the historical register below).
+**Zero** entries are uncommitted. All five are committed and byte-identical to `HEAD`. Git blob
+hashes are used because they are immune to LF/CRLF normalisation (see the historical register below).
 
 ```
-c1ab09c8998221fa077dcdf053a17e65f398cffd  mobile/eas.json                        (modified, unstaged)
-
-# committed and identical to HEAD — no longer uncommitted entries:
-86688b7b8468e57b9abeaf3986f23b17bb23b57a  server/src/services/ai/providers/http.ts
-07601c7ab31009263d0045f20a9b940539184094  server/test/phase06-ai-wire.test.mjs
-12627bae19ec693bd8d609ac00bd57b602139dce  docs/superpowers/plans/2026-09-11-phase-18c-core-list-screens.md
-347bcc1365939bed92879f00d781f63f71cf670e  docs/superpowers/plans/2026-09-11-phase-18e-secondary-screens.md
+c1ab09c8998221fa077dcdf053a17e65f398cffd  mobile/eas.json                        (committed by `934b15a`; == HEAD)
+86688b7b8468e57b9abeaf3986f23b17bb23b57a  server/src/services/ai/providers/http.ts            (== HEAD)
+07601c7ab31009263d0045f20a9b940539184094  server/test/phase06-ai-wire.test.mjs               (== HEAD)
+12627bae19ec693bd8d609ac00bd57b602139dce  docs/superpowers/plans/2026-09-11-phase-18c-core-list-screens.md   (== HEAD)
+347bcc1365939bed92879f00d781f63f71cf670e  docs/superpowers/plans/2026-09-11-phase-18e-secondary-screens.md   (== HEAD)
 ```
+
+The five paths remain the protected **set** — the history above is what the safety rules protect.
+What changed is only that none of them is uncommitted any more.
 
 ### Historical register — SHA-256 as recorded 2026-09-26 (superseded; retained, not erased)
 
 ```
-10c5ff2e…530  mobile/eas.json                                     still matches
+10c5ff2e…530  mobile/eas.json                                     still matches; status moved UNCOMMITTED -> COMMITTED by Phase 3 commit `934b15a`
 23e91610…213  server/src/services/ai/providers/http.ts            SUPERSEDED — CRLF normalisation, content unchanged
 83767f8b…768  server/test/phase06-ai-wire.test.mjs               SUPERSEDED — CRLF normalisation, content unchanged
 52d3afef…891  docs/superpowers/plans/…-18c-core-list-screens.md   SUPERSEDED — committed by the Phase 1 reconciliation commit `48969e0`
@@ -929,6 +931,10 @@ The Phase 1 reconciliation commit is **`48969e0`** ("docs: reconcile the histori
 implementation plans"). It committed both plans with blob hashes `12627bae…` (18C) and `347bcc13…`
 (18E), so they are no longer protected *uncommitted* entries. The two CRLF mismatches were **not**
 content changes: those files' git-normalised blobs already equalled `HEAD` exactly.
+
+Phase 2 (**`d340735`**) reconciled this document's own baseline; Phase 3 (**`934b15a`**) committed
+`mobile/eas.json` — the last protected file that had been modified but unstaged — leaving **no**
+uncommitted protected entries.
 
 ---
 
@@ -944,9 +950,9 @@ retirement F1/F2; Android runtime verification F2.9; **Android Google existing-a
 
 ### Current
 **NO AUTHORISED IMPLEMENTATION PHASE CURRENTLY ACTIVE.** The repository is in a
-documentation/cleanup tail. Git state: branch `main` @ `48969e0`; PRs **#1–#6 merged**; **0 open
-PRs**; local `main` is **1 commit ahead** of `origin/main` (`e97497b`) — the Phase 1 reconciliation
-commit `48969e0` is not yet pushed.
+documentation/cleanup tail. Git state: branch `main` @ `934b15a`; `origin/main` @ `934b15a`;
+**0 ahead / 0 behind**; PRs **#1–#6 merged**; **0 open PRs**; Phases **1–3 pushed**; the working
+tree holds only `?? .freebuff/`.
 
 ### Blocked
 iOS provider build/runtime (no iOS build host, P-6); the **new-identity → `REGISTRATION_REQUIRED`**
@@ -1027,7 +1033,7 @@ phase active now.**
 - `docs/superpowers/plans/*`.
 - `docs/freebuff/{BASELINE,DECISIONS,HANDOFF,MASTER_LOG,README,TEST_BASELINE}.md`, `tasks/FB-001…FB-012`.
 - `CLAUDE.md`, `README.md`.
-- Git state at `48969e0` (branch `main`; `origin/main` at `e97497b`) — see §36.
+- Git state at `934b15a` (branch `main`; `origin/main` at `934b15a`) — see §37.
 
 ---
 
@@ -1094,6 +1100,53 @@ This reconciliation changed **current-state metadata only** (§30, §31 G-8, §3
 §28 deferred work and security findings, §29 phase history and §35 conflicts are **unchanged**.
 The dependency-level PII-logging finding (`@react-native-firebase/auth` v26.4.0) remains in §24 and
 §28 and was **not** extracted.
+
+---
+
+## 37. BASELINE — Phase 3/current-state reconciliation (2026-09-28)
+
+A **new dated baseline**. §36 above is preserved exactly as the historical Phase 2 baseline; this
+section supersedes it as the current state and rewrites nothing before it.
+
+| Field | Value |
+| --- | --- |
+| Branch | `main` |
+| HEAD | `934b15a038ccbdeb50c8c246f1a0ed5ae669886d` |
+| `origin/main` | `934b15a038ccbdeb50c8c246f1a0ed5ae669886d` |
+| Divergence | **0 ahead / 0 behind** |
+| Merged PRs | #1 `fa87941`, #2 `dbdf673`, #3 `37f5535`, #4 `924f8bc`, #5 `14de2af`, #6 `e97497b` |
+| Open PRs | **0** |
+| Phase 1 commit | `48969e0` — reconcile the historical Phase 18C and 18E implementation plans |
+| Phase 2 commit | `d340735` — reconcile this checklist's current-state baseline |
+| Phase 3 commit | `934b15a` — set the EAS **preview** API URL to the Render origin |
+| Push state | Phases **1–3 pushed**; `main` and `origin/main` agree |
+| Working tree | `?? .freebuff/` only |
+| Uncommitted protected entries | **zero** — all five are committed and equal to `HEAD` |
+| `mobile/eas.json` | **committed and clean** (committed by `934b15a`); SHA-256 `10c5ff2e5c1a719ea330fa8bec74bb7d1770efb9070c24b043180ea35d7bd530` |
+| WIP backup | `wip/backup-working-tree` @ `e9616cfa19be05dd70abbf0702a1c3ca541fa3c5` — **intact locally and on `origin`** |
+| Prior baseline | Phase 2 (`48969e0`), preserved in §36 |
+
+### Protected-file register at this baseline (git blob hashes)
+
+```
+c1ab09c8998221fa077dcdf053a17e65f398cffd  mobile/eas.json                        (== HEAD)
+86688b7b8468e57b9abeaf3986f23b17bb23b57a  server/src/services/ai/providers/http.ts            (== HEAD)
+07601c7ab31009263d0045f20a9b940539184094  server/test/phase06-ai-wire.test.mjs               (== HEAD)
+12627bae19ec693bd8d609ac00bd57b602139dce  docs/superpowers/plans/2026-09-11-phase-18c-core-list-screens.md   (== HEAD)
+347bcc1365939bed92879f00d781f63f71cf670e  docs/superpowers/plans/2026-09-11-phase-18e-secondary-screens.md   (== HEAD)
+```
+
+Use `git hash-object <path>` to re-check. Blob hashes are used because LF/CRLF normalisation cannot
+change them — the two false mismatches recorded in §32 were line-ending differences, not content
+changes.
+
+### Changed in this reconciliation
+
+Current-state metadata only: the header evidence line, §30 `Git/branch state`, §31 **G-8**, the §32
+*current set* register, §33 *Current*, §34, and this new §37. §0–§29 behaviour and security tables,
+O-1…O-11, §28 deferred work and security findings, §29 phase history, §35 conflicts and **§36** are
+**unchanged**. The dependency-level PII-logging finding (`@react-native-firebase/auth` v26.4.0)
+remains in §24 and §28 and was **not** extracted.
 
 ---
 

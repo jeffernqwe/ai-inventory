@@ -184,8 +184,8 @@ default and needs no dashboard entry. Verify the current values in the Render da
 | `OPENROUTER_API_KEY`, `OPENROUTER_BASE_URL`, `AI_MODEL_OPENROUTER` | **required when `AI_PROVIDER=openrouter`** | the model has no default |
 | `FIREBASE_SERVICE_ACCOUNT_JSON` — or the three-variable form | **all-or-nothing** | a partially supplied service account fails fast; none at all = Firebase disabled |
 | `TRUST_PROXY` | **effectively required behind Render** | set to `1`; see below |
-| `MAIL_PROVIDER`, `MAIL_FROM`, `RESEND_API_KEY`, `PASSWORD_RESET_URL` | optional | with any of them missing, password recovery is **disabled** and `forgot-password` answers 503 |
-| `AUTH_*_RATE_LIMIT_*` (eleven variables) | optional | the documented defaults are the production values |
+| `MAIL_PROVIDER`, `MAIL_FROM`, `RESEND_API_KEY`, `PASSWORD_RESET_URL` | optional | missing any of them **disables password recovery only** (`forgot-password` answers 503) — the server still starts and serves every other feature. Resend remains the implemented transport; no Firebase reset flow is implemented |
+| `AUTH_*_RATE_LIMIT_*` — **sixteen** variables (eight window/limit pairs) | optional | the documented defaults are the production values; the count is taken from code, not estimated. `TRUST_PROXY` and `JWT_SECRET` / `JWT_EXPIRES_IN` are listed separately above and are **not** `AUTH_*` variables |
 | `CORS_ORIGINS`, `JSON_BODY_LIMIT`, `SHUTDOWN_TIMEOUT_MS`, `LOG_REQUESTS` | optional | the documented defaults are the production values |
 
 **`TRUST_PROXY=1`.** Render terminates TLS at a proxy, so without this setting `req.ip` is the proxy's
@@ -222,6 +222,10 @@ excluded on purpose — they are not missing:
   rules — **keep the two in step.**
 - `mobile/ios/` and `mobile/android/` do not exist and remain ignored (Expo Continuous Native
   Generation); `node_modules/`, Expo build output, logs and local smoke-test artifacts are ignored too.
+- **Local tooling state is repository-ignored**: `.freebuff/` (Freebuff project/session metadata) and
+  `.claude/settings.local.json`. Neither is committed by design — the `.freebuff/` rule replaced an
+  earlier protection that was convention only, and the `.claude/settings.local.json` rule replaced a
+  machine-local exclusion so the file is ignored in every clone.
 - The `wip/backup-working-tree` branch is a preserved snapshot and must **not** be deleted.
 
 ### Commercialization foundation (Phase 10)

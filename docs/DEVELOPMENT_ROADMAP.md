@@ -5187,7 +5187,13 @@ dashboard value was changed.
   One line in `mobile/eas.json`; `preview` already pointed at the same origin (`934b15a`). No other
   profile, variable, plugin or native setting changed.
 - **Phase 4B (this record)** — the deployment audit's findings were reconciled into
-  `docs/AUTH_SECURITY_MASTER_CHECKLIST.md` §38 and the Render section of `README.md`.
+  `docs/AUTH_SECURITY_MASTER_CHECKLIST.md` §38 and the Render section of `README.md` (`0152f8a`), and the
+  ignore / configuration boundary audit was added as the phase's addendum (`d14ad86`).
+- **Repository hygiene checkpoint (`a95a461`)** — the two boundary decisions the audit raised were
+  approved by the owner and committed: `.freebuff/` and `.claude/settings.local.json` were added to the
+  root `.gitignore`. Verified afterwards: both rules match, no tracked file became ignored, the
+  tracked-file integrity check stayed empty, and the working tree went from one untracked entry
+  (`?? .freebuff/`) to **fully clean**.
 
 ## Findings — repository evidence vs. dashboard verification
 
@@ -5197,23 +5203,33 @@ dashboard value was changed.
 | G-2 EAS Firebase/Google client configuration | dashboard (owner-verified) | **VERIFIED — NO ACTION REQUIRED** |
 | G-3 Render `TRUST_PROXY=1` | dashboard (owner-verified) + code-derived | **VERIFIED** |
 | G-4 Render production configuration documentation | repository | **DONE** — now enumerated in `README.md` |
-| Mail configuration | code-derived | **VERIFIED — NO ACTION REQUIRED** for startup; **OPEN** for password recovery |
-| Auth/rate-limit configuration | code-derived | **VERIFIED — NO ACTION REQUIRED** |
+| Mail configuration | code-derived | **VERIFIED — NO ACTION REQUIRED** for startup; **OPEN** for password recovery — the reset-architecture decision is pending a **separate read-only audit** |
+| Auth/rate-limit configuration | code-derived | **VERIFIED — NO ACTION REQUIRED** — **sixteen** optional `AUTH_*` variables, code-counted (not an estimate) |
+| Ignore-boundary decisions (`.freebuff/`, `.claude/settings.local.json`) | repository | **DONE / VERIFIED** (`a95a461`) |
 
 `EXPO_PUBLIC_FIREBASE_*` (all six client values), `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID`,
 `GOOGLE_SERVICES_JSON` and `GOOGLE_SERVICE_INFO_PLIST` are **EAS dashboard environment variables**,
 not values missing from `mobile/eas.json`. The Firebase Android SHA-1/SHA-256 fingerprints are
 configured in the Firebase console. **No secret value is recorded anywhere in this record.**
 
-## The one genuinely open item
+## The one genuinely open item — and what is deliberately NOT decided
 
 Password recovery is **disabled in production** because the Render service carries none of
-`MAIL_PROVIDER`, `MAIL_FROM`, `RESEND_API_KEY` or `PASSWORD_RESET_URL`; `POST /api/auth/forgot-password`
-correctly answers a fixed 503 `MAIL_NOT_CONFIGURED`, and the server still boots. Enabling it needs four
-dashboard values — with `PASSWORD_RESET_URL=inventoryai://reset-password`, the mobile custom scheme
-Phase 27 ships — and **no code change**. **Not implemented here:** the owner must decide whether
-recovery ships enabled. `AI_MAX_TOOL_RESULT_CHARS` (default `12000`, read by `aiConfig.ts`) is also
-absent from `server/.env.example` — cosmetic drift, recorded so it is not rediscovered as a defect.
+`MAIL_PROVIDER`, `MAIL_FROM`, `RESEND_API_KEY` or `PASSWORD_RESET_URL`. That is the designed
+"not configured" state rather than a defect: `POST /api/auth/forgot-password` correctly answers a fixed
+503 `MAIL_NOT_CONFIGURED`, and **the server still boots and serves every other feature** — mail missing
+disables recovery only. Two things must **not** be read into this: **Resend is still the implemented,
+supported transport and was not removed**, and **Firebase-based password recovery has not been
+implemented.**
+
+**The production reset architecture is undecided, and this record deliberately does not decide it.**
+Choosing between the shipped Resend flow and a Firebase-based reset requires a separate **read-only
+audit** first, so **no `PASSWORD_RESET_URL` value is proposed or pre-decided here.** Phase 27's
+`inventoryai://reset-password` mobile custom scheme exists and works, but whether a future decision
+reuses it is part of that audit. **Nothing was configured, enabled or changed.**
+
+`AI_MAX_TOOL_RESULT_CHARS` (default `12000`, read by `aiConfig.ts`) is also absent from
+`server/.env.example` — cosmetic drift, recorded so it is not rediscovered as a defect.
 
 ## Verification
 
@@ -5248,14 +5264,22 @@ value outside Git and outside the EAS archive. `git check-ignore -v` was run for
 | **no `.gitattributes`** | line endings are governed by `core.autocrlf=true`, a local Git setting rather than a repository attribute | the file does not exist; `git ls-files --eol` reports an empty `attr/` column for every file | **INTENTIONAL — VERIFIED** | none. *Consequence recorded:* EOL handling is **operator-local**, so a clone with a different `autocrlf` shows whole-file EOL differences — which is why this project verifies **git blob hashes**, not worktree text |
 | root `.env` (present locally, ignored) | a local developer artifact, **read by nothing**: `dotenv` resolves from the process working directory, which is `server/` | `server/src/index.ts:2` (`import 'dotenv/config'`) | **INTENTIONAL — VERIFIED** | none |
 | `mobile/google-services.json` / plist **absent locally** | consequence: `app.config.js`'s local-path fallback points at a file that is not there, so a *local* prebuild would fail; the EAS build is the supported path and supplies them through the file environment variables | `mobile/app.config.js:50,54`; the ENOENT class is already recorded in §27J | **INTENTIONAL — VERIFIED** | none |
-| **`.freebuff/` — untracked and matched by NO ignore rule** | local tooling state, deliberately outside Git; **0 commit entries across every ref** | `git check-ignore .freebuff/project-id` returns **no match**; `git log --all -- .freebuff` is empty | **POSSIBLE GAP — NEEDS OWNER DECISION** | The protection is **convention only** ("stage by explicit path; never `git add -A`"), so a future blanket stage would commit it. Smallest proposed action: add `.freebuff/` to the root `.gitignore`. **Not done** — an ignore-file change is outside this phase's authority |
-| **`~/.config/git/ignore` → `**/.claude/settings.local.json`** | a **machine-local** global excludes file, not a repository rule | `git check-ignore -v .claude/settings.local.json` resolves to `C:\Users\jeffe/.config/git/ignore:1` | **POSSIBLE GAP — NEEDS OWNER DECISION** | `.claude/settings.local.json` is ignored **only on this machine**; on another clone it appears as untracked. Smallest proposed action: add the rule to the root `.gitignore` if that file should stay out of the repository everywhere. **Not done** |
+| **`.freebuff/` — was untracked and matched by NO ignore rule** *(finding as recorded at the audit checkpoint)* | local tooling state, deliberately outside Git; **0 commit entries across every ref** | `git check-ignore .freebuff/project-id` returned **no match**; `git log --all -- .freebuff` is empty | **RESOLVED — DONE / VERIFIED (`a95a461`)** | Owner decision taken: `.freebuff/` was added to the **root `.gitignore`**. It now matches (`git check-ignore -v` → the `.gitignore` rule), and it is **still untracked and uncommitted** — 0 commit entries across every ref, contents untouched |
+| **`~/.config/git/ignore` → `**/.claude/settings.local.json`** *(finding as recorded at the audit checkpoint)* | a **machine-local** global excludes file, not a repository rule | `git check-ignore -v .claude/settings.local.json` resolved to `C:\Users\jeffe/.config/git/ignore:1` | **RESOLVED — DONE / VERIFIED (`a95a461`)** | Owner decision taken: the rule is now in the **root `.gitignore`**, so the file is ignored in **every clone** rather than only on this machine. The machine-local global excludes file is unchanged and remains outside the repository |
 | **`wip/backup-working-tree` @ `e9616cf`** | the preserved pre-reconciliation working-tree snapshot | `git ls-remote` equals the local ref; its tree still holds the pre-Phase-4A `mobile/eas.json` (`c1ab09c8…`), `http.ts` and `mobile/.easignore` | **INTENTIONAL — VERIFIED** | **preserve.** Ignore rules cannot affect refs, so no ignore file can damage or expose it |
 
 **Integrity result: `git ls-files -i -c --exclude-standard` is EMPTY** — no tracked file is matched by
 any ignore rule, and no file under `server/src/`, `server/test/`, `mobile/app/` or `mobile/lib/` is
-silently outside Git. Every exclusion above is **INTENTIONAL**; the two **POSSIBLE GAP** rows are
-documentation-level decisions rather than configuration defects, and **no ignore file was changed.**
+silently outside Git. Every exclusion above is **INTENTIONAL**, and the two rows recorded as
+**POSSIBLE GAP — NEEDS OWNER DECISION** are both **CLOSED**: the owner approved the two
+repository-boundary rules and they were committed in **`a95a461`**.
+
+*Historical note, preserved rather than rewritten:* at the audit checkpoint this record read "**no
+ignore file was changed**" and carried those two items as open owner decisions. That was accurate then
+and remains traceable in the row wording above; it is **superseded, not deleted.** Re-verified after
+`a95a461`: both rules match, `.freebuff/` and `.claude/settings.local.json` are reported **ignored**
+(`!!`) by `git status`, no tracked file became ignored, and the tracked-file integrity check is still
+**empty**.
 
 Two historical Freebuff notes describe a `mobile/.gitignore` entry for the Firebase native files as
 "not the mechanism" (`tasks/FB-012…:192`, `MASTER_LOG.md:515`). Those notes predate the entries now
@@ -5274,6 +5298,12 @@ carry the rule: **`.easignore` replaces rather than extends `.gitignore`**.
   above, added as the addendum to this phase.
 - `docs/freebuff/HANDOFF.md` §2 and `docs/freebuff/BASELINE.md` §13 — the living pointer to the
   protected-file integrity register re-pointed from §32/§37 to §32/§38.
+- `docs/DEVELOPMENT_ROADMAP.md` §27T, `docs/AUTH_SECURITY_MASTER_CHECKLIST.md` §38 and `README.md` —
+  **second pass, after `a95a461`**: the two ignore-boundary decisions advanced from open to
+  **DONE / VERIFIED**, the stale "no ignore file was changed" statement corrected, the `AUTH_*` count
+  corrected to **sixteen** (code-verified), and the password-recovery wording corrected so that Resend
+  is not implied to be removed, Firebase reset is not implied to be implemented, and no
+  `PASSWORD_RESET_URL` value is pre-decided. Original audit wording is preserved and marked superseded.
 - No historical record, snapshot or test-count figure was rewritten, and no file was deleted. In
   particular §27J's Phase 32G text still says the `production` profile holds the placeholder: that is a
   **frozen historical record**, superseded rather than edited.

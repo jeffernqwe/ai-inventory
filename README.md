@@ -408,7 +408,7 @@ committed.
   stock in/out, adjust (MANAGER+), history and profile screens; centralized API client with
   timeout/network handling; client RBAC gating mirrors the server; verified by `expo export`
   bundling for Android and iOS plus a secret scan
-- **Phase 06 — AI Assistant:** complete — provider abstraction (Claude/Gemini over Node `fetch`,
+- **Phase 06 — AI Assistant:** complete — provider abstraction (Claude, Gemini and OpenRouter over Node `fetch`,
   no AI SDK dependency), an AI service that orchestrates tool calls with strict read-only,
   authorization-aware tools (9 inventory tools), conversation/message persistence, a rate-limited
   `/api/ai/chat` endpoint plus conversation listing/creation and message retrieval, and a mobile
@@ -755,6 +755,25 @@ Phase 07 (testing + production hardening) and Phase 08 (owner-directed hardening
   nothing in this phase is runtime-verified:** the evidence is the local toolchain (jest 11 suites / 88
   tests, `tsc --noEmit`, `eslint .`, `expo-doctor` 21/21) plus config introspection. **F-1 (PDF sharing)
   is not fixed and not closed**, and **Phase 30B has not started**.
+- **Phase 31 — AI Provider Wire Diagnostics & the AgentRouter → OpenRouter Migration:** complete —
+  provider wire diagnostics that make an upstream failure diagnosable (`31D.3` began recording the
+  status, Content-Type and a redacted body prefix for a 2xx whose body could not be parsed; `31D.6`
+  extended that to every non-2xx, which had logged the status alone and discarded the body). The AI
+  provider then moved off the retired **AgentRouter** gateway onto **OpenRouter**, an
+  Anthropic-compatible gateway that documents a bare `Authorization: Bearer` — so the provider sends
+  no claude-cli / claude-code fingerprint headers and no `anthropic-version` — and whose model
+  (`AI_MODEL_OPENROUTER`) is required with no default, because it fronts many models with differing
+  tool-calling ability. Selection stays server-side through `AI_PROVIDER`, and the AI Assistant flow,
+  tool authorization, tenant isolation and the read-only boundary are unchanged (`e9f2690`,
+  `711d090`, `7b4f4fa`, merge `e97497b`; roadmap §27S). **The OpenRouter integration is working in
+  test production, and the AI Assistant responds through it.** A later unit-test failure in
+  `server/test/phase-openrouter-provider.test.mjs` was **not** a production defect and **not** an
+  OpenRouter / model / credits failure: that file imports `support.mjs` (which loads `dotenv/config`),
+  and its helper restored `AI_MODEL_OPENROUTER` before the deferred request ran, so the request read
+  the developer's real `server/.env` model. It was fixed test-only in `751d796`, and that suite runs
+  against a **local HTTP stub** — it never contacts OpenRouter and cannot consume credits. A
+  historical verification is not a guarantee of future model or gateway availability: free-model
+  availability and credits can change independently of application correctness.
 - **Phase 32A — Firebase Authentication Architecture & Console Runbook:** documentation only. The
   design authority is `docs/superpowers/specs/2026-09-18-firebase-auth-design.md`. It records the
   selected architecture (**Option B**: Firebase is the identity provider, while the existing MongoDB

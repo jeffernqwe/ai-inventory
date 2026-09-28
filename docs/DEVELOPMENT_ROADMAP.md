@@ -148,6 +148,9 @@ Residual Security-Risk Decision Record & Documentation Reconciliation
 Phase 30A
 EAS Development Build & iOS Readiness Foundation
         ↓
+Phase 31
+AI Provider Wire Diagnostics & the AgentRouter → OpenRouter Migration
+        ↓
 Phase 32A
 Firebase Authentication Architecture & Console Runbook
         ↓
@@ -5015,6 +5018,157 @@ required"**, while a non-empty confirmation that differs still reports **"Passwo
   "Google Sign-In not implemented" statements are corrected, and the design authority gains the missing
   Phase 32L **unlink** supersession note.
 - `README.md` Phase Status: an entry for this fix.
+
+---
+
+# 27S. Phase 31 — AI Provider Wire Diagnostics, the AgentRouter → OpenRouter Migration, and the OpenRouter Wire-Suite Test Isolation
+
+## Objective
+
+Close two documentation gaps the provider work left behind, and record the resolution of the one test
+failure that was mistaken for an OpenRouter production problem.
+
+**Gap 1 — Phase 31 was never in the phase record.** The AI provider wire diagnostics exist in the
+shipped code and are cited by other records (`Phase 31C` preview-profile work, §27J; `Phase 31D.3` and
+`Phase 31D.6`, `server/src/services/ai/providers/http.ts`), but the phase had **no section anywhere**
+and was **absent from §3's Phase Overview**. It is listed there now.
+
+**Gap 2 — the AgentRouter → OpenRouter migration had no record.** It shipped as three commits and a
+merge and touched the specification, `.env.example`, the provider registry, the config validator,
+`run-tests.mjs` and three test files — yet `docs/DEVELOPMENT_ROADMAP.md`,
+`docs/AUTH_SECURITY_MASTER_CHECKLIST.md`, `CLAUDE.md` and every `docs/freebuff/` file contained **no
+mention of OpenRouter at all**. Only `README.md` and `docs/SYSTEM_SPECIFICATION.md` §26/§35 named it,
+and the specification's own **§3 Technology Stack** still listed Claude and Google Gemini as the only
+providers. Those stale statements are corrected here.
+
+## Provider history — how the AI provider reached its current state
+
+| Stage | What happened |
+| --- | --- |
+| Phase 06 | The AI Assistant shipped on a provider abstraction with **Claude** and **Gemini** built-ins. |
+| Phase 31 | Owner-directed AI provider **wire diagnostics**. A production gateway call answered 2xx with a body `res.json()` could not parse, and only that fact was recorded, so the status, Content-Type and body were all discarded (`31D.3`). A later origin migration replaced an Aliyun WAF challenge with a **401**, and the `!res.ok` branch logged the status alone and threw without reading the body, making it un-diagnosable by construction (`31D.6`). Both branches now report status, Content-Type, length and a **redacted** body prefix. The helpers are logging only: they alter no control flow and raise the same `AiProviderError` on every path. |
+| `e9f2690` (2026-09-28) | **`feat: add OpenRouter AI provider`** — an `openrouter` built-in as a thin configuration over the shared `anthropicWire.ts` layer (8 files, +1029/−14). |
+| `711d090` (2026-09-28) | **`chore: remove the AgentRouter AI provider and leave OpenRouter as the only provider`** — the retired gateway's module, registry entry, provider-selection support, configuration, environment variables, tests and active documentation removed (14 files, +42/−213). |
+| `7b4f4fa` (2026-09-28) | **`test: retarget AI wire diagnostics to OpenRouter`** — `phase06-ai-wire.test.mjs` rebuilt against the OpenRouter variables; the Phase 31D.6 diagnostics in `http.ts` committed unchanged (3 files). |
+| `e97497b` (2026-09-28) | Merge of **PR #6** into `main`. |
+
+**Why the gateway mattered, and what did not change.** The retired gateway required claude-cli /
+claude-code client-fingerprint headers; OpenRouter documents a bare `Authorization: Bearer` and
+nothing else, so the OpenRouter provider sends **no** impersonation headers and **no**
+`anthropic-version`. Because OpenRouter fronts many models with differing tool-calling ability,
+`AI_MODEL_OPENROUTER` is **required with no default** — a missing model refuses to build and surfaces
+as a 503 rather than silently routing inventory questions at a model that may not support tools.
+Provider selection stays server-side on the pre-existing `AI_PROVIDER` switch, so adding a provider
+does not by itself change which one is configured. The AI Assistant flow, tool authorization, tenant
+isolation and the read-only AI V1 boundary are unchanged by the migration.
+
+## OpenRouter status vs. test status — the distinction this record exists to keep
+
+**Production / integration status.** The OpenRouter integration **has been working in test
+production** throughout this work: the AI Assistant responds through the OpenRouter provider, and this
+investigation found **no production OpenRouter integration failure**. Nothing here should be read as
+"OpenRouter was broken", "the AI Assistant was broken", or "credits caused a production failure".
+
+**Automated test-isolation status.** One unit test failed, and it had **nothing to do with the
+gateway**: the suite **never contacted OpenRouter**, and running it **cannot consume OpenRouter
+credits**. The failure was a local test-isolation defect whose symptom — the real production model name
+appearing in an assertion — made it look like a model/credits problem.
+
+### The failure
+
+`server/test/phase-openrouter-provider.test.mjs` → *"sends the configured model, token cap, system
+prompt, tools as input_schema and mapped messages"*:
+
+```text
++ actual   'inclusionai/ling-3.0-flash-sante:free'      ← the model configured in server/.env
+- expected 'test-vendor/tool-capable-model'             ← the stub's model
+```
+
+### Root cause — ambient `.env` contamination, in six steps
+
+1. `createAnthropicCompatibleProvider()` captures the **API key** at construction time.
+2. It resolves the **model per request** — `aiConfig()[modelKey] || defaultModel` — and `aiConfig()`
+   reads `process.env` lazily by design, so a test can switch providers between files.
+3. `server/test/phase-openrouter-provider.test.mjs` imports `test/support.mjs`, which does
+   `import 'dotenv/config'`, so the developer's real `server/.env` is loaded into `process.env`.
+4. The old `providerFor()` helper set `OPENROUTER_API_KEY` / `OPENROUTER_BASE_URL` /
+   `AI_MODEL_OPENROUTER`, built the provider, and **restored all three before the deferred request ran**.
+5. `complete()` therefore read `AI_MODEL_OPENROUTER` from the ambient environment — the real `.env` model.
+6. The assertion compared that value against the stub's expected model and failed.
+
+Because the *ambient* value leaked, the suite **passed wherever `server/.env` set no
+`AI_MODEL_OPENROUTER`** and failed only on a configured machine. That asymmetry — not a provider fault —
+is why the failure looked intermittent and environment-dependent.
+
+### The fix (test-only)
+
+| File | Change |
+| --- | --- |
+| `server/test/phase-openrouter-provider.test.mjs` | `providerFor()` now **pins** its three environment variables for the **whole test** instead of restoring them before the request, and a top-level `afterEach()` reverses and clears them so no stub value leaks. `afterEach` added to the `node:test` import. (+27/−10) |
+
+**No production source was changed** — not the provider, the registry, the model configuration, the
+config validator or `http.ts`.
+
+### Verification
+
+- Target suite, `TEST_MODE=unit`: **28 pass / 0 fail / 1 skipped** (the DB-backed suite, skipped by mode).
+- Same suite with a hostile ambient `AI_MODEL_OPENROUTER=some/other-model`: **28 pass / 0 fail** — the
+  suite no longer reads the ambient value at all.
+- `npm run test:unit`: **373 tests, 348 pass, 0 fail, 25 skipped**.
+- `npm run typecheck`, `npm run lint`, `git diff --check`: clean.
+- Protected files, `.env` and `server/src/**`: **unchanged**.
+- Commit **`751d796`** — `test: pin the OpenRouter suite's model instead of reading the ambient env`.
+
+### Does this test call the real OpenRouter API?
+
+**No.** Every request in the suite goes to a local `http.createServer` stub on `127.0.0.1`, except one
+case that deliberately targets an unreachable `http://127.0.0.1:9/api` to exercise the network-error
+path. No gateway credential is used, no request leaves the machine, and **running it cannot consume
+OpenRouter credits**. The sibling wire suite `phase06-ai-wire.test.mjs` uses the same stub approach and
+does **not** import `support.mjs`, so it was never affected by the `.env` coupling — the same trap
+exists for any future suite that both loads `dotenv` and asserts on a lazily-read provider value.
+
+## Future-audit guidance
+
+> OpenRouter integration was verified working in test production at the Phase 1 reconciliation
+> checkpoint. The historical unit-test failure was caused by ambient `.env` contamination in the
+> OpenRouter test, not by the production provider. Future audits should verify current
+> deployment/provider configuration and run deterministic local tests, but should not reopen the
+> historical test-isolation investigation unless the relevant test or provider environment-loading
+> behavior changes.
+
+A historical verification is **not** a statement that OpenRouter, a specific free model, or the
+gateway API will remain available. **Free model availability and credits can change independently of
+application correctness**, so temporary model-credit exhaustion is not evidence that the Inventory AI
+OpenRouter integration is defective. Verifying current deployment, model and API availability remains
+required whenever it is relevant.
+
+## What remains genuinely unverified
+
+- **The DB-backed AI tool workload** in the same file — all nine read-only tools executed over MongoDB —
+  was **not** run during the reconciliation, because `TEST_MODE=unit` skips it by design. It needs
+  `npm run test:db` / `npm test` against a reachable database.
+- **No automated test makes a live gateway call**, so a real 200/401/429 from OpenRouter, the deployed
+  model's tool-calling behaviour, and the Render production configuration are covered by production
+  smoke testing — not by the suite.
+- **`docs/AUTH_SECURITY_MASTER_CHECKLIST.md` was deliberately not changed.** Its remit is
+  authentication/security invariants, owner decisions, deferred security items and the §32/§37
+  protected-file integrity register. AI provider health and provider-suite test isolation are not
+  authentication or authorization properties, so recording them there would dilute that register.
+
+## Documentation
+
+- `docs/DEVELOPMENT_ROADMAP.md` §3 — Phase 31 added to the Phase Overview (it had never been listed);
+  this section added.
+- `README.md` — the Phase 06 entry no longer omits OpenRouter, and the Phase Status list gains a
+  Phase 31 entry recording the diagnostics, the migration and the test-isolation outcome.
+- `CLAUDE.md` §2 — the AI stack bullet listed only "Claude and/or Gemini" and now names all three
+  providers, identifying OpenRouter as the deployed one.
+- `docs/SYSTEM_SPECIFICATION.md` — **§3 Technology Stack** no longer lists Claude and Gemini as the only
+  providers, and **§41 Testing Strategy** records that the provider wire suites run against a local
+  stub and never contact a live gateway.
+- `docs/freebuff/HANDOFF.md` §2 — the living current-state table refreshed.
+- No historical record, snapshot or test-count figure was rewritten, and no file was deleted.
 
 ---
 

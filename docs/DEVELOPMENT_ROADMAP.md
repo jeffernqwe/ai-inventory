@@ -4824,7 +4824,7 @@ still asserted that Phase 32L had not started.
 | **32L-A** (server) | **`01ae73f`** | The unlink endpoint, its service, validator, audit actions and the Policy B write. |
 | **32L-B** (mobile) | **`0c3f87d`** | The disconnect screen, the Profile entry point, `firebaseUnlink`, the `disconnectFirebase` orchestration and `authMethods` widening. |
 
-Both are ancestors of `fa87941` (PR #1) and therefore of **`dbdf673`** (PR #2, the current `main`).
+Both are ancestors of `fa87941` (PR #1) and therefore of **`dbdf673`** (PR #2, `main` at that time).
 **The implementation was shipped before this close-out; the close-out documents it.**
 
 **Decision authority:** `docs/freebuff/tasks/FB-007-unlink-last-method-design.md` (design freeze),

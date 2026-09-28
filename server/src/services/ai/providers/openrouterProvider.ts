@@ -7,19 +7,17 @@
  * like the Anthropic API, passing through native tool use. Because it speaks the
  * Anthropic shape, this provider is a thin configuration over the shared wire
  * layer in anthropicWire.ts — the same tool_use / tool_result mapping and the
- * same parse the Claude and AgentRouter providers use. Only the endpoint, the
- * key, and the model differ.
+ * same parse the Claude provider uses. Only the endpoint, the key, and the model
+ * differ.
  *
- * DELIBERATE DIFFERENCES FROM THE AGENTROUTER PROVIDER
+ * DELIBERATE DIFFERENCES FROM THE CLAUDE PROVIDER
  *
  *   - Authentication is a bare `Authorization: Bearer <key>`. OpenRouter
  *     documents exactly that header, so no `anthropic-version` is sent.
- *   - NO client impersonation. The AgentRouter provider must present the
- *     claude-cli User-Agent and the claude-code beta header because that gateway
- *     only accepts traffic that looks like the Claude Code client. OpenRouter has
- *     no such requirement, so this provider sends neither — there is nothing to
- *     impersonate, and doing so would be a terms-of-service problem rather than a
- *     compatibility measure.
+ *   - NO client impersonation. This provider sends no claude-cli User-Agent and
+ *     no claude-code beta header: OpenRouter documents no client-fingerprint
+ *     requirement, so there is nothing to impersonate, and doing so would be a
+ *     terms-of-service problem rather than a compatibility measure.
  *
  * MODEL SELECTION IS REQUIRED, NOT DEFAULTED
  *
@@ -49,9 +47,9 @@ import type { AIProvider } from './index.ts';
 /**
  * Turn an origin/base URL into the Anthropic messages endpoint.
  *
- * Deliberately the same convention the AgentRouter provider uses: the base is an
- * origin-ish prefix (OpenRouter's documented value is https://openrouter.ai/api)
- * and /v1/messages is appended, unless the base already names the endpoint.
+ * The base is an origin-ish prefix (OpenRouter's documented value is
+ * https://openrouter.ai/api) and /v1/messages is appended, unless the base
+ * already names the endpoint.
  */
 function messagesUrlFromBase(base: string) {
   const trimmed = base.trim().replace(/\/+$/, '');

@@ -208,6 +208,22 @@ The Firebase Android **SHA-1 / SHA-256** fingerprints are configured in the Fire
 the repository. `mobile/.easignore` excludes `.env`, `.env.*`, `google-services.json` and
 `GoogleService-Info.plist` from a remote build, so a build must receive these through the dashboard.
 
+**What is deliberately *not* in the repository.** Local secrets and build-time configuration are
+excluded on purpose — they are not missing:
+
+- `server/.env` and `mobile/.env` hold **developer-local** values and are git-ignored. The tracked
+  `server/.env.example` and `mobile/.env.example` carry variable **names only**. `dotenv` resolves from
+  the process working directory (`server/`), so a root-level `.env` is read by nothing.
+- `mobile/google-services.json` and `mobile/GoogleService-Info.plist` are **not** committed (owner
+  decision **P-1**); a build receives them through the EAS file environment variables above.
+- `mobile/.easignore` also excludes `.env`, `.env.*`, `google-services.json` and
+  `GoogleService-Info.plist` from a **remote build archive**. EAS uses `.easignore` *instead of*
+  `.gitignore`, so that file must stay the **union** of `mobile/.gitignore` and the relevant root
+  rules — **keep the two in step.**
+- `mobile/ios/` and `mobile/android/` do not exist and remain ignored (Expo Continuous Native
+  Generation); `node_modules/`, Expo build output, logs and local smoke-test artifacts are ignored too.
+- The `wip/backup-working-tree` branch is a preserved snapshot and must **not** be deleted.
+
 ### Commercialization foundation (Phase 10)
 
 `Business.planCode`, the centralized plan catalog (`server/src/constants/plans.ts`), and

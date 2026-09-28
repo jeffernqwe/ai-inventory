@@ -1283,6 +1283,29 @@ service — `MAIL_PROVIDER=resend`, `MAIL_FROM` (a Resend-verified sender), `RES
 code change and no migration. If no, record the feature as intentionally disabled. **Nothing was
 implemented in this phase.**
 
+### Ignore / configuration-boundary audit (security-relevant result)
+
+The rule-by-rule audit lives in `docs/DEVELOPMENT_ROADMAP.md` §27T. The security-relevant outcome:
+
+- **`mobile/.easignore` excluding `.env` / `.env.*` is load-bearing, not housekeeping.** EAS uses
+  `.easignore` *instead of* `.gitignore`, so without that rule a local `mobile/.env` — which holds the
+  eight `EXPO_PUBLIC_*` client values — would be uploaded into a remote build archive. The file is
+  tracked and must remain the **union** of `mobile/.gitignore` and the relevant root rules.
+- **`google-services.json` / `GoogleService-Info.plist` are excluded from both Git and EAS** (owner
+  decision **P-1**, **O-7 RESOLVED**). The build input is the `GOOGLE_SERVICES_JSON` /
+  `GOOGLE_SERVICE_INFO_PLIST` EAS **file environment variable**. Committing either file is **not**
+  required by the architecture and would contradict P-1.
+- **Signing material** — `*.jks`, `*.p8`, `*.p12`, `*.key`, `*.pem`, `*.mobileprovision` — is excluded
+  from both boundaries and none of it is present in the repository.
+- **Two open decisions, neither a defect.** (1) `.freebuff/` is protected by **convention only** and is
+  matched by **no** ignore rule, so a future `git add -A` would commit it. (2) `.claude/settings.local.json`
+  is ignored by a **machine-local** global excludes file (`~/.gitconfig`-adjacent `~/.config/git/ignore`),
+  not a repository rule, so it is ignored only on this machine. Proposed actions are recorded in §27T;
+  **no ignore file was changed in this phase, and none should be changed without an owner decision.**
+- **Integrity:** `git ls-files -i -c --exclude-standard` is **empty** — no tracked file is matched by any
+  ignore rule, and no source file under `server/src/`, `server/test/`, `mobile/app/` or `mobile/lib/` is
+  silently outside Git.
+
 ### For future audits
 
 > Deployment configuration for this project is split by design. The repository holds the code, the
@@ -1295,8 +1318,9 @@ implemented in this phase.**
 
 ### Changed in this reconciliation
 
-Current-state metadata only: this new §38, the pointer updates in `docs/freebuff/HANDOFF.md` and
-`docs/freebuff/BASELINE.md` §13, and the `README.md` deployment table. §0–§37 behaviour and security
+Current-state metadata only: this new §38 (including its ignore/configuration-boundary subsection), the
+pointer updates in `docs/freebuff/HANDOFF.md` and `docs/freebuff/BASELINE.md` §13, and the `README.md`
+deployment section. §0–§37 behaviour and security
 tables, O-1…O-11, §28 deferred work, §29 phase history, §35 conflicts and **§36/§37** are **unchanged**.
 
 ---

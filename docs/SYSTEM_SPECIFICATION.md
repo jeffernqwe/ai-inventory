@@ -1061,9 +1061,19 @@ AIService
 Providers:
 
 ```text
-ClaudeProvider
-GeminiProvider
+ClaudeProvider            (Anthropic Messages API)
+GeminiProvider            (Google Generative Language API)
+AgentRouterProvider       (Anthropic-compatible gateway)
+OpenRouterProvider        (Anthropic-compatible gateway)
 ```
+
+The two gateway providers speak the same Anthropic Messages wire as ClaudeProvider through one
+shared mapping layer, so a gateway is a configuration over that layer rather than a second protocol
+implementation. `openrouter` additionally requires `AI_MODEL_OPENROUTER`: it fronts many models with
+different tool-calling ability, so the assistant model is named explicitly rather than defaulted.
+
+Provider selection is server-side only (`AI_PROVIDER`). Keys never reach the mobile application, and
+`AI_PROVIDER` stays `agentrouter` unless an operator changes it — adding a provider does not switch one.
 
 The application should be able to switch providers through configuration without rewriting inventory logic.
 
@@ -2029,6 +2039,11 @@ JWT_REFRESH_SECRET
 AI_PROVIDER
 ANTHROPIC_API_KEY
 GEMINI_API_KEY
+AGENTROUTER_API_KEY
+AGENTROUTER_BASE_URL
+OPENROUTER_API_KEY
+OPENROUTER_BASE_URL
+AI_MODEL_OPENROUTER
 ```
 
 ## Firebase Authentication

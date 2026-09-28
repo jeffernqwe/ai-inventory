@@ -1159,13 +1159,14 @@ records no secret.
 | Field | Value |
 | --- | --- |
 | Branch | `main` |
-| HEAD | `d3092523cc94dc93f58943793e3da19fdb57bbaa` |
-| `origin/main` | `d3092523cc94dc93f58943793e3da19fdb57bbaa` |
+| HEAD | `a95a461b0b8422fef9e167e81a57952cc905ad19` — current at this reconciliation; was `d3092523cc94dc93f58943793e3da19fdb57bbaa` when §38 was first written |
+| `origin/main` | `a95a461b0b8422fef9e167e81a57952cc905ad19` |
 | Divergence | **0 ahead / 0 behind** |
 | Phase 4A commit | `d309252` — set the EAS **production** API URL to the Render origin (one line in `mobile/eas.json`) |
+| Phase 4B commits | `0152f8a` (deployment-audit reconciliation), `d14ad86` (ignore/configuration boundary audit), `a95a461` (the two boundary rules) |
 | Preceding commits | `6e32717` (Phase 2 — OpenRouter documentation reconciliation), `751d796` (Phase 1 — pin the OpenRouter suite's model) |
-| Push state | Phases 1, 2 and 4A pushed; `main` and `origin/main` agree |
-| Working tree | `?? .freebuff/` only |
+| Push state | Phases 1, 2, 4A and 4B pushed; `main`, `origin/main` and the live remote agree |
+| Working tree | **clean** — no tracked change and nothing staged. `?? .freebuff/` no longer appears, because `.freebuff/` is now ignored by the repository |
 | Open PRs | **0** |
 | Merged PRs | #1 `fa87941`, #2 `dbdf673`, #3 `37f5535`, #4 `924f8bc`, #5 `14de2af`, #6 `e97497b` |
 | WIP backup | `wip/backup-working-tree` @ `e9616cfa19be05dd70abbf0702a1c3ca541fa3c5` — intact locally and on `origin` |
@@ -1206,9 +1207,13 @@ from a repository config file is not evidence that it is unset.** No secret valu
 
 ### Auth / rate-limit configuration audit (code-derived)
 
-All eleven `AUTH_*` variables are **optional** and read lazily at limiter-creation time
-(`server/src/middlewares/rateLimit.ts`, `authRateConfig`), each with a documented default; none is in
-the production fail-fast set (`server/src/config/validateConfig.ts`). **Render needs no override.**
+All **sixteen** `AUTH_*` variables — eight window/limit pairs — are **optional** and read lazily at
+limiter-creation time (`server/src/middlewares/rateLimit.ts`, `authRateConfig`), each with a documented
+default; none is in the production fail-fast set (`server/src/config/validateConfig.ts`).
+**Render needs no override.** The count is exact and code-derived
+(`grep -rhoE 'process\.env\.AUTH_[A-Z0-9_]+' server/src | sort -u` → 16), **not** an estimate.
+`TRUST_PROXY` and `JWT_SECRET` / `JWT_EXPIRES_IN` appear in the table below but are **not** `AUTH_*`
+variables and are counted separately.
 
 | Variable | Default | Consumed by |
 | --- | --- | --- |
@@ -1266,6 +1271,7 @@ item below.
 | **G-4** Render production configuration not enumerated in the repository | **DONE** — the required-variable table is now in `README.md` under the Render deployment section; the environment audit is this section |
 | **Mail configuration** | **VERIFIED — NO ACTION REQUIRED** for startup; **OPEN** for password recovery (the feature is correctly disabled because its four variables are not set on Render) |
 | **Auth/rate-limit configuration** | **VERIFIED — NO ACTION REQUIRED** — defaults are the production values and `TRUST_PROXY=1` is present and correct |
+| **Ignore-boundary decisions** (`.freebuff/`, `.claude/settings.local.json`) | **DONE / VERIFIED** (`a95a461`) — owner-approved, committed to the root `.gitignore`, both rules verified matching, no tracked file newly ignored |
 
 ### Known documentation drift found by this audit
 
@@ -1275,13 +1281,19 @@ item below.
   placeholder. That is a **frozen historical record** and is deliberately not rewritten; the current
   value is recorded in §27T.
 
-### Smallest proposed action for the one OPEN item
+### The one OPEN item — what it is, and what is deliberately NOT decided
 
-Decide whether production password recovery should be enabled. If yes, set four values on the Render
-service — `MAIL_PROVIDER=resend`, `MAIL_FROM` (a Resend-verified sender), `RESEND_API_KEY`, and
-`PASSWORD_RESET_URL=inventoryai://reset-password` (the mobile custom scheme Phase 27 ships) — with no
-code change and no migration. If no, record the feature as intentionally disabled. **Nothing was
-implemented in this phase.**
+Production password recovery is **disabled** because the Render service carries none of
+`MAIL_PROVIDER`, `MAIL_FROM`, `RESEND_API_KEY` or `PASSWORD_RESET_URL`. The feature is **implemented**
+and the route correctly answers a fixed 503 `MAIL_NOT_CONFIGURED`. Two things must **not** be read into
+this: **Resend is still the implemented, supported transport and was not removed**, and **Firebase-based
+password recovery has not been implemented.**
+
+**The production reset architecture is undecided, and this record deliberately does not decide it.**
+Choosing between the shipped Resend flow and a Firebase-based reset requires a separate **read-only
+audit** first, so **no `PASSWORD_RESET_URL` value is proposed or pre-decided here.** Phase 27's
+`inventoryai://reset-password` mobile scheme exists and works, but whether a future decision reuses it
+is part of that audit. **Nothing was configured, enabled or changed in this phase.**
 
 ### Ignore / configuration-boundary audit (security-relevant result)
 
@@ -1297,14 +1309,17 @@ The rule-by-rule audit lives in `docs/DEVELOPMENT_ROADMAP.md` §27T. The securit
   required by the architecture and would contradict P-1.
 - **Signing material** — `*.jks`, `*.p8`, `*.p12`, `*.key`, `*.pem`, `*.mobileprovision` — is excluded
   from both boundaries and none of it is present in the repository.
-- **Two open decisions, neither a defect.** (1) `.freebuff/` is protected by **convention only** and is
-  matched by **no** ignore rule, so a future `git add -A` would commit it. (2) `.claude/settings.local.json`
-  is ignored by a **machine-local** global excludes file (`~/.gitconfig`-adjacent `~/.config/git/ignore`),
-  not a repository rule, so it is ignored only on this machine. Proposed actions are recorded in §27T;
-  **no ignore file was changed in this phase, and none should be changed without an owner decision.**
+- **Two boundary decisions — RAISED, APPROVED, and now CLOSED (`a95a461`).** *As originally recorded:*
+  (1) `.freebuff/` was protected by **convention only** and matched by **no** ignore rule, so a blanket
+  `git add -A` would have committed it; (2) `.claude/settings.local.json` was ignored only by a
+  **machine-local** global excludes file, so any other clone saw it as untracked. *Current state:* the
+  owner approved both, and the two rules are now in the **root `.gitignore`** — `.freebuff/` and
+  `.claude/settings.local.json`. Both were verified matching after the change, and **no tracked file
+  became ignored.** The earlier "no ignore file was changed in this phase" wording was accurate at the
+  audit checkpoint and is **superseded, not rewritten.**
 - **Integrity:** `git ls-files -i -c --exclude-standard` is **empty** — no tracked file is matched by any
   ignore rule, and no source file under `server/src/`, `server/test/`, `mobile/app/` or `mobile/lib/` is
-  silently outside Git.
+  silently outside Git. Re-verified after `a95a461`: **still empty.**
 
 ### For future audits
 
@@ -1320,8 +1335,16 @@ The rule-by-rule audit lives in `docs/DEVELOPMENT_ROADMAP.md` §27T. The securit
 
 Current-state metadata only: this new §38 (including its ignore/configuration-boundary subsection), the
 pointer updates in `docs/freebuff/HANDOFF.md` and `docs/freebuff/BASELINE.md` §13, and the `README.md`
-deployment section. §0–§37 behaviour and security
-tables, O-1…O-11, §28 deferred work, §29 phase history, §35 conflicts and **§36/§37** are **unchanged**.
+deployment section. §0–§37 behaviour and security tables, O-1…O-11, §28 deferred work, §29 phase history,
+§35 conflicts and **§36/§37** are **unchanged**.
+
+**Second pass (same day, after `a95a461`).** §38's current-state fields were advanced: HEAD/`origin/main`,
+the Phase 4B commit row, the working-tree row, the `AUTH_*` count (**eleven → sixteen**, code-verified),
+the two ignore-boundary decisions (**OPEN** → **DONE / VERIFIED**), and the password-recovery wording —
+the previously suggested `PASSWORD_RESET_URL` value is **removed**, and the reset-architecture decision
+is recorded as **pending a separate read-only audit**. The original audit wording is preserved above and
+marked superseded. No behaviour, grant, owner decision or deferred item changed, and **no secret value is
+recorded** anywhere in this section.
 
 ---
 

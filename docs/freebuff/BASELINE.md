@@ -199,13 +199,13 @@ is an index of pointers, not a history and not an architecture summary.
   `experiment/freebuff-evaluation` at HEAD `d8b693a`. Their branch, HEAD, status and test-count values
   describe that date and are preserved as evidence. They are **not** corrected here.
 - **The §3 SHA-256 register is historical and MUST NOT be read as the current protected-file
-  register.** Later **authorized** commits legitimately changed four of the five recorded values:
+  register.** Later **authorized** commits legitimately changed **all five** of the recorded values:
   - `server/src/services/ai/providers/http.ts` — **line-ending difference only**; the value recorded in
     §3 still equals the file's *content* hash.
   - `server/test/phase06-ai-wire.test.mjs` — an authorized later content change.
   - `docs/superpowers/plans/2026-09-11-phase-18c-core-list-screens.md` — authorized Phase 1 change.
   - `docs/superpowers/plans/2026-09-11-phase-18e-secondary-screens.md` — authorized Phase 1 change.
-  - `mobile/eas.json` — **still matches its historical hash.**
+  - `mobile/eas.json` — **matched its historical hash when this note was written**; **Phase 4A (`d309252`) then legitimately changed its content** (the EAS `production` `EXPO_PUBLIC_API_URL` placeholder was replaced with the Render origin), so the §3 value is historical. Current git blob: `9060e8c3a120984d88530dcfb3284eeb43f66a74`.
 - **§12 rule 1's STOP condition belongs to this historical snapshot.** A hash delta caused by a later
   authorized commit is expected drift, not unexplained tampering; the rule guards *unexplained* change
   against the capture it was taken from.

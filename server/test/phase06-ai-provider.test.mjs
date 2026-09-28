@@ -137,52 +137,6 @@ unitSuite('Phase 06 — AI provider selection', () => {
       restoreProvider();
     }
   });
-
-  it('agentrouter without AGENTROUTER_API_KEY throws AiNotConfigured', () => {
-    const restoreKey = withEnv('AGENTROUTER_API_KEY', undefined);
-    const restoreProvider = withEnv('AI_PROVIDER', 'agentrouter');
-    try {
-      assert.throws(() => selectProvider(), (err) => {
-        assert.ok(err instanceof AiNotConfigured);
-        assert.match(err.message, /AGENTROUTER_API_KEY/);
-        return true;
-      });
-    } finally {
-      restoreKey();
-      restoreProvider();
-    }
-  });
-
-  it('agentrouter with a key but no base URL throws AiNotConfigured', () => {
-    const restoreKey = withEnv('AGENTROUTER_API_KEY', 'ar_test_key');
-    const restoreBase = withEnv('AGENTROUTER_BASE_URL', undefined);
-    const restoreProvider = withEnv('AI_PROVIDER', 'agentrouter');
-    try {
-      assert.throws(() => selectProvider(), (err) => {
-        assert.ok(err instanceof AiNotConfigured);
-        assert.match(err.message, /AGENTROUTER_BASE_URL/);
-        return true;
-      });
-    } finally {
-      restoreKey();
-      restoreBase();
-      restoreProvider();
-    }
-  });
-
-  it('agentrouter fully configured selects a provider named agentrouter', () => {
-    const restoreKey = withEnv('AGENTROUTER_API_KEY', 'ar_test_key');
-    const restoreBase = withEnv('AGENTROUTER_BASE_URL', 'http://127.0.0.1:9');
-    const restoreProvider = withEnv('AI_PROVIDER', 'agentrouter');
-    try {
-      const p = selectProvider();
-      assert.equal(p.name, 'agentrouter');
-    } finally {
-      restoreKey();
-      restoreBase();
-      restoreProvider();
-    }
-  });
 });
 
 // ---------------------------------------------------------------------------

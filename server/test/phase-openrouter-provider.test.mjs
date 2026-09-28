@@ -1,15 +1,14 @@
-// OpenRouter provider validation (server-side, additive).
+// OpenRouter provider validation (server-side).
 //
-// The Inventory AI production provider stays AgentRouter. This suite validates a
-// NEW, configuration-selectable provider that speaks the same Anthropic Messages
-// wire as the shared anthropicWire.ts layer, against a local HTTP stub so it is
-// fully deterministic, offline, and needs no OpenRouter credential.
+// OpenRouter is the supported Anthropic-compatible gateway provider. This suite
+// validates it against a local HTTP stub so it is fully deterministic, offline,
+// and needs no OpenRouter credential.
 //
 // Covered here:
 //   - provider selection + the production fail-fast contract for its env vars
 //   - /v1/messages URL construction from OPENROUTER_BASE_URL
 //   - Bearer-only authentication, and the ABSENCE of the claude-cli / claude-code
-//     impersonation headers the AgentRouter gateway requires
+//     client-fingerprint headers some gateway services require
 //   - Anthropic request/response mapping, tool-call parsing, error mapping
 //   - the existing orchestration loop (runAiChat) driven through this provider
 //     (DB-free: only tool paths that decide before the database are used here)
@@ -381,7 +380,7 @@ unitSuite('OpenRouter provider — Anthropic /v1/messages wire mapping', () => {
     assert.equal(headers['anthropic-version'], undefined, 'not required by the documented endpoint');
     assert.ok(
       !String(headers['user-agent'] ?? '').includes('claude-cli'),
-      'the claude-cli fingerprint belongs to the AgentRouter provider only'
+      'no client-fingerprint header may be sent'
     );
     // The key must appear in no other header value.
     for (const [name, value] of Object.entries(headers)) {

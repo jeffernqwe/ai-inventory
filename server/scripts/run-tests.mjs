@@ -34,7 +34,7 @@ if (!VALID.includes(mode)) {
 // ---------------------------------------------------------------------------
 const PURE_UNIT = [
   'phase03-rbac.test.mjs',            // middleware/constants unit tests
-  'phase06-ai-wire.test.mjs',         // AgentRouter/Anthropic wire mapping
+  'phase06-ai-wire.test.mjs',         // legacy AgentRouter wire mapping; retained in-flight work that still imports the retired provider until the owner retargets it
   'phase07d-production-config.test.mjs', // env validation, health, shutdown
   'phase20f-ai-conversation-index.test.mjs', // schema-declaration guard for the ai_conversations list index (M-5)
   'phase20g-list-sort-indexes.test.mjs', // schema-declaration guards for the products/purchase_orders/users list-sort indexes

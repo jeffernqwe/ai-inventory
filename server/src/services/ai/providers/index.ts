@@ -2,9 +2,10 @@
  * AI provider registry.
  *
  * selectProvider() resolves the provider named by AI_PROVIDER at call time by
- * reading process.env lazily (see aiConfig.js for why). Built-in providers are
- * Claude, Gemini, and agentrouter (an Anthropic-compatible gateway that routes
- * to models such as DeepSeek-V4-Flash); test suites register a 'fake' provider
+ * reading process.env lazily (see aiConfig.ts for why). Built-in providers are
+ * Claude, Gemini, agentrouter (an Anthropic-compatible gateway that routes to
+ * models such as DeepSeek-V4-Flash) and openrouter (another Anthropic-compatible
+ * gateway, see openrouterProvider.ts); test suites register a 'fake' provider
  * via registerProvider so the full orchestration loop and routes can be
  * exercised without an API key.
  *
@@ -16,6 +17,7 @@ import { AiNotConfigured } from '../aiErrors.ts';
 import { createAgentrouterProvider } from './agentrouterProvider.ts';
 import { createClaudeProvider } from './claudeProvider.ts';
 import { createGeminiProvider } from './geminiProvider.ts';
+import { createOpenrouterProvider } from './openrouterProvider.ts';
 
 /**
  * A tool call the model asked for: the id it must be answered by, the tool's
@@ -115,6 +117,12 @@ const BUILTINS: Record<string, AIProviderEntry> = {
     factory: createAgentrouterProvider,
     requiredEnv: ['AGENTROUTER_API_KEY', 'AGENTROUTER_BASE_URL'],
   },
+  // OpenRouter also demands a model: it fronts hundreds of models with different
+  // tool-calling ability, so there is no safe default to fall back on.
+  openrouter: {
+    factory: createOpenrouterProvider,
+    requiredEnv: ['OPENROUTER_API_KEY', 'OPENROUTER_BASE_URL', 'AI_MODEL_OPENROUTER'],
+  },
 };
 
 /** Register (or override) a provider factory, primarily for tests. */
@@ -151,7 +159,7 @@ export function selectProvider(): AIProvider {
   const builtin = BUILTINS[name];
   if (builtin) return builtin.factory();
   throw new AiNotConfigured(
-    `The configured AI provider "${raw}" is not supported. Set AI_PROVIDER to "claude", "gemini", or "agentrouter".`
+    `The configured AI provider "${raw}" is not supported. Set AI_PROVIDER to "claude", "gemini", "agentrouter", or "openrouter".`
   );
 }
 

@@ -404,9 +404,10 @@ verified. It is **not** recorded as deferred work.
 | `[✓]` | **Reset email** | Provider-agnostic mail layer (Resend transport). |
 | `[✓]` | **Enumeration protection** | Uniform 202; failure swallowed post-lookup. |
 | `[~]` | **Reset flooding (B2)** | Per-account/per-IP buckets only; distributed flooding open → §18. |
-| `[ ]` | **Firebase-native password reset** | Not implemented. |
-| `[!]` | **O-8** | Whether Firebase takes over the reset flow — OPEN. |
-| `[!]` | **O-9** | `passwordChangedAt` semantics for Firebase-native accounts — OPEN. |
+| `[ ]` | **Firebase-native password reset** | Not implemented — **direction LOCKED 2026-09-29 (§39, design §14C L-3/L-11): Firebase takes over recovery; the 26B/27 path is to be removed later. Nothing removed yet.** |
+| `[!]` | **O-8** | Whether Firebase takes over the reset flow — **RESOLVED 2026-09-29 (§39): it does.** Artefact disposition (deleted vs archived) open as **OD-5**. |
+| `[!]` | **O-9** | `passwordChangedAt` semantics for Firebase-native accounts — **RESOLVED (design) 2026-09-29 (§39): the credential-change revocation bridge.** Not implemented. |
+| `[ ]` | **Credential-change revocation bridge** | **Designed, NOT implemented** (§39 / design §14C.3). Without it a client-side Firebase reset revokes **nothing**. |
 | `[✓]` | **Dummy-hash protection** | Phase 32K timing equalizer. |
 | `[✓]` | **Sensitive-logging protection** | Reset URL/message never logged (§24). |
 
@@ -656,9 +657,9 @@ Connects existing controls to future controls **without** claiming missing featu
 | `[~]` | **Recovery audit** | Reset events audited; broader recovery not. |
 | `[ ]` | **Recovery notifications** | None (§20). |
 | `[ ]` | **Support/admin recovery** | Not implemented. |
-| `[!]` | **O-6** | Unhealable-orphan remedy — OPEN. |
-| `[!]` | **O-8** | Firebase taking over reset — OPEN. |
-| `[!]` | **O-9** | `passwordChangedAt` semantics for Firebase-native — OPEN. |
+| `[!]` | **O-6** | Unhealable-orphan remedy — OPEN (**not reachable for the current mocked population**: §39). |
+| `[!]` | **O-8** | Firebase taking over reset — **RESOLVED 2026-09-29 (§39): it does.** |
+| `[!]` | **O-9** | `passwordChangedAt` semantics for Firebase-native — **RESOLVED (design) 2026-09-29 (§39).** |
 
 **Distinction preserved:** existing password-reset functionality is real; broader recovery controls
 are missing.
@@ -672,7 +673,7 @@ are missing.
 | `[✓]` | **Mongo disabled state** | `User.status` ACTIVE/DISABLED. |
 | `[ ]` | **Firebase state** | No propagation from Mongo to Firebase. |
 | `[ ]` | **Firebase token revocation** | Not implemented. |
-| `[~]` | **`checkRevoked` behaviour** | `false` (documented). |
+| `[~]` | **`checkRevoked` behaviour** | `false` — **REVIEWED 2026-09-29 (§39 / design §14C.5, L-19): recommended to REMAIN `false`**, with the availability-vs-authority tradeoff recorded. MongoDB `status` stays the revocation authority. |
 | `[ ]` | **Provider disable** | Not implemented. |
 | `[ ]` | **Compromised Firebase account** | No containment flow. |
 | `[✓]` | **Server exchange refusal** | DISABLED user / inactive business refused at exchange. |
@@ -759,14 +760,14 @@ are missing.
 | --- | --- | --- | --- | --- | --- |
 | **O-1** | Unlink policy + last-authentication-method protection | **Policy B RESOLVED**; residual (Firebase's own provider set) recorded, **NOT closed** | design §14A.5; §27Q | Affects any unlink/provider work | Accept residual or scope a follow-up |
 | **O-2** | Linked-account disposition of `change-password` / reset | **CLOSED / decided in Phase 32K** | README 32K entry | Inert-hash behaviour recorded | No further action (residual O-8/O-9) |
-| **O-3** | Whether `emailVerified` is enforced | **OPEN** | design §14A.5; spec §29 | Blocks provider sign-in relying on a provider-asserted address | Decide enforcement policy |
+| **O-3** | Whether `emailVerified` is enforced | **DIRECTION LOCKED 2026-09-29** (§39, L-6/L-7); **enforcement mechanics still OPEN as OD-3** | design §14A.5; §14C | Email/password users must verify before the main app; Google verified per Firebase's claim. Mechanics block the implementing step | Decide client-gate vs server-gate, unverified-user reach, resend limiter |
 | **O-4** | M1 vs M2 | **RESOLVED** — M1 (RNFirebase) + P2 durable persistence | P2 decision §8.1 | Forfeits Expo Go (O-11) | None |
 | **O-5** | Facebook missing-email onboarding flow | **OPEN** | design §14A.5; R-10 | Blocks Facebook Login | Decide flow |
 | **O-6** | Remedy for the unhealable orphan | **OPEN** | design §14A.5; §16.6 | Blocks legacy migration/linking | Decide remedy / accept |
 | **O-7** | `google-services.json` / plist storage | **RESOLVED** — EAS build-time injection, not committed | P2 decision §8.1 | Native provider config | None |
-| **O-8** | Whether Firebase takes over the password-reset flow | **OPEN** | design §14A.5; §14.1 | Password recovery disposition | Decide |
-| **O-9** | `passwordChangedAt` semantics for Firebase-native accounts | **OPEN** | design §14A.5; §14.7 | `SESSION_INVALIDATED` does not fire for them | Decide acceptance or compensating design |
-| **O-10** | Invitation implementation | **OPEN** | design §14A.5; §14.3 | Invitation onboarding | Decide model/lifetime/routes |
+| **O-8** | Whether Firebase takes over the password-reset flow | **RESOLVED 2026-09-29 — Firebase takes over recovery** | §39; design §14C L-3/L-11 | 26B/27 + Resend are to be removed in a later step | Decide artefact disposition (**OD-5**) |
+| **O-9** | `passwordChangedAt` semantics for Firebase-native accounts | **RESOLVED (design) 2026-09-29 — the credential-change revocation bridge** | §39; design §14C.3 | A Firebase-native reset would otherwise revoke **nothing** | Implement (N-4); name is **OD-1** |
+| **O-10** | Invitation implementation | **DIRECTION LOCKED 2026-09-29 (L-12); implementation OPEN** | §39; design §14C.6 N-9 | **Now a hard prerequisite of retiring legacy login** — `users.service.create` writes a hash and no `firebaseUid` | Decide model/lifetime/routes |
 | **O-11** | Expo Go policy | **OPEN (forfeited by M1)** | design §14A.5; P2 decision | Every future mobile phase | Formalise acceptance |
 
 > Resolved decisions are **not** reopened without new repository evidence.
@@ -867,7 +868,7 @@ Before Freebuff starts coding any authentication/security work, **all** must be 
 | G-2 | Is it numbered? | **No** |
 | G-3 | Is scope documented? | **No** |
 | G-4 | Are prerequisites satisfied? | **No** (external gates open) |
-| G-5 | Required owner decisions resolved? | **No** (O-3, O-5, O-6, O-8, O-9, O-10, O-11 open) |
+| G-5 | Required owner decisions resolved? | **Partially — the Firebase-only DIRECTION is locked 2026-09-29 (§39): O-8 and O-9 resolved, O-3/O-10 direction locked.** Still blocking implementation: **OD-1…OD-8** (design §14C.7) and **O-5, O-6, O-11**. |
 | G-6 | External blockers resolved? | **No** (§25) |
 | G-7 | Git working tree understood? | **Yes** |
 | G-8 | Protected files preserved? | **Yes** — no protected file was modified. There are now **zero uncommitted protected entries**: all five are committed and equal to `HEAD` (Phase 3 committed the last one, `mobile/eas.json`). The two older SHA-256 mismatches (`http.ts`, `phase06-ai-wire.test.mjs`) were **CRLF-normalisation differences, not content changes** (§32). |
@@ -961,9 +962,12 @@ Gates 1/2. (The live Firebase project and the Android existing-account Google E2
 blocked — §5a/§25.)
 
 ### Decision Required
-**O-3** (emailVerified enforcement), **O-5** (Facebook missing-email), **O-6** (orphan remedy),
-**O-8** (Firebase reset), **O-9** (`passwordChangedAt` for Firebase-native), **O-10** (invitations),
-**O-11** (Expo Go policy).
+**O-5** (Facebook missing-email), **O-6** (orphan remedy — not reachable for the mocked population),
+**O-11** (Expo Go policy), plus the Firebase-only register **OD-1…OD-8** (design §14C.7): the bridge's
+name/shape, unlink's fate, `emailVerified` enforcement mechanics, the invitation model, the 26B/27
+artefact disposition, whether `/firebase/link` survives, and whether `/register` is removed outright.
+*(**O-3**, **O-8** and **O-9** were resolved/direction-locked on 2026-09-29 — §39 — and **O-10**'s
+direction is locked with its implementation still open.)*
 
 ### Future
 Invitations; provider linking on the shipped boundaries; **Google Sign-In** and **Facebook Login**
@@ -1345,6 +1349,133 @@ the previously suggested `PASSWORD_RESET_URL` value is **removed**, and the rese
 is recorded as **pending a separate read-only audit**. The original audit wording is preserved above and
 marked superseded. No behaviour, grant, owner decision or deferred item changed, and **no secret value is
 recorded** anywhere in this section.
+
+---
+
+## 39. FIREBASE-ONLY AUTHENTICATION — LOCKED DECISIONS & THE SESSION-REVOCATION BRIDGE (2026-09-29)
+
+**Documentation only.** No code, test, schema, dependency, environment variable, Firebase Console
+setting, EAS configuration or deployment change was made for this section. The authoritative record is
+`docs/superpowers/specs/2026-09-18-firebase-auth-design.md` **§14C**; the shipped-record counterpart is
+`docs/DEVELOPMENT_ROADMAP.md` **§27U**.
+
+### What was decided
+
+Nineteen decisions are **locked** (design §14C.1, cited here as **L-1…L-19**): Firebase owns
+email/password, Google, password reset, email verification and password changes (**L-1…L-5**);
+email/password users must have a **verified email before entering the main app** and Google users are
+verified **according to Firebase's signed claim**, not because the provider is Google (**L-6, L-7**);
+the **Inventory AI JWT + server session remain** and Firebase does **not** replace backend
+authorization (**L-8**); **MongoDB remains authoritative** for `businessId`, `role`, `status`,
+permissions, lifecycle and tenant isolation (**L-9**); legacy bcrypt login/register (**L-10**), the
+custom reset tokens + endpoints + Resend infrastructure (**L-11**), admin-created password accounts
+(**L-12**) and the Inventory-specific link/unlink lifecycle (**L-13**) are to be retired or re-scoped;
+a **credential-change revocation bridge** is required before native recovery or change-password ships
+(**L-14/L-15/L-16**); the **action-link return leg must be verified live** (**L-17**); business
+authorization must **not** move into Firebase custom claims (**L-18**); and `checkRevoked` was reviewed
+(**L-19**).
+
+### The security substance — the credential-change revocation bridge (L-14, L-15, L-16)
+
+**The defect it closes.** `passwordChangedAt` is the **only** mechanism that invalidates existing
+Inventory AI sessions on a credential change, and `checkRevoked` is `false`, so Firebase cannot
+invalidate them either. A Firebase-native reset/change therefore **revokes nothing** — every session
+that existed before the change, including an attacker's, survives it. Today's 26B/27 flow does not
+have that hole because the server stamps the field; a client-side reset never reaches the server.
+
+**Proposed shape:** `POST /api/auth/credentials-changed` — **AUTHENTICATED** (`requireAuth` + controller,
+**no permission**; self-service, like `/logout`, `/sessions` and `/firebase/link`), body `{ idToken }`,
+and the validator returns **only** `{ problems, idToken }`, so a body carrying `userId`,
+`businessId`, `firebaseUid` or `role` is **inert by construction**.
+
+**L-15 is satisfied twice over, by two independent facts, and this is the security argument:**
+
+1. **Identity binding.** The verified uid **must equal** the account's `firebaseUid`
+   (`User.findById(req.user.id)`). A mismatch is refused with one generic `409` that names no account,
+   tenant, role or uid, **and nothing is written**. Without this the endpoint would let any caller
+   holding *some* Firebase identity revoke *someone else's* sessions.
+2. **Freshness.** `authTimeIsFresh(identity.authTime, now)` against
+   `FIREBASE_REAUTH_WINDOW_SECONDS` (300 s), from the **signed `auth_time` claim** — never `iat` —
+   failing **closed** on an absent claim. A credential change is by definition recent; a stolen
+   long-lived token is not.
+
+No single stolen artefact satisfies all three conditions (live Inventory AI session **and** a verified
+Firebase credential **and** a fresh signed `auth_time` **and** the uid already attached to that
+session's account), and no value a client can type is one of them.
+
+**Writes exactly two things** — `passwordChangedAt = now` and `revokeAllSessions(...)` — so it can
+never move a tenant, change a role or change a status. The audit row carries
+`{ reason: 'credential_changed' }` and **no uid** (the audit viewer is ADMIN-readable — the 32H/32L
+precedent).
+
+**L-16 — ordering, and why it is forced rather than chosen:** Firebase change → bridge (revokes
+everything) → **re-exchange** (`/api/auth/firebase/exchange` is **PUBLIC**, so the revocation cannot
+block it) → a new JWT whose `iat >= changedAtSec`. The request that performs the change is itself
+admitted because `requireAuth` rejects only tokens minted **strictly before** the stamp. The user
+therefore stays signed in, and the bridge composes with sign-out-everywhere instead of fighting it.
+
+> **⚠️ The one hazard this design adds, recorded rather than hidden.** The endpoint is **not**
+> retryable: a second call stamps a *later* time and revokes everything again, so a replay after the
+> re-exchange would kill the brand-new session. Its acknowledgement is a statement about the
+> credential, sent **exactly once per change**. If the bridge's response is lost and the client
+> retries, the retry arrives with the **old** token and is answered `401 SESSION_INVALIDATED` — which
+> the client must treat as **success-equivalent** and proceed to the re-exchange. **This rule must be
+> pinned by a test in the implementing step.**
+
+**Rejected alternatives** (design §14C.3.6): a **public** endpoint keyed only on a verified ID token
+(turns a stolen Firebase credential into an Inventory AI denial-of-service, and contradicts L-15); a
+**Cloud Function / Admin-SDK trigger** (a new infrastructure surface this repository has never had and
+no phase authorises); doing nothing (impossible — Firebase cannot revoke an Inventory AI session); and
+simply accepting long-lived sessions (contradicts L-14).
+
+### `checkRevoked` review (L-19) — recommendation: **REMAIN `false`**
+
+Recorded in full at design §14C.5. In security terms: **MongoDB `status` is checked per request by
+`requireAuth` and is the revocation authority (L-9).** Setting `checkRevoked: true` would add a network
+round trip to Google on **every** exchange, fail closed when Google is unreachable (a Google outage
+becomes a total sign-in outage), and **still not revoke a live Inventory AI session** — `requireAuth`
+never sees a Firebase token. The narrow gap that remains, stated so it is not mistaken for coverage:
+**disabling a user in Firebase only does not stop their Inventory AI session, and will not while
+Firebase is not the bearer credential.** Change it only if a separately-approved phase establishes
+that Firebase-side disable must take effect at exchange.
+
+### New findings recorded by this decision
+
+| # | Finding |
+| --- | --- |
+| **F-1** | **A Firebase-native password reset would revoke nothing** without the bridge (§39 above, design §14C.3). This is the O-9 defect becoming live, and it is the reason L-14 gates the work. |
+| **F-2** | **A client-side reset never reaches the server**, so any future server-side security consequence of a credential change (audit, notification, revocation) must be re-established explicitly rather than inherited from the 26B/27 flow. |
+| **F-3** | **Enumeration resistance relocates to Firebase.** The uniform-202 guarantee is genuinely lost when the request is a client-SDK call; Firebase reports `auth/user-not-found` on a project with enumeration protection off. This is a **relocation, not a new hole** — an attacker can call the SDK directly with the public API key regardless — but the project's own property no longer exists. |
+| **F-4** | **`users.service.create` produces an unauthenticatable account under Firebase-only.** It writes a bcrypt `passwordHash` and **no `firebaseUid`**. Retiring legacy login without L-12/O-10 first would lock such users out entirely. **Hard sequencing constraint (N-9).** |
+| **F-5** | **Removing the recovery endpoints deletes the subject matter of B2** (distributed reset-mail flooding). **E3** (in-memory, per-process limiter stores) **survives** for the remaining login/exchange limiters. **No shared store is introduced in either direction.** |
+| **F-6** | **`User.emailVerified` is written only at exchange/link/register time**, so it is stale between those events — which matters once L-6/L-7 have to make a decision from it (**OD-3**). |
+| **F-7** | **No live Firebase project has ever been exercised** for Phases 32B–32L (§25), so none of this can be runtime-claimed. |
+
+### What is UNCHANGED, and must be
+
+`middlewares/authenticate.ts` (check order, codes, `req.user`/`req.auth` shapes); `session.service.ts`
+and `session.model.ts`; `config/jwt.ts`; `constants/roles.ts` and the mobile RBAC mirror; the Phase 23
+route classification; the §14.1 password-authority guard **while the legacy path still exists**; the
+global error envelope; and every client-facing error code. **L-8 is an instruction to preserve these,
+not a licence to relax them.** **No Firebase custom claim is introduced (L-18).**
+
+### What this decision does NOT authorise
+
+**No implementation.** No route, service, validator, screen or test may be added on the strength of
+this section. No Firebase Console change. No removal of the legacy path, the recovery endpoints, the
+reset-token model or the Resend mail layer — every one of those artefacts **still exists and still
+works**, and its disposition is **OD-5**. No weakening of the §14.1 guard. No claim that the
+action-link flow works (**L-17** is a live-test gate that has not been performed).
+
+### Changed in this reconciliation
+
+This new §39; the §11 (O-8/O-9 + Firebase-native reset rows), §22 (O-6/O-8/O-9 rows), §23
+(`checkRevoked` row), §27 (O-3, O-8, O-9, O-10 rows), §G-5 and §"Decision Required" updates; and the
+corresponding pointers in `docs/superpowers/specs/2026-09-18-firebase-auth-design.md` §14.1 / §14A.5 /
+§18 / §21 / the new §14C, `docs/DEVELOPMENT_ROADMAP.md` §27U, `docs/SYSTEM_SPECIFICATION.md` §29,
+`CLAUDE.md` §2 and `README.md`. **§0–§38 behaviour and security tables, §28 deferred work, §29 phase
+history, §35 conflicts and §36/§37 are otherwise unchanged**, no owner decision was silently reopened,
+and **no secret value is recorded**.
 
 ---
 

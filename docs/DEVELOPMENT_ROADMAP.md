@@ -5420,6 +5420,56 @@ fails, the fallback is a hosted continue URL (Universal Links / App Links), whic
 which needs a web domain plus association files — a **new infrastructure dependency** that must be an
 explicit owner decision.
 
+## N-2 — the action-link live test (2026-09-29): app side VERIFIED, Firebase side NOT
+
+**Live verification phase.** No application code, test, dependency, configuration or deployment file
+was changed, and the emulator that was started for the test was shut down afterwards and the machine
+returned to its prior state. The full result table is design **§14C.4.1**.
+
+**What was done.** The existing `InventoryAI` AVD (`emulator-5554`, SDK 35, x86_64) was booted and the
+**installed development build** `com.inventoryai.app` (versionCode 1, targetSdk 36, `lastUpdateTime
+2026-09-25 15:43` — the **Phase F2.9** build `f3038fa1-…`) was exercised by injecting deep links at the
+OS level. **No build was created and no Firebase Console setting was read or changed.**
+
+| Probe | Result |
+| --- | --- |
+| `inventoryai://reset-password` package resolution | **Resolves to `com.inventoryai.app/.MainActivity`** |
+| Control: retired `com.inventoryai.app:/oauthredirect` | **`No activity found`** — independently re-confirms F2.9 |
+| `…/reset-password?oobCode=PLACEHOLDER` | **Status: ok**; delivered in-app; **no browser, no Firebase error, no crash** |
+| Screen after that delivery | **`Link incomplete` / `This reset link is missing its token.`** |
+| Positive control `…/reset-password?token=PLACEHOLDER` | **The reset form rendered** (`Set a new password`, `New password *`, `Confirm new password *`) |
+| Negative control `inventoryai://` | The **login screen** rendered |
+
+**PASS for the app side**, and the placeholder was never rendered.
+
+**★ The finding N-3 must carry.** The `oobCode` and `token` probes differ **only in the parameter name**
+and land on **different branches of the same screen**, because the current `app/reset-password.tsx` reads
+**`params.token`**. A Firebase-native link carrying `?oobCode=` therefore renders **"Link incomplete"**.
+**Router-level delivery of `inventoryai://reset-password?oobCode=…` does not by itself reach the form**,
+so N-3 must change the screen to read `oobCode` (and/or use the SDK's `ActionCodeURL`) or every Firebase
+reset link dead-ends one screen short. This is a reproducible observation, not an inference.
+
+**What it does NOT prove.** Every probe injected the URL **directly with `am start`**, so it tests the
+**receiving** end only. Still UNVERIFIED: whether **Firebase's email actually contains a custom-scheme
+URL**; whether **Firebase's hosted action handler consumes the link first** (the exact behaviour
+`handleCodeInApp` is meant to change, and the point of the gate); the **Firebase error path** for an
+expired or already-used code; and anything provider-specific.
+
+**Why it stopped there.** The remaining half needs an **email inbox** and a **Firebase Console session**
+(and a dedicated development account). This host has **no `firebase` CLI, no `gcloud` CLI**, no Console
+credential and no mailbox access, so the reset email was **never triggered** — not because it failed,
+but because the link it would produce cannot be retrieved here. **No success was simulated.**
+
+**Consequences.** **L-17 is only HALF satisfied** — the *real device* half is verified (on an
+**emulator**, not physical hardware), the *live Firebase project* half is **not**, and **the gate stays
+open**. **N-3 must not be started on the strength of this result alone.** **iOS is entirely
+`[EXTERNAL VERIFICATION REQUIRED]` and nothing about it was tested** — including whether the single-entry
+`expo.scheme` registers, whether a URL routes to `/reset-password`, and whether any Firebase action-link
+delivery works on a platform with no Universal Links, no associated domains and no AASA file. **No
+hosted continue-URL fallback was implemented or prototyped** — it is indicated only if the Firebase-side
+probes fail, and they were never performed; it remains the new infrastructure dependency design §14C.4
+already records.
+
 ## Implementation order (design §14C.6)
 
 **N-1** this decision record → **N-2** the action-link live test (first, because it can invalidate the

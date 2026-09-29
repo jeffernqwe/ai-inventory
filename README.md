@@ -1165,7 +1165,12 @@ sentence's second clause: it was the reset flow, not `change-password`, that rep
   /api/auth/credentials-changed` — authenticated, bound to the verified uid **and** a fresh signed
   `auth_time`, stamping `passwordChangedAt` and revoking every session, with the re-exchange ordered
   after it so the new session survives), recommends **`checkRevoked` stays `false`**, and records that
-  the **Firebase action-link return leg must be verified live** before recovery is complete. **Nothing
+  the **Firebase action-link return leg must be verified live** before recovery is complete. **N-2 (2026-09-29,
+live test) then verified the Android app/OS half and found the `token`-vs-`oobCode` mismatch** —
+`inventoryai://reset-password` resolves to the app and routes to the reset screen, but the screen reads
+`?token=` while a Firebase link carries `?oobCode=`, so a native link currently dead-ends on
+*"Link incomplete"*; the **Firebase email side remains UNVERIFIED** (no inbox or Console access), so the
+gate stays open and **iOS is entirely unverified**. **Nothing
   was removed:** the 26B/27 endpoints, the reset-token model and the Resend mail layer all remain — the
   record documents a later retirement, it does not perform one. Full record:
   `docs/superpowers/specs/2026-09-18-firebase-auth-design.md` **§14C**; security record

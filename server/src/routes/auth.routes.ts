@@ -2,7 +2,7 @@ import { Router } from 'express';
 
 import { register, login, me, changePassword, updateMe, logout, listSessions, revokeSession } from '../controllers/auth.controller.ts';
 import { forgotPassword, resetPassword as resetPasswordHandler } from '../controllers/passwordReset.controller.ts';
-import { firebaseExchange, firebaseRegister, firebaseLink, firebaseUnlink } from '../controllers/firebaseAuth.controller.ts';
+import { firebaseExchange, firebaseRegister, firebaseLink, firebaseUnlink, credentialsChanged } from '../controllers/firebaseAuth.controller.ts';
 import requireAuth from '../middlewares/authenticate.ts';
 import {
   createLoginAccountLimiter,
@@ -131,6 +131,31 @@ export function createAuthRouter({ limits }: AuthRouterOptions = {}) {
   // header. The new password travels in the same body and is handled like every
   // other password this API accepts — never logged, never echoed.
   router.post('/firebase/unlink', requireAuth, firebaseUnlink);
+
+  // N-4: the credential-change bridge. AUTHENTICATED, and once again the
+  // authentication IS the operation's ownership proof rather than a convenience —
+  // the account is `req.user.id` and the identity must equal the uid already on
+  // it, so no permission key could express "record a credential change on my own
+  // account" without inventing an authorization concept the catalogue does not
+  // have. It is registered as `requireAuth, controller` — no second middleware —
+  // which is also why it is not rate-limited: every authenticated route in this
+  // application is unlimited, and each attempt here requires a live session AND a
+  // verified, RECENT Firebase credential whose uid matches this account.
+  //
+  // It is the route the approved recovery sequence reaches last-but-one: the user
+  // signs in again with the new password, the PUBLIC exchange above mints a
+  // temporary ordinary session, and this route records the change and revokes
+  // EVERY session — that temporary one included, because `revokeAllSessions` has no
+  // caller exception. The client then re-exchanges, and the surviving session is
+  // valid because its `iat` is not before the stamp. Revoking the caller's own
+  // session is therefore the mechanism rather than a cost of it, and it is why this
+  // route answers `200 { changedAt }` instead of trying to preserve the token it
+  // arrived on.
+  //
+  // The ID token travels in the POST body, like every other Firebase route, so it
+  // cannot reach the access log (httpLogger records req.path only) or a Referer
+  // header.
+  router.post('/credentials-changed', requireAuth, credentialsChanged);
 
   return router;
 }

@@ -1,24 +1,33 @@
 /**
  * Phase 32C — the Firebase authentication HTTP surface.
  * Phase 32H — plus the authenticated identity-linking route.
+ * Phase 32L — plus the authenticated identity-unlinking route.
+ * N-4       — plus the authenticated credential-change bridge.
  *
- * Three routes, and the ONLY place a Firebase domain failure becomes an HTTP
+ * Five routes, and the ONLY place a Firebase domain failure becomes an HTTP
  * status:
  *
- *   POST /api/auth/firebase/exchange — a verified Firebase ID token becomes an
- *                                      Inventory AI application session. PUBLIC.
- *   POST /api/auth/firebase/register — a verified Firebase identity with no tenant
- *                                      gets a Business and its OWNER user. PUBLIC.
- *   POST /api/auth/firebase/link     — an AUTHENTICATED account adopts a verified
- *                                      Firebase identity (Phase 32H, below).
+ *   POST /api/auth/firebase/exchange   — a verified Firebase ID token becomes an
+ *                                        Inventory AI application session. PUBLIC.
+ *   POST /api/auth/firebase/register   — a verified Firebase identity with no
+ *                                        tenant gets a Business and its OWNER
+ *                                        user. PUBLIC.
+ *   POST /api/auth/firebase/link       — an AUTHENTICATED account adopts a
+ *                                        verified Firebase identity (32H, below).
+ *   POST /api/auth/firebase/unlink     — an AUTHENTICATED account detaches one
+ *                                        (Phase 32L, below).
+ *   POST /api/auth/credentials-changed — an AUTHENTICATED account records that
+ *                                        Firebase changed its password, so every
+ *                                        session minted against the old credential
+ *                                        dies (N-4, below).
  *
- * The third route is the one that does NOT belong with the other two, and the
- * distinction is the whole of Phase 32H: exchange and register answer "who are
- * you?" with no prior session, while link answers "may this account, which has
- * already proved itself, carry this identity?" It is behind `requireAuth`, it reads
- * the account from `req.user` and the identity from the verified token's uid, and
- * it shares this file only so there is ONE translation of a Firebase domain error
- * rather than a second copy free to drift.
+ * The authenticated routes are the ones that do NOT belong with the two above, and
+ * the distinction is the whole of Phase 32H: exchange and register answer "who are
+ * you?" with no prior session, while link, unlink and the bridge each answer a
+ * question about an account that has ALREADY proved itself. All three are behind
+ * `requireAuth`, they read the account from `req.user` and the identity from the
+ * verified token's uid, and they share this file only so there is ONE translation of
+ * a Firebase domain error rather than a second copy free to drift.
  *
  * WHY THIS IS ITS OWN FILE, following passwordReset.controller.ts: the services
  * this file calls throw two DIFFERENT kinds of error. `firebaseAuth.service.ts`
@@ -57,13 +66,14 @@
 
 import type { Request, Response } from 'express';
 
-import { validateFirebaseExchange, validateFirebaseRegister, validateFirebaseLink, validateFirebaseUnlink } from '../utils/validate.ts';
+import { validateFirebaseExchange, validateFirebaseRegister, validateFirebaseLink, validateFirebaseUnlink, validateCredentialsChanged } from '../utils/validate.ts';
 import {
   exchangeFirebaseSession,
   registerBusinessFromFirebase,
 } from '../services/firebaseAuth.service.ts';
 import { linkFirebaseIdentity } from '../services/firebaseLink.service.ts';
 import { unlinkFirebaseIdentity } from '../services/firebaseUnlink.service.ts';
+import { applyCredentialsChanged } from '../services/credentialsChanged.service.ts';
 import { toPublicUser } from '../services/auth.service.ts';
 import {
   FirebaseNotConfigured,
@@ -438,4 +448,70 @@ export async function firebaseUnlink(req: AuthenticatedRequest, res: Response) {
   });
 }
 
-export default { firebaseExchange, firebaseRegister, firebaseLink, firebaseUnlink };
+/**
+ * POST /api/auth/credentials-changed — AUTHENTICATED (N-4).
+ *
+ * Records that the CALLER'S OWN Firebase credential changed, so that every
+ * Inventory AI session minted against the previous one is revoked. It is the
+ * server half of the approved recovery sequence (design §14C.3.8/§14C.3.9): the
+ * password itself changes inside Firebase, which the server never observes, so this
+ * is where that change acquires its local consequence.
+ *
+ * THE ACCOUNT AND THE IDENTITY ARE BOTH SERVER-DERIVED, exactly as on the two
+ * routes above and for the same reason:
+ *
+ *   - `req.user.id` is the account, put there by `requireAuth` from THIS request's
+ *     own session. `validateCredentialsChanged` returns no `userId` field that could
+ *     carry one.
+ *   - the identity is `verifyFirebaseIdToken(idToken).uid`, and the service
+ *     additionally requires it to EQUAL the uid already on the account. So the token
+ *     cannot name a different account's identity — it can only confirm the one whose
+ *     credential changed. There is no `firebaseUid` field in the validated body
+ *     either, and nothing here reads `businessId`, `role` or `status` on any path.
+ *
+ * WHY AUTHENTICATED, AND WHY THAT IS NOT A CONTRADICTION OF THE RESET FLOW. The
+ * caller reaches this route by signing in again with the NEW password (the approved
+ * sequence's step 5), which the existing public exchange turns into an ordinary
+ * session — a temporary one, minted precisely so that this authenticated call can
+ * exist. Authentication is therefore established FIRST and never relaxed: no public
+ * unauthenticated revocation endpoint is introduced, and no Firebase credential
+ * alone is ever accepted as the application's bearer credential.
+ *
+ * THE REVOCATION INCLUDES THE CALLER'S OWN SESSION, and that is intended rather than
+ * overlooked. `revokeAllSessions` has no caller exception, so the session this
+ * request arrived on dies with the others; the client completes the sequence with a
+ * final re-exchange, whose session is valid because its `iat` is not before the
+ * stamp. Answering `200 { changedAt }` tells the client exactly that: the change is
+ * recorded and the token it is holding is now spent.
+ *
+ * ERRORS, AND WHY NONE OF THEM CAN SIGN THE USER OUT MID-FLOW. A bad Firebase
+ * credential answers 400 through `mapAuthenticatedFirebaseFailure`, as on link and
+ * unlink. The identity refusal and the freshness refusal are BOTH 409
+ * (`FIREBASE_IDENTITY_CONFLICT`, `FIREBASE_REAUTHENTICATION_REQUIRED`) — never 401
+ * or 403, which the mobile client's session-loss rule would read as "your session is
+ * gone" and act on by clearing it. That matters more here than anywhere else: this
+ * is the one flow in the application that is deliberately holding a short-lived
+ * session, so a spurious session-loss signal would abort it.
+ */
+export async function credentialsChanged(req: AuthenticatedRequest, res: Response) {
+  const body = req.body ?? {};
+  const { problems, idToken } = validateCredentialsChanged(body);
+  if (problems.length > 0) throwValidation(problems);
+
+  let result;
+  try {
+    result = await applyCredentialsChanged({ userId: req.user!.id, idToken });
+  } catch (err) {
+    throw mapAuthenticatedFirebaseFailure(err);
+  }
+
+  return res.status(200).json({ changedAt: result.changedAt.toISOString() });
+}
+
+export default {
+  firebaseExchange,
+  firebaseRegister,
+  firebaseLink,
+  firebaseUnlink,
+  credentialsChanged,
+};

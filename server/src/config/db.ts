@@ -130,6 +130,18 @@ function attachConnectionMonitoring() {
 attachConnectionMonitoring();
 
 /**
+ * The database this process is actually using (environment separation).
+ *
+ * Read from the live connection first, so it reports what MongoDB confirmed
+ * rather than what was requested — the only way to verify separation from the
+ * running process itself. Before the connection is ready it falls back to the
+ * configured target. Never returns the connection string or credentials.
+ */
+export function getDatabaseName(): string {
+  return mongoose.connection.name || env.mongodbDbName;
+}
+
+/**
  * Connects to MongoDB using MONGODB_URI from the environment.
  *
  * - Returns `true` when connected.
@@ -141,7 +153,7 @@ export async function connectDatabase(): Promise<boolean> {
   if (!env.mongodbUri) {
     console.warn(
       '[db] MONGODB_URI is not set — skipping database connection. ' +
-        'Add it to server/.env to connect to MongoDB.'
+        `Add it to server/.env to connect to MongoDB (target database: ${getDatabaseName()}).`
     );
     return false;
   }
@@ -151,10 +163,17 @@ export async function connectDatabase(): Promise<boolean> {
     // the object literal, which is then freshly excess-property-checked against
     // `ConnectOptions` at the call and fails for the same missing key.
     await mongoose.connect(env.mongodbUri, {
+      // Environment separation: the database is chosen by config/env.ts, never by
+      // the path segment of MONGODB_URI, so one cluster and one connection string
+      // serve development, test and production without any of them sharing data.
+      dbName: env.mongodbDbName,
       serverSelectionTimeoutMS: 5000,
       bufferTimeoutMS: 1500,
     } as MongooseConnectOptions);
-    console.log('[db] connected to MongoDB');
+    // The database name is one of three fixed, non-secret values — and it is the
+    // single most useful line an operator can see in a deploy log, since it is
+    // what proves which database this process actually reached.
+    console.log(`[db] connected to MongoDB (database: ${getDatabaseName()})`);
     return true;
   } catch (err) {
     console.error(

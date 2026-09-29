@@ -52,11 +52,125 @@ function parseShutdownTimeoutMs() {
   return Number.isFinite(n) && n > 0 ? n : 10000;
 }
 
+/**
+ * MongoDB database names — one per environment (environment separation).
+ *
+ * Every connection passes an explicit `dbName` (see config/db.ts), so the
+ * database a process talks to is decided here rather than by whatever path
+ * segment happens to sit in MONGODB_URI. That is what makes the environments
+ * separable while sharing one cluster and one connection string: the URI
+ * supplies the cluster and the credentials, this supplies the database.
+ *
+ * The legacy shared database is deliberately NOT named here. `inventory_ai`
+ * held the pre-separation development and production data in one place, and no
+ * configuration may silently resolve back to it.
+ */
+export const DATABASE_NAMES = {
+  development: 'inventoryai_dev_db',
+  test: 'inventoryai_test_db',
+  production: 'inventoryai_prod_db',
+} as const;
+
+/** Optional explicit override of the resolved database name. */
+export const MONGODB_DB_NAME_ENV = 'MONGODB_DB_NAME';
+
+/**
+ * The inputs `resolveDatabaseName` decides from. Named so the resolver can be
+ * driven with an explicit bag — another environment, a test — as easily as with
+ * the live process values.
+ */
+export interface DatabaseNameInputs {
+  nodeEnv?: string;
+  explicitName?: string;
+  testMode?: string;
+}
+
+/**
+ * Resolves the MongoDB database name for this process, in this order:
+ *
+ *   1. A TEST run always uses DATABASE_NAMES.test. TEST_MODE is set by
+ *      scripts/run-tests.mjs, and NODE_ENV=test is honoured as well, so this is
+ *      fail-closed by construction: a test process cannot reach the development
+ *      or production database even when MONGODB_DB_NAME names one, and a test
+ *      run cannot accidentally touch real data at all.
+ *   2. Otherwise MONGODB_DB_NAME, when set, wins — the operator escape hatch for
+ *      a staging deployment or a renamed database.
+ *   3. Otherwise NODE_ENV=production selects the production database and
+ *      anything else selects the development database.
+ *
+ * Two combinations are refused outright rather than resolved, because both would
+ * put data somewhere the environment cannot legitimately reach:
+ *
+ *   - a test run inside a production-flagged process (NODE_ENV=production with
+ *     TEST_MODE set) — tests must never execute as production; and
+ *   - production naming the development or test database, or a non-production
+ *     environment naming the production database.
+ *
+ * Pure and argument-driven — it reads nothing from process.env itself, so every
+ * environment can be exercised without touching the live process, and a caller's
+ * outcome depends only on what it passes. The module's own resolution supplies
+ * the live values through `databaseNameInputs()` below. The environment is
+ * compared case-insensitively, the database name exactly — MongoDB database names
+ * are case-sensitive, so a near-miss must not be treated as a match.
+ */
+export function resolveDatabaseName({ nodeEnv, explicitName, testMode }: DatabaseNameInputs = {}): string {
+  const environment = (nodeEnv || 'development').trim().toLowerCase();
+  const explicit = typeof explicitName === 'string' ? explicitName.trim() : '';
+  const isTestRun = environment === 'test' || (testMode || '').trim() !== '';
+
+  if (isTestRun) {
+    if (environment === 'production') {
+      throw new Error(
+        'Refusing to configure the database: TEST_MODE is set in a production-flagged process ' +
+          '(NODE_ENV=production). Tests must never run as production.'
+      );
+    }
+    return DATABASE_NAMES.test;
+  }
+
+  if (explicit) {
+    if (environment === 'production') {
+      if (explicit === DATABASE_NAMES.development || explicit === DATABASE_NAMES.test) {
+        throw new Error(
+          `Refusing to configure the database: ${MONGODB_DB_NAME_ENV} selects "${explicit}" while ` +
+            'NODE_ENV=production. Production must not use the development or test database.'
+        );
+      }
+    } else if (explicit === DATABASE_NAMES.production) {
+      throw new Error(
+        `Refusing to configure the database: ${MONGODB_DB_NAME_ENV} selects the production ` +
+          `database "${explicit}" while NODE_ENV=${environment}. Only a production process may use it.`
+      );
+    }
+    return explicit;
+  }
+
+  return environment === 'production' ? DATABASE_NAMES.production : DATABASE_NAMES.development;
+}
+
+/**
+ * The live environment values `resolveDatabaseName` is applied to. Split out so
+ * the resolution is a pure function of a value bag while the process still reads
+ * the real environment exactly once, at module load.
+ */
+export function databaseNameInputs(): DatabaseNameInputs {
+  return {
+    nodeEnv: process.env.NODE_ENV,
+    explicitName: process.env[MONGODB_DB_NAME_ENV],
+    testMode: process.env.TEST_MODE,
+  };
+}
+
 const env = {
   nodeEnv: process.env.NODE_ENV || 'development',
   port: Number(process.env.PORT) || 4000,
   // MongoDB connection string. Never log or expose this value.
   mongodbUri: process.env.MONGODB_URI || '',
+  // Database this process uses (environment separation). Resolved by
+  // resolveDatabaseName above and passed to mongoose.connect as `dbName`, so it
+  // — not the URI's path segment — decides where data is read and written. The
+  // name itself is not a secret; the connection string is.
+  mongodbDbName: resolveDatabaseName(databaseNameInputs()),
   // JWT signing secret. Never log, commit, or expose this value.
   jwtSecret: process.env.JWT_SECRET || '',
   // Access-token lifetime (jsonwebtoken format, e.g. "7d", "15m").

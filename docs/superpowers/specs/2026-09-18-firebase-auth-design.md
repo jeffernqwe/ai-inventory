@@ -1968,6 +1968,89 @@ probes fail, and they were never performed. It therefore stays documented as §1
 — a **new infrastructure dependency needing an explicit owner decision** — and **no fallback was
 implemented or prototyped**. **No application-code change of any kind was made in N-2.**
 
+### 14C.4.2 N-3 implementation record (2026-09-29) — the client half ships, and the gate stays OPEN
+
+**What shipped, and it is mobile only.** The Firebase-native recovery path, additively as the N-3 row
+requires. The Phase 1 verb guard was **deliberately relaxed for exactly one verb**
+(`sendPasswordResetEmail`; `confirmPasswordReset` was never in that map), the boundary gained the two
+operations plus the `ActionCodeSettings` this section's live test names, the classification layer gained
+two outcome-typed wrappers, `forgot-password` became Firebase-first with the custom endpoint as its
+**unconfigured-build** fallback, and `reset-password` now chooses its flow from the parameter present —
+`?oobCode=` is redeemed by Firebase, `?token=` still goes to `POST /api/auth/reset-password`. **The
+26B/27 stack is untouched**: both routes, the controller, the service, the token model, the whole mail
+layer and their suites all still exist and still work. **N-7 is what removes them, not this.**
+
+**TWO VERBS, NOT THE FOUR THE ROW NAMES, AND THE DIFFERENCE IS RECORDED.** The N-3 row lists four
+`firebase-native.ts` verbs. Only two have a consumer in this flow: `sendPasswordResetEmail` and
+`confirmPasswordReset`. `verifyPasswordResetCode` and `applyActionCode` were **not** added, because
+nothing in the flow would call them and CLAUDE.md §8 forbids dead code — an unusable code is already
+surfaced as `confirmPasswordReset`'s own ordinary `invalid-code` outcome, so the pre-verification the
+plan imagined would have bought a second network round trip and a third screen state for nothing. If a
+later phase needs either verb, it adds it then.
+
+**The screen stopped asserting the thing that is unverified.** Its success body said the link "opens the
+Inventory AI app directly", which is true **only if** Firebase honours the custom-scheme settings —
+that is precisely this gate — so it now reads "Open the link to choose a new password." A sentence a
+user reads is not the place to assert an unmeasured behaviour.
+
+**Two properties are implemented rather than intended.** *Enumeration resistance moves into the
+client*: `auth/user-not-found` and `auth/user-disabled` are answered as **SENT**, because with
+Firebase's email-enumeration protection OFF those codes identify an address, and reporting them as a
+failure would rebuild the oracle the uniform 202 exists to prevent (checklist F-3). *The confirmation
+has no fallback*: an action code is a Firebase credential, so a failed redemption can never license a
+call to the custom endpoint — and the classification layer imports no API module at all, so such a
+branch would have to add an import first. The gate's **own** error surface is named too:
+`auth/invalid-continue-uri` and `auth/unauthorized-continue-uri` are matched by shape and answered with
+a configuration sentence rather than "please try again", because if this project does not accept
+`inventoryai://reset-password` as a continue URL then retrying cannot help and the operator has to act.
+
+**★ What the first pass could not verify.** No Firebase reset email was generated,
+received or inspected, and no live Firebase project was exercised — **the runtime section below records what a later pass DID observe on a device, and which parts of that remain unproven.**
+The delivery half of the test — items 3, 6 and 7 — remains **BLOCKED** on the same external access N-2 lacked (no Console
+credential, no mailbox, no `firebase`/`gcloud` CLI), because whether the address received anything can only be learned from its inbox.
+**L-17 remains OPEN — NARROWED by the runtime result below, not resolved — and N-4 must not be started as
+though the Firebase-side half had been proven.** iOS remains `[EXTERNAL VERIFICATION REQUIRED]`.
+
+**One N-2 statement is superseded by observation, and it is annotating rather than rewriting.** N-2
+recorded that the attached physical device had no build installed and that no APK existed to install.
+At N-3 time `com.inventoryai.app` **is** installed on `PV4DDMIZZLTCIVSK` (CPH1969, SDK 30;
+`firstInstallTime = lastUpdateTime = 2026-09-29 13:04:10`) and APKs are present under `mobile/.smoke/` — but that build was
+**NOT** a development build. It was the **`preview`** APK (`4160dee1-369e-4266-956b-746de824bc8c`, commit `4ca36c6`), a release build that embeds its bundle — which is
+why the first attempt to run this code on it changed nothing: its `flags` carried **no `DEBUGGABLE`**, `run-as` and the dev menu were refused, no dev-launcher activity
+existed, and it was 126 MB against 258 MB for the development APKs — so **Metro could not drive it** and it kept
+rendering the pre-N-3 bundle. `mobile/.smoke/f2-9-development.apk` was then installed over it **by owner decision**, and the runtime results below come from that build.
+
+**★ N-3 RUNTIME RESULT (2026-09-29, physical device, live Firebase project, `jeffern1233@owner.com`).** The
+development build was installed, Metro served the N-3 working tree into it
+(`Android Bundled … expo-router/entry.js`, 1591 modules), and the following were OBSERVED, not inferred:
+
+| Probe | Observed |
+| --- | --- |
+| `inventoryai://reset-password?oobCode=<placeholder>` | **The reset form renders** (`Set a new password`, both fields). The pre-N-3 bundle answered *"Link incomplete / missing its token"* — **F-8 is CLOSED on the client side, on a device.** |
+| `inventoryai://reset-password?token=<placeholder>` | The same form renders — the legacy 26B/27 path is intact on the same build. |
+| `inventoryai://forgot-password` → Send for the test address | `Auth: sendPasswordResetEmail` → `FirebaseAuth: Password reset request …` → **`sendPasswordResetEmail:onComplete:success`**; the screen showed *"Check your email"*, the fixed enumeration-resistant sentence and the new body copy. |
+| `confirmPasswordReset` with an obviously fake code | `FirebaseAuthActionCodeException: The out of band code is invalid…` → the screen showed **"This reset link is invalid or has expired. Request a new one."** |
+
+**What that settles, and what it does not.** The project **accepted the custom-scheme
+`ActionCodeSettings`** — there was no `auth/*-continue-uri` rejection — so the configuration question
+moved from "unknown" to "accepted by the API", and the confirmation classification is now
+runtime-proven end to end. **It does NOT settle whether the email was delivered or what its link
+contains:** `onComplete:success` is returned even for an address with no account under
+email-enumeration protection, and the screen **deliberately cannot** distinguish "sent" from "no such
+account". The inbox is the only instrument that can, and there is none here. So whether the emailed
+link actually returns to the app carrying the code — the remaining half of L-17 — is **still
+UNVERIFIED**, items 6 and 7 (a real password change and the resulting sign-in) are **still blocked**,
+and **the gate is NARROWED, NOT CLOSED.**
+
+**Device state left behind, recorded so it is not a surprise.** The CPH1969 now carries the F2.9
+**development** build instead of the `preview` build `4160dee1-…`; that preview APK can be reinstalled
+from `https://expo.dev/artifacts/eas/gjFMvYd2HTe5T8jJPqr-78y8iUOgJA49N8Vxj4NykQU.apk`. Metro was left
+running on `:8081` because it is what loads this code, **no source, configuration or Firebase Console
+setting was changed by the run**, no new EAS build was created, and the device's temporary UI dumps were
+removed.
+
+---
+
 ## 14C.5 `checkRevoked = false` — review and recommendation (L-19)
 
 **Current behaviour.** `services/firebase/tokenVerifier.ts` passes `checkRevoked: false`. The
@@ -2008,7 +2091,7 @@ capability is never briefly absent between two phases.
 | --- | --- | --- | --- |
 | **N-1** | **Decision record only (this section).** Lock L-1…L-19; amend §14A.5; reconcile the specification, checklist, roadmap, README and CLAUDE.md. | — | nothing |
 | **N-2** | **Action-link live test (§14C.4)**, performed first because it can invalidate the mobile half of the plan. Live Firebase project + real device. **PARTIALLY DONE 2026-09-29 (§14C.4.1): the Android app/OS side is VERIFIED; the Firebase email side is NOT — the gate stays open.** | N-1, a live Firebase project | nothing |
-| **N-3** | **Mobile Firebase-native recovery, additive.** Add the four `firebase-native.ts` verbs (**which requires relaxing the Phase 1 `FORBIDDEN` verb map deliberately** — see below); add `sendPasswordResetEmail` + `confirmPasswordReset` + the `oobCode` reset screen; configure `ActionCodeSettings`. **The 26B/27 server path stays up.** | N-2 | nothing |
+| **N-3** | **Mobile Firebase-native recovery, additive.** Add the four `firebase-native.ts` verbs (**which requires relaxing the Phase 1 `FORBIDDEN` verb map deliberately** — see below); add `sendPasswordResetEmail` + `confirmPasswordReset` + the `oobCode` reset screen; configure `ActionCodeSettings`. **The 26B/27 server path stays up.** — **DONE 2026-09-29 (client half, §14C.4.2): TWO verbs, not four (the other two would have been dead code); the Firebase side remains UNVERIFIED, so the gate stays OPEN.** | N-2 | nothing |
 | **N-4** | **The revocation bridge (§14C.3).** `POST /api/auth/credentials-changed`, its validator, service, controller, audit action, the `phase23` `AUTHENTICATED` declaration, and the `401 SESSION_INVALIDATED`-is-success rule pinned by test. | N-1 | nothing |
 | **N-5** | **Firebase-native change-password + email verification.** `updatePassword` calling N-4; `sendEmailVerification`; `reload()`; a verify-email screen; the L-6/L-7 gate. Reconcile `authMethods` and the Profile screen. | N-4 | nothing |
 | **N-6** | **Retire the legacy password path.** Remove `/login`, `/register`, `loginWithPassword`, `registerBusinessOwner`, the `FIREBASE_SIGN_IN_REQUIRED` guard, their limiters, `authMethodsFor`, and the legacy branches in `lib/auth.tsx` (L-10). | N-5 | legacy login + register |

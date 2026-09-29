@@ -74,6 +74,14 @@
  * address" is by definition the legacy case. The security question is not decided
  * here either way: if a Firebase-linked account is somehow reached through this
  * branch, the server's `firebaseUid` guard refuses it.
+ *
+ * N-3 ADDS PASSWORD RECOVERY HERE, AND ADDS NOTHING ELSE. Two operations join the
+ * ones above — `sendFirebasePasswordResetEmail` and `confirmFirebasePasswordReset` —
+ * because recovery is the third thing Firebase does for this app and it needs the same
+ * treatment: the boundary performs the SDK call, and THIS module decides what a
+ * failure means and what a user may read. The custom 26B/27 server flow is not
+ * replaced; it is the fallback an unconfigured build still uses, and it is reachable
+ * from these outcome types rather than from a second policy written in a screen.
  */
 
 // THERE IS DELIBERATELY NO `import … from 'firebase/auth'` HERE ANY MORE (Phase D).
@@ -89,8 +97,10 @@
 import {
   isNativeFirebaseConfigured,
   isNativeGoogleConfigured,
+  nativeConfirmPasswordReset,
   nativeCreateUserWithEmail,
   nativeCurrentIdToken,
+  nativeSendPasswordResetEmail,
   nativeSignInWithEmail,
   nativeSignInWithGoogle,
   nativeSignOut,
@@ -727,6 +737,197 @@ export async function confirmFirebaseSignIn({
   }
 }
 
+// ---------------------------------------------------------------------------
+// Password recovery (N-3) — Firebase-native, additive
+// ---------------------------------------------------------------------------
+//
+// THE 26B/27 SERVER FLOW IS NOT REPLACED BY THIS, AND MUST NOT BE. Both paths ship
+// side by side: the screens prefer Firebase when the build is configured and fall back
+// to `POST /api/auth/forgot-password` + `POST /api/auth/reset-password` when it is not.
+// Retiring the custom stack is a later, separate owner decision (OD-5).
+//
+// WHAT THIS MODULE OWNS HERE, AND WHAT IT DELIBERATELY DOES NOT. It owns the DECISION
+// ABOUT WHAT A FIREBASE FAILURE MEANS, exactly as it does for sign-in, and it owns the
+// sentences a user is allowed to read. It does not own the product copy for the
+// ordinary outcomes: "we sent it", "this link cannot be used" and "there is nothing to
+// redeem" are states the screens render, so the unions below carry no message for them
+// — the same split `cancelled` and `wrong-method` already follow.
+
+/**
+ * What {@link sendFirebasePasswordResetEmail} answers.
+ *
+ * `legacyFallback` is ORDINARY, not a failure, and it is the ONLY state in which a
+ * caller may use the custom server flow. It means this BUILD has no Firebase
+ * configuration at all, which is a property of the build rather than a condition a
+ * runtime fault can create — the same rule, and the same word, `signInWithEmail`
+ * already uses. A configured-but-failing Firebase must NOT fall back, or an outage
+ * would become a downgrade path to a different mail system.
+ *
+ * `failure` carries `field` only for the single cause that belongs on an input rather
+ * than above the form: a malformed address.
+ */
+export type PasswordResetRequestOutcome =
+  | { kind: 'sent' }
+  | { kind: 'legacyFallback' }
+  | { kind: 'failure'; code: string | null; message: string; field?: 'email' };
+
+/**
+ * What {@link confirmFirebasePasswordReset} answers.
+ *
+ * `invalid-code` is ORDINARY and carries no message. An expired, already-spent,
+ * unknown or wrong-purpose action code is the expected outcome of an old or reused
+ * link, and the remedy is a new link rather than an error report. Every Firebase code
+ * that means "this code cannot be redeemed" collapses into it, because the causes are
+ * indistinguishable to a person and separating them would describe Firebase's
+ * internals for no benefit.
+ *
+ * THERE IS NO `legacyFallback` HERE, AND ITS ABSENCE IS LOAD-BEARING. An action code is
+ * a credential for FIREBASE, so failing to redeem it can never license a call to the
+ * custom server endpoint: the two credentials are unrelated, and a "try the other
+ * door" branch here would be a way in that neither flow's rules describe.
+ */
+export type PasswordResetConfirmOutcome =
+  | { kind: 'reset' }
+  | { kind: 'invalid-code' }
+  | { kind: 'failure'; code: string | null; message: string };
+
+/** The sentence for a request that failed for a reason this table has no words for. */
+const RESET_REQUEST_FAILED_MESSAGE = 'Unable to send the reset link. Please try again.';
+
+/** The same, for a confirmation that failed. */
+const RESET_FAILED_MESSAGE = 'Unable to reset the password. Please try again.';
+
+/**
+ * The sentence for a reset that cannot work because THIS APP is misconfigured.
+ *
+ * THE ERROR FAMILY IT ANSWERS IS THE PHASE'S OPEN GATE, which is why it exists at all.
+ * N-3 asks Firebase to return the emailed link to the app's own scheme
+ * (`inventoryai://reset-password`), and Firebase accepts a continue URL only if the
+ * project allows it — otherwise the send fails with `auth/unauthorized-continue-uri` or
+ * `auth/invalid-continue-uri`. Whether that happens on THIS project is exactly the
+ * unverified gate L-17/B-2, and the answer depends on Firebase Console configuration
+ * this repository cannot see.
+ *
+ * Reporting that answer as "please try again" would be actively misleading — retrying
+ * cannot help, and the person would loop — so it is named for what it is: a
+ * configuration fault the operator has to fix. The affected codes are matched by SHAPE
+ * because the SDK spells this family several ways across versions and platforms
+ * (`missing-`, `invalid-`, `unauthorized-`).
+ */
+const RESET_MISCONFIGURED_MESSAGE =
+  'Password reset is not available right now. Contact your administrator.';
+
+/**
+ * The codes that must be answered as SENT rather than as a failure.
+ *
+ * ENUMERATION RESISTANCE IS AN INVARIANT OF THIS FEATURE, not a nicety. The custom
+ * endpoint answers one identical 202 whether or not the address exists (Phase 26B-3),
+ * and the screen renders a fixed sentence that never reads that response, precisely so
+ * the flow cannot be used to learn which addresses have accounts. Firebase's own
+ * behaviour depends on a project setting: with email-enumeration protection ON (the
+ * default for a new project) it answers success for an unknown address and sends
+ * nothing, and with it OFF it answers `auth/user-not-found` — and for a disabled
+ * account it answers `auth/user-disabled`, which the server's own flow treats as
+ * indistinguishable from an unknown one. Reporting any of those as a failure would
+ * reintroduce through the client exactly the oracle the server was built to avoid, so
+ * they are all reported as sent and the screen's copy stays uniform.
+ */
+const INDISTINGUISHABLE_CODES: readonly string[] = [
+  'auth/disabled-user',
+  'auth/user-disabled',
+  'auth/user-not-found',
+];
+
+/**
+ * The codes that mean "this action code cannot be redeemed", collapsed to one state.
+ *
+ * `auth/invalid-action-code` covers unknown, malformed and wrong-purpose codes;
+ * `auth/expired-action-code` covers a link older than Firebase's expiry; and
+ * `auth/user-not-found` arrives here when the account was removed between the email
+ * being sent and the link being opened. The middle one is the only case where the
+ * person did nothing wrong, and it still needs a new link, which is why it shares the
+ * state.
+ */
+const INVALID_ACTION_CODE_CODES: readonly string[] = [
+  'auth/expired-action-code',
+  'auth/invalid-action-code',
+  'auth/user-not-found',
+];
+
+/**
+ * Sends Firebase's password-reset email. Never throws.
+ *
+ * THE GATE IS CHECKED OUTSIDE THE TRY, for the reason `signInWithEmail` records:
+ * "this build has no Firebase configuration" is a property of the build, not a state a
+ * runtime fault can produce, so it must not be confusable with one — and it is what
+ * licenses the caller's fallback to the custom endpoint. Everything the boundary can
+ * do is INSIDE the try, so a native module that failed to load, a network fault and a
+ * refused address are all classified by the same rules, and none of them falls back.
+ *
+ * A TOKEN IS NEVER INVOLVED. The Firebase JavaScript SDK once sent reset mail to a
+ * signed-in user through a different helper; nothing here needs or touches a session,
+ * a JWT or a Firebase ID token, which is why this route works for the signed-out
+ * person it exists for.
+ */
+export async function sendFirebasePasswordResetEmail(
+  email: string
+): Promise<PasswordResetRequestOutcome> {
+  if (!isNativeFirebaseConfigured()) return { kind: 'legacyFallback' };
+
+  try {
+    await nativeSendPasswordResetEmail(email);
+    return { kind: 'sent' };
+  } catch (err) {
+    const code = errorCode(err);
+    if (code && INDISTINGUISHABLE_CODES.includes(code)) return { kind: 'sent' };
+    // The app's own configuration, before anything the person could act on. Checked
+    // before the table below, whose entries are written for a user rather than for an
+    // operator. See `RESET_MISCONFIGURED_MESSAGE`.
+    if (code && code.includes('continue-uri')) {
+      return { kind: 'failure', code, message: RESET_MISCONFIGURED_MESSAGE };
+    }
+    // The one cause that belongs on the input rather than above the form.
+    if (code === 'auth/invalid-email') {
+      return { kind: 'failure', code, message: describeFirebaseFailure(code), field: 'email' };
+    }
+    return {
+      kind: 'failure',
+      code,
+      message: describeFirebaseFailure(code, RESET_REQUEST_FAILED_MESSAGE),
+    };
+  }
+}
+
+/**
+ * Redeems a Firebase action code and sets the new password. Never throws.
+ *
+ * THE CODE IS AN ARGUMENT AND THE PASSWORD IS AN ARGUMENT, and neither is retained:
+ * the code goes straight to the boundary, and the password is not stored anywhere in
+ * this module. The new password is NOT checked here either — the policy lives in the
+ * server's validator for the custom flow and in the screen's own pre-check for both,
+ * and a third opinion in this layer would be a third place for the two to disagree.
+ */
+export async function confirmFirebasePasswordReset({
+  oobCode,
+  newPassword,
+}: {
+  oobCode: string;
+  newPassword: string;
+}): Promise<PasswordResetConfirmOutcome> {
+  if (!isNativeFirebaseConfigured()) {
+    return { kind: 'failure', code: 'firebase/not-configured', message: MISCONFIGURED_MESSAGE };
+  }
+
+  try {
+    await nativeConfirmPasswordReset(oobCode, newPassword);
+    return { kind: 'reset' };
+  } catch (err) {
+    const code = errorCode(err);
+    if (code && INVALID_ACTION_CODE_CODES.includes(code)) return { kind: 'invalid-code' };
+    return { kind: 'failure', code, message: describeFirebaseFailure(code, RESET_FAILED_MESSAGE) };
+  }
+}
+
 export default {
   signInWithEmail,
   signInWithGoogle,
@@ -734,5 +935,7 @@ export default {
   signOutOfFirebase,
   currentFirebaseIdToken,
   confirmFirebaseSignIn,
+  sendFirebasePasswordResetEmail,
+  confirmFirebasePasswordReset,
   FirebaseAuthError,
 };

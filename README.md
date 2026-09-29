@@ -1175,3 +1175,31 @@ gate stays open and **iOS is entirely unverified**. **Nothing
   record documents a later retirement, it does not perform one. Full record:
   `docs/superpowers/specs/2026-09-18-firebase-auth-design.md` **§14C**; security record
   `docs/AUTH_SECURITY_MASTER_CHECKLIST.md` **§39**; phase record `docs/DEVELOPMENT_ROADMAP.md` **§27U**.
+
+- **Phase N-3 — Firebase-Native Password Recovery (additive):** the mobile half of the Firebase-only
+  recovery direction, shipped **beside** the existing flow rather than in place of it. `forgot-password`
+  now asks **Firebase** to send the reset email, and the custom 26B endpoint is reached **only** when the
+  build has no Firebase configuration — so a configured-but-failing Firebase reports a failure instead of
+  quietly falling back to another mail system. `reset-password` redeems a Firebase `?oobCode=` through the
+  native SDK while a legacy `?token=` link still goes to `POST /api/auth/reset-password`, so both link
+  shapes work. The Phase 1 verb guard was relaxed for **exactly one verb** (`sendPasswordResetEmail`) with
+  the reason recorded in place, and the deep link the email must return to is **pinned against
+  `app.json`**. Two properties are implemented rather than assumed: **enumeration resistance follows the
+  flow** (`auth/user-not-found` and `auth/user-disabled` answer *sent*, because with Firebase's
+  enumeration protection off those codes identify an address), and **a failed redemption can never fall
+  back** to the server endpoint, because an action code is a Firebase credential. The 26B/27 routes,
+  controller, service, reset-token model, Resend mail layer and their suites are **untouched** — removing
+  them is N-7. **No server, permission, schema, dependency, environment, EAS or Firebase Console change.**
+  Verified by **2 new mobile suites / 36 cases** (mobile **36 suites / 509 tests**, `tsc` and `eslint`
+  clean). **★ An on-device run against the live Firebase project was then performed** (the F2.9
+  development APK driven by Metro): a `?oobCode=` link **renders the reset form** (closing the `token`
+  vs `oobCode` mismatch that dead-ended it before), the legacy `?token=` link still works,
+  `sendPasswordResetEmail` for the dedicated test address reached the project and answered
+  **`onComplete:success`**, and a deliberately fake code was refused and rendered as *"This reset link is
+  invalid or has expired."* — so the project **accepted the custom-scheme `ActionCodeSettings`**.
+  **The reset email itself was never received or inspected (no mailbox access), so delivery and the
+  email's link remain UNVERIFIED, test items 3, 6 and 7 remain BLOCKED, the gate L-17 is narrowed but
+  stays open, and iOS remains `[EXTERNAL VERIFICATION REQUIRED]`.** One consequence is recorded rather than glossed: a Firebase-native
+  reset does **not** revoke Inventory AI sessions, which is the credential-change bridge's job (N-4,
+  designed and not implemented). See `docs/DEVELOPMENT_ROADMAP.md` **§27U** and
+  `docs/superpowers/specs/2026-09-18-firebase-auth-design.md` **§14C.4.2**.

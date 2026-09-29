@@ -40,7 +40,8 @@
  * dependency guard stopped claiming the JS SDK is what every path uses. Everything
  * else is untouched, including the two guards that carry the real weight: the boundary
  * still reaches the native packages only through the gated lazy loader, and it is still
- * the only file that names them. The Firebase operations themselves are tested in
+ * the only file that names them. N-3 relaxed one further verb and nothing else — the
+ * FORBIDDEN map below names which, and why. The Firebase operations themselves are tested in
  * `__tests__/firebase-auth.test.ts` (them migrated to the native seam) and in the
  * Phase B suites beside it.
  */
@@ -171,15 +172,23 @@ describe('the native boundary calls no authentication verb', () => {
    * writes). Every remaining group is forbidden for a reason that has not changed:
    * an auth-state listener would let native state drive the app, `setPersistence`
    * cannot work on React Native Firebase at all (owner decision P2 §3), and the
-   * provider link/unlink, Firebase email and account-mutation verbs are Phase D/E
-   * work that the owner has not authorised.
+   * provider link/unlink and account-mutation verbs remain unauthorised.
+   *
+   * N-3 RELAXED EXACTLY ONE VERB, AND THE REASON IS RECORDED RATHER THAN IMPLIED.
+   * `sendPasswordResetEmail` left this map because password recovery is Firebase's job
+   * by owner decision (design §14C, L-7) and the verb is now a shipped operation of
+   * `lib/firebase-native.ts` — leaving it here would make this guard fail on a
+   * deliberate implementation, which is how an inertness guard turns into noise that
+   * someone eventually deletes. `confirmPasswordReset` was never in the map. The
+   * relaxation is ONE verb in ONE group: `sendSignInLinkToEmail` is still forbidden,
+   * and so is every other group this map lists.
    */
   const FORBIDDEN: Record<string, string[]> = {
     'signs in anonymously': ['signInAnonymously'],
     'attaches an auth listener': ['onAuthStateChanged', 'onIdTokenChanged'],
     'writes a persistence workaround': ['setPersistence'],
     're-authenticates': ['reauthenticateWith'],
-    'sends a Firebase email': ['sendPasswordResetEmail', 'sendSignInLinkToEmail'],
+    'sends a Firebase email': ['sendSignInLinkToEmail'],
     'changes the account destructively': [
       'deleteUser(',
       'updateEmail(',

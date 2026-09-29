@@ -5471,6 +5471,105 @@ hosted continue-URL fallback was implemented or prototyped** — it is indicated
 probes fail, and they were never performed; it remains the new infrastructure dependency design §14C.4
 already records.
 
+### N-3 — Firebase-native password recovery, shipped additively (2026-09-29)
+
+**Mobile only. No server file, no route, no permission, no schema, no dependency, no environment
+variable, no EAS configuration and no Firebase Console setting was changed.** The existing custom
+recovery stack — both routes, the controller, the service, the reset-token model, the Resend mail layer
+and their suites — is **untouched and still works**; N-3 adds the Firebase path beside it, and N-7 is the
+phase that removes the other one.
+
+**Files changed (mobile, 6):** `lib/firebase-native.ts` (two operation: `nativeSendPasswordResetEmail`
+with the `ActionCodeSettings` prescription, and `nativeConfirmPasswordReset`; plus the deep-link and
+package constants they use), `lib/firebase-auth.ts` (the two outcome-typed wrappers, the code tables and
+their sentences), `app/forgot-password.tsx` (Firebase first, custom endpoint as the unconfigured-build
+fallback), `app/reset-password.tsx` (`?oobCode=` → Firebase, `?token=` → the existing endpoint),
+`__tests__/phase1-rnfirebase-foundation.test.ts` (the **deliberate, documented** relaxation of one verb)
+and the two new suites. The `reset-password` refactor also removed a render branch that the parent made
+unreachable — the form could not be mounted without a code.
+
+**The SDK surface used:** `sendPasswordResetEmail(auth, email, actionCodeSettings)` and
+`confirmPasswordReset(auth, oobCode, newPassword)` from `@react-native-firebase/auth@26.4.0`, reached
+only through the gated lazy loader. The settings are
+`{ url: 'inventoryai://reset-password', handleCodeInApp: true, android: { packageName:
+'com.inventoryai.app', installApp: true }, iOS: { bundleId: 'com.inventoryai.app' } }`, and the suite
+**pins them against `app.json`** so the declared deep link cannot drift from `expo.scheme` / the package
+identifiers.
+
+**Two verbs, not four.** The plan named four; `verifyPasswordResetCode` and `applyActionCode` were not
+added because nothing would call them (dead code is forbidden, and an unusable code is already an
+ordinary `invalid-code` outcome). **One verb relaxed, not a group:** `sendPasswordResetEmail` left the
+Phase 1 `FORBIDDEN` map with the reason written in place; `sendSignInLinkToEmail`, the listeners,
+`setPersistence`, `reauthenticateWith*`, the account-mutation verbs and the provider link/unlink verbs
+are all still forbidden.
+
+**★ Two security properties, implemented rather than intended.** *Enumeration resistance follows the
+flow*: `auth/user-not-found` and `auth/user-disabled` are answered as SENT, because with enumeration
+protection OFF those codes identify an address and a failure would rebuild the oracle the uniform 202
+exists to prevent. *No fallback on redemption*: an action code is a Firebase credential, so failing to
+redeem it can never license the custom endpoint — and `lib/firebase-auth.ts` imports no API module, so
+that branch would need a new import to exist. The gate's own errors
+(`auth/invalid-continue-uri` / `auth/unauthorized-continue-uri`) are named as a **configuration fault**
+rather than "please try again", because retrying cannot fix a continue-URL refusal.
+
+**Verification.** `mobile` Jest: **36 suites / 509 tests, 0 failures** (36 new tests in two new suites:
+`__tests__/phaseN3-firebase-recovery.test.ts` and `__tests__/phaseN3-recovery-screens.test.tsx`);
+`tsc --noEmit` clean; `eslint .` 0 findings. **Server suites were not run — no server file changed.**
+
+**★ What the first pass could not verify, and what the later device run changed.** **No Firebase reset email was generated or
+received in that pass**, and no live Firebase project had been exercised. That changed partially — see the runtime result below — so
+**items 3, 6 and 7 of the phase's test list remain BLOCKED**. The blockers are external and unchanged from N-2
+(no Firebase Console credential, no mailbox, no `firebase`/`gcloud` CLI), because delivery and link contents
+can be confirmed only from the inbox. **L-17 stays OPEN — NARROWED by the runtime result below, not resolved**, so
+**N-4 must not be started as though the Firebase-side half were proven.** iOS remains
+`[EXTERNAL VERIFICATION REQUIRED]`.
+
+**Consequence of the additive design, stated so it is not discovered later.** Because the client now
+resets a password **through Firebase**, the server never learns of it: `passwordChangedAt` is not
+stamped and no session is revoked, so an Inventory AI session held by someone else stays valid until it
+expires. That is the credential-change bridge's job (design §14C.3 / **N-4**), which is designed and
+**not implemented**; the reset screen carries the same note in place, and only the local session is
+cleared. The custom flow still revokes server-side, exactly as before.
+
+**Superseding observation about the device.** §27U's N-2 subsection records that the attached physical
+device had no build and no APK existed. That is no longer true: `com.inventoryai.app` **is installed**
+on `PV4DDMIZZLTCIVSK` (CPH1969, SDK 30, installed 2026-09-29 13:04:10), and APKs exist under
+`mobile/.smoke/`. **That installed build was the `preview` APK (`4160dee1-…`, commit `4ca36c6`) — a release
+build that embeds its bundle, so Metro cannot drive it.** `mobile/.smoke/f2-9-development.apk` was therefore installed over it **by owner decision**. The N-2 prose is not
+rewritten; this paragraph supersedes only the availability claim.
+
+### N-3 runtime result (2026-09-29, physical device, live Firebase project)
+
+**Setup.** The F2.9 development APK installed on the CPH1969, Metro serving the N-3 working tree into it
+(`Android Bundled … expo-router/entry.js`, 1591 modules), reachability proven by loading
+`http://localhost:8081/status` **in the device's own browser** through an `adb reverse` tunnel (the host
+LAN address is unreachable from the device, so the tunnel is the path). One root cause is worth keeping:
+the deep link must be `exp+inventory-ai://expo-development-client/?url=http%3A%2F%2Flocalhost%3A8081`,
+and a **stray `\r` in the URL** made the first launch silently fall back to the cached bundle.
+
+| Probe | Observed |
+| --- | --- |
+| `inventoryai://reset-password?oobCode=<placeholder>` | **The reset form renders** — `Set a new password` and both fields. The pre-N-3 bundle answered *"Link incomplete / missing its token"*, so **F-8 is CLOSED on the client side, on a device.** |
+| `inventoryai://reset-password?token=<placeholder>` | The same form renders — the legacy 26B/27 path is intact on the same build. |
+| `inventoryai://forgot-password` → Send for `jeffern1233@owner.com` | `Auth: sendPasswordResetEmail` → `FirebaseAuth: Password reset request …` → **`sendPasswordResetEmail:onComplete:success`**; screen showed *"Check your email"*, the fixed enumeration-resistant sentence and the new body copy. |
+| `confirmPasswordReset` with an obviously fake code | `FirebaseAuthActionCodeException: The out of band code is invalid…` → screen showed **"This reset link is invalid or has expired. Request a new one."** |
+
+**What this settles, and what it does not.** The project **accepted the custom-scheme `ActionCodeSettings`**
+— no `auth/*-continue-uri` rejection — so that configuration question moved from "unknown" to "accepted
+by the API", and the `invalid-code` classification is now runtime-proven end to end. **It does NOT settle
+delivery or the email's contents:** `onComplete:success` is returned even for an address with no account
+under email-enumeration protection, and the screen **deliberately cannot** distinguish "sent" from "no
+such account". Whether the emailed link returns to the app carrying the code — the remaining half of
+L-17 — is **still UNVERIFIED**, and items 6/7 remain blocked. **NARROWED, NOT CLOSED.**
+
+**State left behind.** The device now carries the F2.9 development build instead of preview `4160dee1-…`
+(reinstallable from its EAS artifact URL); Metro was left running on `:8081` because it is what loads this
+code; **no source, configuration, dependency or Firebase Console setting was changed by the run**, no new
+EAS build was created, no real `oobCode` was ever obtained or recorded, and the device's temporary UI
+dumps were removed.
+
+---
+
 ## Implementation order (design §14C.6)
 
 **N-1** this decision record → **N-2** the action-link live test (first, because it can invalidate the

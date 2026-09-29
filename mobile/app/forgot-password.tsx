@@ -8,6 +8,7 @@ import Button from '../components/Button';
 import Input from '../components/Input';
 import { forgotPassword } from '../lib/api';
 import { ApiError } from '../lib/client';
+import { sendFirebasePasswordResetEmail } from '../lib/firebase-auth';
 import { spacing, type } from '../lib/theme';
 import type { Palette } from '../lib/theme';
 import { useTheme } from '../lib/theme-context';
@@ -20,6 +21,15 @@ import { useTheme } from '../lib/theme-context';
  * to that same 202, because a distinguishable failure there would be an
  * account-existence oracle. Rendering the response body would be the one place
  * the client could undo that, so this screen does not read it.
+ *
+ * N-3 EXTENDS THAT RULE TO THE FIREBASE PATH, and the text is unchanged because the
+ * requirement is the same one. Firebase answers differently depending on a project
+ * setting — success for an unknown address with email-enumeration protection on, and
+ * `auth/user-not-found` for the same address with it off — so the classification
+ * layer reports all of those as sent (see `sendFirebasePasswordResetEmail`), and this
+ * one constant is what both paths and both settings show. The precise wording is
+ * therefore load-bearing rather than cosmetic: it may not be made more specific
+ * without reopening the oracle.
  */
 const REQUEST_ACCEPTED =
   'If an account exists for that email, a password reset link has been sent.';
@@ -57,6 +67,14 @@ function fieldMap(err: unknown): Record<string, string> {
  * The screen has no signedIn redirect: a signed-in visitor who lands here is
  * harmless (the reset would simply end their sessions), and bouncing them into
  * `(app)` would be the silent navigation the phase forbids.
+ *
+ * N-3: THE BUILD DECIDES WHICH MAIL IS SENT. A Firebase-configured build asks Firebase
+ * to send its own reset email (`sendFirebasePasswordResetEmail`), and only an
+ * UNCONFIGURED build falls through to the custom 26B endpoint below. A configured but
+ * failing Firebase does NOT fall back — the classification layer reports a failure and
+ * this screen shows it — because treating an outage as "try the other mail system"
+ * would let anyone who can break Firebase choose the weaker door. Both paths end in the
+ * same success state and the same single sentence.
  */
 export default function ForgotPasswordScreen() {
   const { colors } = useTheme();
@@ -80,7 +98,19 @@ export default function ForgotPasswordScreen() {
     setFormError(null);
     setFieldErrors({});
     try {
-      await forgotPassword(value);
+      // FIREBASE FIRST (N-3). `legacyFallback` is the one state that licenses the custom
+      // endpoint, and it means this build has no Firebase configuration at all — it is
+      // not a route out of a Firebase failure, which is reported below instead.
+      const outcome = await sendFirebasePasswordResetEmail(value);
+      if (outcome.kind === 'legacyFallback') {
+        await forgotPassword(value);
+      } else if (outcome.kind === 'failure') {
+        // A malformed address belongs on the input; everything else is a statement
+        // about the request and goes above the form.
+        if (outcome.field === 'email') setFieldErrors({ email: outcome.message });
+        else setFormError(outcome.message);
+        return;
+      }
       setDone(true);
     } catch (err) {
       const fields = fieldMap(err);
@@ -95,8 +125,15 @@ export default function ForgotPasswordScreen() {
     return (
       <AuthLayout title="Check your email" subtitle="Follow the link to set a new password.">
         <Banner type="success" text={REQUEST_ACCEPTED} />
+        {/*
+          * Deliberately claims nothing about HOW the link is delivered. The earlier
+          * wording said the link "opens the Inventory AI app directly", which is only
+          * true if Firebase's hosted action handler honours the custom-scheme settings
+          * — the open gate L-17/B-2, which no test on this host can settle. A sentence
+          * a user reads is not the place to assert an unverified behaviour.
+          */}
         <Text style={styles.body}>
-          The link opens the Inventory AI app directly. It can only be used once.
+          Open the link to choose a new password. It can only be used once.
         </Text>
         <Button
           title="Back to sign in"

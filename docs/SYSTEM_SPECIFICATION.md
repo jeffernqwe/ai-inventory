@@ -1637,6 +1637,86 @@ Phase 32F record and is not rewritten.)* The boundary is what Google and Faceboo
 
 ---
 
+## Firebase-Only Authentication — the Locked Direction (design only; nothing removed)
+
+**2026-09-29.** The owner has locked the direction of this subsystem: **Firebase Authentication becomes
+the sole authentication authority**, and the application-owned password path is **retired** rather than
+carried forward. The premise that makes this affordable is fixed by the owner: **all current MongoDB
+users are mocked development/test data**, so **no legacy-user migration, backward-compatibility layer
+or bulk `auth:import` is designed, and none is to be built**.
+
+**Nothing described in this subsection has been implemented or removed.** Every route, service, model,
+screen and mail module named below still exists and still behaves exactly as the sections above
+describe. The authoritative record is `docs/superpowers/specs/2026-09-18-firebase-auth-design.md`
+**§14C**; the security record is `docs/AUTH_SECURITY_MASTER_CHECKLIST.md` **§39**; the shipped record is
+`docs/DEVELOPMENT_ROADMAP.md` **§27U**.
+
+**What Firebase owns, once this is implemented:** email/password authentication, Google authentication,
+password reset/recovery, email verification, and password changes.
+
+**What does not move — and this is the part that must not be misread:**
+
+```text
+Firebase Auth      identity          — "who is this person?"
+Inventory AI JWT   application session + revocation   ← REMAINS
+MongoDB            businessId · role · status · permissions · lifecycle · tenant isolation   ← AUTHORITATIVE
+```
+
+- **The Inventory AI JWT and server-side session remain, and this is not negotiable.** `requireAuth` is
+the only component that loads the MongoDB `User` **per request**, refuses a token whose `jti` names no
+live session, compares the token's `iat` against `passwordChangedAt`, and checks the business's
+liveness. Firebase cannot revoke an Inventory AI session, because an ID token is never the API bearer
+credential.
+- **MongoDB remains authoritative** for `businessId`, `role`, `status`, permissions, business lifecycle
+  and tenant isolation. **Business authorization must not move into Firebase custom claims as the
+  primary authority**, and no custom claim is introduced, read or trusted. `firebaseUid` remains an
+  identity linkage field, not an authorization source.
+- **Email/password users must have a verified email before entering the main app.** A Google user is
+  verified **according to Firebase's signed `email_verified` claim** — not because the provider is
+  Google. The enforcement *mechanics* (client gate vs server gate, what an unverified user may reach,
+  and the fact that `User.emailVerified` is only written at exchange/link/register time and is
+  therefore stale between those events) remain **open** and must be decided before the step that needs
+  them.
+
+### The credential-change revocation bridge (required before native recovery ships)
+
+A Firebase-native password reset or password change completes **entirely inside Firebase**, on the
+client. Because `passwordChangedAt` is the only mechanism that invalidates existing Inventory AI
+sessions — and `checkRevoked` is `false` — a client-side credential change would **revoke nothing**,
+leaving every prior session alive, including an attacker's. **This is a requirement, not an
+enhancement:** native recovery may not ship before a bridge exists.
+
+The proposed bridge is **`POST /api/auth/credentials-changed`** — authenticated, no permission,
+`{ idToken }` only, with a validator that returns no field capable of carrying a client-supplied
+`userId`, `businessId`, `firebaseUid` or `role`. It must satisfy three conditions before it writes
+anything: the verified uid must equal the account's existing `firebaseUid`; the signed `auth_time`
+must be inside the existing 300-second freshness window, failing closed when the claim is absent; and
+the caller must already hold a live Inventory AI session. It then stamps `passwordChangedAt` and
+revokes every session, and the client **re-exchanges afterwards** — the exchange route is public, so
+the revocation cannot block it, and a token minted after the stamp is never caught by the comparison.
+The bridge writes only those two things and can never move a tenant, change a role or change a status.
+Full design, including its ordering, its non-retryability and the documented
+`401 SESSION_INVALIDATED`-is-success rule: design §14C.3.
+
+**`checkRevoked` is reviewed and stays `false`.** MongoDB `status`, checked per request, is the
+revocation authority; enabling Firebase-side revocation checking would add a network call to Google on
+every exchange, fail closed during a Google outage, and still not end a live Inventory AI session.
+**Disabling a user in Firebase only does not stop their Inventory AI session, and will not while
+Firebase is not the bearer credential.**
+
+### What is to be retired, eventually and in separately approved steps
+
+Legacy bcrypt login and register; the two custom password-reset routes, the reset-token model and the
+**entire mail layer** (whose only production consumer is password recovery); admin-created password
+accounts, which must be replaced by **invitation-based Firebase onboarding** *before* legacy login is
+removed, because `users.service.create` currently writes a password hash and **no `firebaseUid`** and
+would otherwise produce an account with no way in; and the Inventory-specific Firebase link/unlink
+lifecycle, whose Policy B destination disappears under this direction. **No artefact on this list is
+removed by this specification change**, and each removal requires the same approval discipline as any
+other phase.
+
+---
+
 # 30. Authorization
 
 Authorization must be server-side.

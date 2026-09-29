@@ -1150,3 +1150,23 @@ sentence's second clause: it was the reset flow, not `change-password`, that rep
   **30 suites / 438 tests, 0 failures**; `tsc --noEmit` and `eslint .` clean; verified on device through
   the `preview` EAS build **`75fc3eb6-…`**. **No backend, dependency, permission, route or session
   change.** See `docs/DEVELOPMENT_ROADMAP.md` §27R.
+
+- **Phase 32N — Firebase-Only Authentication Architecture & the Credential-Change Revocation Bridge
+  (design record only):** **documentation only — no code, test, schema, dependency, environment
+  variable, Firebase Console setting, EAS configuration or deployment change.** The owner has locked
+  **Firebase Authentication as the sole authentication authority** (email/password, Google, password
+  reset, email verification, password changes) and fixed the premise that all current MongoDB users are
+  **mocked development/test data**, so **no legacy migration or bulk `auth:import` is designed**. The
+  **Inventory AI JWT + server-side session remain** and **MongoDB remains authoritative** for
+  `businessId`, `role`, `status`, permissions, business lifecycle and tenant isolation — **business
+  authorization must not move into Firebase custom claims**. The application-owned password path is on a
+  **retirement path**, with **invitation-based onboarding a hard prerequisite** of removing legacy
+  login. The phase records the **credential-change revocation bridge** (`POST
+  /api/auth/credentials-changed` — authenticated, bound to the verified uid **and** a fresh signed
+  `auth_time`, stamping `passwordChangedAt` and revoking every session, with the re-exchange ordered
+  after it so the new session survives), recommends **`checkRevoked` stays `false`**, and records that
+  the **Firebase action-link return leg must be verified live** before recovery is complete. **Nothing
+  was removed:** the 26B/27 endpoints, the reset-token model and the Resend mail layer all remain — the
+  record documents a later retirement, it does not perform one. Full record:
+  `docs/superpowers/specs/2026-09-18-firebase-auth-design.md` **§14C**; security record
+  `docs/AUTH_SECURITY_MASTER_CHECKLIST.md` **§39**; phase record `docs/DEVELOPMENT_ROADMAP.md` **§27U**.

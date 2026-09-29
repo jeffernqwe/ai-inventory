@@ -50,7 +50,7 @@ history, the deferred exception and the verification baseline.
 
 - Firebase Authentication — the **identity provider** (answers "who is this person?")
 - JWT — the Inventory AI **application session**, exchanged from a verified Firebase ID token
-- bcrypt — legacy password hashes, retained for accounts that predate Firebase
+- bcrypt — legacy password hashes, retained for accounts that predate Firebase, and **on a retirement path** (locked direction 2026-09-29 — design §14C)
 - Server-side session records named by a mandatory `jti` (Phase 26A)
 
 Firebase identity and Inventory AI authorization are **separate systems**. A verified Firebase ID
@@ -62,9 +62,33 @@ resolves a user by `firebaseUid` only and never by email.
 
 Provider architecture (Google / Facebook / Apple) and the account-linking security policy are
 documented in `docs/SYSTEM_SPECIFICATION.md` §29 and in the design authority
-`docs/superpowers/specs/2026-09-18-firebase-auth-design.md` §14/§14A. **Google Sign-In, Facebook
-Login, Apple Sign-In, account linking and account unlinking are NOT implemented** — they are
+`docs/superpowers/specs/2026-09-18-firebase-auth-design.md` §14/§14A/§14C. **Facebook
+Login and Apple Sign-In are NOT implemented.** *(Corrected 2026-09-29: **Google Sign-In**, the server-side **link** boundary and the server-side **unlink** boundary are each implemented — Phases C, 32H and 32L respectively. Provider linking itself is performed by the Firebase **client** SDK and has no server-side equivalent.)* They are
 planned and require an owner-approved phase each.
+
+### Firebase-only authentication — the locked direction (design only; nothing removed)
+
+**Firebase Authentication becomes the sole authentication authority**: email/password, Google, password
+reset/recovery, email verification and password changes are all Firebase's. **The Inventory AI JWT and
+server-side session remain**, and **MongoDB remains authoritative** for `businessId`, `role`, `status`,
+permissions, business lifecycle and tenant isolation. **Business authorization must not move into
+Firebase custom claims as the primary authority**, and no custom claim is introduced, read or trusted.
+Email/password users must have a **verified email before entering the main app**; a Google user is
+verified according to Firebase's signed claim, not because the provider is Google.
+
+**Nothing has been implemented or removed by this decision.** The application-owned password path —
+bcrypt login/register, the custom reset-token flow and the Resend mail layer, and admin-created
+password accounts — is on a **retirement path**, with **invitation-based onboarding a hard prerequisite**
+of removing legacy login (because `users.service.create` writes a password hash and no `firebaseUid`).
+A Firebase-native credential change completes client-side and would therefore revoke **nothing**, so a
+**credential-change revocation bridge** is required before native recovery or change-password ships.
+The action-link return leg must be verified on a real device against a live Firebase project before
+recovery is called complete, and iOS remains `[EXTERNAL VERIFICATION REQUIRED]`.
+
+Authority for all of the above: `docs/SYSTEM_SPECIFICATION.md` §29 · design authority
+`docs/superpowers/specs/2026-09-18-firebase-auth-design.md` **§14C** (locked decisions L-1…L-19, the
+bridge, the order plan) · security record `docs/AUTH_SECURITY_MASTER_CHECKLIST.md` **§39** · shipped
+record `docs/DEVELOPMENT_ROADMAP.md` **§27U**.
 
 ### AI
 

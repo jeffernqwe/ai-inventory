@@ -1371,7 +1371,7 @@ permissions, lifecycle and tenant isolation (**L-9**); legacy bcrypt login/regis
 custom reset tokens + endpoints + Resend infrastructure (**L-11**), admin-created password accounts
 (**L-12**) and the Inventory-specific link/unlink lifecycle (**L-13**) are to be retired or re-scoped;
 a **credential-change revocation bridge** is required before native recovery or change-password ships
-(**L-14/L-15/L-16**); the **action-link return leg must be verified live** (**L-17**); business
+(**L-14/L-15/L-16**); the **action-link return leg must be verified live** (**L-17**) — **N-2, 2026-09-29: the Android app/OS side is VERIFIED and the Firebase email side is NOT, so the gate stays OPEN (design §14C.4.1, finding F-8)**; business
 authorization must **not** move into Firebase custom claims (**L-18**); and `checkRevoked` was reviewed
 (**L-19**).
 
@@ -1450,6 +1450,7 @@ that Firebase-side disable must take effect at exchange.
 | **F-5** | **Removing the recovery endpoints deletes the subject matter of B2** (distributed reset-mail flooding). **E3** (in-memory, per-process limiter stores) **survives** for the remaining login/exchange limiters. **No shared store is introduced in either direction.** |
 | **F-6** | **`User.emailVerified` is written only at exchange/link/register time**, so it is stale between those events — which matters once L-6/L-7 have to make a decision from it (**OD-3**). |
 | **F-7** | **No live Firebase project has ever been exercised** for Phases 32B–32L (§25), so none of this can be runtime-claimed. |
+| **F-8** | **The existing reset screen reads `token`, not `oobCode`, and a Firebase-native link would therefore dead-end.** Verified on the installed Android development build 2026-09-29 by injecting both parameter names at the OS level: `?token=` renders the reset form, `?oobCode=` renders **"Link incomplete"**. **Router-level custom-scheme delivery is VERIFIED; the Firebase email side is NOT** (design §14C.4.1, roadmap §27U). |
 
 ### What is UNCHANGED, and must be
 
@@ -1465,7 +1466,9 @@ not a licence to relax them.** **No Firebase custom claim is introduced (L-18).*
 this section. No Firebase Console change. No removal of the legacy path, the recovery endpoints, the
 reset-token model or the Resend mail layer — every one of those artefacts **still exists and still
 works**, and its disposition is **OD-5**. No weakening of the §14.1 guard. No claim that the
-action-link flow works (**L-17** is a live-test gate that has not been performed).
+action-link flow works (**L-17** is a live-test gate that is **still open**: N-2 verified the Android app/OS
+side on 2026-09-29 but the **Firebase email side was never exercised** — see §39 finding F-8 and design
+§14C.4.1).
 
 ### Changed in this reconciliation
 

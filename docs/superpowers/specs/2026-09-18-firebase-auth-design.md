@@ -1884,6 +1884,86 @@ improvisation. **iOS cannot be verified on the current Windows host and remains
 
 ---
 
+### 14C.4.1 N-2 test result (2026-09-29) — the app side is VERIFIED, the Firebase email side is NOT
+
+**What was tested.** The `InventoryAI` AVD (`emulator-5554`, SDK 35, x86_64) was booted and the
+**installed development build** `com.inventoryai.app` (versionName 1.0.0, versionCode 1, targetSdk 36,
+`lastUpdateTime 2026-09-25 15:43` — the **Phase F2.9** build `f3038fa1-…`) was exercised. No build was
+created, no configuration was changed, and no real reset `oobCode` was ever obtained, used or recorded
+— only clearly-labelled placeholders.
+
+| # | Probe | Observed result |
+| --- | --- | --- |
+| 1 | Package/activity resolution of `inventoryai://reset-password` | **Resolves to `com.inventoryai.app/.MainActivity`** (`match=0x208000`, `isDefault=true`) |
+| 2 | Control: the retired `com.inventoryai.app:/oauthredirect` | **`No activity found`** — still unresolvable, confirming F2.9 |
+| 3 | `am start -a VIEW -c BROWSABLE -d "inventoryai://reset-password?oobCode=PLACEHOLDER"` | **Status: ok**, delivered in-app to `MainActivity`, which became `topResumedActivity`. **No browser opened. No Firebase error. No crash.** |
+| 4 | Screen after probe 3 | **`Link incomplete` / `This reset link is missing its token.` / `Request a new link`** |
+| 5 | Positive control: `…?token=PLACEHOLDER` | **The reset form rendered** — `Set a new password`, `New password *`, `Confirm new password *`, `Min 8 characters` |
+| 6 | Negative control: `inventoryai://` with no route | The **login screen** rendered (`Welcome back`, `Sign In`, `Continue with Google`, `Forget password?`) |
+
+**PASS for the app side.** `inventoryai` reaches the app, **expo-router routes it to `/reset-password`**,
+and **a query parameter is read and accepted** — proven by the positive control, which drove the screen
+into its form branch rather than its missing-token branch. The placeholder was never rendered, which is
+the token-hygiene property Phase 27 established and still holds.
+
+**★ The finding N-3 must carry.** Probe 3 and probe 5 differ **only in the parameter name**, and they
+land on different branches of the same screen: the current `app/reset-password.tsx` reads
+**`params.token`**, so a Firebase-native link carrying **`?oobCode=`** renders
+**"Link incomplete"**. **Router-level `inventoryai://reset-password?oobCode=…` delivery does NOT by
+itself reach the form** — N-3 must change the screen to read `oobCode` (and/or parse it via the SDK's
+`ActionCodeURL`), or every Firebase reset link will dead-end one screen short of working. This is a
+genuine, reproducible observation rather than an inference.
+
+**What this test does NOT prove, and must not be read as proving.** Every probe above injected the URL
+**directly at the OS level with `am start`**. It therefore proves the **receiving** end and says nothing
+about the **sending** end. Still **UNVERIFIED**:
+
+1. **Whether Firebase's reset email actually contains a custom-scheme URL.** The email is composed by
+   **Firebase's servers** from the template configured in the **Firebase Console**. It was never
+   generated, received or read in this test.
+2. **Whether Firebase's hosted action handler consumes the link first** rather than handing control to
+   the app — the specific behaviour `handleCodeInApp` is meant to change, and the specific thing this
+gate exists to settle.
+3. **Any Firebase error path**, including what an expired or already-used `oobCode` produces, and
+   whether a Firebase error surfaces as a browser page or as an app-branchable error.
+4. **Anything Google/provider-specific.** No provider was exercised.
+
+**Why it could not be completed, stated exactly.** The test requires an **email inbox** to receive the
+reset message and a **Firebase Console session** to configure and confirm the action-code settings
+(§14C.4 header rule 6, and the owner's requirement to use a dedicated development account). This agent
+has access to neither: there is **no `firebase` CLI and no `gcloud` CLI on this host**, no Console
+credential, and no mailbox access. The reset email was therefore **never triggered** — not because it
+failed, but because the link it would produce cannot be retrieved here. **No success was simulated.**
+
+**Therefore L-17 is only HALF satisfied.** *"Firebase action-link/deep-link routing using the existing
+`inventoryai` scheme must be verified on a real device against a live Firebase project before recovery
+is considered complete."* — the **real device** half is now verified (on an **emulator**, not physical
+hardware; see below); the **live Firebase project** half is **still UNVERIFIED**, and the gate
+**remains open**. **N-3 must not be started on the strength of this result alone.**
+
+**Android emulator vs physical device — recorded, because the difference is real.** Every runtime
+observation above is from the `InventoryAI` **emulator** on this Windows host. This phase had **no
+physical device**, exactly as Phase 32G and Phase F2.9 recorded. A physical-device run additionally
+needs `EXPO_PUBLIC_API_URL` pointed at the host's LAN address, since the `development` profile sets no
+`env`.
+
+**iOS remains `[EXTERNAL VERIFICATION REQUIRED]`, with nothing verified.** No iOS build exists for this
+project, none can be produced on this Windows host, and no iOS run was attempted. Specifically
+unverified for iOS: that the `inventoryai` scheme is registered at all after the F2 change to a
+single-entry `expo.scheme`; that a URL reaching the app routes to `/reset-password`; and — the reason
+iOS needs its own live test rather than an Android result being extended to it — that **any** Firebase
+action-link delivery works on a platform where the project has configured **no** Universal Links, no
+associated domains and no Apple Team/App Site Association file.
+
+**No Firebase Console configuration was changed, and none was read.** The settings the test will
+require are named in §14C.4 above (the action-code / custom action URL configuration and the email
+template) and remain **unconfirmed**.
+
+**A hosted continue-URL fallback is NOT yet indicated.** It appears necessary only if the Firebase-side
+probes fail, and they were never performed. It therefore stays documented as §14C.4 already records it
+— a **new infrastructure dependency needing an explicit owner decision** — and **no fallback was
+implemented or prototyped**. **No application-code change of any kind was made in N-2.**
+
 ## 14C.5 `checkRevoked = false` — review and recommendation (L-19)
 
 **Current behaviour.** `services/firebase/tokenVerifier.ts` passes `checkRevoked: false`. The
@@ -1923,7 +2003,7 @@ capability is never briefly absent between two phases.
 | Step | Scope | Depends on | Removes |
 | --- | --- | --- | --- |
 | **N-1** | **Decision record only (this section).** Lock L-1…L-19; amend §14A.5; reconcile the specification, checklist, roadmap, README and CLAUDE.md. | — | nothing |
-| **N-2** | **Action-link live test (§14C.4)**, performed first because it can invalidate the mobile half of the plan. Live Firebase project + real device. | N-1, a live Firebase project | nothing |
+| **N-2** | **Action-link live test (§14C.4)**, performed first because it can invalidate the mobile half of the plan. Live Firebase project + real device. **PARTIALLY DONE 2026-09-29 (§14C.4.1): the Android app/OS side is VERIFIED; the Firebase email side is NOT — the gate stays open.** | N-1, a live Firebase project | nothing |
 | **N-3** | **Mobile Firebase-native recovery, additive.** Add the four `firebase-native.ts` verbs (**which requires relaxing the Phase 1 `FORBIDDEN` verb map deliberately** — see below); add `sendPasswordResetEmail` + `confirmPasswordReset` + the `oobCode` reset screen; configure `ActionCodeSettings`. **The 26B/27 server path stays up.** | N-2 | nothing |
 | **N-4** | **The revocation bridge (§14C.3).** `POST /api/auth/credentials-changed`, its validator, service, controller, audit action, the `phase23` `AUTHENTICATED` declaration, and the `401 SESSION_INVALIDATED`-is-success rule pinned by test. | N-1 | nothing |
 | **N-5** | **Firebase-native change-password + email verification.** `updatePassword` calling N-4; `sendEmailVerification`; `reload()`; a verify-email screen; the L-6/L-7 gate. Reconcile `authMethods` and the Profile screen. | N-4 | nothing |
@@ -1965,7 +2045,7 @@ password can be reset through one system and not the other."* The plan closes in
 | **OD-7** | **Is `/register` removed outright, or left for an unconfigured build?** Today `signUp` uses the legacy route when `isFirebaseConfigured()` is false. Removing it means an unconfigured build cannot register at all — possibly correct, but a deliberate choice. | Decision |
 | **OD-8** | **Facebook (O-5) and Apple** are outside L-1…L-19. The missing-email onboarding flow and Apple's future scope are untouched by this design. | Decision, already open |
 | **B-1** | **No live Firebase project has ever been exercised** for any of Phases 32B–32L. Every one of them is offline/seam-verified. | Blocker (environment) |
-| **B-2** | **The action-link return leg (§14C.4) is UNVERIFIED** and gates N-3. | Blocker (external) |
+| **B-2** | **The action-link return leg (§14C.4) is UNVERIFIED** and gates N-3. — **PARTIALLY NARROWED 2026-09-29 (§14C.4.1):** the **Android app/OS side is VERIFIED** (`inventoryai://reset-password` resolves to the app, routes to the screen, and a query parameter is read) **and the `token`-vs-`oobCode` mismatch was found**; the **Firebase email side is still UNVERIFIED** because no inbox or Console access exists, so the gate **stays open**. | Blocker (external) |
 | **B-3** | **iOS cannot be built or verified on the current Windows host.** `[EXTERNAL VERIFICATION REQUIRED]`. | Blocker (hardware) |
 | **B-4** | **The mobile Jest configuration mocks nothing Firebase-related** (§19). Any test touching `lib/auth.tsx` changes in the same commit as the rewiring. | Blocker (test infrastructure) |
 | **B-5** | **`test:db` and the full suite must be re-run** in each implementing step; several guards fail by *declaration* (the Phase 23 route classifier) and must change in the same commit as the route they describe. | Blocker (verification) |

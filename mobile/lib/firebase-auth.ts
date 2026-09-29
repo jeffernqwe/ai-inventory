@@ -104,6 +104,7 @@ import {
   nativeSignInWithEmail,
   nativeSignInWithGoogle,
   nativeSignOut,
+  nativeVerifyPasswordResetCode,
 } from './firebase-native';
 
 // ---------------------------------------------------------------------------
@@ -791,11 +792,44 @@ export type PasswordResetConfirmOutcome =
   | { kind: 'invalid-code' }
   | { kind: 'failure'; code: string | null; message: string };
 
+/**
+ * What {@link verifyFirebasePasswordResetCode} answers (N-4).
+ *
+ * `verified` carries the ACCOUNT'S EMAIL, and that is the only field in this module that
+ * ever describes an account — so what it is allowed to become is stated here rather than
+ * left to a caller: the address of the automatic sign-in that follows a reset, and half of
+ * a non-secret local fingerprint. It is never persisted, never rendered, never logged and
+ * never an authorization input; the server decides who the account is, from the session
+ * and the verified uid.
+ *
+ * `invalid-code` is ORDINARY and carries no message, for exactly the reason the confirm
+ * outcome's is: an expired, spent, unknown or wrong-purpose code is what an old link gives
+ * you, and the remedy is a new link rather than an error report. The SAME code set decides
+ * it as for the confirmation, so the two steps cannot disagree about which links are dead.
+ *
+ * There is deliberately NO `legacyFallback`: an action code is a credential for Firebase,
+ * and failing to read it can never license the custom server endpoint.
+ */
+export type PasswordResetCodeOutcome =
+  | { kind: 'verified'; email: string }
+  | { kind: 'invalid-code' }
+  | { kind: 'failure'; code: string | null; message: string };
+
 /** The sentence for a request that failed for a reason this table has no words for. */
 const RESET_REQUEST_FAILED_MESSAGE = 'Unable to send the reset link. Please try again.';
 
 /** The same, for a confirmation that failed. */
 const RESET_FAILED_MESSAGE = 'Unable to reset the password. Please try again.';
+
+/**
+ * The same, for a reset link whose ACCOUNT could not be established (N-4).
+ *
+ * Separate from `RESET_FAILED_MESSAGE` because the two describe different failures: this
+ * one means the link could not be read at all, so the password was not touched and the
+ * person can simply retry the same link. Saying "unable to reset the password" there would
+ * suggest something had been attempted against their credential.
+ */
+const RESET_LINK_FAILED_MESSAGE = 'Unable to use this reset link. Please try again.';
 
 /**
  * The sentence for a reset that cannot work because THIS APP is misconfigured.
@@ -928,6 +962,51 @@ export async function confirmFirebasePasswordReset({
   }
 }
 
+/**
+ * Establishes which account a password-reset link belongs to. Never throws (N-4).
+ *
+ * READ-ONLY WITH RESPECT TO THE CREDENTIAL, and that is the property the caller depends on:
+ * it is called BEFORE the password changes, so that the recovery marker can be written
+ * before the operation that must not be able to escape it (design §14C.3.9 M-1/M-6). A step
+ * that could change the password would make that ordering meaningless.
+ *
+ * THE GATE IS CHECKED OUTSIDE THE TRY, following `sendFirebasePasswordResetEmail`:
+ * "this build has no Firebase configuration" is a property of the build rather than a
+ * runtime fault, and it is the one state that licenses the caller's custom endpoint. Here
+ * it answers a `failure` rather than a `legacyFallback`, because the custom flow has no
+ * equivalent of this step — nothing falls back, the link simply cannot be read on an
+ * unconfigured build.
+ *
+ * A BLANK OR NON-STRING ADDRESS IS REFUSED rather than passed on. An identity layer that
+ * returned no address would make both consumers wrong at once: the automatic sign-in would
+ * have no address to use, and the fingerprint would be the hash of nothing, which would
+ * match every other empty case. It is a defensive branch — the native SDK resolves an
+ * address or rejects — not a state a working project produces.
+ */
+export async function verifyFirebasePasswordResetCode(
+  oobCode: string
+): Promise<PasswordResetCodeOutcome> {
+  if (!isNativeFirebaseConfigured()) {
+    return { kind: 'failure', code: 'firebase/not-configured', message: MISCONFIGURED_MESSAGE };
+  }
+
+  try {
+    const email = await nativeVerifyPasswordResetCode(oobCode);
+    if (typeof email !== 'string' || !email.trim()) {
+      return { kind: 'failure', code: 'firebase/no-email', message: RESET_LINK_FAILED_MESSAGE };
+    }
+    return { kind: 'verified', email: email.trim() };
+  } catch (err) {
+    const code = errorCode(err);
+    if (code && INVALID_ACTION_CODE_CODES.includes(code)) return { kind: 'invalid-code' };
+    return {
+      kind: 'failure',
+      code,
+      message: describeFirebaseFailure(code, RESET_LINK_FAILED_MESSAGE),
+    };
+  }
+}
+
 export default {
   signInWithEmail,
   signInWithGoogle,
@@ -936,6 +1015,7 @@ export default {
   currentFirebaseIdToken,
   confirmFirebaseSignIn,
   sendFirebasePasswordResetEmail,
+  verifyFirebasePasswordResetCode,
   confirmFirebasePasswordReset,
   FirebaseAuthError,
 };

@@ -7,9 +7,9 @@ import Banner from '../components/Banner';
 import Button from '../components/Button';
 import Input from '../components/Input';
 import { resetPassword } from '../lib/api';
-import { useSession } from '../lib/auth';
+import { clearPasswordResetPending, markPasswordResetPending, useSession } from '../lib/auth';
 import { ApiError } from '../lib/client';
-import { confirmFirebasePasswordReset } from '../lib/firebase-auth';
+import { confirmFirebasePasswordReset, verifyFirebasePasswordResetCode } from '../lib/firebase-auth';
 import { type } from '../lib/theme';
 import type { Palette } from '../lib/theme';
 import { useTheme } from '../lib/theme-context';
@@ -162,18 +162,59 @@ function ResetPasswordForm({ attempt }: { attempt: ResetAttempt }) {
     setFieldErrors({});
     try {
       if (attempt.kind === 'firebase') {
-        // FIREBASE NATIVE (N-3). The code is redeemed by Firebase, not by the server,
-        // and `invalid-code` is an ordinary outcome rather than a failure: the link is
-        // simply unusable, and the person needs a new one.
+        // N-4 STEP 1 — WHICH ACCOUNT IS THIS LINK FOR? Firebase resolves the address the
+        // code belongs to, so the person never has to retype it. This step does not touch
+        // the credential, which is exactly why it may run before the marker below.
+        //
+        // The address is MEMORY-ONLY, and it has exactly two uses on this screen: it
+        // becomes the fingerprint's input, and (one screen later, after the password has
+        // changed) the address the automatic sign-in uses. It is never rendered, logged,
+        // persisted, put in a route param or sent to the server, and it authorizes
+        // nothing — the server resolves the account from the session and the verified uid.
+        const verified = await verifyFirebasePasswordResetCode(attempt.oobCode);
+        if (verified.kind === 'invalid-code') {
+          setFormError(LINK_INVALID);
+          return;
+        }
+        if (verified.kind === 'failure') {
+          setFormError(verified.message);
+          return;
+        }
+
+        // N-4 STEP 2 — THE RECOVERY MARKER, WRITTEN BEFORE THE PASSWORD CHANGES (M-6).
+        // The ordering is the guarantee, not a convenience: an interruption at ANY point
+        // after this line — a crash, a kill, a dropped connection — leaves the note
+        // behind, so the next sign-in with the new password runs the credential-change
+        // bridge and revokes every session minted against the old one. Writing it after
+        // the change would leave precisely the window the design forbids, where the
+        // credential is new and nothing owes a revocation.
+        //
+        // It stores a non-secret fingerprint and nothing else — no password, no code, no
+        // token, no userId, no businessId, no role, no tenant data — and it cannot fail
+        // the reset, because a storage fault must never stop a password change.
+        await markPasswordResetPending(verified.email);
+
+        // N-4 STEP 3 — THE CREDENTIAL CHANGES, inside Firebase and nowhere else.
+        // `invalid-code` is an ordinary outcome rather than a failure: the link is simply
+        // unusable, and the person needs a new one.
         const outcome = await confirmFirebasePasswordReset({
           oobCode: attempt.oobCode,
           newPassword,
         });
         if (outcome.kind === 'invalid-code') {
+          // DEFINITIVE: Firebase refused the code, so no password changed and nothing is
+          // owed. The marker is dropped, because keeping it would make a LATER sign-in
+          // (with the unchanged password) revoke this account's sessions for a change
+          // that never happened. This is the one clear that is not an acknowledgement.
+          await clearPasswordResetPending();
           setFormError(LINK_INVALID);
           return;
         }
         if (outcome.kind === 'failure') {
+          // UNDECIDED, SO THE MARKER STAYS. A failure here can be a transport fault that
+          // happened after Firebase applied the change, so the safe assumption is that
+          // the revocation is owed — and the next sign-in is the retry. Clearing here
+          // would risk the very sessions the marker exists to revoke.
           setFormError(outcome.message);
           return;
         }
@@ -186,11 +227,13 @@ function ResetPasswordForm({ attempt }: { attempt: ResetAttempt }) {
       // right for both flows. The two differ server-side and the difference is
       // recorded rather than glossed: the CUSTOM flow stamped `passwordChangedAt`, so
       // every Inventory AI session this user held is already dead; the FIREBASE flow
-      // never reached the server, so those sessions remain valid until they expire —
-      // revoking them is the credential-change bridge's job (design §14C.3, N-9), which
-      // is designed but NOT implemented. `clearSession` rather than `signOut`: signOut
-      // would fire a logout request that cannot succeed for the custom flow, where the
-      // token this screen holds is already dead.
+      // never reached the server, so those sessions are still alive at this instant —
+      // the marker written above is what closes that, by having the NEXT sign-in run the
+      // credential-change bridge before its session is applied (N-4). So the revocation
+      // is deferred by exactly one sign-in, and it is owed by a durable note rather than
+      // by anything this screen still holds. `clearSession` rather than `signOut`:
+      // signOut would fire a logout request that cannot succeed for the custom flow,
+      // where the token this screen holds is already dead.
       await clearSession();
     } catch (err) {
       const fields = fieldMap(err);

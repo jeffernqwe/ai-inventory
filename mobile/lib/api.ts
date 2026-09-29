@@ -309,6 +309,62 @@ export function firebaseUnlink(
   });
 }
 
+export interface FirebaseCredentialsChangedPayload {
+  /**
+   * A Firebase ID token from the ACTUAL password sign-in that just happened, so its
+   * signed `auth_time` is within the server's 300 s freshness window. A refreshed
+   * token (`getIdToken(true)`) moves `iat` and leaves `auth_time` alone, so it is not
+   * a substitute and the server refuses it — deliberately.
+   */
+  idToken: string;
+}
+
+/**
+ * POST /api/auth/credentials-changed -> { changedAt } (200, N-4).
+ *
+ * Records that Firebase changed this account's password, so every Inventory AI session
+ * minted against the previous one is revoked. It is the server half of the approved
+ * recovery sequence and it is AUTHENTICATED: `token` here is the TEMPORARY session the
+ * public exchange just minted for the recovery, not the app's session — the bridge
+ * revokes every session including that one, and the caller then exchanges once more for
+ * the session it actually keeps.
+ *
+ * `temporarySession: true` is set for exactly that reason: the caller is deliberately
+ * holding a token that is not the app's session, so a 401 from this request must not be
+ * reported as session loss — that report ends the durable Firebase session, which would
+ * destroy the sign-in the recovery still needs. `lib/client.ts` carries the full argument.
+ *
+ * EXPECTED ANSWERS, and what each means to the caller:
+ *
+ *   200 — recorded. The revocation happened (or happened already; the operation is
+ *         idempotent). Clear the recovery marker and take the final session.
+ *   401 `SESSION_INVALIDATED` — the SUCCESS-EQUIVALENT answer: this exact revocation
+ *         already happened, which is why the temporary token is no longer valid. Treat it
+ *         as the 200 above. Other 401 codes mean the temporary session died for an
+ *         unrelated reason; the revocation is still owed, so the marker stays.
+ *   409 `FIREBASE_REAUTHENTICATION_REQUIRED` — the Firebase authentication is older than
+ *         the 300 s window. The revocation is still owed, so the marker stays and the next
+ *         sign-in retries.
+ *   409 `FIREBASE_IDENTITY_CONFLICT` — the verified identity is not this account's, or the
+ *         account carries none. TERMINAL, and the marker stays: a mismatch must never
+ *         consume it.
+ *   400 `FIREBASE_TOKEN_INVALID` — Firebase refused the token; a bad request field rather
+ *         than a dead session, which is why the server keeps it off 401 here too.
+ *   403 `ACCOUNT_DISABLED` / `BUSINESS_NOT_ACTIVE`, 503 `FIREBASE_NOT_CONFIGURED` —
+ *         unchanged, and all of them leave the marker in place.
+ */
+export function credentialsChanged(
+  { idToken }: FirebaseCredentialsChangedPayload,
+  token: string
+): Promise<ApiResponse> {
+  return apiFetch('/api/auth/credentials-changed', {
+    token,
+    method: 'POST',
+    temporarySession: true,
+    body: { idToken },
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Users (Phase 14A backend / 14B mobile)
 // ---------------------------------------------------------------------------

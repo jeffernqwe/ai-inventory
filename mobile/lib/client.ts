@@ -79,6 +79,18 @@ export interface ApiFetchOptions {
   token?: string | null;
   body?: unknown;
   params?: QueryParams | null;
+  /**
+   * N-4 — the `token` on this request is a DELIBERATELY TEMPORARY session that is
+   * never applied to the app, so a 401/403 answer must NOT be reported as session
+   * loss. See the note at the report site below for why that distinction has to
+   * exist rather than being left to the caller.
+   *
+   * It says nothing about authorization, and the server treats the request
+   * identically either way: the response is still normalized into an `ApiError` and
+   * still thrown. The only thing it changes is whether a client-side NOTIFICATION
+   * fires.
+   */
+  temporarySession?: boolean;
 }
 
 function toQuery(params?: QueryParams | null): string {
@@ -126,7 +138,7 @@ function isAbortError(err: unknown): boolean {
  * The response body is a genuinely dynamic boundary, so the parsed JSON is
  * returned as `unknown` unless the caller names the shape it expects (`T`).
  */
-export async function apiFetch<T = unknown>(path: string, { method = 'GET', token, body, params }: ApiFetchOptions = {}): Promise<T> {
+export async function apiFetch<T = unknown>(path: string, { method = 'GET', token, body, params, temporarySession = false }: ApiFetchOptions = {}): Promise<T> {
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -161,7 +173,23 @@ export async function apiFetch<T = unknown>(path: string, { method = 'GET', toke
     envelope.fields || [],
     envelope.applied,
   );
-  if (token && (res.status === 401 || res.status === 403)) sessionLostHandler?.(error);
+  // N-4 — WHY ONE REQUEST CAN OPT OUT OF THIS REPORT.
+  //
+  // The password-recovery handoff deliberately holds a TEMPORARY session (minted by the
+  // public exchange, never applied to the app) and calls the credential-change bridge
+  // with it. Two of that call's answers are expected and ordinary: `401
+  // SESSION_INVALIDATED` is the success-equivalent answer when the revocation this call
+  // is repeating already happened, and any 401 from the bridge can happen if the
+  // sessions were ended elsewhere first. Reporting either through this handler would
+  // fire `lib/auth.tsx`'s session-loss path, which CLEARS the session AND ENDS THE
+  // DURABLE FIREBASE SESSION — destroying the very sign-in the recovery is completing,
+  // so the final exchange that must follow would then have no Firebase user at all.
+  //
+  // The flag therefore suppresses the notification for that one request and nothing
+  // else. It cannot weaken the rule for any ordinary request (it defaults to false and
+  // is set in exactly one place), it changes no authorization decision, and the caller
+  // still receives the thrown `ApiError` and handles the status itself.
+  if (token && !temporarySession && (res.status === 401 || res.status === 403)) sessionLostHandler?.(error);
   throw error;
 }
 

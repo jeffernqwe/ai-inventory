@@ -33,8 +33,12 @@ import type { ReactNode } from 'react';
 import ForgotPasswordScreen from '../app/forgot-password';
 import ResetPasswordScreen from '../app/reset-password';
 import { forgotPassword, resetPassword } from '../lib/api';
-import { useSession } from '../lib/auth';
-import { confirmFirebasePasswordReset, sendFirebasePasswordResetEmail } from '../lib/firebase-auth';
+import { clearPasswordResetPending, markPasswordResetPending, useSession } from '../lib/auth';
+import {
+  confirmFirebasePasswordReset,
+  sendFirebasePasswordResetEmail,
+  verifyFirebasePasswordResetCode,
+} from '../lib/firebase-auth';
 import { ThemeProvider } from '../lib/theme-context';
 
 const mockParams: Record<string, unknown> = {};
@@ -52,10 +56,16 @@ jest.mock('../lib/api', () => ({
 
 jest.mock('../lib/auth', () => ({
   useSession: jest.fn(),
+  // N-4 — the recovery marker's writer and the definitive-failure clear. Mocked at the
+  // module boundary like everything else here, so this suite pins the screen's ORDERING
+  // (verify -> mark -> confirm) without touching SecureStore.
+  markPasswordResetPending: jest.fn(),
+  clearPasswordResetPending: jest.fn(),
 }));
 
 jest.mock('../lib/firebase-auth', () => ({
   sendFirebasePasswordResetEmail: jest.fn(),
+  verifyFirebasePasswordResetCode: jest.fn(),
   confirmFirebasePasswordReset: jest.fn(),
 }));
 
@@ -63,9 +73,15 @@ const mockedForgotPassword = forgotPassword as jest.Mock;
 const mockedResetPassword = resetPassword as jest.Mock;
 const mockedSendFirebase = sendFirebasePasswordResetEmail as jest.Mock;
 const mockedConfirmFirebase = confirmFirebasePasswordReset as jest.Mock;
+const mockedVerifyFirebase = verifyFirebasePasswordResetCode as jest.Mock;
+const mockedMarkPending = markPasswordResetPending as jest.Mock;
+const mockedClearPending = clearPasswordResetPending as jest.Mock;
 const mockedUseSession = useSession as jest.Mock;
 
 const clearSession = jest.fn(async () => {});
+
+/** The address Firebase resolves for the fixture code. Memory-only, by design. */
+const RESET_ACCOUNT_EMAIL = 'reset-owner@example.com';
 
 /** The server's own fixed sentence, which the Firebase path must reproduce unchanged. */
 const REQUEST_ACCEPTED =
@@ -113,6 +129,10 @@ beforeEach(() => {
   mockedUseSession.mockReturnValue({ clearSession });
   mockedForgotPassword.mockResolvedValue({});
   mockedResetPassword.mockResolvedValue({});
+  // N-4 — the first Firebase step of every reset attempt now resolves the account.
+  mockedVerifyFirebase.mockResolvedValue({ kind: 'verified', email: RESET_ACCOUNT_EMAIL });
+  mockedMarkPending.mockResolvedValue(undefined);
+  mockedClearPending.mockResolvedValue(undefined);
 });
 
 describe('N-3 — Forgot Password chooses the flow by the build, never by a failure', () => {
@@ -201,6 +221,18 @@ describe('N-3 — Reset Password accepts a Firebase code and still accepts the c
     expect(mockedResetPassword).not.toHaveBeenCalled();
     await waitFor(() => expect(view.getByText(RESET_COMPLETED)).toBeTruthy());
     expect(clearSession).toHaveBeenCalled();
+
+    // N-4 — THE ORDER IS THE GUARANTEE: the account is established, then the marker is
+    // written, and only THEN does the credential change. An interruption after this
+    // sequence's second step still leaves the note behind (design §14C.3.9 M-6).
+    expect(mockedVerifyFirebase).toHaveBeenCalledWith('oob-code-1');
+    expect(mockedMarkPending).toHaveBeenCalledWith(RESET_ACCOUNT_EMAIL);
+    const order = (fn: jest.Mock) => fn.mock.invocationCallOrder[0];
+    expect(order(mockedVerifyFirebase)).toBeLessThan(order(mockedMarkPending));
+    expect(order(mockedMarkPending)).toBeLessThan(order(mockedConfirmFirebase));
+    // Nothing is cleared on the success path: the marker is left for the sign-in that
+    // follows, which is what performs the revocation.
+    expect(mockedClearPending).not.toHaveBeenCalled();
   });
 
   it('still sends the custom flow’s token to the existing endpoint', async () => {
@@ -217,6 +249,11 @@ describe('N-3 — Reset Password accepts a Firebase code and still accepts the c
       })
     );
     expect(mockedConfirmFirebase).not.toHaveBeenCalled();
+    // N-4 — AND NO RECOVERY MARKER. The custom flow revokes server-side as part of the
+    // reset itself, so a marker here would make a later sign-in revoke the same sessions a
+    // second time; the two flows must not both claim the debt.
+    expect(mockedVerifyFirebase).not.toHaveBeenCalled();
+    expect(mockedMarkPending).not.toHaveBeenCalled();
     await waitFor(() => expect(view.getByText(RESET_COMPLETED)).toBeTruthy());
   });
 
@@ -230,6 +267,7 @@ describe('N-3 — Reset Password accepts a Firebase code and still accepts the c
 
     await waitFor(() => expect(mockedConfirmFirebase).toHaveBeenCalledTimes(1));
     expect(mockedResetPassword).not.toHaveBeenCalled();
+    expect(mockedVerifyFirebase).toHaveBeenCalledWith('oob-code-1');
   });
 
   it('names an unusable action code, and shows no success state', async () => {
@@ -242,6 +280,9 @@ describe('N-3 — Reset Password accepts a Firebase code and still accepts the c
     await waitFor(() => expect(view.getByText(LINK_INVALID)).toBeTruthy());
     expect(view.queryByText(RESET_COMPLETED)).toBeNull();
     expect(clearSession).not.toHaveBeenCalled();
+    // N-4 — a refused code is DEFINITIVE: no password changed, so nothing is owed and the
+    // marker is dropped rather than left to revoke a change that never happened.
+    expect(mockedClearPending).toHaveBeenCalled();
     // The remedy is reachable from here. (Asserted by text: expo-router's `Link` renders
     // as a Text, so it exposes no link role to query.)
     expect(view.getByText('Request a new link')).toBeTruthy();
@@ -264,12 +305,16 @@ describe('N-3 — Reset Password accepts a Firebase code and still accepts the c
       ).toBeTruthy()
     );
     expect(view.queryByText(RESET_COMPLETED)).toBeNull();
+    // N-4 — UNDECIDED, SO THE MARKER STAYS: a transport fault can happen AFTER Firebase
+    // applied the change, so the revocation is still owed and the next sign-in retries it.
+    expect(mockedClearPending).not.toHaveBeenCalled();
   });
 
   it('still calls a link with no code incomplete, and asks for nothing', async () => {
     const view = await mountReset();
 
     expect(view.getByText(LINK_INCOMPLETE)).toBeTruthy();
+    expect(mockedVerifyFirebase).not.toHaveBeenCalled();
     expect(mockedConfirmFirebase).not.toHaveBeenCalled();
     expect(mockedResetPassword).not.toHaveBeenCalled();
   });
@@ -284,6 +329,7 @@ describe('N-3 — Reset Password accepts a Firebase code and still accepts the c
 
     await waitFor(() => expect(view.getByText('Passwords do not match')).toBeTruthy());
     // A mistyped confirmation must not spend the code: the outcome would be a lost link.
+    expect(mockedVerifyFirebase).not.toHaveBeenCalled();
     expect(mockedConfirmFirebase).not.toHaveBeenCalled();
   });
 });

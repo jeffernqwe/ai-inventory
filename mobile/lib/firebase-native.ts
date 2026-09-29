@@ -438,6 +438,41 @@ export async function nativeSendPasswordResetEmail(email: string): Promise<void>
 }
 
 /**
+ * Checks a password-reset code and resolves with the ACCOUNT'S EMAIL (N-4).
+ *
+ * WHY THIS EXISTS. The approved N-4 sequence has the reset screen establish a recovery
+ * marker BEFORE the password changes, and the marker is a fingerprint of the reset
+ * account — so the screen has to learn which account the code belongs to. Typing the
+ * address again is the only alternative, and it is strictly worse: it can disagree with
+ * the account the code actually belongs to, and it makes the marker wrong (or absent) for
+ * anyone who mistypes it.
+ *
+ * IT DOES NOT CONSUME THE CODE, and that is the documented pairing rather than an
+ * assumption: Firebase's own handling of an action link is to read the `oobCode`, verify
+ * it to learn/display which account it is for, and THEN call `confirmPasswordReset` with
+ * the same code. A destructive verify would make that documented sequence impossible.
+ * The claim is nevertheless on the open gate L-17 — the live check that this returns the
+ * right address without spending the code is recorded as an explicit device-test
+ * requirement (design §14C.3.9 M-10), because nothing here has been exercised against a
+ * real project.
+ *
+ * IF IT EVER WERE DESTRUCTIVE THE FAILURE IS SAFE AND RETRYABLE: the following
+ * `confirmPasswordReset` would answer `auth/invalid-action-code`, which the reset screen
+ * already renders as "this link is invalid or has expired" — a dead link the person
+ * replaces, never a security hole.
+ *
+ * THE EMAIL IS NOT A CREDENTIAL AND IS NOT AN IDENTITY. It leaves this module only to
+ * become (a) the address of the automatic sign-in that follows a reset and (b) half of a
+ * non-secret local fingerprint. It never authorizes anything: the server resolves the
+ * account from the signed-in session and the verified uid, exactly as it does for every
+ * other request. Nothing here stores, logs or returns anything else about the account.
+ */
+export async function nativeVerifyPasswordResetCode(oobCode: string): Promise<string> {
+  const { auth, instance } = requireNativeFirebase();
+  return await auth.verifyPasswordResetCode(instance, oobCode);
+}
+
+/**
  * Completes a Firebase password reset with the one-time code from the email.
  *
  * IT CONSUMES THE CODE, and that is the whole of the single-use guarantee. Firebase's

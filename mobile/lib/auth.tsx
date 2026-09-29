@@ -494,6 +494,217 @@ async function readFirebaseSignOutPending(): Promise<boolean> {
   }
 }
 
+// ---------------------------------------------------------------------------
+// N-4 — the recovery marker
+// ---------------------------------------------------------------------------
+//
+// WHAT IT IS FOR. A Firebase password reset completes entirely inside Firebase, so the
+// server never learns of it and the sessions minted against the OLD credential would
+// otherwise stay alive until they expired. Recording that change is
+// `POST /api/auth/credentials-changed` — and it is AUTHENTICATED, deliberately, so the
+// person has to sign in once with the new password before it can be called. This marker is
+// how the app knows, at that sign-in, that it must call it: a durable, device-local note
+// left by the reset screen, read and consumed by `signIn` below.
+//
+// IT IS A FLOW SELECTOR AND NEVER A CREDENTIAL. It grants nothing, authorizes nothing and
+// is never sent anywhere. The account it describes is still decided entirely server-side
+// from the session and the verified uid, so the worst a forged marker can do is ask the
+// server to revoke the forger's OWN sessions (see `bridgePendingPasswordReset`).
+//
+// THE SAME SHAPE AS THE SIGN-OUT MARKER ABOVE (a second SecureStore key, a module-scope
+// helper pair, an in-memory mirror for the web target, and a write that is quiet on
+// failure), with ONE deliberate difference: clearing REMOVES the key rather than writing
+// `'0'`. The sign-out marker writes a negative value because a third party (Firebase) may
+// still hold the session it is about, so "cleared" is a fact worth recording; here absence
+// is the honest state, because there is no outstanding obligation once the bridge has been
+// acknowledged, and the value is a fingerprint rather than a flag.
+
+/** The locked key (design §14C.3.9 M-1). */
+const PASSWORD_RESET_PENDING_KEY = 'inventoryai.auth.passwordResetPending';
+
+/**
+ * The current stored format's tag, so a future change cannot be misread as a fingerprint.
+ * Only the fingerprint is ever returned to a caller — see `parsePasswordResetPending`.
+ */
+const PASSWORD_RESET_PENDING_VERSION = 'v1';
+
+// The web target's in-memory mirror, exactly as `mem` is for the token.
+const memPasswordResetPending: { fingerprint: string | null } = { fingerprint: null };
+
+/**
+ * A NON-SECRET fingerprint of the reset account, derived from its email.
+ *
+ * DELIBERATELY NOT CRYPTOGRAPHIC, and that is a decision rather than a shortcut. The
+ * project removed `expo-crypto` in Phase F2 and this phase adds no dependency, and more
+ * importantly a cryptographic hash would buy nothing here: the marker is a flow selector
+ * whose only effect is to ask the server to revoke THE CALLER'S OWN sessions, the server
+ * re-derives the account from the session it issued, and the value never leaves the
+ * device. There is no attacker inside this trust boundary to defend against — anyone who
+ * can read this key already has the unlocked device — and a collision could at worst make
+ * the bridge run for the account that is signing in, which is the account it would have
+ * been run for anyway.
+ *
+ * FNV-1a over the trimmed, lower-cased address, so the same account always produces the
+ * same value regardless of how the address was typed. The address ITSELF is never stored.
+ */
+function accountFingerprint(email: string): string {
+  const normalized = email.trim().toLowerCase();
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < normalized.length; i += 1) {
+    hash ^= normalized.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, '0');
+}
+
+/**
+ * The fingerprint a stored value carries, or `null` for absent, malformed or unknown-format
+ * values. Fails closed in every direction: an unrecognised value is treated as "no marker",
+ * which runs no bridge and consumes nothing.
+ */
+function parsePasswordResetPending(raw: string | null): string | null {
+  if (typeof raw !== 'string') return null;
+  const [version, fingerprint] = raw.split(':');
+  if (version !== PASSWORD_RESET_PENDING_VERSION) return null;
+  return fingerprint && /^[0-9a-f]{8}$/.test(fingerprint) ? fingerprint : null;
+}
+
+/**
+ * Records (or, with `null`, clears) the marker. Quiet on failure, like `persistToken`.
+ *
+ * A STORAGE FAULT MUST NOT FAIL THE CALLER, and both callers can afford it: the reset
+ * screen is completing a password change that has already happened, and the sign-in is
+ * consuming a marker it has already acted on.
+ */
+async function persistPasswordResetPending(fingerprint: string | null): Promise<void> {
+  memPasswordResetPending.fingerprint = fingerprint;
+  if (Platform.OS === 'web') return;
+  try {
+    if (fingerprint) {
+      await SecureStore.setItemAsync(
+        PASSWORD_RESET_PENDING_KEY,
+        `${PASSWORD_RESET_PENDING_VERSION}:${fingerprint}`
+      );
+    } else {
+      await SecureStore.deleteItemAsync(PASSWORD_RESET_PENDING_KEY);
+    }
+  } catch {
+    // Non-fatal: the in-memory copy keeps this launch honest.
+  }
+}
+
+/** The stored fingerprint, or `null` when no recovery is pending for anyone. */
+async function readPasswordResetPending(): Promise<string | null> {
+  if (Platform.OS === 'web') return memPasswordResetPending.fingerprint;
+  try {
+    return parsePasswordResetPending(await SecureStore.getItemAsync(PASSWORD_RESET_PENDING_KEY));
+  } catch {
+    return memPasswordResetPending.fingerprint;
+  }
+}
+
+/**
+ * Leaves the marker for an account whose password is about to change (N-4).
+ *
+ * CALLED BEFORE THE PASSWORD CHANGE, NEVER AFTER, and that ordering is the whole
+ * guarantee: an interruption at any later point — a crash, a kill, a lost network — still
+ * leaves the note behind, so the next sign-in with the new password closes the revocation.
+ * Writing it afterwards would leave exactly the window the design forbids, where the
+ * credential is new and no revocation is owed by anything.
+ *
+ * It takes the ADDRESS rather than a fingerprint so the normalisation lives in one place,
+ * and the screen never computes a hash. The address is not stored — only its fingerprint.
+ */
+export async function markPasswordResetPending(email: string): Promise<void> {
+  await persistPasswordResetPending(accountFingerprint(email));
+}
+
+/**
+ * Drops the marker without running a bridge. Used for the one case where the reset
+ * DEFINITIVELY did not happen — a code Firebase refused — so no credential change is owed
+ * and a later sign-in must not revoke the account's sessions for it.
+ */
+export async function clearPasswordResetPending(): Promise<void> {
+  await persistPasswordResetPending(null);
+}
+
+/** `SESSION_INVALIDATED` — the bridge's success-equivalent answer (design §14C.3.9 M-5). */
+const SESSION_INVALIDATED = 'SESSION_INVALIDATED';
+
+function isSessionInvalidated(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 401 && err.code === SESSION_INVALIDATED;
+}
+
+/** What the handoff did, for the caller's own bookkeeping and for the tests. */
+type PasswordResetHandoff = 'none' | 'bridged' | 'owed';
+
+/**
+ * Runs the N-4 recovery handoff for a sign-in that owes one.
+ *
+ * THE LOCKED SEQUENCE, and every step of it is load-bearing:
+ *
+ *   signInWithEmail(email, newPassword)          the caller already did this, so the
+ *                                                token below came from a REAL credential
+ *                                                sign-in and its signed `auth_time` is
+ *                                                fresh — which is what the server's
+ *                                                300 s window requires. A refreshed token
+ *                                                (`getIdToken(true)`) would move `iat` and
+ *                                                leave `auth_time` old, so it is not a
+ *                                                substitute and is not used.
+ *   → read the marker, and stop unless it is THIS account's (a mismatch must neither
+ *     consume the marker nor run the bridge — another account's revocation is not ours)
+ *   → POST /api/auth/firebase/exchange       the existing PUBLIC exchange mints the
+ *                                            TEMPORARY session
+ *   → POST /api/auth/credentials-changed     the bridge, carrying that temporary session
+ *                                            and the same fresh ID token
+ *   → acknowledge: 2xx, or `401 SESSION_INVALIDATED` (the revocation already happened)
+ *     clears the marker; anything else keeps it, because the revocation is still owed and
+ *     the next sign-in is the retry
+ *   → the CALLER then exchanges once more for the FINAL session and applies only that.
+ *
+ * THE TEMPORARY SESSION LIVES IN ONE LOCAL VARIABLE. It is never returned, never
+ * persisted, never applied and never handed to a screen; it exists to authenticate one
+ * request, and the bridge revokes it along with every other session because
+ * `revokeAllSessions` has no caller exception. The final session works because its `iat` is
+ * not before the stamp the bridge wrote.
+ *
+ * A THROWN TEMPORARY EXCHANGE PROPAGATES, and that is the honest behaviour: the temporary
+ * exchange and the final one are the same endpoint with the same token, so a refusal there
+ * is a refusal the sign-in would have met a moment later. The marker survives, so the retry
+ * completes the revocation.
+ *
+ * `owed` and `none` are deliberately NOT errors. The person has already changed their
+ * password and signed in successfully; a revocation the server would not accept is ours to
+ * retry, not theirs to be blocked on.
+ */
+async function bridgePendingPasswordReset({
+  email,
+  idToken,
+  deviceLabel,
+}: {
+  email: string;
+  idToken: string;
+  deviceLabel: string;
+}): Promise<PasswordResetHandoff> {
+  const pending = await readPasswordResetPending();
+  if (!pending) return 'none';
+  if (pending !== accountFingerprint(email)) return 'none';
+
+  const temporary = await api.firebaseExchange({ idToken, deviceLabel });
+
+  try {
+    await api.credentialsChanged({ idToken }, temporary.token);
+    await persistPasswordResetPending(null);
+    return 'bridged';
+  } catch (err) {
+    if (isSessionInvalidated(err)) {
+      await persistPasswordResetPending(null);
+      return 'bridged';
+    }
+    return 'owed';
+  }
+}
+
 const AuthContext = createContext<AuthValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -696,15 +907,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // user may go next, and the screen still decides what they read.
       let session: ApiResponse;
       try {
-        session =
-          outcome.kind === 'idToken'
-            ? await api.firebaseExchange({ idToken: outcome.idToken, deviceLabel })
-            : await api.login({ email, password, deviceLabel });
+        if (outcome.kind === 'idToken') {
+          // N-4 — THE RECOVERY HANDOFF, and the ONLY place it runs. A sign-in whose
+          // account left a recovery marker goes through the bridge BEFORE the session is
+          // applied, because the bridge revokes every session this account holds — the
+          // temporary one it authenticates with included — and the session that survives
+          // is the one the exchange below mints. `applySession` therefore never sees the
+          // temporary token, and the marker is cleared only once the server has
+          // acknowledged. A sign-in with no marker (or one belonging to another account)
+          // takes the exact path it always took.
+          await bridgePendingPasswordReset({ email, idToken: outcome.idToken, deviceLabel });
+          session = await api.firebaseExchange({ idToken: outcome.idToken, deviceLabel });
+        } else {
+          session = await api.login({ email, password, deviceLabel });
+        }
       } catch (err) {
         if (isRegistrationRequired(err)) armRegistrationRequired();
         throw err;
       }
 
+      // THE FINAL SESSION AND NOTHING ELSE. `session` is the second exchange's response on
+      // the recovery path, so the temporary token minted above cannot reach this line.
       await applySession(session.token, session.user);
       return session.user;
     },

@@ -1,5 +1,5 @@
 /**
- * Phase 1 (RNFirebase foundation) / Phase B (native email and password) / Phase C
+ * Phase 1 (RNFirebase foundation) / Phase B (native email and password) / Phase C / N-3
  * (native Google Sign-In) — the React Native Firebase (native SDK) boundary.
  *
  * ONE HALF OF A PAIR, AND — SINCE PHASE B — THE AUTHENTICATING HALF. `lib/firebase.ts`
@@ -53,10 +53,13 @@
  *
  * PHASE B DELIBERATELY DOES NOT USE. `setPersistence` (it throws on React Native
  * Firebase, by design — P2 §3), `reauthenticateWith*`, `onAuthStateChanged`,
- * `onIdTokenChanged`, the provider link/unlink operations, the Firebase email verbs
+ * `onIdTokenChanged`, the provider link/unlink operations, the email-link verb
  * and the account-mutation verbs. Each is either a later phase's work or forbidden
  * outright, and the guards enumerate them so that "not yet" cannot drift into
- * "accidentally".
+ * "accidentally". N-3 IS THE ONE RELAXATION SINCE: owner decision L-7 hands password
+ * recovery to Firebase, so `sendPasswordResetEmail` and `confirmPasswordReset` are now
+ * this boundary's own operations and the guard names them as permitted rather than as
+ * risks. `sendSignInLinkToEmail` and every other group here remain forbidden.
  *
  * PHASE C ADDS A THIRD NATIVE PACKAGE, AND ONLY FOR SIGN-IN.
  * `@react-native-google-signin/google-signin` performs the native Google consent
@@ -376,6 +379,85 @@ export async function nativeCurrentIdToken(): Promise<string | null> {
 }
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// The native operations (N-3) — Firebase-native password recovery
+// ---------------------------------------------------------------------------
+//
+// THE PHASE 1 VERB GUARD IS DELIBERATELY RELAXED FOR EXACTLY THESE TWO VERBS.
+// `sendPasswordResetEmail` and `confirmPasswordReset` were forbidden while recovery
+// belonged to the server (Phases 26B/27) and no Firebase flow had been authorised.
+// Owner decision L-7 hands password recovery to Firebase, so they are now operations
+// of this boundary; `phase1-rnfirebase-foundation.test.ts` names them as permitted,
+// and every other forbidden group there is untouched.
+//
+// NEITHER OPERATION HANDS A CREDENTIAL UPWARD. The request answers nothing at all on
+// success — Firebase composes and sends the mail — and the confirmation consumes the
+// one-time code it is given and returns no user, no token and no session. The
+// `oobCode` therefore enters as an argument, goes straight to the SDK, and is never
+// stored, returned, logged, or attached to anything this module exports. That is the
+// property the reset screen leans on when it keeps the code in route params for as
+// long as the screen is mounted and nowhere else.
+//
+// THE DEEP LINK IS DECLARED RATHER THAN DERIVED, because nothing in JavaScript can
+// read it at runtime: it is three build-level facts that live in `app.json`
+// (`expo.scheme`, `android.package`, `ios.bundleIdentifier`). The N-3 suite pins the
+// constants below against that file, so a scheme or package change fails a test
+// instead of silently producing a reset link the app cannot receive.
+
+/** `expo.scheme` plus the reset route. Pinned against `app.json` by the N-3 suite. */
+const PASSWORD_RESET_DEEP_LINK = 'inventoryai://reset-password';
+
+/** `android.package` / `ios.bundleIdentifier`. Pinned against `app.json` too. */
+const APP_ANDROID_PACKAGE = 'com.inventoryai.app';
+const APP_IOS_BUNDLE_ID = 'com.inventoryai.app';
+
+/**
+ * Sends Firebase's own password-reset email for this address.
+ *
+ * WHAT THE SETTINGS ASK FIREBASE TO DO, AND WHAT IS STILL NOT KNOWN ABOUT IT. They are
+ * the design authority's prescription (design §14C.4): the emailed link should return
+ * control to the app carrying the one-time code rather than landing on Firebase's
+ * hosted page. Whether Firebase's hosted action handler honours that for a PASSWORD
+ * RESET is the open gate L-17/B-2, and nothing here may be read as having settled it.
+ * If it does not, the link opens the hosted page in a browser and the code never
+ * reaches this app — a question about Firebase's behaviour, not a fault in this
+ * function.
+ *
+ * It answers `void` and throws whatever the SDK threw, exactly like the Phase B
+ * operations: the classification layer above decides what a code means, and a second
+ * opinion here would split that decision in two.
+ */
+export async function nativeSendPasswordResetEmail(email: string): Promise<void> {
+  const { auth, instance } = requireNativeFirebase();
+  await auth.sendPasswordResetEmail(instance, email, {
+    url: PASSWORD_RESET_DEEP_LINK,
+    handleCodeInApp: true,
+    android: { packageName: APP_ANDROID_PACKAGE, installApp: true },
+    iOS: { bundleId: APP_IOS_BUNDLE_ID },
+  });
+}
+
+/**
+ * Completes a Firebase password reset with the one-time code from the email.
+ *
+ * IT CONSUMES THE CODE, and that is the whole of the single-use guarantee. Firebase's
+ * action code is time-limited and is invalidated by the reset itself, so a second call
+ * with the same code cannot succeed; this function deliberately keeps no state of its
+ * own to enforce that, because a local opinion about a server-side credential could
+ * only be wrong.
+ *
+ * The new password is the last thing the caller hands over, and nothing here retains
+ * it: no variable in this module holds it once the SDK call has returned, and no part
+ * of it is returned, echoed or logged.
+ */
+export async function nativeConfirmPasswordReset(
+  oobCode: string,
+  newPassword: string
+): Promise<void> {
+  const { auth, instance } = requireNativeFirebase();
+  await auth.confirmPasswordReset(instance, oobCode, newPassword);
+}
+
 // The native operations (Phase C) — Google Sign-In
 // ---------------------------------------------------------------------------
 //

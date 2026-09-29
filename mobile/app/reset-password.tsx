@@ -9,6 +9,7 @@ import Input from '../components/Input';
 import { resetPassword } from '../lib/api';
 import { useSession } from '../lib/auth';
 import { ApiError } from '../lib/client';
+import { confirmFirebasePasswordReset } from '../lib/firebase-auth';
 import { type } from '../lib/theme';
 import type { Palette } from '../lib/theme';
 import { useTheme } from '../lib/theme-context';
@@ -16,16 +17,42 @@ import { useTheme } from '../lib/theme-context';
 const RESET_COMPLETED = 'Password changed. Please sign in again.';
 
 /**
- * The token arrives from the deep link and from nowhere else. A missing param is
- * `undefined`, and a link carrying the key twice yields an array — neither is a
- * usable token, and neither should ever reach the network. Only the length is
- * checked: the token is base64url and opaque, so any client-side rule about its
- * shape could only ever reject a valid link.
+ * The copy for a Firebase action code that cannot be redeemed — expired, already
+ * spent, unknown, or issued for something other than a password reset.
+ *
+ * It lives here rather than in `lib/firebase-auth.ts` because it is product copy for an
+ * ORDINARY state, which is the split that module documents: it returns the
+ * `invalid-code` outcome with no message and this screen supplies the sentence.
  */
-function readToken(raw: unknown): string {
+const LINK_INVALID = 'This reset link is invalid or has expired. Request a new one.';
+
+/**
+ * A link code arrives from the deep link and from nowhere else. A missing param is
+ * `undefined`, and a link carrying the key twice yields an array — neither is a usable
+ * code, and neither should ever reach the network. Nothing about the value's SHAPE is
+ * checked: a Firebase `oobCode` and the custom flow's token are both opaque, so any
+ * client-side rule could only ever reject a link that works.
+ */
+function readCode(raw: unknown): string {
   if (typeof raw !== 'string') return '';
   return raw.trim();
 }
+
+/**
+ * Which recovery flow this link belongs to, decided by WHICH PARAMETER IS PRESENT.
+ *
+ * A Firebase action link carries `mode=resetPassword` and an `oobCode`; the custom
+ * 26B/27 link carries a `token`. Both ship in N-3, so the screen supports both and
+ * never guesses: the Firebase code is preferred when both are somehow present, because
+ * only Firebase can redeem it and the custom flow's token is not a substitute for it.
+ *
+ * The two are held as a discriminated union rather than as two loose strings so that
+ * `submit` below cannot accidentally send one flow's credential to the other's
+ * endpoint — the branch that reads the code is the same branch that knows the kind.
+ */
+type ResetAttempt =
+  | { kind: 'firebase'; oobCode: string }
+  | { kind: 'legacy'; token: string };
 
 function fieldMap(err: unknown): Record<string, string> {
   const out: Record<string, string> = {};
@@ -52,20 +79,35 @@ const createStyles = (colors: Palette) =>
  * who is not signed in, which would discard the incoming token before this
  * screen could read it.
  *
- * The token is held only in route params for as long as the screen is mounted —
- * it is never rendered, logged, persisted, or copied into another navigation.
- * It leaves the app in exactly one place: the body of the reset POST.
+ * The code is held only in route params for as long as the screen is mounted — it is
+ * never rendered, logged, persisted, or copied into another navigation. It leaves the
+ * app in exactly one place, and N-3 gives that place two possible forms: the body of the
+ * custom flow's reset POST, or the single argument of Firebase's `confirmPasswordReset`.
+ *
+ * TWO FLOWS, ONE SCREEN. A Firebase link (`?oobCode=`) is redeemed by Firebase; a custom
+ * link (`?token=`) still goes to `POST /api/auth/reset-password`. Which one runs is
+ * decided by `attempt` below and by nothing else, and neither path can be reached with
+ * the other's credential.
  */
 export default function ResetPasswordScreen() {
   // Read from the focused route's params rather than latched into state, so a
   // second link delivered while this screen is already open supersedes the first.
   const params = useLocalSearchParams();
-  const token = readToken(params.token);
+  const oobCode = readCode(params.oobCode);
+  const token = readCode(params.token);
 
-  // No token in the link: there is nothing to submit, and no request is made.
-  if (!token) {
+  // N-3: the presence of a FIREBASE code decides the flow; a link with only the custom
+  // flow's token is the legacy path and still works. A link with neither has nothing to
+  // submit, and no request is made.
+  const attempt: ResetAttempt | null = oobCode
+    ? { kind: 'firebase', oobCode }
+    : token
+      ? { kind: 'legacy', token }
+      : null;
+
+  if (!attempt) {
     return (
-      <AuthLayout title="Link incomplete" subtitle="This reset link is missing its token.">
+      <AuthLayout title="Link incomplete" subtitle="This reset link is missing its code.">
         <Banner
           type="error"
           text="The link you followed is incomplete. Request a new one to continue."
@@ -75,13 +117,15 @@ export default function ResetPasswordScreen() {
     );
   }
 
-  // The token is the form's identity, and that is what makes a second link start
-  // a clean attempt: a different token is a different component, so React
-  // remounts it and every field, error and flag below begins again. Resetting
-  // through identity rather than through an effect on `token` also means the new
-  // link never renders against the previous attempt's state, not even for the
-  // commit an effect would have needed to catch up.
-  return <ResetPasswordForm key={token} token={token} />;
+  // The code is the form's identity, and that is what makes a second link start a clean
+  // attempt: a different code is a different component, so React remounts it and every
+  // field, error and flag below begins again. Resetting through identity rather than
+  // through an effect on the code also means the new link never renders against the
+  // previous attempt's state, not even for the commit an effect would have needed to
+  // catch up. The key carries the flow as well as the code, so a Firebase link and a
+  // legacy link can never be mistaken for a second attempt at the same one.
+  const attemptKey = attempt.kind === 'firebase' ? attempt.oobCode : attempt.token;
+  return <ResetPasswordForm key={`${attempt.kind}:${attemptKey}`} attempt={attempt} />;
 }
 
 /**
@@ -89,7 +133,7 @@ export default function ResetPasswordScreen() {
  * the `key` above remounts — state that lives any higher would survive a new
  * link, which is the one thing a fresh attempt must never do.
  */
-function ResetPasswordForm({ token }: { token: string }) {
+function ResetPasswordForm({ attempt }: { attempt: ResetAttempt }) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { clearSession } = useSession();
@@ -117,18 +161,42 @@ function ResetPasswordForm({ token }: { token: string }) {
     setFormError(null);
     setFieldErrors({});
     try {
-      await resetPassword({ token, newPassword, confirmPassword });
+      if (attempt.kind === 'firebase') {
+        // FIREBASE NATIVE (N-3). The code is redeemed by Firebase, not by the server,
+        // and `invalid-code` is an ordinary outcome rather than a failure: the link is
+        // simply unusable, and the person needs a new one.
+        const outcome = await confirmFirebasePasswordReset({
+          oobCode: attempt.oobCode,
+          newPassword,
+        });
+        if (outcome.kind === 'invalid-code') {
+          setFormError(LINK_INVALID);
+          return;
+        }
+        if (outcome.kind === 'failure') {
+          setFormError(outcome.message);
+          return;
+        }
+      } else {
+        await resetPassword({ token: attempt.token, newPassword, confirmPassword });
+      }
       setDone(true);
-      // The reset revoked every session this user held, so the client's copy is
-      // already dead. Clearing it is also what stops the login screen's
-      // `status === 'signedIn'` redirect from bouncing them into `(app)`.
-      // clearSession rather than signOut: there is no live session left to
-      // revoke, and signOut would fire a guaranteed-401 logout for nothing.
+      // Clearing the local session is what stops the login screen's
+      // `status === 'signedIn'` redirect from bouncing them into `(app)`, and it is
+      // right for both flows. The two differ server-side and the difference is
+      // recorded rather than glossed: the CUSTOM flow stamped `passwordChangedAt`, so
+      // every Inventory AI session this user held is already dead; the FIREBASE flow
+      // never reached the server, so those sessions remain valid until they expire —
+      // revoking them is the credential-change bridge's job (design §14C.3, N-9), which
+      // is designed but NOT implemented. `clearSession` rather than `signOut`: signOut
+      // would fire a logout request that cannot succeed for the custom flow, where the
+      // token this screen holds is already dead.
       await clearSession();
     } catch (err) {
       const fields = fieldMap(err);
-      // The token has no input of its own, so a field error naming it would be
-      // invisible; promote it to the form level instead of dropping it.
+      // The link code has no input of its own, so a field error naming it would be
+      // invisible; promote it to the form level instead of dropping it. (Only the custom
+      // flow can produce one: Firebase's outcomes never carry `fields`.)
       const tokenProblem = fields.token;
       delete fields.token;
       if (Object.keys(fields).length) setFieldErrors(fields);
@@ -139,19 +207,6 @@ function ResetPasswordForm({ token }: { token: string }) {
     } finally {
       setBusy(false);
     }
-  }
-
-  // No token in the link: there is nothing to submit, and no request is made.
-  if (!token) {
-    return (
-      <AuthLayout title="Link incomplete" subtitle="This reset link is missing its token.">
-        <Banner
-          type="error"
-          text="The link you followed is incomplete. Request a new one to continue."
-        />
-        <Button title="Request a new link" onPress={() => router.replace('/forgot-password')} full />
-      </AuthLayout>
-    );
   }
 
   if (done) {

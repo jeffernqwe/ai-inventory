@@ -36,6 +36,7 @@ const PURE_UNIT = [
   'phase03-rbac.test.mjs',            // middleware/constants unit tests
   'phase06-ai-wire.test.mjs',         // OpenRouter wire mapping: payload, header and error-sanitization contract, plus the upstream diagnostics
   'phase07d-production-config.test.mjs', // env validation, health, shutdown
+  'phaseN1-database-separation.test.mjs', // MongoDB environment separation: dev/test/prod database-name resolution, the fail-closed test rule, the cross-environment refusals
   'phase20f-ai-conversation-index.test.mjs', // schema-declaration guard for the ai_conversations list index (M-5)
   'phase20g-list-sort-indexes.test.mjs', // schema-declaration guards for the products/purchase_orders/users list-sort indexes
   'phase21-product-archive-invariant.test.mjs', // declaration guards for the archive-only product lifecycle + inventory↔product dependency

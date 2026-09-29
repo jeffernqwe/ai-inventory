@@ -1673,10 +1673,25 @@ credential.
   identity linkage field, not an authorization source.
 - **Email/password users must have a verified email before entering the main app.** A Google user is
   verified **according to Firebase's signed `email_verified` claim** — not because the provider is
-  Google. The enforcement *mechanics* (client gate vs server gate, what an unverified user may reach,
-  and the fact that `User.emailVerified` is only written at exchange/link/register time and is
-  therefore stale between those events) remain **open** and must be decided before the step that needs
-  them.
+  Google. **The enforcement *mechanics* are DECIDED (2026-09-29, design §14C.9 — OD-3 resolved), and
+  they are enforced by ordering rather than by a new check:** the registration order is Firebase
+  account → **verification email sent** → the user verifies → `reload()` confirms
+  `emailVerified === true` → **only then** does Inventory AI create the MongoDB `User` **and**
+  `Business` (together, with `User.businessId` still required), make the user **OWNER**, and mint the
+  Inventory AI JWT + server session. **No `User`, no `Business`, no JWT and no session exist before
+  verification**, so there is no half-registered tenant to clean up; a signed-in-but-unverified
+  identity is held on a **client verify screen** and may resend through **native Firebase Auth**. That
+  is why **`requireAuth` is deliberately not modified**: the Phase 23/24 authorization order and
+  status-code contract are preserved, and every already-shipped client stays valid. An unverified
+  Google identity is **refused**, not merely warned. The stale `User.emailVerified` problem is
+  **bounded, not eliminated** — the gate applies at registration time, and no per-request Firebase call
+  is added (the server must not call Firebase on ordinary API requests). The legacy
+  `/api/auth/register` path stays **transitional** and is not weakened for this, and **universal**
+  verification enforcement becomes possible only once that path is retired. **None of this is
+  implemented, and the delivered flow does not exist in the shipped code** — today
+  `POST /api/auth/firebase/register` creates the `Business` and the `User` immediately and
+  `POST /api/auth/firebase/exchange` mints the session, with `emailVerified` persisted and never
+  enforced.
 
 ### The credential-change revocation bridge (required before native recovery ships)
 
@@ -1697,6 +1712,48 @@ the revocation cannot block it, and a token minted after the stamp is never caug
 The bridge writes only those two things and can never move a tenant, change a role or change a status.
 Full design, including its ordering, its non-retryability and the documented
 `401 SESSION_INVALIDATED`-is-success rule: design §14C.3.
+
+**The password-*reset* path — where the caller begins with no session at all — is now RESOLVED (D2).**
+The bridge requires a live Inventory AI session, but `forgot-password` and `reset-password` are
+**public** screens and the reset completes entirely inside Firebase, so at the moment the password
+actually changes the caller holds **no** session and could not reach the bridge — which would have left
+a Firebase-native reset revoking **nothing**. The approved sequence **establishes the context first**:
+after the reset the user **signs in again with the new password**, the app obtains a **fresh Firebase ID
+token**, establishes a **temporary recovery-context session** through the existing **public** exchange,
+calls the bridge — which revokes **every** session, including that temporary one, because
+`revokeAllSessions` spares no caller — and then **re-exchanges** to mint the **final** session, valid
+because it was minted after the stamp. The recovery-context session is structurally an ordinary session
+— **no new session type, no new field, no "recovery" flag** — and the bridge's authentication is **not**
+relaxed for this path: **no public `credentials-changed` endpoint and no Cloud Function / Admin-SDK
+trigger is introduced.** `passwordChangedAt` and `revokeAllSessions()` remain the N-4 invariant, the
+Firebase UID → MongoDB `User` binding remains authoritative, and a Firebase ID token is still **not**
+the application's bearer credential. Design: **§14C.3.8**.
+
+**How the client knows a sign-in is a recovery continuation is now LOCKED (OD-9, 2026-09-29).** A
+**durable, non-secret recovery marker** is written to `expo-secure-store` under
+`inventoryai.auth.passwordResetPending`, holding **only an account fingerprint** — never a password, an
+`oobCode`, a Firebase ID token, an Inventory AI JWT, a `userId`, a `businessId`, a `role` or tenant
+data. It is a **flow selector, never a credential**, and the server still derives the account
+exclusively from `requireAuth → req.user.id → Mongo User → firebaseUid`; no client-supplied value can
+steer which account is revoked. The marker is created with **`verifyPasswordResetCode(oobCode)`**, whose
+returned email is **memory-only** — used for the automatic sign-in and the fingerprint, and **never**
+as an authorization source. **Automatic recovery (F1) is approved:** verify → write marker →
+`confirmPasswordReset` → sign in with the new password → **temporary** public exchange →
+`credentials-changed` → revoke all → **final** exchange → apply the final session. The temporary session
+is **held only in a local variable** — never persisted, never applied, never navigated with, never
+placed in route parameters — and `revokeAllSessions()` revokes it together with every other active
+session. The marker is created **before** the password-change operation; **cleared** after a successful
+bridge acknowledgement or a `401 SESSION_INVALIDATED` (which is **success-equivalent**); **kept** on
+`409 FIREBASE_REAUTHENTICATION_REQUIRED` and on transport failure; never consumed on a fingerprint
+mismatch; and the legacy `?token=` recovery never creates it, because that server flow already performs
+the revocation. **Two limits are recorded rather than glossed.** A reset completed on one device followed
+by the **first** password sign-in on **another** is **not detectable** by this client-local marker, so
+OD-9 is **not** a universal cross-device revocation guarantee; and the server-side `passwordUpdatedAt`
+derivation that would close that gap (**Option E**, now **OD-10**) is **deferred as a separate owner
+decision, with nothing of it introduced** — no Mongo field and no extra Admin lookup. `requireAuth`,
+`passwordChangedAt`, `revokeAllSessions()`, the UID→Mongo `User` mapping, Mongo business/role authority
+and the JWT/session architecture are **unchanged**, and **no new session type or session field** is
+introduced. Design: **§14C.3.9** (**M-1…M-10**).
 
 **`checkRevoked` is reviewed and stays `false`.** MongoDB `status`, checked per request, is the
 revocation authority; enabling Firebase-side revocation checking would add a network call to Google on

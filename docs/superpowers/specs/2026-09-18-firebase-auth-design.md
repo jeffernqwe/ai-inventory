@@ -1941,11 +1941,15 @@ is considered complete."* — the **real device** half is now verified (on an **
 hardware; see below); the **live Firebase project** half is **still UNVERIFIED**, and the gate
 **remains open**. **N-3 must not be started on the strength of this result alone.**
 
-**Android emulator vs physical device — recorded, because the difference is real.** Every runtime
-observation above is from the `InventoryAI` **emulator** on this Windows host. This phase had **no
-physical device**, exactly as Phase 32G and Phase F2.9 recorded. A physical-device run additionally
-needs `EXPO_PUBLIC_API_URL` pointed at the host's LAN address, since the `development` profile sets no
-`env`.
+**Android emulator vs physical device — recorded, because the difference is real, and corrected.**
+Every runtime observation above is from the `InventoryAI` **emulator** on this Windows host. A physical
+device **was** attached later in the same session (`PV4DDMIZZLTCIVSK`, an **OPPO CPH1969**, Android 11 /
+**SDK 30**, **arm64-v8a**), but it **could not be used**: `com.inventoryai.app` is **not installed** on
+it, and **no APK exists** in the repository or on this host to install. Producing one would require an
+`eas build` or an `expo prebuild`+Gradle build, both of which this phase forbids — so the run was
+**not** repeated there, and the result above **must be read as emulator-only**. A physical-device run
+additionally needs `EXPO_PUBLIC_API_URL` pointed at the host's LAN address, since the `development`
+profile sets no `env`.
 
 **iOS remains `[EXTERNAL VERIFICATION REQUIRED]`, with nothing verified.** No iOS build exists for this
 project, none can be produced on this Windows host, and no iOS run was attempted. Specifically

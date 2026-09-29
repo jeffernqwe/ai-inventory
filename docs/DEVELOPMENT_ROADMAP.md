@@ -5460,9 +5460,10 @@ expired or already-used code; and anything provider-specific.
 credential and no mailbox access, so the reset email was **never triggered** — not because it failed,
 but because the link it would produce cannot be retrieved here. **No success was simulated.**
 
-**Consequences.** **L-17 is only HALF satisfied** — the *real device* half is verified (on an
-**emulator**, not physical hardware), the *live Firebase project* half is **not**, and **the gate stays
-open**. **N-3 must not be started on the strength of this result alone.** **iOS is entirely
+**Consequences.** **L-17 is only HALF satisfied** — the *real device* half is verified **on an emulator only** (a physical
+device, an OPPO CPH1969 / Android 11, was attached later in the session but has **no build installed**
+and **no APK exists to install**, so the run was not repeated there), the *live Firebase project* half is
+**not**, and **the gate stays open**. **N-3 must not be started on the strength of this result alone.** **iOS is entirely
 `[EXTERNAL VERIFICATION REQUIRED]` and nothing about it was tested** — including whether the single-entry
 `expo.scheme` registers, whether a URL routes to `/reset-password`, and whether any Firebase action-link
 delivery works on a platform with no Universal Links, no associated domains and no AASA file. **No

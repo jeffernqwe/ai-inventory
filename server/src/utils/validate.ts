@@ -386,6 +386,40 @@ export function validateFirebaseUnlink(body: Body) {
   return { problems, idToken: idToken.value, newPassword: body?.newPassword };
 }
 
+/**
+ * Credentials-changed payload (N-4). Reads `idToken` and NOTHING else — the
+ * strictest payload in this file, and for the same reason `validateFirebaseLink`
+ * is strict.
+ *
+ * The bridge's whole job is to act on the CALLER'S OWN account after Firebase
+ * changed its password, so two facts must be server-derived and no others may be
+ * expressible:
+ *
+ *   - the ACCOUNT is `req.user.id`, put there by `requireAuth` from this
+ *     request's own session — so there is no `userId` field to forward;
+ *   - the IDENTITY is the uid of the token `verifyFirebaseIdToken` returns, and
+ *     the service additionally requires it to EQUAL the uid already on the
+ *     account — so there is no `firebaseUid` field to forward either.
+ *
+ * `businessId`, `role`, `status` and `email` are not read on any path, so a body
+ * carrying them is inert rather than rejected: the returned object has no field to
+ * carry them and the handler has no variable holding a client-supplied identity,
+ * tenant or role. That is what makes the control structural rather than a check
+ * somebody could later delete.
+ *
+ * There is deliberately NO session, `jti`, device or revision field. The session
+ * being revoked is whichever one authenticated this request, and naming it would
+ * let a caller aim the operation at a session other than their own — the exact
+ * hazard `DELETE /api/auth/sessions/:id` avoids by putting `req.user.id` inside the
+ * query filter rather than checking ownership afterwards.
+ */
+export function validateCredentialsChanged(body: Body) {
+  const problems = [];
+  const idToken = requiredString(body?.idToken, 'idToken', MAX_ID_TOKEN);
+  problems.push(...idToken.problems);
+  return { problems, idToken: idToken.value };
+}
+
 // ---------------------------------------------------------------------------
 // User management (Phase 14A)
 // ---------------------------------------------------------------------------

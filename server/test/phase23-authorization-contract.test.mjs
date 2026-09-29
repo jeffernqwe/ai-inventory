@@ -209,8 +209,12 @@ const CLASS = {
  *   req.user, never from the request — so no permission applies; Phase 32H added
  *   POST /api/auth/firebase/link, which attaches a verified Firebase identity to
  *   the caller's own account for the same reason — the account is req.user.id and
- *   `firebaseUid` is not a capability any role could be granted), and every
- *   other account route is permission-gated.
+ *   `firebaseUid` is not a capability any role could be granted; Phase 32L added
+ *   POST /api/auth/firebase/unlink on the same terms; and N-4 added
+ *   POST /api/auth/credentials-changed, which records a credential change and
+ *   revokes sessions on the caller's OWN account — nothing but the account that
+ *   authenticated the request can be affected, and a session is not a capability),
+ *   and every other account route is permission-gated.
  *   The four categories/locations reads are Phase 22's explicit deferral: no
  *   categories.view / locations.view key exists in the catalogue, and inventing
  *   one was out of Phase 22 scope. They are pinned here so the deferral is
@@ -255,6 +259,10 @@ const AUTHENTICATED_ROUTES = [
   {
     route: 'POST /api/auth/firebase/unlink',
     why: 'Phase 32L: detaches the CALLER’S OWN Firebase identity and establishes a local password — the account is req.user.id and the identity must equal the uid already on it, so no other account or identity can be named, and no permission key could express "may detach an identity" without inventing an authorization concept the catalogue does not have',
+  },
+  {
+    route: 'POST /api/auth/credentials-changed',
+    why: 'N-4: records a credential change on the CALLER’S OWN account and revokes that account’s sessions — the account is req.user.id and the identity must equal the uid already on it, so the request can only ever affect the account that authenticated it; no permission key could express "may record a credential change on my own account" without inventing an authorization concept the catalogue does not have, and a session is not a capability that could be granted',
   },
   { route: 'GET /api/categories', why: 'Phase 22 deferral: no categories.view key exists' },
   { route: 'GET /api/categories/:id', why: 'Phase 22 deferral: no categories.view key exists' },

@@ -40,7 +40,11 @@ jest.mock('../lib/auth', () => ({
 const mockedUseSession = useSession as jest.Mock;
 
 const CONNECT = 'Connect Google';
-const DISCONNECT = 'Disconnect Firebase';
+// Phase A (F-1): the entry point no longer detaches anything — it changes the
+// password. The label stays provider-neutral (the screen must not name the identity
+// implementation) and distinct from the local 'Change password' control, which is why
+// it is asserted by its own constant.
+const CHANGE_SIGNIN_PASSWORD = 'Change sign-in password';
 const CHANGE_PASSWORD = 'Change password';
 
 const connectFirebase = jest.fn();
@@ -84,7 +88,7 @@ describe('Profile — connecting Google is offered only where it applies', () =>
     expect(view.getByRole('button', { name: CONNECT })).toBeTruthy();
     // The rest of the Security card is untouched: only this action is gated.
     expect(view.getByText(CHANGE_PASSWORD)).toBeTruthy();
-    expect(view.queryByText(DISCONNECT)).toBeNull();
+    expect(view.queryByText(CHANGE_SIGNIN_PASSWORD)).toBeNull();
   });
 
   it('does not offer it when the account already authenticates through Firebase', async () => {
@@ -93,7 +97,7 @@ describe('Profile — connecting Google is offered only where it applies', () =>
 
     expect(view.queryByText(CONNECT)).toBeNull();
     // The inverse action is what belongs there instead.
-    expect(view.getByRole('button', { name: DISCONNECT })).toBeTruthy();
+    expect(view.getByRole('button', { name: CHANGE_SIGNIN_PASSWORD })).toBeTruthy();
   });
 
   it('does not offer it when the capability block is absent entirely', async () => {
@@ -103,7 +107,7 @@ describe('Profile — connecting Google is offered only where it applies', () =>
     const view = await mount();
 
     expect(view.queryByText(CONNECT)).toBeNull();
-    expect(view.queryByText(DISCONNECT)).toBeNull();
+    expect(view.queryByText(CHANGE_SIGNIN_PASSWORD)).toBeNull();
   });
 
   it('does not offer it to an account that already reports a local password AND an identity', async () => {
@@ -117,7 +121,7 @@ describe('Profile — connecting Google is offered only where it applies', () =>
     const view = await mount();
 
     expect(view.queryByText(CONNECT)).toBeNull();
-    expect(view.getByRole('button', { name: DISCONNECT })).toBeTruthy();
+    expect(view.getByRole('button', { name: CHANGE_SIGNIN_PASSWORD })).toBeTruthy();
   });
 
   it('does not offer it without a local password, even with no Firebase identity', async () => {

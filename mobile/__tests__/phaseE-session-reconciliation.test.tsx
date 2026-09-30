@@ -107,7 +107,6 @@ jest.mock('../lib/api', () => ({
   firebaseExchange: (...args: unknown[]) => mockFirebaseExchange(...args),
   firebaseRegister: jest.fn(),
   register: jest.fn(),
-  firebaseUnlink: jest.fn(),
 }));
 
 const mockGetItemAsync = jest.fn();

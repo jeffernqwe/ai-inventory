@@ -348,44 +348,15 @@ export function validateFirebaseLink(body: Body) {
 }
 
 /**
- * Identity-unlink payload (Phase 32L). Reads `idToken` and `newPassword`.
+ * The Firebase-unlink payload was REMOVED in Phase A (F-1), together with the route
+ * it validated and the `POST /api/auth/firebase/unlink` handler.
  *
- * `newPassword` is the whole of Policy B: an account may stop authenticating
- * through Firebase only by establishing a local password in the same transition,
- * so the new credential is a REQUIRED field rather than an optional one. It is
- * held to the shared password rules through `passwordProblems` — the same 8–72
- * bound `validateChangePassword` and `validateResetPassword` apply — and its
- * problems are re-labelled `newPassword`, exactly as both of those do, so a
- * client can anchor the error on the right input.
- *
- * `confirmPassword` is deliberately NOT read. Confirmation is a client-side UX
- * concern on the reset screen, where a mistyped confirmation must not spend a
- * token; here the caller is already authenticated and a mistyped password costs
- * them nothing but a second attempt.
- *
- * Every other key is IGNORED rather than rejected, matching `validateFirebaseLink`:
- * `firebaseUid`, `userId`, `businessId`, `role` and `status` are inert because the
- * returned object has no field to carry them — the account is `req.user.id` and
- * the identity is the verified token's uid. There is nothing to pass by mistake
- * and no check that could be removed.
- *
- * The token's SHAPE is still not validated. `requiredString` bounds its length
- * only; what a real token looks like is the verifier's decision, and a 400 here
- * would imply the server knows.
+ * THE CAPABILITY IS GONE, NOT DISABLED, so there is nothing left for a validator to
+ * read: an account may no longer detach its Firebase identity at all, and the endpoint
+ * that did so no longer exists. The removal is recorded here rather than composed
+ * silently into a smaller diff, because a reader looking for the unlink payload must
+ * be able to find out where it went.
  */
-export function validateFirebaseUnlink(body: Body) {
-  const problems = [];
-
-  const idToken = requiredString(body?.idToken, 'idToken', MAX_ID_TOKEN);
-  problems.push(...idToken.problems);
-
-  problems.push(
-    ...passwordProblems(body?.newPassword).map((p) => ({ ...p, field: 'newPassword' }))
-  );
-
-  return { problems, idToken: idToken.value, newPassword: body?.newPassword };
-}
-
 /**
  * Credentials-changed payload (N-4). Reads `idToken` and NOTHING else — the
  * strictest payload in this file, and for the same reason `validateFirebaseLink`

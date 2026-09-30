@@ -43,6 +43,7 @@ const PURE_UNIT = [
   'phase22-authorization-contract.test.mjs', // route↔permission bindings, catalogue coverage, CATALOGUE_ONLY declaration
   'phase23-authorization-contract.test.mjs', // route authorization classification, mobile RBAC mirror, requireRole inertness, client error-code contract
   'phase26b-mail-service.test.mjs',   // mail provider registry, Resend wire format via a stubbed fetch, template and error contract
+  'phaseA-credential-authority.test.mjs', // Phase A (F-1) declaration guards: the unlink capability is gone, no reachable path clears firebaseUid, an identity is never resolved by email
   'phase-ts-3-migration-guards.test.mjs', // module-graph guards: duplicate .js/.ts stems + stale relative specifiers, resolved against the filesystem
 ];
 const PURE_DB = [
@@ -86,7 +87,6 @@ const MIXED = [
   'phase32b-firebase-admin.test.mjs', // unit: Firebase config parsing, error leak boundary, ID-token narrowing via the seam, admin-app lifecycle, production-config integration; db: User firebaseUid/emailVerified schema + the sparse unique index against real MongoDB
   'phase32c-firebase-exchange.test.mjs', // unit: exchange/registration validators + limiter keying and the absent skipSuccessfulRequests; db: POST /api/auth/firebase/exchange + /register over the real app (session shape, JWT sub/jti, REGISTRATION_REQUIRED, ACCOUNT_DISABLED, inactive business, body-identity injection ignored, registration + orphan retry)
   'phase32h-firebase-linking.test.mjs', // unit: the link payload returns only {problems, idToken} and a planted identity/tenant/role is inert; db: POST /api/auth/firebase/link over the real app (CASE A-D, conflict indistinguishability, email is not a join key, unauthenticated 401, 400-not-401 on a bad Firebase token, 503 unconfigured, 32E guard intact, race outcomes)
-  'phase32l-firebase-unlink.test.mjs', // unit: unlink validator shape + the auth_time freshness helper (fail-closed, window boundary, iat is not freshness); db: POST /api/auth/firebase/unlink over the real app (Policy B transition, last-method invariant, identity mismatch/not-linked, recency, R-3 + R-4 reset-token race both orderings, session revocation, audit hygiene, authMethods, conditional-write races)
   'phaseN4-credentials-changed.test.mjs', // unit: the credentials-changed payload returns only {problems, idToken} and a planted account/identity/tenant/role/session is inert; db: POST /api/auth/credentials-changed over the real app (the stamp, total session revocation incl. the caller's own, a post-stamp session still authenticating, uid mismatch/legacy account, stale + missing auth_time, iat is not freshness, only passwordChangedAt moves, SESSIONS_REVOKED_ALL audit, planted-body inertness, unauthenticated 401, DISABLED/business 403, 503 unconfigured, route registration)
 ];
 

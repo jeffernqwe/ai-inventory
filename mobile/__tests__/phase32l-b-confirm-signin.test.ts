@@ -1,5 +1,5 @@
 /**
- * Phase 32L-B — `confirmFirebaseSignIn`, and the API wrapper the disconnect uses.
+ * Phase 32L-B — `confirmFirebaseSignIn`, the confirmation the credential-change flow reuses.
  *
  * TWO CLAIMS THIS FILE EXISTS TO PIN, both of which would be silent if they broke:
  *
@@ -29,11 +29,13 @@
  * `googleRedirectUri()` and the `expo-auth-session` import — so the `expo-auth-session`
  * mock that used to model those seams is gone with it: there is nothing left to assert
  * against. The structural claim that replaced those negative assertions lives in
- * `phaseF1-retired-dependency-guard.test.ts`. `lib/config` is still mocked, because
- * `lib/api.ts` — imported below for the `firebaseUnlink` cases — reads its URL and timeout.
+ * `phaseF1-retired-dependency-guard.test.ts`. PHASE A (F-1) THEN REMOVED THE `firebaseUnlink` API
+ * WRAPPER, together with the `POST /api/auth/firebase/unlink` route it called and the two cases
+ * that used to drive it here: an account may no longer detach its Firebase identity, so
+ * `firebaseUid` can never be cleared and there is no wrapper left to assert against. `lib/config`
+ * is still mocked, because the modules under test read it.
  */
 
-import { firebaseUnlink } from '../lib/api';
 import { confirmFirebaseSignIn, signInWithGoogle } from '../lib/firebase-auth';
 import { isNativeGoogleConfigured } from '../lib/firebase-native';
 
@@ -384,52 +386,5 @@ describe('a confirmation has no legacy door', () => {
     expect(code).not.toMatch(/from 'firebase\/auth'/);
     expect(code).not.toMatch(/from 'firebase\/app'/);
     expect(code).not.toMatch(/getFirebaseAuth\(/);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// The API wrapper
-// ---------------------------------------------------------------------------
-
-/** The two arguments `apiFetch` passes to `fetch`, so the mock's calls are typed. */
-interface FetchInit {
-  method: string;
-  headers: Record<string, string>;
-  body: string;
-}
-
-describe('firebaseUnlink', () => {
-  const originalFetch = global.fetch;
-
-  afterEach(() => {
-    global.fetch = originalFetch;
-  });
-
-  it('POSTs the token and the new password to the unlink endpoint as the bearer credential', async () => {
-    const fetchMock = jest.fn(async (_url: string, _init: FetchInit) => ({
-      status: 200,
-      json: async () => ({ unlinked: true, user: { id: 'u1' } }),
-    }));
-    global.fetch = fetchMock as unknown as typeof global.fetch;
-
-    await firebaseUnlink('session.jwt', { idToken: ID_TOKEN, newPassword: PASSWORD });
-
-    const [url, init] = fetchMock.mock.calls[0]!;
-    expect(url).toBe('http://localhost:4000/api/auth/firebase/unlink');
-    expect(init.method).toBe('POST');
-    expect(init.headers.Authorization).toBe('Bearer session.jwt');
-    expect(JSON.parse(init.body)).toEqual({ idToken: ID_TOKEN, newPassword: PASSWORD });
-  });
-
-  it('surfaces the server code and status as an ApiError', async () => {
-    const fetchMock = jest.fn(async (_url: string, _init: FetchInit) => ({
-      status: 409,
-      json: async () => ({ code: 'FIREBASE_REAUTHENTICATION_REQUIRED', error: 'confirm again' }),
-    }));
-    global.fetch = fetchMock as unknown as typeof global.fetch;
-
-    await expect(
-      firebaseUnlink('session.jwt', { idToken: ID_TOKEN, newPassword: PASSWORD })
-    ).rejects.toMatchObject({ status: 409, code: 'FIREBASE_REAUTHENTICATION_REQUIRED' });
   });
 });

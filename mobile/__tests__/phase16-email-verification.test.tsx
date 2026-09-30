@@ -94,7 +94,6 @@ const mockLogout = jest.fn();
 const mockMe = jest.fn();
 const mockCredentialsChanged = jest.fn();
 const mockFirebaseLink = jest.fn();
-const mockFirebaseUnlink = jest.fn();
 
 jest.mock('../lib/api', () => ({
   login: (...args: unknown[]) => mockLogin(...args),
@@ -105,7 +104,6 @@ jest.mock('../lib/api', () => ({
   me: (...args: unknown[]) => mockMe(...args),
   credentialsChanged: (...args: unknown[]) => mockCredentialsChanged(...args),
   firebaseLink: (...args: unknown[]) => mockFirebaseLink(...args),
-  firebaseUnlink: (...args: unknown[]) => mockFirebaseUnlink(...args),
 }));
 
 jest.mock('expo-secure-store', () => ({

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Redirect, Stack } from 'expo-router';
+import { Redirect, Stack, router } from 'expo-router';
 import { StyleSheet, Text } from 'react-native';
 
 import Banner from '../../components/Banner';
@@ -16,9 +16,9 @@ import type { Palette } from '../../lib/theme';
 import { useTheme } from '../../lib/theme-context';
 
 /**
- * Phase 32L-B — disconnecting the account's Firebase sign-in.
+ * Phase A (F-1) — CHANGING the account's Firebase password.
  *
- * THIS SCREEN HAS THREE STEPS BECAUSE THE SERVER HAS TWO REQUIREMENTS. It must be
+ * IT NO LONGER DISCONNECTS ANYTHING. Until Phase A this screen detached the account's
  * the caller's own account (which the session already proves) AND the Firebase
  * authentication must be RECENT — the verified token's `auth_time` within 300 s.
  * A person signed in hours ago satisfies the first and not the second, so the
@@ -28,8 +28,9 @@ import { useTheme } from '../../lib/theme-context';
  *
  *   1. Choose how this account signs in to Firebase, and confirm it.
  *   2. Type the new password that will own the account afterwards.
- *   3. The server detaches the Firebase identity and this screen is gone — the
- *      revoked session sends the app back to login, where the new password works.
+ *   3. Firebase changes the credential, the server withdraws every session minted
+ *      against the old one — including the one this screen is using — and the app
+ *      immediately takes the one fresh session the sequence ends with.
  *
  * STEP 2 CAN HAPPEN TWICE, which is why it is a step and not a button. The server owns
  * a 300 s freshness window, so it can refuse the whole request with
@@ -116,7 +117,7 @@ function messageFor(err: unknown): string {
     if (err.code === 'FIREBASE_IDENTITY_CONFLICT') return OTHER_OPTION_MESSAGE;
     if (err.message) return err.message;
   }
-  return 'We could not disconnect your Firebase sign-in. Please try again.';
+  return 'We could not change your password. Please try again.';
 }
 
 /** True when the refusal means "this is the wrong confirmation option". */
@@ -143,10 +144,10 @@ function needsAnotherConfirmation(err: unknown): boolean {
   );
 }
 
-export default function DisconnectFirebaseScreen() {
+export default function ChangeFirebasePasswordScreen() {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const { user, status, confirmFirebaseSignIn, disconnectFirebase, signOut } = useSession();
+  const { user, status, confirmFirebaseSignIn, changeFirebasePassword, signOut } = useSession();
 
   const [step, setStep] = useState<Step>('choose');
   /** The option that was chosen, kept after success so a retry can re-confirm. */
@@ -174,6 +175,15 @@ export default function DisconnectFirebaseScreen() {
    */
   const [retried, setRetried] = useState(false);
   const [busy, setBusy] = useState(false);
+  /**
+   * The flow FINISHED, and the person is still signed in.
+   *
+   * Unlike the disconnect this screen used to perform, a password change does not end
+   * the session — the sequence replaces it — so there is no redirect to login to carry
+   * the news. The screen therefore says it plainly and offers the way back, because
+   * "did that work?" is the one question this flow must never leave open.
+   */
+  const [done, setDone] = useState(false);
 
   /**
    * The gate (Phase 32L-B decision Q8). `authMethods.firebase` is what the server
@@ -270,7 +280,7 @@ export default function DisconnectFirebaseScreen() {
     setBusy(true);
     resetFeedback();
     try {
-      const outcome = await disconnectFirebase(
+      const outcome = await changeFirebasePassword(
         {
           method: method ?? 'password',
           email,
@@ -305,10 +315,11 @@ export default function DisconnectFirebaseScreen() {
         return;
       }
 
-      // `unlinked`: the orchestration has already ended the Firebase session and cleared
-      // the local session, so the (app) layout redirects to login. Nothing is navigated
-      // from here — there is deliberately no success screen to land on for an account
-      // that now has to sign in again.
+      // `changed`: the credential is Firebase's and the session has already been replaced
+      // by the final exchange, so the person is still signed in and nothing needs
+      // re-authenticating. The screen stays put and reports it rather than navigating
+      // away silently, which would leave the one question that matters unanswered.
+      setDone(true);
     } catch (err) {
       if (isSessionError(err)) {
         await signOut();
@@ -339,12 +350,29 @@ export default function DisconnectFirebaseScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: 'Disconnect Firebase' }} />
+      <Stack.Screen options={{ title: 'Change password' }} />
       <Screen scroll contentStyle={styles.content}>
         <Banner type="error" text={formError} />
         {info ? <Banner type="info" text={info} /> : null}
 
-        {step === 'choose' ? (
+        {done ? (
+          <>
+            <SectionHeader title="Password changed" />
+            <Card>
+              <Text style={styles.help}>
+                Your password has been changed. Use it the next time you sign in. Any other device
+                signed in to this account has been signed out.
+              </Text>
+              <Button
+                title="Back to profile"
+                style={styles.spaced}
+                onPress={() => router.replace('/profile')}
+              />
+            </Card>
+          </>
+        ) : null}
+
+        {!done && step === 'choose' ? (
           <>
             <SectionHeader title="Step 1 · Confirm your sign-in" />
             <Card>
@@ -374,7 +402,7 @@ export default function DisconnectFirebaseScreen() {
           </>
         ) : null}
 
-        {step === 'confirmPassword' ? (
+        {!done && step === 'confirmPassword' ? (
           <>
             <SectionHeader title="Step 1 · Confirm your sign-in" />
             <Card>
@@ -408,13 +436,13 @@ export default function DisconnectFirebaseScreen() {
           </>
         ) : null}
 
-        {step === 'newPassword' ? (
+        {!done && step === 'newPassword' ? (
           <>
             <SectionHeader title="Step 2 · Choose a new password" />
             <Card>
               <Text style={styles.help}>
-                This account will sign in with this password from now on, and the Firebase connection
-                will be removed. Signing in with the provider above will no longer open this account.
+                This account will sign in with this password from now on. Your Firebase sign-in stays
+                connected — this replaces the password, it does not remove the account&apos;s sign-in.
               </Text>
               <Input
                 name="newPassword"
@@ -438,7 +466,7 @@ export default function DisconnectFirebaseScreen() {
                 required
                 autoCapitalize="none"
               />
-              <Button title="Disconnect Firebase" loading={busy} style={styles.spaced} onPress={submit} />
+              <Button title="Change password" loading={busy} style={styles.spaced} onPress={submit} />
               <Button
                 title="Back"
                 variant="secondary"

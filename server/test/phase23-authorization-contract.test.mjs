@@ -209,8 +209,10 @@ const CLASS = {
  *   req.user, never from the request — so no permission applies; Phase 32H added
  *   POST /api/auth/firebase/link, which attaches a verified Firebase identity to
  *   the caller's own account for the same reason — the account is req.user.id and
- *   `firebaseUid` is not a capability any role could be granted; Phase 32L added
- *   POST /api/auth/firebase/unlink on the same terms; and N-4 added
+ *   `firebaseUid` is not a capability any role could be granted (Phase 32L added
+ *   POST /api/auth/firebase/unlink on the same terms, and PHASE A (F-1) REMOVED it
+ *   again — the capability is gone, not re-bucketed, so it is declared nowhere); and
+ *   N-4 added
  *   POST /api/auth/credentials-changed, which records a credential change and
  *   revokes sessions on the caller's OWN account — nothing but the account that
  *   authenticated the request can be affected, and a session is not a capability),
@@ -255,10 +257,6 @@ const AUTHENTICATED_ROUTES = [
   {
     route: 'POST /api/auth/firebase/link',
     why: 'Phase 32H: attaches a verified Firebase identity to the CALLER’S OWN account — the account is req.user.id, so there is no other account the request could name, and no permission key could express "may link an identity" without inventing an authorization concept the catalogue does not have',
-  },
-  {
-    route: 'POST /api/auth/firebase/unlink',
-    why: 'Phase 32L: detaches the CALLER’S OWN Firebase identity and establishes a local password — the account is req.user.id and the identity must equal the uid already on it, so no other account or identity can be named, and no permission key could express "may detach an identity" without inventing an authorization concept the catalogue does not have',
   },
   {
     route: 'POST /api/auth/credentials-changed',

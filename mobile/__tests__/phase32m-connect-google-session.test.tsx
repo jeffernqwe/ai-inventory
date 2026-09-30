@@ -74,7 +74,6 @@ jest.mock('../lib/api', () => ({
   me: (...args: unknown[]) => mockMe(...args),
   register: jest.fn(),
   firebaseRegister: jest.fn(),
-  firebaseUnlink: jest.fn(),
 }));
 
 // PHASE 16: `lib/auth.tsx` now reaches the verification boundary DIRECTLY, not only

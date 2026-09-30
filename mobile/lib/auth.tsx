@@ -21,6 +21,7 @@ import {
   nativeForceIdToken,
   nativeReloadUser,
   nativeSendEmailVerification,
+  nativeUpdatePassword,
 } from './firebase-native';
 import type { Role } from './permissions';
 
@@ -222,21 +223,21 @@ export interface FirebaseConfirmInput {
 }
 
 /**
- * A disconnect request (Phase 32L-B): ONE attempt's inputs, and nothing carried
- * between attempts.
+ * A password-change request (Phase A / F-1): ONE attempt's inputs, and nothing
+ * carried between attempts.
  *
- * `newPassword` is the credential that will own the account afterwards, and it is
- * validated by the SERVER's shared password validator — anything checked here is
- * a courtesy to the person typing, never a control.
+ * `newPassword` is the credential that will own the account afterwards. It is set
+ * AT FIREBASE and validated there; the shared server validator is never consulted
+ * for it, because Inventory AI holds no credential for this account at all.
  */
-export interface DisconnectFirebaseInput extends FirebaseConfirmInput {
+export interface ChangeFirebasePasswordInput extends FirebaseConfirmInput {
   newPassword: string;
 }
 
 /**
- * What ONE disconnect attempt produced.
+ * What ONE password-change attempt produced.
  *
- * `reauth-required` is not a failure and not an error: the server refused only
+ * `reauth-required` is not a failure and not an error: the refusal came only
  * because the Firebase authentication behind the request was older than its 300 s
  * window, and it mutated nothing. It is RETURNED rather than handled here because
  * its remedy needs the person — a confirmation they complete, and a new password
@@ -244,8 +245,8 @@ export interface DisconnectFirebaseInput extends FirebaseConfirmInput {
  * the credential this call was handed still in scope. The caller re-confirms and
  * calls again with a password it collected afterwards.
  */
-export type DisconnectFirebaseOutcome =
-  | { kind: 'unlinked' }
+export type ChangeFirebasePasswordOutcome =
+  | { kind: 'changed' }
   | { kind: 'reauth-required' };
 
 /**
@@ -258,7 +259,7 @@ export type DisconnectFirebaseOutcome =
  * Enforced here rather than in the caller because this is the one place every
  * attempt passes through.
  */
-export interface DisconnectFirebaseOptions {
+export interface ChangeFirebasePasswordOptions {
   retry?: boolean;
 }
 
@@ -412,34 +413,45 @@ async function readEmailVerified(): Promise<boolean> {
    */
   confirmFirebaseSignIn: (input: FirebaseConfirmInput) => Promise<ConfirmSignInOutcome>;
   /**
-   * Phase 32L-B — DETACHES this account's Firebase identity and establishes a new
-   * local password, in the order the Phase 32L freeze requires.
+   * Phase A (F-1) — CHANGES this account's FIREBASE password.
    *
-   * THE ORDERING IS THE OPERATION: the server is asked first and only a 200
-   * authorises anything local. A confirmation is (re)obtained when there is no live
-   * one, ONE unlink request is sent, and the answer is reported back as an outcome.
-   * On success the Firebase session is ended and the local session cleared, which
-   * returns the app to login where the new password works.
+   * IT IS NOT A DETACH, AND IT CANNOT BECOME ONE. The account keeps its
+   * `firebaseUid`, so it keeps resolving through the exchange and nothing else in the
+   * app has to learn a new state; there is deliberately no code path here that could
+   * clear the mapping, because clearing it is what produced the detached-identity
+   * dead end this phase removes.
    *
-   * ONE ATTEMPT PER CALL, on purpose. A `FIREBASE_REAUTHENTICATION_REQUIRED` refusal
-   * is returned as `reauth-required` instead of being retried in here, because its
-   * remedy (confirm again, then type the new password again) is the caller's to
-   * perform and because retrying in here would mean holding this attempt's password
-   * across a confirmation that can background or kill the app. The caller's second
-   * call passes `retry`, which makes the cap the caller cannot exceed.
+   * FIREBASE OWNS THE CREDENTIAL (L-1/L-5), so the change happens there and never in
+   * Inventory AI: no local password is created, no `passwordHash` is written, and the
+   * server is told only that the credential changed so it can withdraw the sessions
+   * minted against the old one.
    *
-   * It deliberately does NOT call `api.logout`: a successful unlink has already
-   * revoked every session server-side, so that request would be a guaranteed 401.
+   * THE SEQUENCE IS THE APPROVED ONE AND ITS ORDER IS LOAD-BEARING: confirm, then
+   * `updatePassword`, then a TEMPORARY exchange, then the credential-change bridge,
+   * then the FINAL exchange, then `applySession`. Each step depends on the one before
+   * it — the confirmation is what gives Firebase a recent `auth_time`; the temporary
+   * session exists because the bridge revokes every session including the one it is
+   * called with; and the final exchange works because it is PUBLIC and its `iat` is
+   * not before the stamp.
    *
-   * Throws `FirebaseAuthError` when a confirmation produced no token, and the
-   * server's `ApiError` for every refusal it can return — including the two
-   * TERMINAL 409s, `FIREBASE_IDENTITY_NOT_LINKED` and `FIREBASE_IDENTITY_CONFLICT`,
-   * which are never retried.
+   * ONE ATTEMPT PER CALL, on purpose. A freshness refusal is returned as
+   * `reauth-required` instead of being retried in here, because its remedy (confirm
+   * again, then type the new password again) is the caller's to perform and because
+   * retrying in here would hold this attempt's password across a confirmation that
+   * can background or kill the app. The caller's second call passes `retry`, which
+   * makes the cap the caller cannot exceed.
+   *
+   * IT DOES NOT CALL `api.logout`: the bridge has already revoked every session
+   * server-side, so that request would be a guaranteed 401.
+   *
+   * Throws `FirebaseAuthError` when no credential could be produced, and the SDK's or
+   * the server's own error for every refusal — a Firebase credential that cannot be
+   * changed, a rejected token, a disabled account.
    */
-  disconnectFirebase: (
-    input: DisconnectFirebaseInput,
-    options?: DisconnectFirebaseOptions
-  ) => Promise<DisconnectFirebaseOutcome>;
+  changeFirebasePassword: (
+    input: ChangeFirebasePasswordInput,
+    options?: ChangeFirebasePasswordOptions
+  ) => Promise<ChangeFirebasePasswordOutcome>;
   /**
    * Phase 32M — CONNECTS a verified Google/Firebase identity to THIS account: the
    * mobile half of Phase 32H's linking boundary.
@@ -1247,7 +1259,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * It adds nothing to the Firebase module's outcome, and that is the point: the
    * module decides what a Firebase fault means, and this layer only makes it
    * reachable without a screen importing the SDK. The token it produces is
-   * deliberately discarded — `disconnectFirebase` reads the live Firebase user
+   * deliberately discarded — `changeFirebasePassword` reads the live Firebase user
    * instead, so no credential ever sits in a component's state.
    */
   const confirmFirebaseSignIn = useCallback(
@@ -1256,47 +1268,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   /**
-   * Phase 32L-B — the server-first disconnect, with the retry cap built in.
+   * Phase A (F-1) — the Firebase password change, with the retry cap built in.
    *
    * THREE PROPERTIES THIS FUNCTION EXISTS TO GUARANTEE:
    *
-   * 1. A 200 is the ONLY thing that produces a local teardown, and the Firebase
-   *    session is ended AFTER that 200 — never before. Ending it earlier would
-   *    leave the person signed out of Firebase while Inventory AI still holds the
-   *    mapping, which is the split-brain the freeze's sequence exists to avoid.
+   * 1. THE CREDENTIAL CHANGES AT FIREBASE AND NOWHERE ELSE. `updatePassword` is the
+   *    one call that mutates authority, and it runs against the live Firebase session.
+   *    This flow writes NOTHING to MongoDB — no hash, no field — so there is no second
+   *    credential for the two systems to disagree about.
    *
-   * 2. NO LOOP, AND NO PASSWORD CARRIED ACROSS A CONFIRMATION. One attempt is made
-   *    per call: a freshness refusal is handed back to the caller, which confirms
-   *    again and collects a NEW password before calling a second time — so the
-   *    credential this frame was given is out of scope long before the second
-   *    confirmation runs. `retry` is what closes the loop: the second call's refusal
-   *    propagates instead of being handed back, so there is no third attempt. The
-   *    retry must also NOT re-send the token it just used: the refusal is a statement
-   *    about that token's `auth_time`, so resending it would be refused identically,
-   *    which is why the caller confirms afresh and `forceConfirmation` is called with
-   *    no fallback to the cached token.
+   * 2. THE IDENTITY IS NEVER DETACHED. `firebaseUid` is neither read, written nor
+   *    cleared here, and no call in this sequence can clear it. The account keeps
+   *    resolving through the exchange, which is what makes an interruption
+   *    recoverable: someone cut off half-way simply signs in again with the new
+   *    password, because the mapping that resolves them is still in place.
    *
-   * 3. NO DOOMED REQUEST. `sessionLostRef` is set before the central sign-out, so
-   *    `endSession` skips `api.logout`. The server revoked every session in the
-   *    same transition as the unlink, so there is nothing left to revoke and the
-   *    request could only collect a 401.
+   * 3. NO LOOP, AND NO PASSWORD CARRIED ACROSS A CONFIRMATION. One attempt is made per
+   *    call: a freshness refusal is handed back to the caller, which confirms again and
+   *    collects a NEW password before calling a second time. `retry` is what closes the
+   *    loop — the second call's refusal propagates instead of being handed back.
    *
-   * The cached token is preferred for the FIRST attempt because the flow is
-   * reauth-first: the screen has usually just confirmed, so a live Firebase user
-   * already exists and its token carries the confirmation's `auth_time`. A cold
-   * start — or a screen that skipped its first phase — has no such user, and
-   * `forceConfirmation` then performs the confirmation itself.
+   * A LIVE FIREBASE SESSION IS ESTABLISHED, NOT ASSUMED. The screen normally confirms
+   * first, so a live user already exists; a cold start has none, and `updatePassword`
+   * is a user-scoped operation that cannot run without one. The confirmation is
+   * therefore performed when there is no current user rather than trusted.
    */
-  const disconnectFirebase = useCallback(
+  const changeFirebasePassword = useCallback(
     async (
-      { method, email, password, newPassword }: DisconnectFirebaseInput,
-      { retry = false }: DisconnectFirebaseOptions = {}
-    ): Promise<DisconnectFirebaseOutcome> => {
-      const session = tokenRef.current;
-      if (!session) {
-        throw new FirebaseAuthError(NO_SESSION_CODE, NO_SESSION_MESSAGE);
-      }
-
+      { method, email, password, newPassword }: ChangeFirebasePasswordInput,
+      { retry = false }: ChangeFirebasePasswordOptions = {}
+    ): Promise<ChangeFirebasePasswordOutcome> => {
       /** Confirm from scratch, and throw rather than return when it does not take. */
       const forceConfirmation = async (): Promise<string> => {
         const outcome = await firebaseConfirmSignIn({ method, email, password });
@@ -1304,30 +1305,63 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw confirmationError(outcome);
       };
 
-      /** The already-confirmed token when there is one; a fresh confirmation otherwise. */
-      const confirmedOrExisting = async (): Promise<string> =>
-        (await currentFirebaseIdToken()) ?? (await forceConfirmation());
+      // STEP 1 — a live, recent Firebase session. `currentFirebaseIdToken()` answers
+      // null when there is none (or when the refresh failed), which is the only
+      // condition under which the confirmation is performed here.
+      let idToken = await currentFirebaseIdToken();
+      if (!idToken) idToken = await forceConfirmation();
+
+      // STEP 2 — THE CREDENTIAL CHANGE. Ordered BEFORE the bridge because the bridge's
+      // whole purpose is to record a change that has already happened; reversing them
+      // would revoke every session for a password that never changed.
+      try {
+        await nativeUpdatePassword(newPassword);
+      } catch (err) {
+        // FIREBASE'S OWN RECENCY RULE, answered with the same remedy as the server's:
+        // not a failure to retry, an instruction to prove the sign-in again. Mapped
+        // here rather than in the screen so both recency refusals travel one path.
+        if (nativeErrorCode(err) === 'auth/requires-recent-login' && !retry) {
+          return { kind: 'reauth-required' };
+        }
+        throw err;
+      }
+
+      // Minted AFTER the change so the token the server sees belongs to the credential
+      // as it now stands. `auth_time` is unchanged by `updatePassword` — it is the
+      // CONFIRMATION's — which is exactly the freshness the bridge reads.
+      idToken = (await currentFirebaseIdToken()) ?? idToken;
 
       try {
-        await api.firebaseUnlink(session, { idToken: await confirmedOrExisting(), newPassword });
+        // STEPS 3 AND 4 — a TEMPORARY session, then the bridge. The temporary session
+        // exists because the bridge revokes EVERY session the account holds, this one
+        // included: holding the app's real token across it would destroy the app's own
+        // session in the request that destroys the others, and a 401 from it would be
+        // read as session loss. `temporarySession: true` in `lib/api.ts` is truthful
+        // precisely because this token is never applied to the app.
+        const temporary = await api.firebaseExchange({
+          idToken,
+          deviceLabel: currentDeviceLabel(),
+        });
+        await api.credentialsChanged({ idToken }, temporary.token);
       } catch (err) {
-        // A freshness refusal is the CALLER's to answer, and it is handed back rather
-        // than retried here for two reasons at once: the remedy is a second
-        // confirmation plus a new password, which only the caller can ask for, and
-        // performing that confirmation inside this frame would keep `newPassword`
-        // alive across it. A `retry` refusal is terminal — that is the cap.
+        // A freshness refusal is the CALLER's to answer, handed back rather than
+        // retried here for the reason the type records. A `retry` refusal is
+        // terminal — that is the cap.
         if (!isReauthenticationRequired(err) || retry) throw err;
         return { kind: 'reauth-required' };
       }
 
-      // Reached only on 200. The session the server just revoked is marked lost so
-      // the central sign-out does not chase it, then the single sign-out path ends
-      // the Firebase session and clears local state — in that order.
-      sessionLostRef.current = true;
-      await signOut();
-      return { kind: 'unlinked' };
+      // STEP 5 — THE FINAL SESSION, and nothing else. The exchange is PUBLIC, so the
+      // revocation above cannot block it, and its `iat` is not before the stamp the
+      // bridge wrote, so `requireAuth` admits it.
+      const session = await api.firebaseExchange({
+        idToken,
+        deviceLabel: currentDeviceLabel(),
+      });
+      await applySession(session.token, session.user);
+      return { kind: 'changed' };
     },
-    [signOut]
+    [applySession]
   );
 
   /**
@@ -1553,7 +1587,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signOut,
       signOutEverywhere,
       confirmFirebaseSignIn,
-      disconnectFirebase,
+      changeFirebasePassword,
       connectFirebase,
       refresh,
       clearSession,
@@ -1575,7 +1609,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signOut,
       signOutEverywhere,
       confirmFirebaseSignIn,
-      disconnectFirebase,
+      changeFirebasePassword,
       connectFirebase,
       refresh,
       clearSession,

@@ -157,7 +157,7 @@ export default function ProfileScreen() {
          */}
         {user?.authMethods?.password === false ? (
           <Text style={[styles.securityText, styles.spaced]}>
-            Your password is managed by your sign-in provider, so it can&apos;t be changed here.
+            Your password is managed by your sign-in provider. Use the action below to change it.
           </Text>
         ) : (
           <Button
@@ -168,14 +168,21 @@ export default function ProfileScreen() {
           />
         )}
         {/**
-         * Phase 32L-B — the disconnect entry point, offered only where there is
-         * something to disconnect.
+         * Phase A (F-1) — the password-change entry point for a Firebase account.
+         *
+         * THE BUTTON USED TO DETACH THE FIREBASE IDENTITY; IT NOW CHANGES THE PASSWORD.
+         * Firebase owns this account's credential (Phase 32K refuses a local change with
+         * 409 `PASSWORD_NOT_APPLICABLE`), so the only place a password can be changed is
+         * Firebase, and the account keeps its `firebaseUid` either way.
          *
          * `authMethods.firebase` is the server's own statement that this account
          * authenticates through a Firebase identity, so it is the correct gate: it is
          * true for a Firebase-NATIVE account and for a Firebase-LINKED legacy account
          * alike, and the app cannot tell those apart — nor should it, since the
-         * server publishes a capability rather than the identity behind it.
+         * server publishes a capability rather than the identity behind it. Every such
+         * account can therefore change its password from here, which is what makes the
+         * old "password is managed by your sign-in provider" line below a signpost
+         * rather than a dead end.
          *
          * The test is `=== true`, not truthiness, so a user object that predates the
          * field simply shows no action instead of opening a flow the server would
@@ -214,7 +221,7 @@ export default function ProfileScreen() {
         ) : null}
         {user?.authMethods?.firebase === true ? (
           <Button
-            title="Disconnect Firebase"
+            title="Change sign-in password"
             variant="secondary"
             style={styles.spaced}
             onPress={() => router.push('/disconnect-firebase')}

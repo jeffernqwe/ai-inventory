@@ -106,7 +106,6 @@ const mockLogout = jest.fn();
 const mockFirebaseExchange = jest.fn();
 const mockFirebaseRegister = jest.fn();
 const mockRegister = jest.fn();
-const mockFirebaseUnlink = jest.fn();
 
 jest.mock('../lib/api', () => ({
   me: (...args: unknown[]) => mockMe(...args),
@@ -115,7 +114,6 @@ jest.mock('../lib/api', () => ({
   firebaseExchange: (...args: unknown[]) => mockFirebaseExchange(...args),
   firebaseRegister: (...args: unknown[]) => mockFirebaseRegister(...args),
   register: (...args: unknown[]) => mockRegister(...args),
-  firebaseUnlink: (...args: unknown[]) => mockFirebaseUnlink(...args),
 }));
 
 const mockGetItemAsync = jest.fn();

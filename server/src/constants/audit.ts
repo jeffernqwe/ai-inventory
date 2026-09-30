@@ -63,26 +63,6 @@ export const AUDIT_ACTIONS = Object.freeze({
   // makes it hold.
   FIREBASE_IDENTITY_LINKED: 'FIREBASE_IDENTITY_LINKED',
   FIREBASE_IDENTITY_LINK_CONFLICT: 'FIREBASE_IDENTITY_LINK_CONFLICT',
-  // Phase 32L — Firebase identity UNlinking. The same two-shape convention as
-  // linking above, for the same reason: an adoption and a blocked adoption are
-  // the two facts an investigator has to tell apart.
-  //
-  // UNLINKED records the one durable outcome — the caller's own account stopped
-  // authenticating through Firebase and now carries a password it established in
-  // the same transition. Its metadata records ONLY that a password was
-  // established; the Firebase uid that was detached is deliberately absent,
-  // because the audit viewer is readable by every ADMIN of the business and the
-  // uid is the identity join key — the same reasoning that keeps it out of the
-  // LINKED row.
-  //
-  // At most ONE linked code remains unrecorded, and it is structural rather than
-  // a policy omission: "attempted unlink of an account with no Firebase identity"
-  // is a refusal that changed nothing and concerns an account with no identity in
-  // the first place, so there is no mapping to report. It is answered
-  // FIREBASE_IDENTITY_NOT_LINKED and deliberately not audited, following the
-  // Phase 32H precedent that an event which did not happen makes a false trail.
-  FIREBASE_IDENTITY_UNLINKED: 'FIREBASE_IDENTITY_UNLINKED',
-  FIREBASE_IDENTITY_UNLINK_CONFLICT: 'FIREBASE_IDENTITY_UNLINK_CONFLICT',
 });
 
 export const AUDIT_ENTITY_TYPES = Object.freeze({

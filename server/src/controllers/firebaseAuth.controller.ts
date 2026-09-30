@@ -1,10 +1,11 @@
 /**
  * Phase 32C — the Firebase authentication HTTP surface.
  * Phase 32H — plus the authenticated identity-linking route.
- * Phase 32L — plus the authenticated identity-unlinking route.
+ * Phase A   — REMOVED the authenticated identity-unlinking route (F-1), so no
+ *             reachable path can clear `firebaseUid` any more.
  * N-4       — plus the authenticated credential-change bridge.
  *
- * Five routes, and the ONLY place a Firebase domain failure becomes an HTTP
+ * Four routes, and the ONLY place a Firebase domain failure becomes an HTTP
  * status:
  *
  *   POST /api/auth/firebase/exchange   — a verified Firebase ID token becomes an
@@ -14,8 +15,6 @@
  *                                        user. PUBLIC.
  *   POST /api/auth/firebase/link       — an AUTHENTICATED account adopts a
  *                                        verified Firebase identity (32H, below).
- *   POST /api/auth/firebase/unlink     — an AUTHENTICATED account detaches one
- *                                        (Phase 32L, below).
  *   POST /api/auth/credentials-changed — an AUTHENTICATED account records that
  *                                        Firebase changed its password, so every
  *                                        session minted against the old credential
@@ -23,8 +22,8 @@
  *
  * The authenticated routes are the ones that do NOT belong with the two above, and
  * the distinction is the whole of Phase 32H: exchange and register answer "who are
- * you?" with no prior session, while link, unlink and the bridge each answer a
- * question about an account that has ALREADY proved itself. All three are behind
+ * you?" with no prior session, while link and the bridge each answer a
+ * question about an account that has ALREADY proved itself. Both are behind
  * `requireAuth`, they read the account from `req.user` and the identity from the
  * verified token's uid, and they share this file only so there is ONE translation of
  * a Firebase domain error rather than a second copy free to drift.
@@ -66,13 +65,12 @@
 
 import type { Request, Response } from 'express';
 
-import { validateFirebaseExchange, validateFirebaseRegister, validateFirebaseLink, validateFirebaseUnlink, validateCredentialsChanged } from '../utils/validate.ts';
+import { validateFirebaseExchange, validateFirebaseRegister, validateFirebaseLink, validateCredentialsChanged } from '../utils/validate.ts';
 import {
   exchangeFirebaseSession,
   registerBusinessFromFirebase,
 } from '../services/firebaseAuth.service.ts';
 import { linkFirebaseIdentity } from '../services/firebaseLink.service.ts';
-import { unlinkFirebaseIdentity } from '../services/firebaseUnlink.service.ts';
 import { applyCredentialsChanged } from '../services/credentialsChanged.service.ts';
 import { toPublicUser } from '../services/auth.service.ts';
 import {
@@ -381,74 +379,6 @@ export async function firebaseLink(req: AuthenticatedRequest, res: Response) {
 }
 
 /**
- * POST /api/auth/firebase/unlink — AUTHENTICATED (Phase 32L).
- *
- * The inverse of the route above, and the narrower of the two: it makes the
- * CALLER'S OWN account stop authenticating through the Firebase identity it
- * currently carries, and establishes a NEW local password in the same transition
- * (Policy B — see the service for why the old retained hash is replaced rather
- * than re-enabled).
- *
- * THE ACCOUNT AND THE IDENTITY ARE BOTH SERVER-DERIVED, exactly as on the link
- * route and for the same reason:
- *
- *   - `req.user.id` is the account, put there by `requireAuth` from the MongoDB
- *     document this request's own session resolves to. `validateFirebaseUnlink`
- *     returns no `userId` field that could carry one.
- *   - the identity is `verifyFirebaseIdToken(idToken).uid`, and the service
- *     additionally requires it to EQUAL the uid already on the account. So the
- *     token cannot name a different identity — it can only confirm the one being
- *     detached. There is no `firebaseUid` field in the validated body either.
- *   - `businessId` comes from `req.user`, never the request, so this route cannot
- *     reach across tenants; the service never writes the field, so an unlink cannot
- *     MOVE an account either.
- *   - `role` and `status` are not read on any path.
- *
- * WHY AUTHENTICATED, AND WHY THAT IS THE OWNERSHIP PROOF. As with linking, the
- * session is the primary evidence that the caller may act on this account. The
- * Firebase credential is required as well — not instead — and it is what Phase 32L
- * adds beyond the session: a live, RECENT Firebase authentication whose uid matches
- * the mapping. Both halves are necessary and neither is sufficient.
- *
- * THE RESPONSE IS THE NEW ACCOUNT, NOT THE OLD IDENTITY. `user` is
- * `toPublicUser`'s allowlist, so it carries `authMethods` (`{ password: true,
- * firebase: false }` after this) and never a `firebaseUid`. `unlinked: true` states
- * the one fact the client needs to proceed: it should now discard its Firebase
- * session and return the user to login, where the password just established will
- * work.
- *
- * ERRORS, AND WHY NONE OF THEM CAN SIGN THE USER OUT. A bad Firebase credential
- * answers 400 through `mapAuthenticatedFirebaseFailure`, as on the link route. The
- * two unlink-specific refusals are 409 (`FIREBASE_IDENTITY_NOT_LINKED`,
- * `FIREBASE_IDENTITY_CONFLICT`) and the freshness refusal is ALSO 409
- * (`FIREBASE_REAUTHENTICATION_REQUIRED`) — never 401 or 403, which the mobile
- * client's session-loss rule would read as "your session is gone" and act on by
- * clearing it. See the service for the full argument.
- */
-export async function firebaseUnlink(req: AuthenticatedRequest, res: Response) {
-  const body = req.body ?? {};
-  const { problems, idToken, newPassword } = validateFirebaseUnlink(body);
-  if (problems.length > 0) throwValidation(problems);
-
-  let result;
-  try {
-    result = await unlinkFirebaseIdentity({
-      userId: req.user!.id,
-      businessId: req.user!.businessId,
-      idToken,
-      newPassword,
-    });
-  } catch (err) {
-    throw mapAuthenticatedFirebaseFailure(err);
-  }
-
-  return res.status(200).json({
-    unlinked: true,
-    user: toPublicUser(result.user),
-  });
-}
-
-/**
  * POST /api/auth/credentials-changed — AUTHENTICATED (N-4).
  *
  * Records that the CALLER'S OWN Firebase credential changed, so that every
@@ -512,6 +442,5 @@ export default {
   firebaseExchange,
   firebaseRegister,
   firebaseLink,
-  firebaseUnlink,
   credentialsChanged,
 };

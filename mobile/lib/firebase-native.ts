@@ -542,6 +542,36 @@ class NativeNoCurrentUserError extends Error {
  * Android's silent resolve: a resolved call then means the message was really sent.
  * The caller classifies the thrown code through the shared error set.
  */
+/**
+ * Sets a NEW Firebase password for the signed-in identity. THIS IS THE CREDENTIAL
+ * OPERATION (Phase A / F-1).
+ *
+ * Firebase owns the password for a Firebase-linked account, so changing it is a
+ * Firebase-native call and never a request to this application's own API. Nothing is
+ * returned, because the operation either happened or threw — there is no value to
+ * report beyond that, and inventing one would invite a caller to treat an SDK result
+ * as an authorization fact.
+ *
+ * THROWS when there is no current user, on both platforms, for the reason
+ * `nativeSendEmailVerification` records: Android resolves user-scoped calls with no
+ * user while iOS rejects them, so the check is made here and the answer does not
+ * depend on the platform. Otherwise it throws the SDK's own error and CLASSIFIES
+ * NOTHING — `auth/requires-recent-login`, `auth/weak-password`,
+ * `auth/network-request-failed` and the rest are the caller's to read, because
+ * deciding what a code means is `lib/firebase-auth.ts`'s job and mirroring a code
+ * here would put that decision in two places.
+ *
+ * THE MODULAR FORM, because React Native Firebase exposes this operation as a
+ * top-level function taking the user rather than as a method on it — the same shape
+ * `updateProfile` above uses for the same reason.
+ */
+export async function nativeUpdatePassword(newPassword: string): Promise<void> {
+  const { auth, instance } = requireNativeFirebase();
+  const user = instance.currentUser;
+  if (!user) throw new NativeNoCurrentUserError();
+  await auth.updatePassword(user, newPassword);
+}
+
 export async function nativeSendEmailVerification(): Promise<void> {
   const { auth, instance } = requireNativeFirebase();
   const user = instance.currentUser;

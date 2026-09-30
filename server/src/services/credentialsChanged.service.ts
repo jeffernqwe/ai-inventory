@@ -78,7 +78,7 @@ import {
 
 /**
  * Local to this module, following `auth.service.ts`, `session.service.ts` and
- * `firebaseUnlink.service.ts`: the controller passes the string `req.user` carries,
+ * `firebaseUnlink.service.ts` (removed in Phase A): the controller passes the string
  * and the model casts whichever arrives.
  */
 type IdLike = string | mongoose.Types.ObjectId;
@@ -102,7 +102,8 @@ type CredentialsChangedInput = {
  * is reused from Phase 32H rather than redeclared, so a client that already branches
  * on it needs no new branch and the two endpoints cannot drift apart.
  *
- * The coalescing is deliberate and differs from `unlinkFirebaseIdentity`, which keeps
+ * The coalescing is deliberate and differs from `unlinkFirebaseIdentity` (removed in
+ * Phase A), which kept
  * `FIREBASE_IDENTITY_NOT_LINKED` distinct from its conflict because there "you have
  * no provider connected" is the outcome of a valid operation. Here it is not an
  * outcome at all: an account with no `firebaseUid` cannot have had a credential

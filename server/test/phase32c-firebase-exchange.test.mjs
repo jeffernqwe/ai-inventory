@@ -817,7 +817,11 @@ dbSuite('Phase 32C — Firebase exchange and registration over HTTP and a real d
 
     const stored = await User.findById(res.json.user.id);
     assert.equal(stored.firebaseUid, id, 'the uid is the verified one');
-    assert.equal(stored.emailVerified, true, 'the claim is mirrored (and not enforced)');
+    // Phase 16 changed the second half of this claim: the assertion used to read
+    // "mirrored (and not enforced)". It is still mirrored here, and it is now
+    // ENFORCED at this very route — an unverified identity is refused before any
+    // write, so a 201 can only ever carry a verified claim.
+    assert.equal(stored.emailVerified, true, 'the claim is mirrored at registration');
     assert.equal(stored.passwordHash, undefined, 'a federated account holds no password hash');
   });
 

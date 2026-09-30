@@ -47,6 +47,16 @@ jest.mock('../lib/firebase-auth', () => ({
 }));
 
 const mockIsFirebaseConfigured = jest.fn(() => true);
+// PHASE 16: `lib/auth.tsx` now reaches the verification boundary DIRECTLY, not only
+// through `lib/firebase-auth`. The seam is mocked here for the same reason the others
+// are: only module boundaries are mocked, and an unmocked boundary would load the real
+// native packages. `nativeReloadUser` answers TRUE by default because these suites
+// exercise an already-verified identity; the unverified road has its own suite.
+jest.mock('../lib/firebase-native', () => ({
+  nativeForceIdToken: jest.fn(async () => 'forced.firebase.id.token'),
+  nativeReloadUser: jest.fn(async () => true),
+  nativeSendEmailVerification: jest.fn(async () => {}),
+}));
 jest.mock('../lib/config', () => ({
   isFirebaseConfigured: () => mockIsFirebaseConfigured(),
 }));

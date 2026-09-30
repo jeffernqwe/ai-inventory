@@ -65,6 +65,15 @@ const mockNative: {
  */
 const mockUpdateProfile = jest.fn();
 
+/**
+ * Phase 16 — the two MODULAR operations the verification flow needs. Modular, not
+ * `User` methods: the boundary calls `auth.sendEmailVerification(user)` and
+ * `auth.reload(user)`, so these belong on the auth namespace alongside
+ * `signInWithEmailAndPassword`.
+ */
+const mockSendEmailVerification = jest.fn();
+const mockReload = jest.fn();
+
 jest.mock('@react-native-firebase/app', () => {
   mockNativeLoads.app += 1;
   return { getApp: () => ({ name: '[DEFAULT]' }) };
@@ -90,6 +99,8 @@ jest.mock('@react-native-firebase/auth', () => {
       if (mockNative.signOutError) throw mockNative.signOutError;
     },
     updateProfile: (...args: unknown[]) => mockUpdateProfile(...args),
+    sendEmailVerification: (...args: unknown[]) => mockSendEmailVerification(...args),
+    reload: (...args: unknown[]) => mockReload(...args),
   };
 });
 
@@ -140,6 +151,10 @@ beforeEach(() => {
   mockNative.signOutError = null;
   mockUpdateProfile.mockReset();
   mockUpdateProfile.mockResolvedValue(undefined);
+  mockSendEmailVerification.mockReset();
+  mockSendEmailVerification.mockResolvedValue(undefined);
+  mockReload.mockReset();
+  mockReload.mockResolvedValue(undefined);
   mockIsFirebaseConfigured.mockReset();
   mockIsFirebaseConfigured.mockReturnValue(false);
 });
@@ -327,6 +342,79 @@ describe('nativeHasCurrentUser / nativeCurrentIdToken', () => {
       expect(typeof boundary.nativeHasCurrentUser()).toBe('boolean');
     });
     await expect(loadBoundary().nativeCurrentIdToken()).resolves.toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The verification operations (Phase 16)
+// ---------------------------------------------------------------------------
+
+describe('the verification operations', () => {
+  beforeEach(() => mockIsFirebaseConfigured.mockReturnValue(true));
+
+  it('sends the Firebase verification email for the signed-in user', async () => {
+    const user = { emailVerified: false };
+    mockNative.currentUser = user;
+
+    await expect(loadBoundary().nativeSendEmailVerification()).resolves.toBeUndefined();
+    expect(mockSendEmailVerification).toHaveBeenCalledTimes(1);
+    expect(mockSendEmailVerification).toHaveBeenCalledWith(user);
+  });
+
+  it('★ THROWS when no user is signed in, rather than inheriting the Android silent resolve', async () => {
+    // RNFirebase 26.4.0 diverges here: Android RESOLVES `reload`/`sendEmailVerification`
+    // when no user exists, while iOS rejects with `auth/no-current-user`. A resolved
+    // promise must therefore never be read as "the email was sent", or a sign-out would
+    // look like a successful resend.
+    mockNative.currentUser = null;
+
+    await expect(loadBoundary().nativeSendEmailVerification()).rejects.toMatchObject({
+      code: 'native/no-current-user',
+    });
+    expect(mockSendEmailVerification).not.toHaveBeenCalled();
+  });
+
+  it('answers false with no user, without calling the native reload at all', async () => {
+    mockNative.currentUser = null;
+
+    await expect(loadBoundary().nativeReloadUser()).resolves.toBe(false);
+    expect(mockReload).not.toHaveBeenCalled();
+  });
+
+  it('★ reads the GETTER after the reload, never the resolved value', async () => {
+    // The modular API types `reload` as `Promise<void>`. A boundary that read whatever
+    // the native side resolved would answer with the SDK's internal shape; the refreshed
+    // state has to come from the user object.
+    mockNative.currentUser = { emailVerified: true };
+    mockReload.mockResolvedValue('a resolved value that is NOT a verification state');
+
+    await expect(loadBoundary().nativeReloadUser()).resolves.toBe(true);
+    expect(mockReload).toHaveBeenCalledTimes(1);
+  });
+
+  it('answers false when the reload leaves the address unverified', async () => {
+    mockNative.currentUser = { emailVerified: false };
+
+    await expect(loadBoundary().nativeReloadUser()).resolves.toBe(false);
+    expect(mockReload).toHaveBeenCalledTimes(1);
+  });
+
+  it('★ mints the FORCED-refresh token — getIdToken(true), never the cached one (RG-9)', async () => {
+    // THE ASSERTION RG-9 RESTS ON. A cached token can still carry
+    // `email_verified: false`, so the post-verification registration would present a
+    // claim the server has just been taught to refuse.
+    const getIdToken = jest.fn(async () => ID_TOKEN);
+    mockNative.currentUser = { getIdToken };
+
+    await expect(loadBoundary().nativeForceIdToken()).resolves.toBe(ID_TOKEN);
+    expect(getIdToken).toHaveBeenCalledTimes(1);
+    expect(getIdToken).toHaveBeenCalledWith(true);
+  });
+
+  it('answers null with no user, instead of minting anything', async () => {
+    mockNative.currentUser = null;
+
+    await expect(loadBoundary().nativeForceIdToken()).resolves.toBeNull();
   });
 });
 

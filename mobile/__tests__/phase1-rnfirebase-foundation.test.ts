@@ -264,16 +264,23 @@ describe('nothing in the app or the library can reach the native SDK yet', () =>
     ).toEqual([]);
   });
 
-  it('is imported only by the classification layer, and by no screen or layout', () => {
-    // Phase B narrowed this from "imported by nothing at all" rather than deleting
-    // it, because the property that matters is still exactly one thing: nothing above
-    // the classification layer may hold a Firebase session. The boundary is reachable
-    // through `lib/firebase-auth.ts` alone — the module that owns every Firebase
-    // operation and the decision about what a Firebase failure means — so a screen
-    // that imported the boundary would fail here, and so would a second library
-    // module. Nothing under `app/` may ever appear in this list.
+  it('is imported only by the two library modules that own Firebase, and by no screen', () => {
+    // PHASE 16 WIDENED THIS FROM ONE PERMITTED IMPORTER TO TWO, deliberately and by
+    // owner decision, and the reason is recorded here rather than left to be inferred.
+    // The email-verification journey needs three native operations that cannot live in
+    // the frozen `lib/firebase-auth.ts`, so `lib/auth.tsx` — the module that already owns
+    // the Firebase journeys and the session lifecycle — becomes the second permitted
+    // importer. THE PROPERTY THAT MATTERS IS UNCHANGED: the boundary is reachable through
+    // exactly these two library modules and by nothing else. A screen, a layout or any
+    // other module that imported it would still fail here, and `app/` must never appear
+    // in this list. The rule above is untouched too — only `lib/firebase-native.ts` names
+    // `@react-native-firebase`.
     const importers = others.filter((path) => /firebase-native/.test(readSource(path)));
-    expect(importers).toEqual([join(MOBILE_ROOT, 'lib', 'firebase-auth.ts')]);
+    // Sorted so the assertion does not depend on directory-iteration order.
+    expect(importers.sort()).toEqual([
+      join(MOBILE_ROOT, 'lib', 'auth.tsx'),
+      join(MOBILE_ROOT, 'lib', 'firebase-auth.ts'),
+    ]);
   });
 
   it('covers the trees it claims to cover', () => {

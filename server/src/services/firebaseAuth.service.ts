@@ -34,8 +34,13 @@
  *     existing password account is REFUSED, never merged — automatic linking
  *     without proof of ownership is an account-takeover vector, and the policy is
  *     an open owner decision (Phase 32A §14.4). See registerBusinessFromFirebase.
- *   * It does not enforce `emailVerified`. It persists the claim (§7.3) and makes
- *     no decision from it (Phase 32A §14.2).
+ *   * It ENFORCES `emailVerified` AT REGISTRATION ONLY (Phase 16). The claim is
+ *     read from the SIGNED token payload and never from the provider name
+ *     (L-7/RG-11), and an unverified identity cannot create a tenant (RG-1/RG-3).
+ *     `exchangeFirebaseSession` deliberately does NOT enforce it: every account
+ *     created before Phase 16 carries `emailVerified: false`, so a gate on the
+ *     exchange would lock out existing ACTIVE users (Phase 32A §14.2 / RG-14). The
+ *     claim is still persisted on creation.
  *   * It does not create a session for registration, and it does not create a
  *     second session mechanism anywhere: the exchange calls the SAME
  *     `newSessionId` / `signAccessToken` / `createSessionForToken` triple that
@@ -233,6 +238,23 @@ export async function registerBusinessFromFirebase({ idToken, businessName, name
       {
         field: 'idToken',
         message: 'the verified Firebase identity carries no email address',
+      },
+    ];
+    throw err;
+  }
+
+  // Phase 16 — email-verification enforcement (RG-1/RG-3). The claim is read from the
+  // SIGNED token payload and from nowhere else (L-7/RG-11): the provider name never
+  // determines verification. Placed after the no-email check so an identity with
+  // neither an address nor a verified claim reports the shape it always did, and
+  // BEFORE any write, so an unverified identity creates no Business and no User —
+  // the absence of a tenant is the server-side gate (RG-2/RG-3).
+  if (identity.emailVerified !== true) {
+    const err = new ApiError(400, 'Validation failed', 'VALIDATION_ERROR');
+    err.fields = [
+      {
+        field: 'idToken',
+        message: 'the verified Firebase identity has an unverified email address',
       },
     ];
     throw err;

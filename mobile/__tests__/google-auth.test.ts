@@ -40,6 +40,12 @@ jest.mock('../lib/firebase-native', () => ({
   nativeSignInWithEmail: jest.fn(),
   nativeSignInWithGoogle: (...args: unknown[]) => mockNativeSignInWithGoogle(...args),
   nativeSignOut: jest.fn(),
+  // PHASE 16: the boundary grew the three verification operations. They are listed
+  // here even though this suite never drives them, so the mock describes the module
+  // it stands in for rather than the subset this file happens to call.
+  nativeForceIdToken: jest.fn(async () => null),
+  nativeReloadUser: jest.fn(async () => true),
+  nativeSendEmailVerification: jest.fn(async () => {}),
 }));
 
 // ---------------------------------------------------------------------------

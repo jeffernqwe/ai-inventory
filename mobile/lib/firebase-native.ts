@@ -18,6 +18,11 @@
  * `__tests__/phase1-rnfirebase-foundation.test.ts` fails if any other file under
  * `app/` or `lib/` mentions `@react-native-firebase`, and it pins that this module is
  * the only place an authentication verb may appear.
+
+ * TWO MODULES REACH THIS BOUNDARY (Phase 16): `lib/firebase-auth.ts`, which owns the
+ * Firebase operations and the decision about what a failure means, and `lib/auth.tsx`,
+ * which owns the email-verification JOURNEY. The Phase 1 guard names exactly those two
+ * as the permitted importers, and no screen may ever appear in that list.
  *
  * GATED, AND THE GATE IS CHECKED BEFORE EITHER NATIVE PACKAGE IS LOADED.
  * `isNativeFirebaseConfigured()` is the same all-or-nothing `EXPO_PUBLIC_FIREBASE_*`
@@ -491,6 +496,92 @@ export async function nativeConfirmPasswordReset(
 ): Promise<void> {
   const { auth, instance } = requireNativeFirebase();
   await auth.confirmPasswordReset(instance, oobCode, newPassword);
+}
+
+// ---------------------------------------------------------------------------
+// The native operations (Phase 16) — email verification
+// ---------------------------------------------------------------------------
+//
+// THE THREE OPERATIONS THE VERIFICATION FLOW NEEDS. They live here rather than in
+// `lib/firebase-auth.ts` because that module is frozen work and stays byte-identical,
+// so the boundary grows the native calls it needs and the JOURNEY lives in
+// `lib/auth.tsx`. Nothing here makes a policy decision: each function performs one SDK
+// call and reports what actually happened.
+//
+// NO RESOLVED PROMISE IS TREATED AS PROOF OF ANYTHING (RNFirebase 26.4.0 divergence).
+// Android resolves `reload`/`sendEmailVerification` when no user is signed in
+// (`promiseNoUser(promise, false)` -> `resolve(null)`), while iOS rejects with
+// `auth/no-current-user`. Each function below checks `instance.currentUser` itself, so
+// the answer does not depend on which platform produced it.
+
+/**
+ * Thrown when a user-scoped native operation runs with no signed-in user.
+ *
+ * The code is this boundary's OWN — it belongs to the `native/*` namespace the other
+ * boundary errors already use, not to a Firebase `auth/*` code. That distinction is
+ * deliberate and guarded: the boundary must never mirror, hardcode or classify a
+ * Firebase code, because classification is the layer above's job. Spelling it
+ * `auth/no-current-user` to look like the one iOS rejects with would have both
+ * hardcoded an `auth/*` string here and implied a platform dependency this function
+ * exists to avoid — Android's silent resolve is why `currentUser` is checked locally.
+ * It is not exported: no caller needs to name it, and a caller branching on it would
+ * be duplicating the check the function already performs.
+ */
+class NativeNoCurrentUserError extends Error {
+  readonly code = 'native/no-current-user';
+  constructor() {
+    super('No user is currently signed in.');
+    this.name = 'NativeNoCurrentUserError';
+  }
+}
+
+/**
+ * Sends Firebase's own email-verification message for the signed-in user.
+ *
+ * THROWS when there is no current user, on both platforms, rather than inheriting
+ * Android's silent resolve: a resolved call then means the message was really sent.
+ * The caller classifies the thrown code through the shared error set.
+ */
+export async function nativeSendEmailVerification(): Promise<void> {
+  const { auth, instance } = requireNativeFirebase();
+  const user = instance.currentUser;
+  if (!user) throw new NativeNoCurrentUserError();
+  await auth.sendEmailVerification(user);
+}
+
+/**
+ * Reloads the signed-in user's profile from Firebase and answers whether the address
+ * is now VERIFIED.
+ *
+ * THE GETTER IS READ AFTER THE RELOAD, never the resolved value: the modular API
+ * types `reload` as `Promise<void>` even though the native side resolves a user, so
+ * the refreshed state is read from `instance.currentUser.emailVerified`.
+ *
+ * Answers `false` when there is no current user rather than throwing, because "no
+ * identity on this device" is a definite not-verified answer the screen renders
+ * exactly as it renders a still-unverified one.
+ */
+export async function nativeReloadUser(): Promise<boolean> {
+  const { auth, instance } = requireNativeFirebase();
+  const user = instance.currentUser;
+  if (!user) return false;
+  await auth.reload(user);
+  return instance.currentUser?.emailVerified === true;
+}
+
+/**
+ * A FORCED-refresh Firebase ID token, or `null` when there is none to mint.
+ *
+ * RG-9 REQUIRES THIS SPECIFICALLY: `getIdToken()` with no argument returns the CACHED
+ * token, which can still carry the pre-verification `email_verified: false`, so the
+ * post-verification registration must present a token minted after the reload.
+ * `getIdToken(true)` re-mints it.
+ */
+export async function nativeForceIdToken(): Promise<string | null> {
+  const { instance } = requireNativeFirebase();
+  const user = instance.currentUser;
+  if (!user) return null;
+  return user.getIdToken(true);
 }
 
 // The native operations (Phase C) — Google Sign-In

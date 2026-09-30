@@ -80,6 +80,7 @@ const MIXED = [
   'phase14-users.test.mjs', // db: user management over /api/users (create/list/role+status, RBAC, OWNER/ADMIN/self protections, dup email, disabled, isolation, audit)
   'phase15-account-security.test.mjs', // db: change-password + PATCH /me (session invalidation via passwordChangedAt vs JWT iat, strict /me whitelist)
   'phase16-audit-viewer.test.mjs', // db: read-only audit trail over GET /api/audit (RBAC, isolation, filters, pagination, actor population, DTO hygiene)
+  'phase16-firebase-email-verification.test.mjs', // unit: the gate lives at registration only (one occurrence, ordered after verification and before the first write) and requireAuth/auth.service carry none; db: POST /api/auth/firebase/register refuses an unverified/absent/non-boolean claim with 400 VALIDATION_ERROR on idToken and writes nothing, verified identities still register, existing emailVerified:false users still exchange and still sign in locally
   'phase26b-password-recovery.test.mjs', // unit: token generation/hashing/reset URL + password-policy drift guard; db: token store + recovery service over real MongoDB
   'phase26b-password-recovery-http.test.mjs', // unit: recovery validators + limiter 429 shape/keying; db: forgot/reset over the real app incl. the mail-failure enumeration guard
   'phase32b-firebase-admin.test.mjs', // unit: Firebase config parsing, error leak boundary, ID-token narrowing via the seam, admin-app lifecycle, production-config integration; db: User firebaseUid/emailVerified schema + the sparse unique index against real MongoDB

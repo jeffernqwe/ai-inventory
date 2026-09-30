@@ -68,7 +68,7 @@ function fieldMap(err: unknown): Record<string, string> {
 const REGISTRATION_REQUIRED = 'REGISTRATION_REQUIRED';
 
 export default function LoginScreen() {
-  const { status, user, signIn, signInWithGoogle } = useSession();
+  const { status, user, signIn, signInWithGoogle, firebaseOnboarding } = useSession();
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [email, setEmail] = useState('');
@@ -80,6 +80,11 @@ export default function LoginScreen() {
   const [googleBusy, setGoogleBusy] = useState(false);
 
   if (status === 'signedIn') return <Redirect href={defaultHomePath(user)} />;
+
+  // Phase 16 - an identity created but not yet verified has NO session, so it never
+  // reaches the signedIn guard above; this is the route that carries it to the verify
+  // screen. It reads the in-memory onboarding state, never a route parameter.
+  if (firebaseOnboarding === 'verify-email') return <Redirect href="/verify-email" />;
 
   /**
    * One place turns a sign-in rejection into what the screen shows. Shared by the

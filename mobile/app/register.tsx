@@ -35,7 +35,7 @@ function fieldMap(err: unknown): Record<string, string> {
 }
 
 export default function RegisterScreen() {
-  const { status, user, signUp } = useSession();
+  const { status, user, signUp, firebaseOnboarding } = useSession();
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [businessName, setBusinessName] = useState('');
@@ -48,6 +48,11 @@ export default function RegisterScreen() {
   const [busy, setBusy] = useState(false);
 
   if (status === 'signedIn') return <Redirect href={defaultHomePath(user)} />;
+
+  // Phase 16 - an identity created but not yet verified has NO session, so it never
+  // reaches the signedIn guard above; this is the route that carries it to the verify
+  // screen. It reads the in-memory onboarding state, never a route parameter.
+  if (firebaseOnboarding === 'verify-email') return <Redirect href="/verify-email" />;
 
   async function submit(): Promise<void> {
     // Required-field validation runs first, so an empty form never reaches the

@@ -53,9 +53,26 @@ jest.mock('../lib/firebase-auth', () => ({
 
 const mockIsFirebaseConfigured = jest.fn(() => true);
 
+// PHASE 16: `lib/auth.tsx` now reaches the verification boundary DIRECTLY, not only
+// through `lib/firebase-auth`. The seam is mocked here for the same reason the others
+// are: only module boundaries are mocked, and an unmocked boundary would load the real
+// native packages. `nativeReloadUser` answers TRUE by default because these suites
+// exercise an already-verified identity; the unverified road has its own suite.
+jest.mock('../lib/firebase-native', () => ({
+  nativeForceIdToken: jest.fn(async () => 'forced.firebase.id.token'),
+  nativeReloadUser: jest.fn(async () => true),
+  nativeSendEmailVerification: jest.fn(async () => {}),
+}));
 jest.mock('../lib/config', () => ({
   isFirebaseConfigured: () => mockIsFirebaseConfigured(),
 }));
+
+/** The mocked verification boundary, so the Phase 16 calls can be asserted on. */
+const mockNative = jest.requireMock('../lib/firebase-native') as {
+  nativeForceIdToken: jest.Mock;
+  nativeReloadUser: jest.Mock;
+  nativeSendEmailVerification: jest.Mock;
+};
 
 const mockLogin = jest.fn();
 const mockRegister = jest.fn();
@@ -285,13 +302,13 @@ describe('signIn — the legacy fallback', () => {
 // ---------------------------------------------------------------------------
 
 describe('signUp', () => {
-  it('creates the Firebase identity, the tenant and the session, in that order', async () => {
+  it('creates the Firebase identity and sends the verification email, but writes nothing server-side', async () => {
     mockEnsureFirebaseAccount.mockResolvedValue({ idToken: ID_TOKEN });
-    mockFirebaseRegister.mockResolvedValue({ user: USER, business: { id: 'b1' } });
 
     const view = await mountSignedOut();
+    let result: unknown;
     await act(async () => {
-      await view.result.current.signUp({
+      result = await view.result.current.signUp({
         businessName: BUSINESS_NAME,
         name: NAME,
         email: EMAIL,
@@ -304,17 +321,26 @@ describe('signUp', () => {
       password: PASSWORD,
       name: NAME,
     });
-    expect(mockFirebaseRegister).toHaveBeenCalledWith({
-      idToken: ID_TOKEN,
+    // PHASE 16 - the identity is created and Firebase's verification email is sent,
+    // and that is the WHOLE of this call. Nothing is written: no tenant, no session,
+    // no exchange. The server enforces the gate at the registration route, so the
+    // client must not reach it before Firebase reports the address verified.
+    expect(mockNative.nativeSendEmailVerification).toHaveBeenCalledTimes(1);
+    expect(mockFirebaseRegister).not.toHaveBeenCalled();
+    expect(mockFirebaseExchange).not.toHaveBeenCalled();
+    expect(mockRegister).not.toHaveBeenCalled();
+    expect(mockLogin).not.toHaveBeenCalled();
+    // Resolves to `null` - 'identity created, no session yet' - and what the caller
+    // follows is the onboarding state, not a token.
+    expect(result).toBeNull();
+    expect(view.result.current.status).toBe('signedOut');
+    expect(view.result.current.firebaseOnboarding).toBe('verify-email');
+    // The profile text is carried on the context so the verify screen can finish the
+    // registration later. No navigation parameter carries it and none could.
+    expect(view.result.current.pendingRegistration).toEqual({
       businessName: BUSINESS_NAME,
       name: NAME,
     });
-    expect(mockFirebaseExchange.mock.calls[0]![0].idToken).toBe(ID_TOKEN);
-    // No password account and no password login are involved on this path.
-    expect(mockRegister).not.toHaveBeenCalled();
-    expect(mockLogin).not.toHaveBeenCalled();
-    expect(view.result.current.status).toBe('signedIn');
-    expect(view.result.current.token).toBe(APP_TOKEN);
   });
 
   it('uses the legacy registration path unchanged when Firebase is absent', async () => {
@@ -378,16 +404,27 @@ describe('signUp', () => {
     );
 
     const view = await mountSignedOut();
-    const caught = await capture(
-      view.result.current.signUp({
+    await act(async () => {
+      await view.result.current.signUp({
         businessName: BUSINESS_NAME,
         name: NAME,
         email: EMAIL,
         password: PASSWORD,
-      })
-    );
+      });
+    });
+
+    // PHASE 16 MOVED WHERE THIS STEP RUNS, NOT WHAT IT GUARANTEES. Tenant creation now
+    // happens from the verify screen once the address is verified, so the ordering
+    // claim is asserted through `completeEmailVerification` - and it is the FORCED
+    // token (RG-9), never the pre-verification one minted at signup, that is presented.
+    const caught = await capture(view.result.current.completeEmailVerification());
 
     expect((caught as ApiError).code).toBe('EMAIL_IN_USE');
+    expect(mockFirebaseRegister).toHaveBeenCalledWith({
+      idToken: 'forced.firebase.id.token',
+      businessName: BUSINESS_NAME,
+      name: NAME,
+    });
     expect(mockFirebaseExchange).not.toHaveBeenCalled();
     expect(view.result.current.status).toBe('signedOut');
   });

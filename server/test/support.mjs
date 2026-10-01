@@ -13,8 +13,8 @@ import app from '../src/app.ts';
 import Business from '../src/models/business.model.ts';
 import User from '../src/models/user.model.ts';
 import Session from '../src/models/session.model.ts';
-import { signAccessToken, decodeAccessToken } from '../src/config/jwt.ts';
-import { newSessionId } from '../src/services/session.service.ts';
+import { signAccessToken } from '../src/config/jwt.ts';
+import { newSessionId, SESSION_ABSOLUTE_CAP_MS } from '../src/services/session.service.ts';
 import { ensureDb, disconnectDb } from './helpers.mjs';
 
 const { ObjectId } = mongoose.Types;
@@ -217,13 +217,14 @@ export async function registerOwner(api, tracker) {
 export async function issueSessionToken(userId, { deviceLabel } = {}) {
   const jti = newSessionId();
   const token = signAccessToken(userId, jti);
-  const { exp } = decodeAccessToken(token);
   await Session.create({
     userId: new ObjectId(userId),
     jti,
     ...(deviceLabel ? { deviceLabel } : {}),
-    // Mirrors the real login path: the row expires when the token does.
-    expiresAt: new Date(exp * 1000),
+    // Mirrors the real login path (AUTH-02): the row carries the session's own
+    // 14-day ABSOLUTE cap, never the token's `exp`. The token expires in ~1h;
+    // the session it names lives for 14 days.
+    expiresAt: new Date(Date.now() + SESSION_ABSOLUTE_CAP_MS),
   });
   return token;
 }

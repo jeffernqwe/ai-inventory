@@ -81,7 +81,11 @@ export function validateProductionConfig(
   // at boot. Probe it with a throwaway signature (never transmitted, nothing
   // persisted) reusing jsonwebtoken's own parser, so this check can never
   // disagree with signAccessToken about what is valid. An empty value is left
-  // alone: env.ts already treats it as absent and applies the "7d" default.
+  // alone: env.ts already treats it as absent and applies the "1h" default.
+  //
+  // AUTH-02: the default is now 1 hour. JWT_ISSUER / JWT_AUDIENCE need no probe
+  // of their own — they are non-secret strings that env.ts defaults, and
+  // jsonwebtoken accepts any string for both.
   const jwtExpiresIn = get('JWT_EXPIRES_IN');
   if (jwtSecret && jwtExpiresIn) {
     try {
@@ -96,7 +100,7 @@ export function validateProductionConfig(
       problems.push({
         variable: 'JWT_EXPIRES_IN',
         message:
-          'JWT_EXPIRES_IN is not a valid expiration string. Use a jsonwebtoken timespan such as "7d", "15m", or "2h", or a number of seconds.',
+          'JWT_EXPIRES_IN is not a valid expiration string. Use a jsonwebtoken timespan such as "1h", "15m", or "2h", or a number of seconds.',
       });
     }
   }

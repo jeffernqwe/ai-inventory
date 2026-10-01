@@ -152,10 +152,33 @@ export function isTokenExpiredError(err: unknown): boolean {
   return err instanceof jwt.TokenExpiredError;
 }
 
+/**
+ * AUTH-03 — the ABSOLUTE expiry of a JUST-SIGNED access token, as an ISO string,
+ * or `null` when the token carries no usable `exp`.
+ *
+ * The client needs an absolute instant rather than the `expiresIn` duration, so it
+ * can compute its authentication horizon as `min(tokenExpiresAt, sessionExpiresAt)`
+ * (the session cap can end BEFORE the token does near the 14-day boundary). The
+ * value is read by decoding the token this server just minted — trusted input by
+ * construction, so `decodeAccessToken` is the right helper and no secret or
+ * re-verification is involved. Deriving it here keeps every endpoint's `exp`
+ * reading identical instead of parsing `env.jwtExpiresIn` in each controller.
+ *
+ * The token itself only ever comes from `signAccessToken`, so `exp` is always a
+ * number in practice; `null` is the honest answer for the impossible case rather
+ * than a fabricated instant.
+ */
+export function accessTokenExpiresAt(token: string): string | null {
+  const payload = decodeAccessToken(token);
+  if (typeof payload?.exp !== 'number') return null;
+  return new Date(payload.exp * 1000).toISOString();
+}
+
 export default {
   signAccessToken,
   verifyAccessToken,
   verifyAccessTokenIgnoringExpiry,
   isTokenExpiredError,
   decodeAccessToken,
+  accessTokenExpiresAt,
 };

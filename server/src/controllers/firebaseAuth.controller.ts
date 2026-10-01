@@ -65,11 +65,12 @@
 
 import type { Request, Response } from 'express';
 
-import { validateFirebaseExchange, validateFirebaseRegister, validateFirebaseLink, validateCredentialsChanged } from '../utils/validate.ts';
+import { validateFirebaseExchange, validateFirebaseRegister, validateFirebaseLink, validateCredentialsChanged, validateRenew } from '../utils/validate.ts';
 import {
   exchangeFirebaseSession,
   registerBusinessFromFirebase,
 } from '../services/firebaseAuth.service.ts';
+import { renewInventorySession } from '../services/sessionRenew.service.ts';
 import { linkFirebaseIdentity } from '../services/firebaseLink.service.ts';
 import { applyCredentialsChanged } from '../services/credentialsChanged.service.ts';
 import { toPublicUser } from '../services/auth.service.ts';
@@ -85,6 +86,7 @@ import { throwValidation } from '../utils/errors.ts';
 import { error as logError } from '../utils/logger.ts';
 import ApiError from '../utils/ApiError.ts';
 import env from '../config/env.ts';
+import { accessTokenExpiresAt } from '../config/jwt.ts';
 
 /**
  * The request context the LINK handler reads, following `auth.controller.ts`,
@@ -105,6 +107,10 @@ import env from '../config/env.ts';
  */
 type AuthenticatedRequest = Request & {
   user?: { id: string; businessId: string };
+  // AUTH-03: the renewal handler reads `req.auth.jti` — the jti of the token that
+  // authenticated the request — to re-sign the SAME session. Both fields are put
+  // there by `requireAuth`; neither is ever read from a request body.
+  auth?: { sessionId: string; jti: string };
 };
 
 // ---------------------------------------------------------------------------
@@ -296,10 +302,78 @@ export async function firebaseExchange(req: Request, res: Response) {
     throw mapFirebaseFailure(err);
   }
 
+  // AUTH-03: the same two absolute instants login now returns, so the client has
+  // one contract across every route that mints a session. `tokenExpiresAt` is the
+  // exact `exp` of the token just signed; `sessionExpiresAt` is the session's
+  // 14-day cap. See `renew` below for why the horizon is their minimum.
   return res.status(200).json({
     token: result.token,
     tokenType: 'Bearer',
     expiresIn: env.jwtExpiresIn,
+    tokenExpiresAt: accessTokenExpiresAt(result.token),
+    sessionExpiresAt: result.session.expiresAt,
+    user: toPublicUser(result.user),
+  });
+}
+
+/**
+ * POST /api/auth/renew — AUTHENTICATED (AUTH-03).
+ *
+ * Re-issues an access token for the CALLER'S OWN existing session, without
+ * creating a session or extending its cap. The account is `req.user.id` and the
+ * session is `req.auth.jti` — both put there by `requireAuth` from the request's
+ * own token, so the handler has NO variable that could carry a client-supplied
+ * user, session or identity. `validateRenew` returns only `{ problems, idToken }`,
+ * so a body naming a `userId`, `jti`, `businessId`, `firebaseUid` or `role` is
+ * inert by construction rather than rejected by a check.
+ *
+ * WHY THIS LIVES IN THE FIREBASE CONTROLLER rather than `auth.controller.ts`. This
+ * file's own contract (see the header) is that it is the ONE place a Phase 32B
+ * Firebase domain error becomes an HTTP status, and renewal reaches
+ * `verifyFirebaseIdToken` — so it can throw `FirebaseTokenError`,
+ * `FirebaseUnavailableError` or `FirebaseNotConfigured`. Reusing
+ * `mapAuthenticatedFirebaseFailure` here keeps that translation in one place
+ * instead of exporting it across controllers. The route is still mounted at
+ * `/api/auth/renew` beside its siblings.
+ *
+ * ERROR SHAPE. Firebase domain failures map through the AUTHENTICATED mapping: a
+ * rejected ID token is a 400 (`FIREBASE_TOKEN_INVALID`), not a 401, because this
+ * route carries a token and the client's session-loss rule acts on 401/403 — a 401
+ * here would sign the user out over a bad request field. The service's own
+ * `ApiError`s (409 `FIREBASE_IDENTITY_CONFLICT`, 400 `EMAIL_NOT_VERIFIED`,
+ * 401 `SESSION_REVOKED`) propagate unchanged: each is already outside the
+ * session-loss rule or deliberately means session loss (a genuinely revoked
+ * session is a 401 `SESSION_REVOKED`, which IS terminal).
+ *
+ * RESPONSE. The same envelope login and exchange return, so the client has one
+ * contract: `token`, `tokenType`, `expiresIn` (retained), `tokenExpiresAt`,
+ * `sessionExpiresAt`, `user`. The two absolute instants are the point — the client
+ * treats `min(tokenExpiresAt, sessionExpiresAt)` as its horizon, because near the
+ * 14-day boundary the session cap ends before the freshly issued token does, and
+ * the session cap is the hard boundary that renewal never moves.
+ */
+export async function renew(req: AuthenticatedRequest, res: Response) {
+  const body = req.body ?? {};
+  const { problems, idToken } = validateRenew(body);
+  if (problems.length > 0) throwValidation(problems);
+
+  let result;
+  try {
+    result = await renewInventorySession({
+      userId: req.user!.id,
+      jti: req.auth!.jti,
+      idToken,
+    });
+  } catch (err) {
+    throw mapAuthenticatedFirebaseFailure(err);
+  }
+
+  return res.status(200).json({
+    token: result.token,
+    tokenType: 'Bearer',
+    expiresIn: env.jwtExpiresIn,
+    tokenExpiresAt: accessTokenExpiresAt(result.token),
+    sessionExpiresAt: result.session.expiresAt,
     user: toPublicUser(result.user),
   });
 }
@@ -467,4 +541,5 @@ export default {
   firebaseRegister,
   firebaseLink,
   credentialsChanged,
+  renew,
 };

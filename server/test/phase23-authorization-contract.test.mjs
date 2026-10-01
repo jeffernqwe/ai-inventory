@@ -192,6 +192,13 @@ const CLASS = {
 };
 
 /**
+ * A rate-limiter middleware factory call (`createSessionRenewLimiter(…)`). A
+ * limiter decides how OFTEN a caller may reach the controller, never WHO may —
+ * so it is not an authorization gate, and it must never be mistaken for one.
+ */
+const LIMITER_FACTORY = /\bcreate[A-Za-z0-9_]*Limiter\s*\(/g;
+
+/**
  * Routes that are deliberately NOT behind a permission gate, with the reason.
  * A route in one of these lists is exempt from PERMISSION_GATED; a route in
  * neither list must be gated. Adding a route means declaring it — never
@@ -255,6 +262,10 @@ const AUTHENTICATED_ROUTES = [
   { route: 'GET /api/auth/sessions', why: 'Phase 26A: lists only the caller’s own sessions' },
   { route: 'DELETE /api/auth/sessions/:id', why: 'Phase 26A: ends only a session the caller owns' },
   {
+    route: 'POST /api/auth/renew',
+    why: 'AUTH-03: re-issues a token for the CALLER’S OWN session — the account is req.user.id and the session is req.auth.jti, both from the request’s own token, so there is no other session the request could name, and no permission key could express "may renew my own session" without inventing an authorization concept the catalogue does not have; a session is not a capability that could be granted',
+  },
+  {
     route: 'POST /api/auth/firebase/link',
     why: 'Phase 32H: attaches a verified Firebase identity to the CALLER’S OWN account — the account is req.user.id, so there is no other account the request could name, and no permission key could express "may link an identity" without inventing an authorization concept the catalogue does not have',
   },
@@ -293,6 +304,16 @@ function classifyRoute({ handlers, declaration }, authFn = requireAuth) {
   }
   if (declaration.includes('requirePermission(')) {
     return { kind: CLASS.GATED, why: 'permission gate' };
+  }
+  // A RATE LIMITER IS NOT AN AUTHORIZATION GATE. `requireAuth, create…Limiter(…),
+  // controller` carries no permission and no role, so it is AUTHENTICATED
+  // (AUTH-03's POST /api/auth/renew is the first such route). The count must match
+  // EXACTLY: every non-auth, non-controller middleware in the chain has to be a
+  // recognised limiter, so an unknown middleware smuggled in beside a limiter
+  // still fails as UNGATED instead of riding along into an exempt bucket.
+  const limiterCount = (declaration.match(LIMITER_FACTORY) ?? []).length;
+  if (limiterCount === handlers.length - 2) {
+    return { kind: CLASS.AUTHENTICATED, why: 'requireAuth + rate limiter only' };
   }
   return { kind: 'UNGATED', why: 'a middleware is present but no gate is named in the declaration' };
 }
@@ -810,6 +831,29 @@ unitSuite('Phase 23 — authorization contract completion', () => {
         declaration: "router.get('/owners-only', requireAuth, requireRole(ROLES.OWNER), c.get)",
       });
       assert.equal(roleGated.kind, CLASS.ROLE_GATED);
+    });
+
+    it('treats a rate limiter as non-gating but refuses an unnamed middleware beside it', () => {
+      const controller = () => {};
+      const limiter = (req, res, next) => next();
+
+      // requireAuth + limiter + controller carries no permission and no role, so
+      // it is AUTHENTICATED — a limiter bounds frequency, not authority.
+      const withLimiter = classifyRoute({
+        handlers: [requireAuth, limiter, controller],
+        declaration:
+          "router.post('/renew', requireAuth, createSessionRenewLimiter(limits), renew)",
+      });
+      assert.equal(withLimiter.kind, CLASS.AUTHENTICATED);
+
+      // A limiter must NOT launder an unknown middleware into the AUTHENTICATED
+      // bucket: two middlewares, only one of which is a limiter, stays UNGATED.
+      const smuggled = classifyRoute({
+        handlers: [requireAuth, limiter, limiter, controller],
+        declaration:
+          "router.post('/sneaky', requireAuth, createSessionRenewLimiter(limits), mysteryGate, c.post)",
+      });
+      assert.equal(smuggled.kind, 'UNGATED');
     });
 
     it('refuses a role-gated route that is not declared', () => {

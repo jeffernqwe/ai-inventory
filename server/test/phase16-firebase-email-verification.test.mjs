@@ -6,16 +6,24 @@
 // place only, after the token is verified and before the first write, so refusal leaves
 // no Business, no User, no session and no audit row behind.
 //
-// WHAT IS DELIBERATELY *NOT* ENFORCED, and is asserted here as a negative because it is
-// the difference between a working system and a locked-out one:
+// AUTH-03 EXTENDED THIS RULE TO EVERY FIREBASE-BACKED SESSION BOUNDARY. Email
+// verification is now required before an Inventory AI session is created OR renewed
+// (target architecture §6 / invariant 8), so `exchangeFirebaseSession` carries the same
+// gate as registration and `sessionRenew.service.ts` carries it too. The previous
+// "registration only" carve-out (RG-14) is DELETED — it was a migration-era exception,
+// and the locked architecture permits no permanent one. The exchange assertions in this
+// file were therefore REWRITTEN: the exchange now REFUSES an unverified identity with
+// 400 EMAIL_NOT_VERIFIED instead of admitting it.
 //
-//   * `exchangeFirebaseSession` carries NO verification gate. Every account created
-//     before Phase 16 has `emailVerified: false`, so a gate there would lock out
-//     existing ACTIVE users — the population this rule exists to protect.
-//   * `requireAuth` is untouched (RG-7): it is the single authentication choke point
-//     for every route, and the phase changed zero lines of it.
-//   * The legacy password path is untouched (RG-14/N-6): `/api/auth/register` and
-//     `/api/auth/login` still work for accounts that carry `emailVerified: false`.
+// WHAT REMAINS TRUE, AND IS STILL ASSERTED:
+//
+//   * `requireAuth` is untouched (RG-7 / AUTH-03 decision 13): it is the single
+//     authentication choke point, it grows no `emailVerified` branch, and a live session
+//     is therefore never retroactively terminated by a claim that has since gone false.
+//   * The legacy password path is untouched (N-6): `/api/auth/register` and
+//     `/api/auth/login` still work for accounts that carry `emailVerified: false` and no
+//     Firebase identity. Legacy Mongo authentication is migration-era (AUTH-03 decision
+//     12) and is retired by AUTH-08, not by this phase.
 //
 // THE DECISION IS THE SIGNED CLAIM, NEVER THE PROVIDER (RG-11/L-7). Two cases below send
 // `sign_in_provider: 'google.com'` with an unverified claim and
@@ -115,10 +123,11 @@ unitSuite('Phase 16 — enforcement is at registration, and only there (no datab
   const exchangeBody = service.slice(exchangeStart, registerStart);
 
   it('★ the registration service refuses an unverified identity exactly once', () => {
-    // ONE gate. A second one is how a scoped rule quietly becomes a universal one — and
-    // a universal one would lock out every account created before Phase 16.
+    // TWO gates, one per Firebase-backed session boundary in this file: the registration
+    // path and the exchange (AUTH-03 decisions 9/10). A gate on either one is required;
+    // a THIRD would be an accidental duplicate.
     const occurrences = service.split('identity.emailVerified !== true').length - 1;
-    assert.equal(occurrences, 1, 'exactly one verification gate exists in this file');
+    assert.equal(occurrences, 2, 'exactly one verification gate per Firebase session boundary');
 
     assert.ok(
       service.includes(VERIFICATION_FIELD_MESSAGE),
@@ -146,20 +155,22 @@ unitSuite('Phase 16 — enforcement is at registration, and only there (no datab
     assert.ok(gate < firstWrite, 'refusal happens before any lookup or write');
   });
 
-  it('★ the exchange carries NO verification gate', () => {
+  it('★ the exchange DOES carry a verification gate, before the session is minted', () => {
     assert.ok(exchangeStart >= 0 && registerStart > exchangeStart, 'both bodies are delimited');
 
-    assert.equal(
-      /emailVerified\s*!==/.test(exchangeBody),
-      false,
-      'a gate on the exchange would lock out existing ACTIVE accounts (RG-14)'
-    );
-    // It still reads the claim to MIRROR it onto the session flow's user — reading is
-    // not enforcing, and this is the distinction the assertion above depends on.
-    assert.ok(
-      exchangeBody.includes('verifyFirebaseIdToken'),
-      'the exchange still verifies the token; it just does not decide from the claim'
-    );
+    const verified = exchangeBody.indexOf('const identity = await verifyFirebaseIdToken(idToken)');
+    const gate = exchangeBody.indexOf('identity.emailVerified !== true');
+    const mint = exchangeBody.indexOf('createSessionForToken(');
+
+    assert.ok(verified >= 0 && gate >= 0 && mint >= 0, 'all three anchors are present');
+    // AUTH-03 decision 10: the exchange creates an Inventory session, so it enforces the
+    // gate, and the claim is read only from a token the verifier already accepted.
+    assert.ok(verified < gate, 'the claim is read only from a VERIFIED token');
+    // The refusal happens BEFORE the session is minted, so an unverified identity can
+    // never obtain one.
+    assert.ok(gate < mint, 'the gate precedes session creation');
+    // It answers the locked AUTH-03 code, not the registration field error.
+    assert.ok(exchangeBody.includes('EMAIL_NOT_VERIFIED'), 'the locked code is used');
   });
 
   it('★ requireAuth is untouched — verification is not an authentication rule (RG-7)', () => {
@@ -415,20 +426,30 @@ dbSuite('Phase 16 — Firebase email-verification enforcement over HTTP', dbOk, 
   // What the enforcement must NOT have changed
   // -------------------------------------------------------------------------
 
-  it('7. ★★ an EXISTING ACTIVE user with emailVerified:false still exchanges (RG-14)', async () => {
-    // THE REGRESSION THIS PHASE MUST NOT INTRODUCE. Every account created before Phase 16
-    // carries `emailVerified: false`, so a verification gate on the exchange would lock
-    // out the entire existing population. The exchange must stay claim-blind.
+  it('7. ★★ an UNVERIFIED identity cannot exchange, and a verified one still can (AUTH-03)', async () => {
+    // AUTH-03 REVERSED the old RG-14 carve-out. The exchange creates an Inventory
+    // session, so email verification is required before it proceeds: an identity whose
+    // claim is currently false is refused with 400 EMAIL_NOT_VERIFIED and opens no
+    // session. The SAME account, with only the claim flipped true, exchanges — so the
+    // claim is the only thing deciding the outcome.
     const id = uid('legacy');
     const user = await makeUser({ firebaseUid: id, emailVerified: false, role: 'MANAGER' });
+
     setFakeFirebaseToken({ uid: id, email: user.email, email_verified: false });
+    const refused = await exchange({ idToken: ID_TOKEN });
 
-    const res = await exchange({ idToken: ID_TOKEN });
+    assert.equal(refused.status, 400, 'the exchange must enforce verification (AUTH-03)');
+    assert.equal(refused.json.code, 'EMAIL_NOT_VERIFIED');
+    assert.equal(refused.json.token, undefined, 'no token was issued');
+    assert.equal(await activeSessionsOf(user._id), 0, 'no session was created');
 
-    assert.equal(res.status, 200, 'the exchange must not enforce verification');
-    assert.equal(res.json.user.id, String(user._id));
-    assert.equal(res.json.user.role, 'MANAGER');
-    assert.equal(res.json.token.split('.').length, 3, 'a real application JWT was issued');
+    setFakeFirebaseToken({ uid: id, email: user.email, email_verified: true });
+    const allowed = await exchange({ idToken: ID_TOKEN });
+
+    assert.equal(allowed.status, 200, 'a verified identity exchanges');
+    assert.equal(allowed.json.user.id, String(user._id));
+    assert.equal(allowed.json.user.role, 'MANAGER');
+    assert.equal(allowed.json.token.split('.').length, 3, 'a real application JWT was issued');
   });
 
   it('8. ★ the legacy password route is untouched (RG-14/N-6)', async () => {
@@ -484,8 +505,9 @@ dbSuite('Phase 16 — Firebase email-verification enforcement over HTTP', dbOk, 
   });
 
   it('11. a DISABLED user is refused exactly as before, verification notwithstanding', async () => {
-    // The gate sits before the pre-existing account checks, so it must not reorder them
-    // into a different answer for an account that is already known and disabled.
+    // On the EXCHANGE the AUTH-03 gate sits AFTER the pre-existing status and tenant
+    // checks, so it must not reorder them into a different answer for an account that is
+    // already known and disabled — the disabled refusal wins, as it always did.
     const id = uid('disabled');
     const user = await makeUser({ firebaseUid: id, status: 'DISABLED' });
     setFakeFirebaseToken({ uid: id, email: user.email, email_verified: true });

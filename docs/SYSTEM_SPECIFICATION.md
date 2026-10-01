@@ -1457,6 +1457,8 @@ sub   the user id
 jti   the id of the session record
 iat   issued-at
 exp   expiry
+iss   issuer (AUTH-02)
+aud   audience (AUTH-02)
 ```
 
 It carries nothing else. Role, status and `businessId` remain database-derived on
@@ -1498,6 +1500,53 @@ tokens issued before server-side sessions existed carry no `jti`, so they are
 rejected and every user signs in once more; and **there is no refresh-token
 rotation** — a session ends when it is revoked or when its token expires, and a
 new token is obtained by signing in again.
+
+### Session Renewal (AUTH-03)
+
+Because a token lives one hour while its session is capped at 14 days, a client must be able to
+obtain a **new token for the same session** without signing in again and without creating a second
+session.
+
+```text
+POST /api/auth/renew   200 on success; requires BOTH credentials
+```
+
+Renewal requires the current Inventory AI access token **and** a fresh Firebase ID token. The route
+is **authenticated** — `requireAuth` is the first handler — so the account comes from `req.user.id`
+and the session from `req.auth.jti`, both taken from the token that authenticated the request; the
+body carries only `{ idToken }`. A client can therefore never name another user, another business or
+another session. The route is **per-IP rate-limited** (default 120 per 15 minutes, configurable via
+`AUTH_SESSION_RENEW_RATE_LIMIT_WINDOW_MS` / `AUTH_SESSION_RENEW_RATE_LIMIT_MAX`), answers
+`429 SESSION_RENEW_RATE_LIMITED` with a `Retry-After` header, and treats that 429 as **transient** —
+it neither ends the session nor loops. No audit row is written per renewal.
+
+Renewal re-issues a token for the **same `jti`**: it never creates a session row and never mints a
+new `jti`; it **never extends the session's `expiresAt`**, so the 14-day absolute cap is untouched
+and renewal cannot prolong a session beyond its original cap; and the new token's `exp` is always
+later than the old token's, which is what makes a renewal observable.
+
+Firebase verification uses `checkRevoked: true` (AUTH-01), and the **Firebase UID is the only
+identity match** — an ID token whose uid differs from the account's `firebaseUid`, or an account
+with none, is refused with `409 FIREBASE_IDENTITY_CONFLICT`. Email is never a join key. The verified
+**email-verification gate applies at issuance and at renewal**: an unverified identity is refused
+with `400 EMAIL_NOT_VERIFIED` on both `POST /api/auth/firebase/exchange` and `POST /api/auth/renew`.
+There is no permanent legacy exception, and registration is unchanged. A live session is **not**
+retroactively terminated if a claim later becomes false — enforcement is at issuance and renewal
+only, and `middlewares/authenticate.ts` is unmodified.
+
+Login, exchange and renewal all report the client's **authentication horizon**: `tokenExpiresAt`
+(the exact `exp` of the token just issued) and `sessionExpiresAt` (the existing session's absolute
+cap). The client renews when `min(tokenExpiresAt, sessionExpiresAt)` — the earlier boundary wins —
+falls inside a 10-minute proactive window, and when the app returns to the foreground.
+
+Renewal is **single-flight**, and staleness is handled by an **authentication epoch**: a response
+belonging to an epoch that has since ended (a sign-out, a fresh sign-in) is discarded rather than
+applied, because clearing the in-flight promise does not cancel the request. Failures are classified
+by **application error code, never by HTTP status** — a plain 401 says nothing about recoverability,
+since `SESSION_EXPIRED` (recoverable) and `SESSION_REVOKED` (terminal) are both 401s. A recoverable
+failure retries the original request **exactly once**; terminal errors never renew; a transient
+failure degrades gracefully without ending the session, and `BUSINESS_NOT_ACTIVE` preserves
+authentication. No refresh token and no new durable state exist.
 
 ## Password Recovery
 

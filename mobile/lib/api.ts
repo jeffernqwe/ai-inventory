@@ -332,6 +332,34 @@ export function credentialsChanged(
   });
 }
 
+/**
+ * POST /api/auth/renew -> { token, tokenType, expiresIn, tokenExpiresAt,
+ * sessionExpiresAt, user } (200, AUTH-03). AUTHENTICATED — the caller's own
+ * session token is required.
+ *
+ * Re-issues an access token for the CALLER'S OWN existing session: the server
+ * keeps the same `jti`, reuses the same session row, and NEVER extends its 14-day
+ * cap. The body carries only `{ idToken }`; the account is the session and the
+ * identity is the verified token's uid, so no id, uid, businessId or role is sent
+ * and none is read. The response restates login's shape plus the two absolute
+ * instants, whose MINIMUM is the client's true authentication horizon.
+ *
+ * NOT `temporarySession`: this request carries the app's own session, so its
+ * refusals must reach the normal classification. The server answers a rejected
+ * Firebase credential as 400 (a bad request field), a uid mismatch as 409
+ * `FIREBASE_IDENTITY_CONFLICT`, an unverified identity as 400 `EMAIL_NOT_VERIFIED`,
+ * a spent/revoked session as 401 `SESSION_REVOKED`, and a throttled caller as 429
+ * `SESSION_RENEW_RATE_LIMITED` — the last of which is TRANSIENT and must preserve
+ * the still-valid session rather than be read as session loss.
+ */
+export function renew(token: string, { idToken }: FirebaseLinkPayload): Promise<ApiResponse> {
+  return apiFetch('/api/auth/renew', {
+    token,
+    method: 'POST',
+    body: { idToken },
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Users (Phase 14A backend / 14B mobile)
 // ---------------------------------------------------------------------------
@@ -659,6 +687,7 @@ export default {
   forgotPassword,
   resetPassword,
   firebaseExchange,
+  renew,
   firebaseRegister,
   firebaseLink,
   updateMe,

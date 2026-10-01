@@ -26,8 +26,11 @@ import { firebaseConfig, isFirebaseConfigured as configIsFirebaseConfigured } fr
 import {
   FirebaseNotConfigured,
   FirebaseTokenError,
+  FirebaseUnavailableError,
   FIREBASE_NOT_CONFIGURED,
   FIREBASE_TOKEN_INVALID,
+  FIREBASE_UNAVAILABLE,
+  classifyFirebaseErrorCode,
   isFirebaseError,
 } from './firebaseErrors.ts';
 import { getFirebaseAdminApp, isFirebaseAdminAppInitialized, resetFirebaseAdminApp } from './adminApp.ts';
@@ -35,14 +38,19 @@ import {
   verifyFirebaseIdToken,
   setFirebaseIdTokenVerifier,
   resetFirebaseIdTokenVerifier,
+  isStructurallyJwtShaped,
+  assertFirebaseTokenEnvironment,
 } from './tokenVerifier.ts';
 import type { VerifiedFirebaseIdentity, FirebaseIdTokenVerifier } from './tokenVerifier.ts';
 
 export {
   FirebaseNotConfigured,
   FirebaseTokenError,
+  FirebaseUnavailableError,
   FIREBASE_NOT_CONFIGURED,
   FIREBASE_TOKEN_INVALID,
+  FIREBASE_UNAVAILABLE,
+  classifyFirebaseErrorCode,
   isFirebaseError,
   getFirebaseAdminApp,
   isFirebaseAdminAppInitialized,
@@ -50,6 +58,8 @@ export {
   setFirebaseIdTokenVerifier,
   resetFirebaseIdTokenVerifier,
   verifyFirebaseIdToken,
+  isStructurallyJwtShaped,
+  assertFirebaseTokenEnvironment,
 };
 export type { VerifiedFirebaseIdentity, FirebaseIdTokenVerifier };
 

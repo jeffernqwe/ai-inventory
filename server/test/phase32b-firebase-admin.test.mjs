@@ -544,8 +544,12 @@ unitSuite('Phase 32B — ID token verification and narrowing', () => {
     await resetFirebaseAdminApp();
 
     await withFirebaseEnv({}, async () => {
+      // Phase AUTH-01: the token must be JWT-SHAPED for this case to reach the
+      // config check at all. The real path now rejects a non-JWT value as
+      // `malformed-token` (terminal) BEFORE asking whether Firebase is configured,
+      // so a shapeless string would exercise that guard instead of this one.
       await assert.rejects(
-        () => verifyFirebaseIdToken('any-token-at-all'),
+        () => verifyFirebaseIdToken('eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ1MSJ9.c2ln'),
         (err) => err instanceof FirebaseNotConfigured && err.code === FIREBASE_NOT_CONFIGURED
       );
     });

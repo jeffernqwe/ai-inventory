@@ -1,13 +1,21 @@
 /**
  * Firebase error layer, mirroring services/mail/mailErrors.ts (Phase 32B).
  *
- * Two distinct conditions, two distinct codes:
+ * Three distinct conditions, three distinct codes (the third added by AUTH-01):
  *
  *   FIREBASE_NOT_CONFIGURED — an operator problem. No Firebase service account
- *     is configured, so no ID token can be verified. Nothing was attempted.
+ *     is configured (or the SDK reports `auth/invalid-credential`), so no ID token
+ *     can be verified. Nothing was attempted.
  *   FIREBASE_TOKEN_INVALID — a caller problem. The ID token was rejected by
- *     verification: expired, wrong audience, wrong issuer, bad signature, or
- *     malformed.
+ *     verification: expired, revoked, the user is disabled or gone, or it is
+ *     structurally not a JWT.
+ *   FIREBASE_UNAVAILABLE — a TRANSIENT infrastructure problem. Verification could
+ *     not be completed (network, Google-side service failure, unknown code), so
+ *     the credential was neither accepted nor judged. This must never be answered
+ *     as a terminal token error: a valid Inventory AI session survives it.
+ *
+ *   The three codes stay DISJOINT and namespaced, so a client can branch on the
+ *   code rather than on a status.
  *
  * Both codes are namespaced FIREBASE_* on purpose, and deliberately share no
  * spelling with any authentication or session code (AUTH_REQUIRED, INVALID_TOKEN,
@@ -23,6 +31,7 @@
 
 export const FIREBASE_NOT_CONFIGURED = 'FIREBASE_NOT_CONFIGURED';
 export const FIREBASE_TOKEN_INVALID = 'FIREBASE_TOKEN_INVALID';
+export const FIREBASE_UNAVAILABLE = 'FIREBASE_UNAVAILABLE';
 
 export class FirebaseNotConfigured extends Error {
   declare code: string;
@@ -71,6 +80,110 @@ export class FirebaseTokenError extends Error {
 }
 
 /**
+ * A TRANSIENT Firebase/Google failure: the credential was not judged, because the
+ * verification could not be completed. Phase AUTH-01.
+ *
+ * This is deliberately NOT a `FirebaseTokenError`. The two answer different
+ * questions — "your credential is bad" versus "we could not reach the authority" —
+ * and the target architecture (§19/§35) requires that a transient failure never
+ * be presented as a terminal one: a valid Inventory AI session must survive a
+ * Firebase outage rather than be signed out over it.
+ *
+ * It carries no HTTP status, exactly like the other two classes; the controller
+ * turns it into a 503.
+ */
+export class FirebaseUnavailableError extends Error {
+  declare code: string;
+  declare reason: string;
+
+  constructor(reason = 'unknown', message = 'Firebase could not be reached to verify this sign-in.') {
+    super(message);
+    this.name = 'FirebaseUnavailableError';
+    this.code = FIREBASE_UNAVAILABLE;
+    this.reason = reason;
+  }
+}
+
+/**
+ * The three ways a Firebase ID-token verification request can fail, as a closed
+ * vocabulary: a rejected credential, a temporary inability to verify, or the
+ * server's own Firebase configuration being unusable.
+ */
+export type FirebaseFailureClass = 'terminal' | 'unavailable' | 'not-configured';
+
+/**
+ * The ONLY SDK codes that mean "this credential is genuinely not acceptable".
+ *
+ * Derived from the installed `firebase-admin` 14.5.0 sources
+ * (`lib/auth/base-auth.js`, `lib/auth/token-verifier.js`), NOT from generic
+ * documentation. The list is intentionally SHORT: everything else falls through to
+ * `unavailable`, because treating an unclassifiable failure as terminal is the
+ * error the target architecture forbids (§19), while treating a genuinely bad
+ * token as transient only delays a refusal that grants nothing.
+ */
+export const TERMINAL_FIREBASE_AUTH_CODES = [
+  'auth/id-token-expired',
+  'auth/id-token-revoked',
+  'auth/user-disabled',
+  'auth/user-not-found',
+] as const;
+
+/**
+ * The SDK's own "this app has no usable credential/project" code. Kept DISTINCT
+ * from generic unavailability (Phase AUTH-01) because it is an operator
+ * configuration fault, not a Google outage, and an operator needs to see the two
+ * apart. Mapped to `FirebaseNotConfigured` so the distinction survives to the
+ * response as `FIREBASE_NOT_CONFIGURED` rather than `FIREBASE_UNAVAILABLE`.
+ */
+export const NOT_CONFIGURED_FIREBASE_AUTH_CODES = ['auth/invalid-credential'] as const;
+
+/**
+ * The service/transport codes we EXPECT to be transient. Listing them is
+ * documentation rather than the mechanism — `classifyFirebaseErrorCode` defaults
+ * to `unavailable`, so this array is not load-bearing and a new code the SDK
+ * introduces is handled correctly without an edit here.
+ *
+ * ★ `auth/argument-error` IS IN THIS LIST ON PURPOSE AND MUST NOT BE MOVED TO
+ *   `TERMINAL_FIREBASE_AUTH_CODES`. In firebase-admin 14.5.0 that code is
+ *   OVERLOADED: `token-verifier.js`'s `mapJwtErrorToAuthError` falls through to
+ *   `INVALID_ARGUMENT` for `JwtErrorCode.KEY_FETCH_ERROR` — a public-key (JWKS)
+ *   fetch failure, i.e. a transient Google outage — so a malformed token and a
+ *   JWKS outage are indistinguishable by code. A malformed token is caught 
+ *   earlier and terminally by the structural guard in `tokenVerifier.ts`; what
+ *   reaches this classifier as `auth/argument-error` is therefore the ambiguous
+ *   remainder, and ambiguity must resolve to "do not destroy a valid session".
+ */
+export const TRANSIENT_FIREBASE_AUTH_CODES = [
+  'auth/argument-error',
+  'auth/internal-error',
+  'app/network-error',
+  'app/network-timeout',
+  'app/internal-error',
+  'auth/quota-exceeded',
+  'auth/insufficient-permission',
+  'auth/project-not-found',
+  'auth/configuration-not-found',
+  'auth/billing-not-enabled',
+] as const;
+
+/**
+ * Classifies an SDK error code. Terminal codes are matched explicitly; the
+ * `not-configured` code is matched explicitly; EVERYTHING ELSE — including a
+ * missing, non-string or unknown/future code — is `unavailable`.
+ *
+ * Verified against the installed `firebase-admin` 14.5.0. If that version
+ * changes, this mapping must be re-derived rather than assumed.
+ */
+export function classifyFirebaseErrorCode(code: unknown): FirebaseFailureClass {
+  if (typeof code !== 'string') return 'unavailable';
+  if ((TERMINAL_FIREBASE_AUTH_CODES as readonly string[]).includes(code)) return 'terminal';
+  if ((NOT_CONFIGURED_FIREBASE_AUTH_CODES as readonly string[]).includes(code)) {
+    return 'not-configured';
+  }
+  return 'unavailable';
+}
+
+/**
  * Coerces an upstream error code into a safe label.
  *
  * Anything that is not a short, plainly-shaped string becomes 'unknown' rather
@@ -83,14 +196,24 @@ export function safeTokenReason(raw: unknown): string {
 }
 
 export function isFirebaseError(err: unknown): boolean {
-  return err instanceof FirebaseNotConfigured || err instanceof FirebaseTokenError;
+  return (
+    err instanceof FirebaseNotConfigured ||
+    err instanceof FirebaseTokenError ||
+    err instanceof FirebaseUnavailableError
+  );
 }
 
 export default {
   FirebaseNotConfigured,
   FirebaseTokenError,
+  FirebaseUnavailableError,
   FIREBASE_NOT_CONFIGURED,
   FIREBASE_TOKEN_INVALID,
+  FIREBASE_UNAVAILABLE,
+  TERMINAL_FIREBASE_AUTH_CODES,
+  NOT_CONFIGURED_FIREBASE_AUTH_CODES,
+  TRANSIENT_FIREBASE_AUTH_CODES,
+  classifyFirebaseErrorCode,
   safeTokenReason,
   isFirebaseError,
 };

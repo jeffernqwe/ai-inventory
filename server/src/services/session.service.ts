@@ -84,6 +84,32 @@ type RevokeAllSessionsInput = {
 export const SESSION_REVOKED_CODE = 'SESSION_REVOKED';
 export const SESSION_REVOKED_MESSAGE = 'Session ended — please sign in again';
 
+/**
+ * AUTH-02 — 401 code for an EXPIRED access token whose session is still live.
+ *
+ * Deliberately distinct from SESSION_REVOKED: an expired token is recoverable
+ * (the Firebase identity is untouched and a normal exchange can mint a fresh
+ * session), whereas a revoked/unknown session is terminal. The two must never be
+ * collapsed, which is why the code the target architecture requires is answered
+ * here rather than reusing `INVALID_TOKEN` the way the pre-AUTH-02 middleware
+ * did. Like SESSION_REVOKED it is a 401 — the request is still refused.
+ */
+export const SESSION_EXPIRED_CODE = 'SESSION_EXPIRED';
+export const SESSION_EXPIRED_MESSAGE = 'Session expired — please sign in again';
+
+/**
+ * AUTH-02 — the Inventory session's ABSOLUTE lifetime: 14 days.
+ *
+ * This is the session's own boundary, not the token's. The access token lives
+ * ~1 hour (`env.jwtExpiresIn`); the session row outlives many tokens so that
+ * renewal (AUTH-03) has something to renew and so that a session cannot be made
+ * immortal by renewing. The cap is anchored at creation and is NEVER extended by
+ * a new token or a renewal; once it passes, the session is dead and the only way
+ * forward is to authenticate through Firebase again and obtain a new session.
+ */
+export const SESSION_ABSOLUTE_CAP_DAYS = 14;
+export const SESSION_ABSOLUTE_CAP_MS = SESSION_ABSOLUTE_CAP_DAYS * 24 * 60 * 60 * 1000;
+
 export const DEFAULT_DEVICE_LABEL = 'Unknown device';
 /** Labels are display-only, so they are capped rather than rejected. */
 const DEVICE_LABEL_MAX = 60;
@@ -148,24 +174,26 @@ export function normalizeDeviceLabel(value: unknown) {
 /**
  * Persists the session for a token that was just signed.
  *
- * `expiresAt` is read back from the token's own `exp` claim rather than
- * recomputed from the configured lifetime, so the row and the JWT expire at the
- * same instant by construction — there is no second implementation of the
- * duration format to drift.
+ * AUTH-02: `expiresAt` is the session's own ABSOLUTE cap — 14 days from now —
+ * and is deliberately NOT derived from the token's `exp`. The two lifetimes mean
+ * different things: the token is a short-lived (~1 hour) credential, while the
+ * session is the long-lived server-side record that tokens reference. Deriving
+ * one from the other would tie session longevity to the JWT lifetime and make
+ * renewal impossible; the cap is set once, here, and never moved afterwards.
  *
  * `businessId` is used only for the audit row (sessions carry no tenant); it
  * comes from the user document login already loaded, never from a request.
  */
 export async function createSessionForToken({ userId, businessId, token, deviceLabel }: CreateSessionInput) {
   const payload = decodeAccessToken(token);
-  if (!payload?.jti || !payload?.exp) {
+  if (!payload?.jti) {
     throw new ApiError(500, 'The access token carries no session id', 'SESSION_ID_REQUIRED');
   }
   const session = await Session.create({
     userId,
     jti: payload.jti,
     deviceLabel: normalizeDeviceLabel(deviceLabel),
-    expiresAt: new Date(payload.exp * 1000),
+    expiresAt: new Date(Date.now() + SESSION_ABSOLUTE_CAP_MS),
   });
   await auditSession({
     businessId,
@@ -317,6 +345,10 @@ export function toPublicSession(session: SessionDoc, currentJti?: string) {
 export default {
   SESSION_REVOKED_CODE,
   SESSION_REVOKED_MESSAGE,
+  SESSION_EXPIRED_CODE,
+  SESSION_EXPIRED_MESSAGE,
+  SESSION_ABSOLUTE_CAP_DAYS,
+  SESSION_ABSOLUTE_CAP_MS,
   DEFAULT_DEVICE_LABEL,
   MAX_SESSIONS_RETURNED,
   newSessionId,

@@ -194,7 +194,7 @@ describe('H7 production config validation (Phase 07D)', () => {
     );
   });
 
-  it('treats an absent JWT_EXPIRES_IN as fine (env.js applies the "7d" default)', async () => {
+  it('treats an absent JWT_EXPIRES_IN as fine (env.ts applies the "1h" default since AUTH-02)', async () => {
     await withEnv(
       { MONGODB_URI: DUMMY_URI, JWT_SECRET: LONG_SECRET, AI_PROVIDER: '', JWT_EXPIRES_IN: undefined },
       () => {

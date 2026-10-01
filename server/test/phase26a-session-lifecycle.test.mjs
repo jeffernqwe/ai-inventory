@@ -49,7 +49,7 @@ import {
 } from './support.mjs';
 import { dbSuite } from './testEnv.mjs';
 import { verifyAccessToken, signAccessToken } from '../src/config/jwt.ts';
-import { newSessionId } from '../src/services/session.service.ts';
+import { newSessionId, SESSION_ABSOLUTE_CAP_MS } from '../src/services/session.service.ts';
 import env from '../src/config/env.ts';
 import Business from '../src/models/business.model.ts';
 import User from '../src/models/user.model.ts';
@@ -98,6 +98,20 @@ async function me(token) {
 /** Every session row for a user, newest first. */
 async function sessionsOf(userId) {
   return Session.find({ userId }).sort({ createdAt: 1, _id: 1 });
+}
+
+/**
+ * Signs a token exactly the way the server does. AUTH-02 made `iss`/`aud`
+ * mandatory on verification, so a hand-built token that omits them is rejected
+ * before it can reach any of the checks these cases exercise.
+ */
+function signAsServer(payload) {
+  return jwt.sign(payload, env.jwtSecret, {
+    algorithm: 'HS256',
+    expiresIn: env.jwtExpiresIn,
+    issuer: env.jwtIssuer,
+    audience: env.jwtAudience,
+  });
 }
 
 /**
@@ -156,8 +170,19 @@ dbSuite('Phase 26A — session lifecycle over real HTTP', dbOk, () => {
     assert.equal(session.deviceLabel, 'Pixel 7', 'the cosmetic label is stored');
     assert.equal(session.revokedAt, null, 'a fresh session is not revoked');
     assert.equal(session.lastUsedAt, null, 'and has not been used yet');
-    // expiresAt is read back from the token, so the two cannot drift apart.
-    assert.equal(session.expiresAt.getTime(), payload.exp * 1000, 'the row expires with the JWT');
+    // AUTH-02: `expiresAt` is the SESSION's own 14-day absolute cap, not the
+    // token's `exp`. The two lifetimes are deliberately independent: a ~1-hour
+    // token names a 14-day session row.
+    const capMs = session.expiresAt.getTime() - session.createdAt.getTime();
+    assert.ok(
+      Math.abs(capMs - SESSION_ABSOLUTE_CAP_MS) < 60_000,
+      `the row carries a ~14-day absolute cap, was ${capMs}ms`
+    );
+    assert.notEqual(
+      session.expiresAt.getTime(),
+      payload.exp * 1000,
+      'the session must not expire with its JWT (AUTH-02)'
+    );
 
     // The session row carries NO authorization data (Phase 03/24 invariant).
     const raw = session.toObject();
@@ -195,29 +220,20 @@ dbSuite('Phase 26A — session lifecycle over real HTTP', dbOk, () => {
     // Correctly signed with the real secret, correct subject, unexpired — the
     // ONLY thing wrong with it is that it names no session. This is exactly the
     // shape of every token issued before Phase 26A.
-    const noJti = jwt.sign({ sub: user.id }, env.jwtSecret, {
-      algorithm: 'HS256',
-      expiresIn: env.jwtExpiresIn,
-    });
+    const noJti = signAsServer({ sub: user.id });
     const res = await me(noJti);
     assert.equal(res.status, 401, JSON.stringify(res.json));
     assert.equal(res.json.code, 'INVALID_TOKEN');
 
     // An empty jti is the same as none.
-    const emptyJti = jwt.sign({ sub: user.id, jti: '' }, env.jwtSecret, {
-      algorithm: 'HS256',
-      expiresIn: env.jwtExpiresIn,
-    });
+    const emptyJti = signAsServer({ sub: user.id, jti: '' });
     const empty = await me(emptyJti);
     assert.equal(empty.status, 401, JSON.stringify(empty.json));
     assert.equal(empty.json.code, 'INVALID_TOKEN');
 
     // A jti naming no session at all is a 401 too — "unknown" and "revoked" are
     // deliberately indistinguishable to the caller.
-    const unknownJti = jwt.sign({ sub: user.id, jti: newSessionId() }, env.jwtSecret, {
-      algorithm: 'HS256',
-      expiresIn: env.jwtExpiresIn,
-    });
+    const unknownJti = signAsServer({ sub: user.id, jti: newSessionId() });
     const unknown = await me(unknownJti);
     assert.equal(unknown.status, 401, JSON.stringify(unknown.json));
     assert.equal(unknown.json.code, 'SESSION_REVOKED');
@@ -484,11 +500,13 @@ dbSuite('Phase 26A — session lifecycle over real HTTP', dbOk, () => {
     // Same live session, same subject — but with a forged OWNER role and a
     // forged businessId, correctly signed with the real secret. Claiming more
     // must not buy anything, because authorization is reloaded from the User.
-    const forged = jwt.sign(
-      { sub: staff.id, jti, role: 'OWNER', businessId: String(owner.businessId), status: 'ACTIVE' },
-      env.jwtSecret,
-      { algorithm: 'HS256', expiresIn: env.jwtExpiresIn }
-    );
+    const forged = signAsServer({
+      sub: staff.id,
+      jti,
+      role: 'OWNER',
+      businessId: String(owner.businessId),
+      status: 'ACTIVE',
+    });
     const res = await api('GET', '/api/users', { token: forged });
     assert.equal(res.status, 403, JSON.stringify(res.json));
     assert.equal(res.json.code, 'FORBIDDEN');
@@ -502,11 +520,7 @@ dbSuite('Phase 26A — session lifecycle over real HTTP', dbOk, () => {
     // A forged jti pointing at another user's session is refused outright.
     const victim = await createStaff(owner);
     const victimToken = (await login(victim.email, PASSWORD)).json.token;
-    const stolenJti = jwt.sign(
-      { sub: staff.id, jti: verifyAccessToken(victimToken).jti },
-      env.jwtSecret,
-      { algorithm: 'HS256', expiresIn: env.jwtExpiresIn }
-    );
+    const stolenJti = signAsServer({ sub: staff.id, jti: verifyAccessToken(victimToken).jti });
     const crossed = await me(stolenJti);
     assert.equal(crossed.status, 401, JSON.stringify(crossed.json));
     assert.equal(crossed.json.code, 'SESSION_REVOKED', 'a session only answers for its own owner');

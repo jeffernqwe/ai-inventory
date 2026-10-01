@@ -179,13 +179,14 @@ default and needs no dashboard entry. Verify the current values in the Render da
 | --- | --- | --- |
 | `MONGODB_URI` | **required** | startup exits when missing |
 | `JWT_SECRET` | **required** | at least 32 characters |
-| `JWT_EXPIRES_IN` | optional | default `7d`; an unparseable value fails fast |
+| `JWT_EXPIRES_IN` | optional | default `1h` (AUTH-02: the Inventory AI access token is short-lived); an unparseable value fails fast. Session longevity is bounded **separately** by the 14-day absolute session cap, so this value never changes how long a session lasts |
+| `JWT_ISSUER`, `JWT_AUDIENCE` | optional | defaults `inventory-ai` / `inventory-ai-api` (AUTH-02); non-secret, non-environment-specific labels minted and validated on every request. A token minted before AUTH-02 carries neither claim and is rejected, so every existing user signs in once more |
 | `AI_PROVIDER` | optional | empty = AI disabled; when set, that provider's own keys become required |
 | `OPENROUTER_API_KEY`, `OPENROUTER_BASE_URL`, `AI_MODEL_OPENROUTER` | **required when `AI_PROVIDER=openrouter`** | the model has no default |
 | `FIREBASE_SERVICE_ACCOUNT_JSON` — or the three-variable form | **all-or-nothing** | a partially supplied service account fails fast; none at all = Firebase disabled |
 | `TRUST_PROXY` | **effectively required behind Render** | set to `1`; see below |
 | `MAIL_PROVIDER`, `MAIL_FROM`, `RESEND_API_KEY`, `PASSWORD_RESET_URL` | optional | missing any of them **disables password recovery only** (`forgot-password` answers 503) — the server still starts and serves every other feature. Resend remains the implemented transport; no Firebase reset flow is implemented |
-| `AUTH_*_RATE_LIMIT_*` — **sixteen** variables (eight window/limit pairs) | optional | the documented defaults are the production values; the count is taken from code, not estimated. `TRUST_PROXY` and `JWT_SECRET` / `JWT_EXPIRES_IN` are listed separately above and are **not** `AUTH_*` variables |
+| `AUTH_*_RATE_LIMIT_*` — **sixteen** variables (eight window/limit pairs) | optional | the documented defaults are the production values; the count is taken from code, not estimated. `TRUST_PROXY` and `JWT_SECRET` / `JWT_EXPIRES_IN` / `JWT_ISSUER` / `JWT_AUDIENCE` are listed separately above and are **not** `AUTH_*` variables |
 | `CORS_ORIGINS`, `JSON_BODY_LIMIT`, `SHUTDOWN_TIMEOUT_MS`, `LOG_REQUESTS` | optional | the documented defaults are the production values |
 
 **`TRUST_PROXY=1`.** Render terminates TLS at a proxy, so without this setting `req.ip` is the proxy's

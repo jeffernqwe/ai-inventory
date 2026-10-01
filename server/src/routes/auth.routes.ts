@@ -2,7 +2,7 @@ import { Router } from 'express';
 
 import { register, login, me, changePassword, updateMe, logout, listSessions, revokeSession } from '../controllers/auth.controller.ts';
 import { forgotPassword, resetPassword as resetPasswordHandler } from '../controllers/passwordReset.controller.ts';
-import { firebaseExchange, firebaseRegister, firebaseLink, credentialsChanged } from '../controllers/firebaseAuth.controller.ts';
+import { firebaseExchange, firebaseRegister, firebaseLink, credentialsChanged, renew } from '../controllers/firebaseAuth.controller.ts';
 import requireAuth from '../middlewares/authenticate.ts';
 import {
   createLoginAccountLimiter,
@@ -13,6 +13,7 @@ import {
   createPasswordResetConfirmLimiter,
   createFirebaseExchangeLimiter,
   createFirebaseRegisterLimiter,
+  createSessionRenewLimiter,
 } from '../middlewares/rateLimit.ts';
 import type { AuthRateConfig } from '../middlewares/rateLimit.ts';
 
@@ -87,6 +88,17 @@ export function createAuthRouter({ limits }: AuthRouterOptions = {}) {
   router.post('/logout', requireAuth, logout);
   router.get('/sessions', requireAuth, listSessions);
   router.delete('/sessions/:id', requireAuth, revokeSession);
+
+  // AUTH-03: session renewal. AUTHENTICATED — no permission, because a user
+  // manages nothing but their own session, and both the account (`req.user.id`) and
+  // the session (`req.auth.jti`) come from the token that authenticated the
+  // request, never from the body. Middleware order is requireAuth → limiter →
+  // controller: the limiter sits immediately before the handler that spends a
+  // Firebase `checkRevoked` verification, matching `ai.routes.ts`'s
+  // `requireAuth, requirePermission, aiRateLimiter, controller` ordering, so an
+  // unauthenticated caller is refused before consuming any budget. The ID token
+  // travels in the POST body, so it cannot reach the access log or a Referer.
+  router.post('/renew', requireAuth, createSessionRenewLimiter(limits), renew);
 
   // Phase 32H: identity linking. AUTHENTICATED, and the authentication IS the
   // operation's ownership proof (design §14A.4) rather than a convenience — the

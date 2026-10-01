@@ -186,7 +186,7 @@ default and needs no dashboard entry. Verify the current values in the Render da
 | `FIREBASE_SERVICE_ACCOUNT_JSON` — or the three-variable form | **all-or-nothing** | a partially supplied service account fails fast; none at all = Firebase disabled |
 | `TRUST_PROXY` | **effectively required behind Render** | set to `1`; see below |
 | `MAIL_PROVIDER`, `MAIL_FROM`, `RESEND_API_KEY`, `PASSWORD_RESET_URL` | optional | missing any of them **disables password recovery only** (`forgot-password` answers 503) — the server still starts and serves every other feature. Resend remains the implemented transport; no Firebase reset flow is implemented |
-| `AUTH_*_RATE_LIMIT_*` — **sixteen** variables (eight window/limit pairs) | optional | the documented defaults are the production values; the count is taken from code, not estimated. `TRUST_PROXY` and `JWT_SECRET` / `JWT_EXPIRES_IN` / `JWT_ISSUER` / `JWT_AUDIENCE` are listed separately above and are **not** `AUTH_*` variables |
+| `AUTH_*_RATE_LIMIT_*` — **eighteen** variables (nine window/limit pairs) | optional | the documented defaults are the production values; the count is taken from code, not estimated. AUTH-03 added the per-IP session-renewal pair (`AUTH_SESSION_RENEW_RATE_LIMIT_WINDOW_MS` / `AUTH_SESSION_RENEW_RATE_LIMIT_MAX`, default 15 min / 120). `TRUST_PROXY` and `JWT_SECRET` / `JWT_EXPIRES_IN` / `JWT_ISSUER` / `JWT_AUDIENCE` are listed separately above and are **not** `AUTH_*` variables |
 | `CORS_ORIGINS`, `JSON_BODY_LIMIT`, `SHUTDOWN_TIMEOUT_MS`, `LOG_REQUESTS` | optional | the documented defaults are the production values |
 
 **`TRUST_PROXY=1`.** Render terminates TLS at a proxy, so without this setting `req.ip` is the proxy's

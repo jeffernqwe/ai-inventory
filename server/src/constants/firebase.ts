@@ -44,6 +44,26 @@ export const FIREBASE_REAUTHENTICATION_REQUIRED = 'FIREBASE_REAUTHENTICATION_REQ
 export const FIREBASE_IDENTITY_NOT_LINKED = 'FIREBASE_IDENTITY_NOT_LINKED';
 
 /**
+ * AUTH-03 — the Firebase-backed session boundary refused an UNVERIFIED identity.
+ *
+ * Email verification is required before an Inventory AI session is created or
+ * renewed (target architecture §6 and invariant 8), and the gate is the same one
+ * the registration path has always applied. The code is answered at HTTP 400,
+ * not 401 or 403, and that status is load-bearing on the renewal route: the
+ * mobile client's session-loss rule treats any 401/403 to a token-bearing
+ * request as "your session is gone" and would sign the user out — which would
+ * retroactively terminate an otherwise-live session, exactly what the target
+ * forbids. 400 states the real failure (a bad request field) and stays outside
+ * that rule.
+ *
+ * Deliberately distinct from `VALIDATION_ERROR`: the registration path reports a
+ * malformed/absent claim as a field problem, whereas this is a policy refusal
+ * about a well-formed but unverified identity, and the client needs one stable
+ * branch to route the user to email verification.
+ */
+export const EMAIL_NOT_VERIFIED = 'EMAIL_NOT_VERIFIED';
+
+/**
  * True when `authTime` is inside the freshness window at `nowMs`.
  *
  * FAILS CLOSED on every malformed input, and that is the whole contract:
@@ -74,5 +94,6 @@ export default {
   FIREBASE_REAUTH_WINDOW_SECONDS,
   FIREBASE_REAUTHENTICATION_REQUIRED,
   FIREBASE_IDENTITY_NOT_LINKED,
+  EMAIL_NOT_VERIFIED,
   authTimeIsFresh,
 };

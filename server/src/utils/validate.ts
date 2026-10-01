@@ -391,6 +391,35 @@ export function validateCredentialsChanged(body: Body) {
   return { problems, idToken: idToken.value };
 }
 
+/**
+ * AUTH-03 — the renewal payload. Reads `idToken` and NOTHING else, for the same
+ * reason `validateFirebaseLink` and `validateCredentialsChanged` are strict.
+ *
+ * The whole operation acts on the CALLER'S OWN session, so both facts must be
+ * server-derived and neither may be expressible by a caller:
+ *
+ *   - the ACCOUNT is `req.user.id`, put there by `requireAuth` from this
+ *     request's own session — so there is no `userId` field to forward;
+ *   - the SESSION being renewed is `req.auth.jti`, the jti of the token that
+ *     authenticated this request — so there is deliberately NO session, `jti`,
+ *     device or revision field, which would let a caller nominate a different
+ *     session to renew;
+ *   - the IDENTITY is the uid of the token `verifyFirebaseIdToken` returns, and
+ *     the service requires it to EQUAL the uid already on the account — so there
+ *     is no `firebaseUid` field either.
+ *
+ * `businessId`, `role`, `status` and `email` are not read on any path, so a body
+ * carrying them is inert rather than rejected: the returned object has no field
+ * to carry them and the handler has no variable holding a client-supplied
+ * identity, tenant or role.
+ */
+export function validateRenew(body: Body) {
+  const problems = [];
+  const idToken = requiredString(body?.idToken, 'idToken', MAX_ID_TOKEN);
+  problems.push(...idToken.problems);
+  return { problems, idToken: idToken.value };
+}
+
 // ---------------------------------------------------------------------------
 // User management (Phase 14A)
 // ---------------------------------------------------------------------------

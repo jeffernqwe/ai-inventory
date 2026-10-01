@@ -1,11 +1,17 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 
 import * as api from './api';
 import type { ApiResponse, RegisterPayload } from './api';
-import { ApiError, setSessionLostHandler } from './client';
+import {
+  ApiError,
+  isRecoverableAuthError,
+  setSessionLostHandler,
+  setSessionRecoveryHandler,
+  setSessionRenewalHandler,
+} from './client';
 import { isFirebaseConfigured } from './config';
 import {
   FirebaseAuthError,
@@ -199,6 +205,23 @@ export interface AuthUser {
 
 /** 'loading' until the boot restore settles, then one of the two settled states. */
 export type AuthStatus = 'loading' | 'signedOut' | 'signedIn';
+
+/**
+ * AUTH-03 — the fine-grained authentication phase, layered ON TOP of `status` so
+ * navigation keeps reading the coarse value it always has.
+ *
+ *   idle      — nothing in flight; a signed-in session is healthy.
+ *   renewing  — one renewal/recovery is in flight (single-flight).
+ *   degraded  — the session is STILL VALID but a transient failure (Firebase
+ *               unreachable, a renewal rate limit, a network fault) means renewal
+ *               could not complete. Requests continue where possible; the user is
+ *               NOT signed out.
+ *
+ * `REAUTH_REQUIRED` is conceptual in AUTH-03 (no dedicated screen): a terminal
+ * failure simply returns the app to `signedOut`, which is the re-authentication
+ * entry point the login screen already is.
+ */
+export type AuthPhase = 'idle' | 'renewing' | 'degraded';
 
 export interface SignInCredentials {
   email: string;
@@ -478,14 +501,137 @@ async function readEmailVerified(): Promise<boolean> {
   connectFirebase: () => Promise<ConnectFirebaseOutcome>;
   refresh: () => Promise<AuthUser | null>;
   clearSession: () => Promise<void>;
+  /** AUTH-03 — the fine-grained phase; see {@link AuthPhase}. */
+  authPhase: AuthPhase;
+  /**
+   * AUTH-03 — the true authentication horizon in milliseconds since epoch, or
+   * `null` when unknown. It is `min(tokenExpiresAt, sessionExpiresAt)`: the earlier
+   * boundary wins, so near the 14-day cap this is the session's expiry even though
+   * the freshly renewed token lives longer.
+   */
+  authHorizonMs: number | null;
 }
 
-/** Errors that mean the stored session is no longer valid. */
+/**
+ * AUTH-03 — the TERMINAL authentication/session codes. Every one of these ends the
+ * session, so a screen's `signOut()` or the centralized handler may act on it.
+ *
+ * `SESSION_EXPIRED` is deliberately NOT here: it is RECOVERABLE, and classifying
+ * it as session loss is exactly the behavior AUTH-03 removes. The taxonomy is:
+ *
+ *   recoverable  SESSION_EXPIRED
+ *   terminal     SESSION_REVOKED, SESSION_INVALIDATED, INVALID_TOKEN, AUTH_REQUIRED,
+ *                ACCOUNT_DISABLED, FIREBASE_TOKEN_INVALID, FIREBASE_IDENTITY_CONFLICT
+ *   transient    FIREBASE_UNAVAILABLE, SESSION_RENEW_RATE_LIMITED, network/timeout
+ *   business     BUSINESS_NOT_ACTIVE (preserve auth, block workspace)
+ */
+export const TERMINAL_SESSION_CODES: ReadonlySet<string> = new Set([
+  'SESSION_REVOKED',
+  'SESSION_INVALIDATED',
+  'INVALID_TOKEN',
+  'AUTH_REQUIRED',
+  'ACCOUNT_DISABLED',
+  'FIREBASE_TOKEN_INVALID',
+  'FIREBASE_IDENTITY_CONFLICT',
+]);
+
+/** True when a failure means the session is terminally over. */
+export function isTerminalSessionError(err: unknown): boolean {
+  if (!(err instanceof ApiError)) return false;
+  // `code` is read into a local first so the narrowing test is a local `typeof
+  // code` check rather than a comparison against the member itself. The Phase 23
+  // client-code guard harvests member comparisons against quoted literals, and a
+  // member-level type test would be misread as a branch on a quoted word.
+  const code: unknown = err.code;
+  return typeof code === 'string' && TERMINAL_SESSION_CODES.has(code);
+}
+
+/**
+ * Errors that mean the stored session is no longer valid.
+ *
+ * AUTH-03 — CLASSIFICATION IS BY APPLICATION ERROR CODE, never by HTTP status. A
+ * plain 401 says nothing about recoverability; `SESSION_EXPIRED` (recoverable) and
+ * `SESSION_REVOKED` (terminal) are both 401s. The one fallback that still consults
+ * the status is a response that carried NO application code at all (a malformed or
+ * legacy refusal), where there is nothing else to classify on.
+ */
 export function isSessionError(err: unknown): boolean {
-  if (err instanceof ApiError) {
-    return err.status === 401 || (err.status === 403 && err.code === 'ACCOUNT_DISABLED');
+  if (!(err instanceof ApiError)) return false;
+  if (isRecoverableAuthError(err)) return false;
+  if (isTerminalSessionError(err)) return true;
+  const code: unknown = err.code;
+  return !code && (err.status === 401 || err.status === 403);
+}
+
+/** AUTH-03 — proactive renewal fires when the horizon is inside this window. */
+const PROACTIVE_RENEWAL_THRESHOLD_MS = 10 * 60 * 1000;
+
+/** AUTH-03 — fallback in-memory backoff when a failure stated no Retry-After. */
+const RENEWAL_COOLDOWN_MS = 60 * 1000;
+
+/**
+ * AUTH-03 — the client's effective authentication horizon in ms, or `null`.
+ *
+ * It is the EARLIER of the two boundaries: the JWT's absolute expiry and the
+ * Inventory session's 14-day cap. Near the cap the session ends first even though
+ * the freshly renewed token lives ~1h longer, so treating the token alone as the
+ * horizon would let the client believe it has an hour when the session dies in a
+ * minute. The session cap is the hard boundary and renewal never moves it.
+ */
+function minHorizonMs(tokenExpiresAt: number | null, sessionExpiresAt: number | null): number | null {
+  const finite = [tokenExpiresAt, sessionExpiresAt].filter(
+    (v): v is number => typeof v === 'number' && Number.isFinite(v),
+  );
+  return finite.length ? Math.min(...finite) : null;
+}
+
+const B64_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
+/**
+ * Decodes a base64url segment to a binary string, without `atob`.
+ *
+ * React Native does not guarantee `atob`/`Buffer`, and this must work identically
+ * in the app and under jest, so the decode is done by hand. Only ASCII is needed:
+ * the caller scans the result for a numeric `exp` claim.
+ */
+function base64UrlToBinary(input: string): string {
+  const str = input.replace(/-/g, '+').replace(/_/g, '/').replace(/=+$/, '');
+  let output = '';
+  let buffer = 0;
+  let bits = 0;
+  for (const ch of str) {
+    const idx = B64_CHARS.indexOf(ch);
+    if (idx < 0) continue;
+    buffer = (buffer << 6) | idx;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      output += String.fromCharCode((buffer >> bits) & 0xff);
+    }
   }
-  return false;
+  return output;
+}
+
+/**
+ * AUTH-03 — the JWT's own absolute `exp`, in ms, or `null`.
+ *
+ * Used ONLY on boot, to give a RESTORED session a horizon: the server returns
+ * `tokenExpiresAt`, but a cold start has only the stored JWT. The value is read
+ * without verification because the token was verified by the server when it was
+ * issued and is not trusted for anything except scheduling a renewal — an attacker
+ * who could forge it could already forge the whole token. Any malformed value
+ * yields `null`, which simply disables proactive renewal for that session; recovery
+ * on a real `SESSION_EXPIRED` still works.
+ */
+function tokenExpiryMsFromJwt(token: string): number | null {
+  const parts = token.split('.');
+  if (parts.length < 2) return null;
+  try {
+    const match = /"exp"\s*:\s*(\d+)/.exec(base64UrlToBinary(parts[1]));
+    return match ? Number(match[1]) * 1000 : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -802,12 +948,45 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [status, setStatus] = useState<AuthStatus>('loading'); // loading | signedOut | signedIn
+  // AUTH-03 — the fine-grained phase (see AuthPhase). Separate from `status` so
+  // navigation keeps reading the coarse value it always has.
+  const [authPhase, setAuthPhase] = useState<AuthPhase>('idle');
+  // AUTH-03 — the client's effective horizon, as STATE (not a ref read during
+  // render). It is `min(tokenExpiresAt, sessionExpiresAt)`, recomputed whenever a
+  // session is applied.
+  const [authHorizonMs, setAuthHorizonMs] = useState<number | null>(null);
 
   // The current token, readable without re-creating callbacks; and whether the
   // server has already refused it, so sign-out knows there is nothing left to
   // revoke. Both are refs because neither should re-render anything.
   const tokenRef = useRef<string | null>(null);
+  // AUTH-03 — the current user, readable inside the renewal callback without
+  // re-creating it (a renewal keeps the same account).
+  const userRef = useRef<AuthUser | null>(null);
   const sessionLostRef = useRef(false);
+
+  // AUTH-03 — the AUTH EPOCH. It is incremented whenever the authentication state
+  // is replaced or torn down (a sign-out, or a fresh sign-in/session), and captured
+  // by any renewal/recovery before it starts. A response whose captured epoch no
+  // longer matches is DISCARDED, which is what stops a slow renewal from
+  // resurrecting a session the user has since signed out of, or from overwriting a
+  // NEWER session.
+  //
+  // This — not promise cancellation — is the stale-response protection: clearing
+  // the in-flight promise does NOT cancel the underlying network request, only
+  // stops new callers sharing it.
+  const epochRef = useRef(0);
+  // AUTH-03 — single-flight: while a renewal is running, every other caller awaits
+  // the SAME promise rather than starting a competing one.
+  const renewalPromiseRef = useRef<Promise<string | null> | null>(null);
+  // AUTH-03 — the absolute instants the server returned, used to compute the
+  // client's horizon and to decide when proactive renewal is due.
+  const tokenExpiresAtRef = useRef<number | null>(null);
+  const sessionExpiresAtRef = useRef<number | null>(null);
+  // AUTH-03 — the in-memory renewal backoff. A transient failure (or a 429 with a
+  // Retry-After) suppresses further renewal attempts until the deadline, so a
+  // Firebase/network outage cannot turn into a hammering loop.
+  const renewalCooldownUntilRef = useRef(0);
 
   /**
    * Whether the durable Firebase session has ALREADY been ended for the current
@@ -872,13 +1051,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     []
   );
 
-  const applySession = useCallback(async (nextToken: string | null, nextUser: AuthUser | null): Promise<void> => {
+  /**
+   * AUTH-03 — applies a session, optionally recording the server's absolute
+   * instants and controlling whether this is a NEW authentication epoch.
+   *
+   * `bumpEpoch` is true for a sign-in/exchange (a new authentication state must
+   * invalidate any in-flight renewal) and FALSE for a renewal (which continues the
+   * SAME session — bumping there would make a renewal discard its own result).
+   */
+  const applySession = useCallback(async (
+    nextToken: string | null,
+    nextUser: AuthUser | null,
+    options: { tokenExpiresAt?: string | null; sessionExpiresAt?: string | null; bumpEpoch?: boolean } = {},
+  ): Promise<void> => {
+    const { tokenExpiresAt = null, sessionExpiresAt = null, bumpEpoch = true } = options;
     await persistToken(nextToken);
     tokenRef.current = nextToken;
+    userRef.current = nextUser;
     if (nextToken) sessionLostRef.current = false;
     // A new session may have authenticated a Firebase user again, so the NEXT loss must
     // be able to end it (see `endFirebaseSession`).
     if (nextToken) firebaseEndedRef.current = false;
+    if (nextToken && bumpEpoch) epochRef.current += 1;
+    tokenExpiresAtRef.current = tokenExpiresAt ? Date.parse(tokenExpiresAt) : null;
+    sessionExpiresAtRef.current = sessionExpiresAt ? Date.parse(sessionExpiresAt) : null;
+    setAuthHorizonMs(minHorizonMs(tokenExpiresAtRef.current, sessionExpiresAtRef.current));
+    // A freshly applied session is healthy again.
+    setAuthPhase('idle');
     // Phase 16 - applying OR clearing a session ends any Firebase onboarding. A live
     // session means nothing is waiting any more, and clearing one (a sign-out) must not
     // leave a stale verify-email behind for the next attempt to inherit.
@@ -890,7 +1089,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const clearSession = useCallback(async (): Promise<void> => {
-    await applySession(null, null);
+    // AUTH-03 — tearing the session down advances the epoch, so any in-flight
+    // renewal's result is discarded rather than resurrecting this session.
+    epochRef.current += 1;
+    renewalPromiseRef.current = null;
+    renewalCooldownUntilRef.current = 0;
+    await applySession(null, null, { bumpEpoch: false });
   }, [applySession]);
 
   /**
@@ -981,6 +1185,127 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => setSessionLostHandler(null);
   }, [clearSession, endFirebaseSession]);
 
+  // ==========================================================================
+  // AUTH-03 — session renewal, recovery, and the authentication horizon
+  // ==========================================================================
+
+  /**
+   * Runs ONE renewal for the current session. Single-flight, epoch-guarded.
+   *
+   * The epoch is captured before the request and re-checked before the result is
+   * applied, and that check is the WHOLE stale-response protection: a sign-out or a
+   * new sign-in during the request advances the epoch, so the late result is
+   * discarded rather than resurrecting an old session or overwriting a newer one.
+   * (Clearing `renewalPromiseRef` does not cancel the request — only stops new
+   * callers sharing it — which is why the epoch, not cancellation, is relied on.)
+   *
+   * Returns the new token on success, or `null` when renewal did not complete.
+   * A TERMINAL failure (the session is genuinely over) signs out through the same
+   * path every other terminal refusal uses; a TRANSIENT or recoverable-but-failed
+   * one preserves the session and marks the phase `degraded`.
+   */
+  const performRenewal = useCallback(async (): Promise<string | null> => {
+    const currentToken = tokenRef.current;
+    if (!currentToken) return null;
+
+    // Single-flight: a second caller joins the running operation.
+    if (renewalPromiseRef.current) return renewalPromiseRef.current;
+
+    const epochAtStart = epochRef.current;
+    const run = (async (): Promise<string | null> => {
+      try {
+        const idToken = await currentFirebaseIdToken();
+        if (!idToken) return null;
+        const session = await api.renew(currentToken, { idToken });
+
+        // Stale-response guard: the request already completed, so a sign-out or a
+        // new sign-in during it must cause this result to be discarded.
+        if (epochRef.current !== epochAtStart) return null;
+
+        await applySession(session.token, session.user ?? userRef.current, {
+          tokenExpiresAt: session.tokenExpiresAt ?? null,
+          sessionExpiresAt: session.sessionExpiresAt ?? null,
+          // A renewal continues the SAME session; only a sign-in starts a new epoch.
+          bumpEpoch: false,
+        });
+        renewalCooldownUntilRef.current = 0;
+        return session.token as string;
+      } catch (err) {
+        if (isSessionError(err)) {
+          // Terminal: the session really is over. Sign out via the one path.
+          if (epochRef.current === epochAtStart && !sessionLostRef.current) {
+            sessionLostRef.current = true;
+            await clearSession();
+            await endFirebaseSession();
+          }
+          return null;
+        }
+        // Recoverable-but-failed, or transient (Firebase unavailable, a renewal
+        // rate limit, a network fault): PRESERVE the session and back off. A 429's
+        // `Retry-After` is the server's own number and takes precedence.
+        const retryAfter = err instanceof ApiError ? err.retryAfter : null;
+        renewalCooldownUntilRef.current =
+          Date.now() +
+          (typeof retryAfter === 'number' && retryAfter > 0
+            ? retryAfter * 1000
+            : RENEWAL_COOLDOWN_MS);
+        setAuthPhase('degraded');
+        return null;
+      } finally {
+        renewalPromiseRef.current = null;
+      }
+    })();
+
+    renewalPromiseRef.current = run;
+    return run;
+  }, [applySession, clearSession, endFirebaseSession]);
+
+  /**
+   * The pre-request / foreground hook: renew ONLY when the horizon is inside the
+   * 10-minute threshold and no backoff is active. Returns the current token when no
+   * renewal is due, so a caller can always use the result.
+   */
+  const renewIfDue = useCallback(
+    async (requestToken: string): Promise<string | null> => {
+      if (requestToken !== tokenRef.current) return null;
+      if (Date.now() < renewalCooldownUntilRef.current) return null;
+      const horizon = minHorizonMs(tokenExpiresAtRef.current, sessionExpiresAtRef.current);
+      if (horizon === null) return null;
+      if (horizon - Date.now() > PROACTIVE_RENEWAL_THRESHOLD_MS) return null;
+      setAuthPhase('renewing');
+      const renewed = await performRenewal();
+      return renewed ?? tokenRef.current;
+    },
+    [performRenewal],
+  );
+
+  // Register the two transport hooks. `lib/client.ts` asks BEFORE a request
+  // (proactive renewal) and AFTER a recoverable refusal (recovery + one retry).
+  useEffect(() => {
+    setSessionRenewalHandler((tok) => renewIfDue(tok));
+    setSessionRecoveryHandler(async () => {
+      setAuthPhase('renewing');
+      return performRenewal();
+    });
+    return () => {
+      setSessionRenewalHandler(null);
+      setSessionRecoveryHandler(null);
+    };
+  }, [performRenewal, renewIfDue]);
+
+  // AUTH-03 — foreground renewal. On a return to the foreground, if a session is
+  // live and renewal is due, renew it. ONE listener, removed on unmount; there is
+  // deliberately no background timer in this MVP.
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    const subscription = AppState.addEventListener('change', (next) => {
+      if (next !== 'active') return;
+      const current = tokenRef.current;
+      if (current) void renewIfDue(current);
+    });
+    return () => subscription.remove();
+  }, [renewIfDue]);
+
   /**
    * Sign in (Phase 32E). Firebase first, then the legacy password route.
    *
@@ -1056,7 +1381,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       // THE FINAL SESSION AND NOTHING ELSE. `session` is the second exchange's response on
       // the recovery path, so the temporary token minted above cannot reach this line.
-      await applySession(session.token, session.user);
+      await applySession(session.token, session.user, {
+        tokenExpiresAt: session.tokenExpiresAt ?? null,
+        sessionExpiresAt: session.sessionExpiresAt ?? null,
+      });
       return session.user;
     },
     [applySession, armRegistrationRequired, armVerificationRequired]
@@ -1143,7 +1471,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         idToken,
         deviceLabel: currentDeviceLabel(),
       });
-      await applySession(session.token, session.user);
+      await applySession(session.token, session.user, {
+        tokenExpiresAt: session.tokenExpiresAt ?? null,
+        sessionExpiresAt: session.sessionExpiresAt ?? null,
+      });
       firebaseAccountRegisteredRef.current = false;
       return session.user;
     },
@@ -1198,7 +1529,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw err;
     }
 
-    await applySession(session.token, session.user);
+    await applySession(session.token, session.user, {
+        tokenExpiresAt: session.tokenExpiresAt ?? null,
+        sessionExpiresAt: session.sessionExpiresAt ?? null,
+      });
     return session.user;
   }, [applySession, armRegistrationRequired, armVerificationRequired]);
 
@@ -1358,7 +1692,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         idToken,
         deviceLabel: currentDeviceLabel(),
       });
-      await applySession(session.token, session.user);
+      await applySession(session.token, session.user, {
+        tokenExpiresAt: session.tokenExpiresAt ?? null,
+        sessionExpiresAt: session.sessionExpiresAt ?? null,
+      });
       return { kind: 'changed' };
     },
     [applySession]
@@ -1439,11 +1776,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       if (isSessionError(err)) {
         await clearSession();
-      } else {
-        // Server unreachable / transient — do not drop a still-valid token.
-        setUser(null);
-        setStatus('signedOut');
+        return null;
       }
+      // AUTH-03 — a NON-TERMINAL failure must never destroy a still-valid session.
+      // The token and user are kept; the phase records that the refresh could not
+      // complete (DEGRADED), so the UI can reflect it without signing anyone out.
+      // This replaces the old "any non-session error means signed out" behavior,
+      // which destroyed a valid session on a transient network fault.
+      setAuthPhase('degraded');
       return null;
     }
   }, [token, clearSession]);
@@ -1475,8 +1815,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // Restored without going through applySession (the token is already
           // persisted), so the refs signOut reads must be set here too.
           tokenRef.current = stored;
+          userRef.current = fresh;
           sessionLostRef.current = false;
           firebaseEndedRef.current = false;
+          // AUTH-03 — give the restored session a horizon from the token's own
+          // `exp`, so proactive renewal works after a cold start. The session cap
+          // is unknown until the next renewal; the token `exp` alone is a safe
+          // lower bound (renewing early never hurts).
+          tokenExpiresAtRef.current = tokenExpiryMsFromJwt(stored);
+          setAuthHorizonMs(tokenExpiresAtRef.current);
           setToken(stored);
           setUser(fresh);
           setStatus('signedIn');
@@ -1552,7 +1899,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         firebaseAccountRegisteredRef.current = true;
       }
       const session: ApiResponse = await api.firebaseExchange({ idToken, deviceLabel });
-      await applySession(session.token, session.user);
+      await applySession(session.token, session.user, {
+        tokenExpiresAt: session.tokenExpiresAt ?? null,
+        sessionExpiresAt: session.sessionExpiresAt ?? null,
+      });
       firebaseAccountRegisteredRef.current = false;
       return session.user;
     } catch (err) {
@@ -1591,11 +1941,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       connectFirebase,
       refresh,
       clearSession,
+      authPhase,
+      authHorizonMs,
     }),
     [
       user,
       token,
       status,
+      authPhase,
+      authHorizonMs,
       signIn,
       signUp,
       completeFirebaseRegistration,

@@ -489,13 +489,23 @@ dbSuite('Phase 32C — Firebase exchange and registration over HTTP and a real d
     const res = await exchange({ idToken: ID_TOKEN, deviceLabel: 'Pixel 7' });
 
     assert.equal(res.status, 200);
+    // AUTH-03 added two ABSOLUTE instants to the envelope (login/exchange/renew).
+    // `expiresIn` is retained, so this is purely additive.
     assert.deepEqual(
       Object.keys(res.json).sort(),
-      ['expiresIn', 'token', 'tokenType', 'user'],
+      ['expiresIn', 'sessionExpiresAt', 'token', 'tokenExpiresAt', 'tokenType', 'user'],
       'the login envelope, exactly'
     );
     assert.equal(res.json.tokenType, 'Bearer');
     assert.equal(res.json.expiresIn, env.jwtExpiresIn);
+    // `tokenExpiresAt` is the exact exp of the token just signed; `sessionExpiresAt`
+    // is the session's 14-day cap (the authoritative one, unmoved by the exchange).
+    const claims = decodeAccessToken(res.json.token);
+    assert.equal(res.json.tokenExpiresAt, new Date(claims.exp * 1000).toISOString());
+    assert.equal(
+      new Date(res.json.sessionExpiresAt).toISOString(),
+      (await Session.findOne({ jti: claims.jti })).expiresAt.toISOString()
+    );
     assert.equal(res.json.user.id, String(user._id));
     assert.equal(res.json.user.businessId, String(business._id));
     assert.equal(res.json.user.role, 'OWNER');

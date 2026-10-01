@@ -56,6 +56,8 @@ export type AuthRateConfig = {
   firebaseExchangeMax: number;
   firebaseRegisterWindowMs: number;
   firebaseRegisterMax: number;
+  renewWindowMs: number;
+  renewMax: number;
 };
 
 function positiveInt(raw: string | undefined, fallback: number): number {
@@ -123,6 +125,18 @@ export function authRateConfig(overrides: Partial<AuthRateConfig> = {}): AuthRat
       60 * 60 * 1000
     ),
     firebaseRegisterMax: positiveInt(process.env.AUTH_FIREBASE_REGISTER_RATE_LIMIT_MAX, 30),
+    // AUTH-03 — session renewal (per IP, 120 / 15 min by default). The window
+    // matches login's and the cap is DELIBERATELY GENEROUS (120 vs login's 60):
+    // renewal is a routine, proactive operation a legitimate client performs about
+    // once per JWT lifetime, and several devices behind one office NAT share the
+    // single per-IP bucket, so a tight cap would throttle honest users. It is
+    // still bounded well below what makes an endpoint that costs a Firebase
+    // `checkRevoked` verification worth abusing.
+    renewWindowMs: positiveInt(
+      process.env.AUTH_SESSION_RENEW_RATE_LIMIT_WINDOW_MS,
+      15 * 60 * 1000
+    ),
+    renewMax: positiveInt(process.env.AUTH_SESSION_RENEW_RATE_LIMIT_MAX, 120),
     ...overrides,
   };
 }
@@ -383,6 +397,40 @@ export function createFirebaseRegisterLimiter(overrides: Partial<AuthRateConfig>
   });
 }
 
+// AUTH-03 — session renewal. A STABLE, route-specific code rather than a shared
+// FIREBASE_* one: unlike those, this rate limit is not about a credential being
+// guessed, it is the server declining to spend more Firebase verification work on
+// this address for now, and the client must treat it as TRANSIENT (preserve the
+// still-valid session, honor Retry-After, back off) rather than as session loss.
+// The `Retry-After` header is emitted by `limitResponse`'s draft-7 standard
+// headers, exactly as for every other auth limiter.
+const SESSION_RENEW_RATE_LIMITED = 'SESSION_RENEW_RATE_LIMITED';
+const SESSION_RENEW_RATE_LIMITED_MESSAGE =
+  'Too many renewal attempts. Please wait a moment and try again.';
+
+/**
+ * Renewal limiter — per IP, counting every attempt.
+ *
+ * `skipSuccessfulRequests` is OMITTED, as on every other count-every-attempt
+ * limiter here: a renewal is cheap to count and a burst of successful ones is
+ * precisely the load this guards (each accepted request costs a Firebase
+ * `checkRevoked` verification). Keyed on `request.ip` with the same explicit
+ * `ipKeyGenerator` rationale as the other per-IP limiters — never the library
+ * default, which would turn a spoofed X-Forwarded-For into a 500 until the
+ * operator sets TRUST_PROXY.
+ */
+export function createSessionRenewLimiter(overrides: Partial<AuthRateConfig> = {}) {
+  const { renewWindowMs, renewMax } = authRateConfig(overrides);
+  return rateLimit({
+    windowMs: renewWindowMs,
+    limit: renewMax,
+    keyGenerator(request) {
+      return ipKeyGenerator(clientIp(request));
+    },
+    ...limitResponse(SESSION_RENEW_RATE_LIMITED, SESSION_RENEW_RATE_LIMITED_MESSAGE),
+  });
+}
+
 export default {
   authRateConfig,
   createLoginAccountLimiter,
@@ -393,4 +441,5 @@ export default {
   createPasswordResetConfirmLimiter,
   createFirebaseExchangeLimiter,
   createFirebaseRegisterLimiter,
+  createSessionRenewLimiter,
 };

@@ -34,13 +34,16 @@
  *     existing password account is REFUSED, never merged — automatic linking
  *     without proof of ownership is an account-takeover vector, and the policy is
  *     an open owner decision (Phase 32A §14.4). See registerBusinessFromFirebase.
- *   * It ENFORCES `emailVerified` AT REGISTRATION ONLY (Phase 16). The claim is
- *     read from the SIGNED token payload and never from the provider name
- *     (L-7/RG-11), and an unverified identity cannot create a tenant (RG-1/RG-3).
- *     `exchangeFirebaseSession` deliberately does NOT enforce it: every account
- *     created before Phase 16 carries `emailVerified: false`, so a gate on the
- *     exchange would lock out existing ACTIVE users (Phase 32A §14.2 / RG-14). The
- *     claim is still persisted on creation.
+ *   * It ENFORCES `emailVerified` ON EVERY FIREBASE-BACKED SESSION BOUNDARY.
+ *     The claim is read from the SIGNED token payload and never from the provider
+ *     name (L-7/RG-11), and an unverified identity cannot create a tenant (RG-1/
+ *     RG-3) and cannot obtain an application session (AUTH-03). The gate applies
+ *     at REGISTRATION (below), at the EXCHANGE (`exchangeFirebaseSession`), and at
+ *     RENEWAL (`sessionRenew.service.ts`) — the three places an Inventory AI
+ *     session is minted or extended. It does NOT apply to `requireAuth`, so an
+ *     already-live session is never retroactively terminated by a claim that has
+ *     since gone false (AUTH-03 decision 13). The claim is still persisted on
+ *     creation.
  *   * It does not create a session for registration, and it does not create a
  *     second session mechanism anywhere: the exchange calls the SAME
  *     `newSessionId` / `signAccessToken` / `createSessionForToken` triple that
@@ -57,6 +60,7 @@ import { error as logError } from '../utils/logger.ts';
 import { assertActiveBusiness } from './business.service.ts';
 import { createSessionForToken, newSessionId } from './session.service.ts';
 import { verifyFirebaseIdToken } from './firebase/index.ts';
+import { EMAIL_NOT_VERIFIED } from '../constants/firebase.ts';
 
 const OWNER_ROLE = 'OWNER';
 const ACTIVE_STATUS = 'ACTIVE';
@@ -93,6 +97,13 @@ const ACCOUNT_DISABLED_MESSAGE = 'This account is disabled. Contact an administr
 // Copied verbatim from auth.service.ts's registration path, for the same reason:
 // a duplicate email is one fact, and it reads the same on both registration routes.
 const EMAIL_IN_USE_MESSAGE = 'An account with this email already exists';
+
+// AUTH-03 — the exchange's verification refusal. Shared in spirit with
+// `sessionRenew.service.ts`'s copy (the same fact, the same next step); the
+// client branches on the CODE, so the wording is for a human and names no
+// provider, claim or environment.
+const EMAIL_NOT_VERIFIED_MESSAGE =
+  'Please verify your email address before continuing.';
 
 /**
  * The service payloads. Both `deviceLabel` and `name` stay `unknown` because they
@@ -186,6 +197,19 @@ export async function exchangeFirebaseSession({ idToken, deviceLabel }: Exchange
   // must exist and be ACTIVE. Runs after the status check so the response never
   // reveals whether an identity merely belongs to an inactive business.
   await assertActiveBusiness(user.businessId);
+
+  // AUTH-03 — the verification gate. Email verification is required before an
+  // Inventory AI session is created (target architecture §6 / invariant 8), so an
+  // unverified identity cannot obtain one here. The refusal is 400
+  // EMAIL_NOT_VERIFIED, deliberately NOT a 403 like the two checks above: the
+  // client's session-loss rule acts on 401/403, and this path is reached by a
+  // caller who legitimately authenticated — email verification is a missing
+  // prerequisite, not a dead credential. It is placed AFTER the status and tenant
+  // checks so those keep their existing, more-specific answers, and immediately
+  // BEFORE the session is minted, so no session is ever created for it.
+  if (identity.emailVerified !== true) {
+    throw new ApiError(400, EMAIL_NOT_VERIFIED_MESSAGE, EMAIL_NOT_VERIFIED);
+  }
 
   const jti = newSessionId();
   const token = signAccessToken(user._id, jti);

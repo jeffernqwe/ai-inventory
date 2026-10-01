@@ -76,8 +76,10 @@ import { toPublicUser } from '../services/auth.service.ts';
 import {
   FirebaseNotConfigured,
   FirebaseTokenError,
+  FirebaseUnavailableError,
   FIREBASE_NOT_CONFIGURED,
   FIREBASE_TOKEN_INVALID,
+  FIREBASE_UNAVAILABLE,
 } from '../services/firebase/index.ts';
 import { throwValidation } from '../utils/errors.ts';
 import { error as logError } from '../utils/logger.ts';
@@ -138,6 +140,16 @@ const FIREBASE_NOT_CONFIGURED_MESSAGE =
   'Sign-in is temporarily unavailable. Please try again later.';
 
 /**
+ * The TRANSIENT case (Phase AUTH-01): Firebase/Google could not be reached to
+ * verify the credential. A 503, and deliberately not a 401 — nothing about the
+ * caller's credential was judged, so answering "your sign-in is invalid" would
+ * both lie and, on an authenticated route, risk the client treating it as session
+ * loss. The copy tells the caller to retry, which is the truthful action.
+ */
+const FIREBASE_UNAVAILABLE_MESSAGE =
+  'We could not verify your sign-in right now. Please try again in a moment.';
+
+/**
  * The link route's copy for the same underlying fact as
  * `FIREBASE_TOKEN_INVALID_MESSAGE`, and it differs by exactly the clause that
  * would otherwise be a lie. "Please sign in again" is correct advice to someone
@@ -161,7 +173,8 @@ const FIREBASE_LINK_TOKEN_INVALID_MESSAGE =
  * The domain-error boundary, in one place. `ApiError`s raised by the service
  * (REGISTRATION_REQUIRED, ACCOUNT_DISABLED, BUSINESS_NOT_ACTIVE, EMAIL_IN_USE,
  * VALIDATION_ERROR) are returned UNCHANGED and propagate exactly as the password
- * login path's do — this function only translates the two Phase 32B classes.
+ * login path's do — this function only translates the three Firebase domain classes
+ * (`FirebaseNotConfigured`, `FirebaseTokenError`, `FirebaseUnavailableError`).
  *
  * Anything unrecognised is returned unchanged as well, so a genuine programming
  * fault still reaches the global handler and becomes a generic 500 whose message
@@ -178,6 +191,17 @@ function mapFirebaseFailure(err: unknown) {
       message: '[firebase] an ID token could not be verified because no service account is configured',
     });
     return new ApiError(503, FIREBASE_NOT_CONFIGURED_MESSAGE, FIREBASE_NOT_CONFIGURED);
+  }
+
+  if (err instanceof FirebaseUnavailableError) {
+    // The reason is safe to log for exactly the reason the token branch's is: it is
+    // a short allowlisted SDK code, never the token. No identity is recorded.
+    logError({
+      type: 'firebase_unavailable',
+      reason: err.reason,
+      message: `[firebase] ID token verification could not be completed (${err.reason})`,
+    });
+    return new ApiError(503, FIREBASE_UNAVAILABLE_MESSAGE, FIREBASE_UNAVAILABLE);
   }
 
   if (err instanceof FirebaseTokenError) {

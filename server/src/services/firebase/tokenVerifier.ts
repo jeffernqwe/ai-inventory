@@ -23,21 +23,40 @@
  *     (services/mail/providers/index.ts): the real implementation is the default,
  *     and a test substitutes through the same entry point production uses.
  *
- * `checkRevoked` is FALSE, matching the approved Phase 32A design. The consequence
- * is deliberate and recorded there: a Firebase account disabled or deleted on
- * Google's side still verifies, so Firebase-side revocation is not enforced at
- * exchange time. That is consistent with Option B, where the authority for
- * whether a principal may act is the MongoDB user record — `status`, `businessId`
- * and the business lifecycle are all checked from the database, per request, by
- * requireAuth and the exchange that issues the session. Passing true here would
- * add a network call to Google on every sign-in and would NOT replace those
- * checks. Revisiting this is a Phase 32C decision, not a Phase 32B one.
+ * `checkRevoked` is TRUE (Phase AUTH-01, approved target architecture §9/§10).
+ * Revocation checking is a security boundary: a stale or revoked Firebase
+ * credential must not be able to create a new Inventory AI session. The cost is a
+ * Firebase user-record lookup per verification, which is exactly why a failure to
+ * complete it is classified as TRANSIENT rather than as a rejected credential —
+ * see the classification note below.
+ *
+ * THREE CLASSES OF OUTCOME, THREE DISTINCT ERRORS (AUTH-01). A verification
+ * attempt can end in (a) a genuinely bad credential (`FirebaseTokenError`),
+ * (b) a temporary inability to verify (`FirebaseUnavailableError`), or (c) the
+ * server's own Firebase configuration being unusable (`FirebaseNotConfigured`).
+ * The classes are derived from the installed `firebase-admin` 14.5.0 sources; see
+ * `firebaseErrors.ts` for the code lists and why `auth/argument-error` is NOT
+ * terminal (it is also emitted for a JWKS fetch failure).
+ *
+ * The real path also performs two defence-in-depth checks that the SDK already
+ * performs internally, so they are belt-and-braces rather than the boundary:
+ * a STRUCTURAL pre-check (a value that is not three dot-separated segments is not
+ * a JWT at all) and an ENVIRONMENT assertion (the verified token's `aud`/`iss` must
+ * name this project). Both live on the real Admin SDK path only; the test seam
+ * substitutes a decoded payload, for which a token-shape check is meaningless.
  */
 
 import { getAuth } from 'firebase-admin/auth';
 
+import { firebaseConfig } from '../../config/firebase.ts';
 import { getFirebaseAdminApp } from './adminApp.ts';
-import { FirebaseTokenError, safeTokenReason } from './firebaseErrors.ts';
+import {
+  FirebaseNotConfigured,
+  FirebaseTokenError,
+  FirebaseUnavailableError,
+  classifyFirebaseErrorCode,
+  safeTokenReason,
+} from './firebaseErrors.ts';
 
 /**
  * The verified identity, and nothing else.
@@ -166,15 +185,92 @@ function toVerifiedIdentity(decoded: unknown): VerifiedFirebaseIdentity {
  * that was handed the token, and relaying it is the one way a token could reach a
  * log line. The code is a fixed string, never an echo of the input.
  */
+/**
+ * True when `value` has the surface shape of a JWT: exactly three non-empty
+ * dot-separated segments.
+ *
+ * This is a STRUCTURAL guard only, never a validation: it can say a value cannot
+ * be a JWT, never that it is a valid one. Firebase remains the authority for
+ * actual validation. It exists because `firebase-admin` 14.5.0 answers a malformed
+ * value with the same overloaded `auth/argument-error` it also uses for a JWKS
+ * fetch failure, so a token we can reject structurally must be rejected HERE, as
+ * terminal, rather than reaching that ambiguity.
+ */
+export function isStructurallyJwtShaped(value: unknown): boolean {
+  if (typeof value !== 'string') return false;
+  const parts = value.trim().split('.');
+  return parts.length === 3 && parts.every((part) => part.length > 0);
+}
+
+/**
+ * Asserts the verified payload belongs to the configured Firebase project.
+ *
+ * `verifyIdToken` already enforces `aud`/`iss` against the app's project id, so
+ * this is defence-in-depth: it makes the requirement explicit and testable as a
+ * unit rather than an SDK implementation detail. A mismatch is TERMINAL — the
+ * credential is for a different project, which is never a transient condition.
+ */
+export function assertFirebaseTokenEnvironment(decoded: unknown, projectId: string): void {
+  const token = (decoded ?? {}) as Record<string, unknown>;
+  const expectedIssuer = `https://securetoken.google.com/${projectId}`;
+  if (!projectId || token.aud !== projectId || token.iss !== expectedIssuer) {
+    throw new FirebaseTokenError('token-environment-mismatch');
+  }
+}
+
+/**
+ * Turns an SDK verification failure into the correct one of our three errors.
+ *
+ * The class is decided by `classifyFirebaseErrorCode` (firebaseErrors.ts), which
+ * defaults to `unavailable` for anything it does not recognise. `safeTokenReason`
+ * is how the raw code becomes a safe label.
+ */
+function verificationErrorFrom(err: unknown): Error {
+  const code = (err as { code?: unknown } | null)?.code;
+  const reason = safeTokenReason(code);
+  const klass = classifyFirebaseErrorCode(code);
+
+  if (klass === 'terminal') return new FirebaseTokenError(reason);
+  if (klass === 'not-configured') {
+    return new FirebaseNotConfigured(
+      'Firebase authentication is not usable on this server (auth/invalid-credential).'
+    );
+  }
+  return new FirebaseUnavailableError(reason);
+}
+
+/**
+ * The real implementation: Firebase Admin's verifier, with revocation checking
+ * enabled, returning the decoded token for `toVerifiedIdentity` to narrow.
+ *
+ * Only the upstream CODE is read, and only through the allowlist in
+ * firebaseErrors. The upstream message is discarded: it is produced by a library
+ * that was handed the token, and relaying it is the one way a token could reach a
+ * log line. The code is a fixed string, never an echo of the input.
+ */
 async function verifyWithAdminSdk(idToken: string): Promise<unknown> {
+  // STRUCTURAL GUARD FIRST — before the SDK is even initialized, so a value that
+  // cannot be a JWT is rejected without spending a credential build, and without
+  // reaching the overloaded `auth/argument-error` the SDK would answer with.
+  if (!isStructurallyJwtShaped(idToken)) {
+    throw new FirebaseTokenError('malformed-token');
+  }
+
   const auth = getAuth(getFirebaseAdminApp());
 
+  let decoded: unknown;
   try {
-    return await auth.verifyIdToken(idToken, /* checkRevoked */ false);
+    // ★ checkRevoked TRUE (Phase AUTH-01).
+    decoded = await auth.verifyIdToken(idToken, /* checkRevoked */ true);
   } catch (err) {
-    const code = (err as { code?: unknown } | null)?.code;
-    throw new FirebaseTokenError(safeTokenReason(code));
+    throw verificationErrorFrom(err);
   }
+
+  // OUTSIDE the try: the assertion throws its own terminal `FirebaseTokenError`,
+  // and inside the catch it would be re-classified by its `code` (which is
+  // `FIREBASE_TOKEN_INVALID`, not an SDK code) into the wrong class.
+  assertFirebaseTokenEnvironment(decoded, firebaseConfig().projectId);
+  return decoded;
 }
 
 /**
@@ -199,4 +295,6 @@ export default {
   setFirebaseIdTokenVerifier,
   resetFirebaseIdTokenVerifier,
   hasCustomFirebaseIdTokenVerifier,
+  isStructurallyJwtShaped,
+  assertFirebaseTokenEnvironment,
 };

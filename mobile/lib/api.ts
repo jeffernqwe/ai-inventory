@@ -344,8 +344,12 @@ export function credentialsChanged(
  * and none is read. The response restates login's shape plus the two absolute
  * instants, whose MINIMUM is the client's true authentication horizon.
  *
- * NOT `temporarySession`: this request carries the app's own session, so its
- * refusals must reach the normal classification. The server answers a rejected
+ * `temporarySession: true` — see the note on the call itself. It is NOT the N-4
+ * "not the app's own session" case (this request DOES carry the app's own token); the
+ * flag is set because the renewal must not run the transport's own renewal/recovery
+ * hooks, and because `performRenewal` already applies this response's classification.
+ * The refusals below are therefore handled by the caller, not by the generic path.
+ * The server answers a rejected
  * Firebase credential as 400 (a bad request field), a uid mismatch as 409
  * `FIREBASE_IDENTITY_CONFLICT`, an unverified identity as 400 `EMAIL_NOT_VERIFIED`,
  * a spent/revoked session as 401 `SESSION_REVOKED`, and a throttled caller as 429
@@ -356,6 +360,22 @@ export function renew(token: string, { idToken }: FirebaseLinkPayload): Promise<
   return apiFetch('/api/auth/renew', {
     token,
     method: 'POST',
+    // AUTH-03 FIX — `temporarySession: true`, FOR THE OPPOSITE REASON TO THE N-4
+    // OPT-OUT ABOVE. The renewal request is ISSUED BY `performRenewal`, which is
+    // itself the implementation of the transport's proactive/recovery hooks. Those
+    // hooks are `await`ed before EVERY request that carries a token, so without this
+    // flag the renewal would re-enter them, `renewIfDue` would resolve to the SAME
+    // in-flight promise `performRenewal` is already awaiting, and the two would wait
+    // on each other forever — a self-deadlock that settled nothing, threw nothing and
+    // never cleared `renewalPromiseRef`, wedging every later request too.
+    //
+    // Suppressing the hooks here is correct on its own terms as well, not just to
+    // break the cycle: `performRenewal` already classifies this response itself
+    // (terminal codes end the session through `clearSession`; a 429 or a transient
+    // failure preserves it and backs off). Letting the generic path ALSO act on it
+    // would apply that decision twice, and its session-loss report would clear the
+    // very session the recovery branch exists to preserve.
+    temporarySession: true,
     body: { idToken },
   });
 }

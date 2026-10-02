@@ -11,7 +11,9 @@
  *   * a failed recovery does NOT report session loss;
  *   * a terminal refusal DOES report session loss and never attempts recovery;
  *   * a 429 carries `retryAfter` and is never session loss;
- *   * proactive renewal runs before the request and its token is used.
+ *   * proactive renewal runs before the request and its token is used;
+ *   * the renewal REQUEST itself bypasses those hooks, so the single-flight promise
+ *     cannot end up waiting on itself.
  */
 
 import {
@@ -22,6 +24,7 @@ import {
   setSessionRecoveryHandler,
   setSessionRenewalHandler,
 } from '../lib/client';
+import { renew } from '../lib/api';
 
 type FakeResponse = {
   status: number;
@@ -186,5 +189,55 @@ describe('AUTH-03 — proactive renewal before a request', () => {
     await apiFetch('/api/private', { token: 'temp', temporarySession: true });
 
     expect(renewal).not.toHaveBeenCalled();
+  });
+});
+
+describe('AUTH-03 — the renewal request never re-enters the renewal hooks', () => {
+  // THE COMPOSITION THAT WAS MISSING. Every other case here drives `apiFetch` with
+  // the hooks registered by hand, and the provider suite mocks `lib/api` — so neither
+  // one sends `api.renew` back through the transport, which is the only place the
+  // cycle can form. `api.renew` is the call `performRenewal` makes while it holds the
+  // single-flight promise, so if the proactive hook runs for it, the promise resolves
+  // to itself and nothing ever settles.
+
+  it('does not invoke the proactive renewal hook for `api.renew`', async () => {
+    const renewal = jest.fn(async () => 'fresh-token');
+    setSessionRenewalHandler(renewal);
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { token: 'rotated' }));
+
+    await expect(renew('app-token', { idToken: 'firebase-id-token' })).resolves.toEqual({
+      token: 'rotated',
+    });
+
+    expect(renewal).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(authHeaderOf(0)).toBe('Bearer app-token');
+  });
+
+  it('still completes when the renewal hook would never settle (the deadlock)', async () => {
+    // Before the fix this case hangs: `api.renew` would await the hook, the hook would
+    // return the in-flight `performRenewal` promise, and that promise is awaiting THIS
+    // request. The assertion below is therefore the regression guard — it can only
+    // pass if the renewal request bypasses the hook entirely.
+    setSessionRenewalHandler(() => new Promise<string | null>(() => {}));
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { token: 'rotated' }));
+
+    await expect(renew('app-token', { idToken: 'firebase-id-token' })).resolves.toEqual({
+      token: 'rotated',
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not report a refused renewal as session loss', async () => {
+    // `performRenewal` owns the terminal/transient decision for this response; the
+    // generic report would clear the session the transient branch exists to keep.
+    const lost = jest.fn();
+    setSessionLostHandler(lost);
+    fetchMock.mockResolvedValueOnce(jsonResponse(401, { code: 'SESSION_REVOKED' }));
+
+    await expect(renew('app-token', { idToken: 'firebase-id-token' })).rejects.toBeInstanceOf(
+      ApiError,
+    );
+    expect(lost).not.toHaveBeenCalled();
   });
 });

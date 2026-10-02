@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { register, login, me, changePassword, updateMe, logout, listSessions, revokeSession } from '../controllers/auth.controller.ts';
 import { forgotPassword, resetPassword as resetPasswordHandler } from '../controllers/passwordReset.controller.ts';
 import { firebaseExchange, firebaseRegister, firebaseLink, credentialsChanged, renew } from '../controllers/firebaseAuth.controller.ts';
+import { emailVerificationRequest, emailVerificationConfirm } from '../controllers/emailVerification.controller.ts';
 import requireAuth from '../middlewares/authenticate.ts';
 import {
   createLoginAccountLimiter,
@@ -14,6 +15,8 @@ import {
   createFirebaseExchangeLimiter,
   createFirebaseRegisterLimiter,
   createSessionRenewLimiter,
+  createEmailVerificationRequestLimiter,
+  createEmailVerificationConfirmLimiter,
   resetLoginAccountBucketOnSuccess,
 } from '../middlewares/rateLimit.ts';
 import type { AuthRateConfig } from '../middlewares/rateLimit.ts';
@@ -91,6 +94,37 @@ export function createAuthRouter({ limits }: AuthRouterOptions = {}) {
   // limiter sets skipSuccessfulRequests — see middlewares/rateLimit.ts.
   router.post('/firebase/exchange', createFirebaseExchangeLimiter(limits), firebaseExchange);
   router.post('/firebase/register', createFirebaseRegisterLimiter(limits), firebaseRegister);
+
+  // AUTH-04-C/D — the email-verification code flow (design §14C.10). PRE-SESSION and
+  // Firebase-AUTHENTICATED, which is why they carry no `requireAuth`: the caller holds
+  // a Firebase ID token and no Inventory AI session at all, because a session is only
+  // minted by the exchange above, and the whole point of this flow is that the identity
+  // is verified but has no tenant yet. Naming a permission is equally impossible — the
+  // caller has no role here, and the uid is read from the VERIFIED token inside the
+  // service, never from the body.
+  //
+  // Middleware order is limiter → controller, with the limiter FIRST so the budget is
+  // spent before any Firebase signature verification, database work or outbound email.
+  // Both are per-IP and neither sets skipSuccessfulRequests — see
+  // middlewares/rateLimit.ts for why, and for why no identity-keyed bucket is possible
+  // on this surface (the identity is unknown until after verification).
+  //
+  // The ID token travels in the POST body, never a URL, so — like every other Firebase
+  // route — it cannot reach the access log (httpLogger records req.path only) or a
+  // Referer header.
+  //
+  // NEITHER ROUTE CREATES A SESSION. Confirmation sets Firebase's `emailVerified` and
+  // nothing else; the Inventory AI session is still created only by the exchange above.
+  router.post(
+    '/email-verification/request',
+    createEmailVerificationRequestLimiter(limits),
+    emailVerificationRequest
+  );
+  router.post(
+    '/email-verification/confirm',
+    createEmailVerificationConfirmLimiter(limits),
+    emailVerificationConfirm
+  );
 
   // Protected
   router.get('/me', requireAuth, me);

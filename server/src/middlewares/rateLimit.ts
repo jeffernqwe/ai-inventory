@@ -32,6 +32,7 @@
 import type { NextFunction, Request, Response } from 'express';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 
+import { EMAIL_VERIFICATION_RATE_LIMITED } from '../constants/emailVerification.ts';
 import { normalizeEmail } from '../utils/validate.ts';
 
 /**
@@ -58,6 +59,10 @@ export type AuthRateConfig = {
   firebaseRegisterMax: number;
   renewWindowMs: number;
   renewMax: number;
+  emailVerificationRequestWindowMs: number;
+  emailVerificationRequestMax: number;
+  emailVerificationConfirmWindowMs: number;
+  emailVerificationConfirmMax: number;
 };
 
 function positiveInt(raw: string | undefined, fallback: number): number {
@@ -137,6 +142,37 @@ export function authRateConfig(overrides: Partial<AuthRateConfig> = {}): AuthRat
       15 * 60 * 1000
     ),
     renewMax: positiveInt(process.env.AUTH_SESSION_RENEW_RATE_LIMIT_MAX, 120),
+    // AUTH-04 — the email-verification code flow (design §14C.10, AD-19). Both routes
+    // are pre-session and Firebase-authenticated, and both are limited PER IP ONLY.
+    // No stable pre-verification identity exists to key on — the identity is only
+    // known AFTER verification, and the one key a caller supplies before that is the
+    // Firebase ID token, which rotates — so an identity-keyed bucket is impossible
+    // here rather than merely omitted. The single-identity control is the 60-second
+    // per-UID resend cooldown enforced in the B3 service's write predicate: a
+    // different control with a different budget, deliberately NOT duplicated as a
+    // limiter (and, on the confirm route, absent altogether).
+    //
+    // `skipSuccessfulRequests` is OMITTED on both, like every non-login limiter: a
+    // successful request is a 2xx, so skipping successes would exempt precisely the
+    // traffic these exist to bound. Each accepted request costs a Firebase signature
+    // verification, and the request route additionally costs a database write plus one
+    // outbound email — which is why the cap is not merely about CPU.
+    emailVerificationRequestWindowMs: positiveInt(
+      process.env.AUTH_EMAIL_VERIFICATION_REQUEST_RATE_LIMIT_WINDOW_MS,
+      15 * 60 * 1000
+    ),
+    emailVerificationRequestMax: positiveInt(
+      process.env.AUTH_EMAIL_VERIFICATION_REQUEST_RATE_LIMIT_MAX,
+      30
+    ),
+    emailVerificationConfirmWindowMs: positiveInt(
+      process.env.AUTH_EMAIL_VERIFICATION_CONFIRM_RATE_LIMIT_WINDOW_MS,
+      15 * 60 * 1000
+    ),
+    emailVerificationConfirmMax: positiveInt(
+      process.env.AUTH_EMAIL_VERIFICATION_CONFIRM_RATE_LIMIT_MAX,
+      30
+    ),
     ...overrides,
   };
 }
@@ -476,6 +512,77 @@ export function createSessionRenewLimiter(overrides: Partial<AuthRateConfig> = {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Email verification (AUTH-04, AD-19)
+// ---------------------------------------------------------------------------
+//
+// Two factories, one per endpoint, because the two endpoints spend different things
+// and must have independent budgets: `request` mints a challenge, writes it and sends
+// an email; `confirm` reserves an attempt, compares a digest and may perform an Admin
+// write. Sharing one bucket would let a burst of confirmations exhaust the budget that
+// bounds outbound mail — the resource abuse of this surface actually costs.
+//
+// SHARED CODE: both answer `EMAIL_VERIFICATION_RATE_LIMITED`, the way
+// `LOGIN_RATE_LIMITED` already spans the two login limiters and
+// `PASSWORD_RESET_RATE_LIMITED` spans the three recovery ones. A client needs to know
+// "you are being throttled on verification", not which bucket caught it.
+//
+// THE CODE IS IMPORTED, NOT RE-DECLARED. The other limiter codes in this file are local
+// string constants, but `EMAIL_VERIFICATION_RATE_LIMITED` already exists in
+// `constants/emailVerification.ts` (declared there in AUTH-04-A, before these endpoints
+// existed). Typing it a second time here would create a second source of truth for a
+// client-facing code, which is exactly the drift the Phase 23 client error-code contract
+// exists to catch.
+
+/**
+ * Request limiter — per IP.
+ *
+ * Bounds how often ONE ADDRESS can make this server mint challenges, write rows and
+ * send mail. Same explicit `request.ip` keying rationale as `createLoginIpLimiter`:
+ * never the library default, which turns a spoofed X-Forwarded-For into a 500 until the
+ * operator sets TRUST_PROXY.
+ */
+export function createEmailVerificationRequestLimiter(overrides: Partial<AuthRateConfig> = {}) {
+  const { emailVerificationRequestWindowMs, emailVerificationRequestMax } =
+    authRateConfig(overrides);
+  return rateLimit({
+    windowMs: emailVerificationRequestWindowMs,
+    limit: emailVerificationRequestMax,
+    keyGenerator(request) {
+      return ipKeyGenerator(clientIp(request));
+    },
+    ...limitResponse(
+      EMAIL_VERIFICATION_RATE_LIMITED,
+      'Too many verification requests. Please wait a moment and try again.'
+    ),
+  });
+}
+
+/**
+ * Confirmation limiter — per IP.
+ *
+ * Bounds code guessing from one address. Each accepted attempt costs a conditional
+ * reservation, an HMAC comparison and possibly a Firebase Admin write, and the code
+ * space is only 10^6 — so this is the backstop that keeps an unauthenticated caller
+ * from spending that budget at machine speed. Keyed on `request.ip` with the same
+ * explicit `ipKeyGenerator` rationale as the other per-IP limiters.
+ */
+export function createEmailVerificationConfirmLimiter(overrides: Partial<AuthRateConfig> = {}) {
+  const { emailVerificationConfirmWindowMs, emailVerificationConfirmMax } =
+    authRateConfig(overrides);
+  return rateLimit({
+    windowMs: emailVerificationConfirmWindowMs,
+    limit: emailVerificationConfirmMax,
+    keyGenerator(request) {
+      return ipKeyGenerator(clientIp(request));
+    },
+    ...limitResponse(
+      EMAIL_VERIFICATION_RATE_LIMITED,
+      'Too many verification attempts. Please wait a moment and try again.'
+    ),
+  });
+}
+
 export default {
   authRateConfig,
   createLoginAccountLimiter,
@@ -487,4 +594,6 @@ export default {
   createFirebaseExchangeLimiter,
   createFirebaseRegisterLimiter,
   createSessionRenewLimiter,
+  createEmailVerificationRequestLimiter,
+  createEmailVerificationConfirmLimiter,
 };

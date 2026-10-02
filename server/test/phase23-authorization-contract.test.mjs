@@ -252,6 +252,14 @@ const PUBLIC_ROUTES = [
     route: 'POST /api/auth/firebase/register',
     why: 'Phase 32C: creates the Business + OWNER user for a Firebase-verified identity that has no tenant yet — the caller holds no Inventory AI JWT and no role, both of which are assigned server-side; rate-limited per IP',
   },
+  {
+    route: 'POST /api/auth/email-verification/request',
+    why: 'AUTH-04-C: PRE-SESSION Firebase-authenticated — the caller presents a verified Firebase ID token, which the service verifies with checkRevoked, and holds NO Inventory AI session by definition (a session is minted only by the exchange above, and this flow exists precisely for an identity that is verified but has no tenant yet). That is why there is no requireAuth and no permission to name: every role in this application would be unknown here, and the identity is the uid of the VERIFIED token inside the service, never a body field. PUBLIC is the no-requireAuth classification, not a claim the endpoint is unauthenticated. Rate-limited per IP',
+  },
+  {
+    route: 'POST /api/auth/email-verification/confirm',
+    why: 'AUTH-04-C: PRE-SESSION Firebase-authenticated — the same boundary as the request route (a verified Firebase ID token is checked inside the service with checkRevoked; no Inventory AI session exists and no requireAuth applies), and confirmation CREATES no session and issues no JWT: it sets Firebase emailVerified and nothing else, so the session is still created only by the exchange above. The submitted code is the only caller-supplied value the validator reads, and it is never shape-checked here. PUBLIC is the no-requireAuth classification, not a claim the endpoint is unauthenticated. Rate-limited per IP',
+  },
 ];
 
 const AUTHENTICATED_ROUTES = [

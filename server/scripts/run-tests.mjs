@@ -43,6 +43,7 @@ const PURE_UNIT = [
   'phase22-authorization-contract.test.mjs', // route↔permission bindings, catalogue coverage, CATALOGUE_ONLY declaration
   'phase23-authorization-contract.test.mjs', // route authorization classification, mobile RBAC mirror, requireRole inertness, client error-code contract
   'phase26b-mail-service.test.mjs',   // mail provider registry, Resend wire format via a stubbed fetch, template and error contract
+  'phaseAUTH04B1-email-verification-mail.test.mjs', // AUTH-04-B1: the verification-code template (exact digits incl. leading zeros, no URL/address/id/crypto, no password, refuses an unusable code without echoing it) and sendEmailVerificationEmail (awaited delivery, registry transport, MAIL_NOT_CONFIGURED for an unusable configuration with no EMAIL_VERIFICATION_* emission, MAIL_UNAVAILABLE for a provider failure, no console output, no secret on an error) plus the mail-layer source guards
   'phaseA-credential-authority.test.mjs', // Phase A (F-1) declaration guards: the unlink capability is gone, no reachable path clears firebaseUid, an identity is never resolved by email
   'phase-ts-3-migration-guards.test.mjs', // module-graph guards: duplicate .js/.ts stems + stale relative specifiers, resolved against the filesystem
 ];

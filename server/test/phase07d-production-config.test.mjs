@@ -143,12 +143,18 @@ describe('H7 production config validation (Phase 07D)', () => {
     );
   });
 
-  it('accepts a complete production config with AI disabled', async () => {
-    await withEnv(
-      { MONGODB_URI: DUMMY_URI, JWT_SECRET: LONG_SECRET, AI_PROVIDER: '' },
-      () => {
-        assert.deepEqual(validateProductionConfig(), [], 'valid config -> no problems');
-      }
+  it('accepts a complete production config with AI disabled', () => {
+    // An EXPLICIT values bag rather than the live process.env. What is under test
+    // is the validator's own contract, so the developer's server/.env must not be
+    // able to change the answer — and it can: a locally configured Firebase
+    // service account makes the AUTH-04 code pepper required (AUTH-04-A), which
+    // would turn this case red for a reason that has nothing to do with it.
+    // This is the same explicit-values shape phase32b-firebase-admin.test.mjs
+    // uses for its production-config cases.
+    assert.deepEqual(
+      validateProductionConfig({ MONGODB_URI: DUMMY_URI, JWT_SECRET: LONG_SECRET, AI_PROVIDER: '' }),
+      [],
+      'valid config -> no problems'
     );
   });
 
@@ -185,21 +191,28 @@ describe('H7 production config validation (Phase 07D)', () => {
     );
   });
 
-  it('accepts a valid JWT_EXPIRES_IN timespan', async () => {
-    await withEnv(
-      { MONGODB_URI: DUMMY_URI, JWT_SECRET: LONG_SECRET, AI_PROVIDER: '', JWT_EXPIRES_IN: '15m' },
-      () => {
-        assert.deepEqual(validateProductionConfig(), [], 'a valid timespan is not a problem');
-      }
+  it('accepts a valid JWT_EXPIRES_IN timespan', () => {
+    // Explicit values for the same reason as the case above: the probe under
+    // test is the validator's, and the live environment must not be an input.
+    assert.deepEqual(
+      validateProductionConfig({
+        MONGODB_URI: DUMMY_URI,
+        JWT_SECRET: LONG_SECRET,
+        AI_PROVIDER: '',
+        JWT_EXPIRES_IN: '15m',
+      }),
+      [],
+      'a valid timespan is not a problem'
     );
   });
 
-  it('treats an absent JWT_EXPIRES_IN as fine (env.ts applies the "1h" default since AUTH-02)', async () => {
-    await withEnv(
-      { MONGODB_URI: DUMMY_URI, JWT_SECRET: LONG_SECRET, AI_PROVIDER: '', JWT_EXPIRES_IN: undefined },
-      () => {
-        assert.deepEqual(validateProductionConfig(), []);
-      }
+  it('treats an absent JWT_EXPIRES_IN as fine (env.ts applies the "1h" default since AUTH-02)', () => {
+    // The key is OMITTED from the bag, which is exactly what "absent" means to
+    // the validator — the same state the previous `undefined` env patch produced,
+    // without reaching into the live environment to produce it.
+    assert.deepEqual(
+      validateProductionConfig({ MONGODB_URI: DUMMY_URI, JWT_SECRET: LONG_SECRET, AI_PROVIDER: '' }),
+      []
     );
   });
 });

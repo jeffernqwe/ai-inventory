@@ -2,6 +2,7 @@ import Business from './business.model.ts';
 import User from './user.model.ts';
 import Session from './session.model.ts';
 import PasswordResetToken from './passwordResetToken.model.ts';
+import EmailVerificationChallenge from './emailVerificationChallenge.model.ts';
 import Location from './location.model.ts';
 import Category from './category.model.ts';
 import Supplier from './supplier.model.ts';
@@ -18,6 +19,7 @@ export {
   User,
   Session,
   PasswordResetToken,
+  EmailVerificationChallenge,
   Location,
   Category,
   Supplier,
@@ -36,6 +38,7 @@ export const models = [
   User,
   Session,
   PasswordResetToken,
+  EmailVerificationChallenge,
   Location,
   Category,
   Supplier,

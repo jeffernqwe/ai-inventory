@@ -21,6 +21,12 @@
  *                   supported "Firebase disabled" state and is NOT a problem —
  *                   which is what keeps an existing deployment bootable when
  *                   Firebase is added but not yet used (Phase 32B adds no route).
+ *   - Email-verification pepper (AUTH-04-A): when Firebase IS configured, the
+ *                   EMAIL_VERIFICATION_CODE_PEPPER the 6-digit code flow keys its
+ *                   digests with must be present and long enough. An unconfigured
+ *                   Firebase is again the supported "flow not enabled" state and
+ *                   is NOT a problem, so this adds no failure to a deployment
+ *                   that never turns the flow on.
  *
  * Problems are returned as { variable, message } objects. Messages name the
  * VARIABLE that is wrong — they never contain the variable's value, so no
@@ -32,6 +38,7 @@ import type { SignOptions } from 'jsonwebtoken';
 
 import { providerRequiredEnv } from '../services/ai/providers/index.ts';
 import { serviceAccountProblems } from './firebase.ts';
+import { emailVerificationPepperProblems } from './emailVerification.ts';
 
 /**
  * One problem with the production configuration. `message` names the VARIABLE
@@ -142,6 +149,22 @@ export function validateProductionConfig(
   // parse failure, where a parser's own message could quote the credential it
   // rejected.
   problems.push(...serviceAccountProblems(values));
+
+  // AUTH-04-A: the email-verification code pepper.
+  //
+  // GATED ON FIREBASE, AND THE GATING IS THE CONTRACT. The AUTH-04 flow verifies a
+  // Firebase ID token before it does anything, so a pepper is meaningless without
+  // a service account — and, more importantly, a check that fired regardless
+  // would add a config failure to every deployment that never enables the flow,
+  // which is exactly the additive property Phase 32B established. The predicate
+  // and the messages live in config/emailVerification.ts so validation and use
+  // cannot disagree about what "configured" means.
+  //
+  // It also reports NOTHING for a PARTIALLY supplied service account: validation
+  // should name the variable the operator must actually fix first, and the
+  // Firebase problems above already do. Messages name variable NAMES only and
+  // never a value, so the pepper can never be printed by a validation failure.
+  problems.push(...emailVerificationPepperProblems(values));
 
   return problems;
 }

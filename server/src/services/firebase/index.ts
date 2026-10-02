@@ -7,7 +7,7 @@
  * caller learns how the app is initialized, which module holds the credential, or
  * that firebase-admin exists.
  *
- * The three exported functions are deliberately small:
+ * The exported functions are deliberately small:
  *
  *   isFirebaseConfigured()  — may this server verify Firebase ID tokens at all?
  *                             Never throws, and never initializes anything.
@@ -15,11 +15,15 @@
  *                             health line. Never throws, and is '' when disabled.
  *   verifyFirebaseIdToken(idToken)
  *                           — verifies a token and returns the narrowed identity.
+ *   updateFirebaseUserEmailVerified(uid)
+ *                           — the AUTH-04-B2 write: sets a verified identity's
+ *                             `emailVerified` flag, and nothing else.
  *
  * Note what this layer does NOT do: it does not issue a session, does not read or
  * write MongoDB, does not know a user exists, and does not decide an HTTP status.
  * Verifying an ID token and establishing an application session are separate
- * steps, and Phase 32B implements only the first.
+ * steps, and Phase 32B implements only the first; AUTH-04-B2 adds the single
+ * Admin WRITE the email-verification flow needs, and still decides no status.
  */
 
 import { firebaseConfig, isFirebaseConfigured as configIsFirebaseConfigured } from '../../config/firebase.ts';
@@ -42,6 +46,13 @@ import {
   assertFirebaseTokenEnvironment,
 } from './tokenVerifier.ts';
 import type { VerifiedFirebaseIdentity, FirebaseIdTokenVerifier } from './tokenVerifier.ts';
+import {
+  updateFirebaseUserEmailVerified,
+  setFirebaseUserUpdater,
+  resetFirebaseUserUpdater,
+  hasCustomFirebaseUserUpdater,
+} from './userUpdater.ts';
+import type { FirebaseEmailVerificationWrite, FirebaseUserUpdater } from './userUpdater.ts';
 
 export {
   FirebaseNotConfigured,
@@ -60,8 +71,17 @@ export {
   verifyFirebaseIdToken,
   isStructurallyJwtShaped,
   assertFirebaseTokenEnvironment,
+  updateFirebaseUserEmailVerified,
+  setFirebaseUserUpdater,
+  resetFirebaseUserUpdater,
+  hasCustomFirebaseUserUpdater,
 };
-export type { VerifiedFirebaseIdentity, FirebaseIdTokenVerifier };
+export type {
+  VerifiedFirebaseIdentity,
+  FirebaseIdTokenVerifier,
+  FirebaseEmailVerificationWrite,
+  FirebaseUserUpdater,
+};
 
 /**
  * True when the environment supplies a complete Firebase service account.

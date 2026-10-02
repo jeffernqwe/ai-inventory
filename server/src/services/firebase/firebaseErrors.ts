@@ -195,6 +195,36 @@ export function safeTokenReason(raw: unknown): string {
   return typeof raw === 'string' && /^[a-z0-9/_-]{1,64}$/i.test(raw) ? raw : 'unknown';
 }
 
+/**
+ * The one domain error that represents an SDK error CODE.
+ *
+ * This is the single place a Firebase error CLASS is chosen from an upstream code,
+ * so a second Admin operation does not need a second copy of the decision. It was
+ * added by AUTH-04-B2 for the `updateUser` write bridge; the token-verification
+ * path deliberately keeps its own private dispatch for now, and AUTH-04-B2 does
+ * not refactor it — adopting this helper there is a later, optional tidy-up.
+ *
+ * PURE, and it reads the code and NOTHING else. No message is inspected, nothing
+ * upstream is relayed, and the label goes through `safeTokenReason`, so a value
+ * that is not a short, plainly-shaped code cannot survive. `classifyFirebaseErrorCode`
+ * supplies the class, whose DEFAULT is `unavailable` — an unrecognised, missing or
+ * future code is treated as a transient outage rather than as a rejected
+ * credential, the direction the target architecture requires (§19).
+ *
+ * The returned error carries no HTTP status: a controller decides that.
+ */
+export function firebaseErrorFromSdkCode(
+  code: unknown,
+  notConfiguredMessage = 'Firebase authentication is not usable on this server (auth/invalid-credential).'
+): FirebaseNotConfigured | FirebaseTokenError | FirebaseUnavailableError {
+  const reason = safeTokenReason(code);
+  const klass = classifyFirebaseErrorCode(code);
+
+  if (klass === 'terminal') return new FirebaseTokenError(reason);
+  if (klass === 'not-configured') return new FirebaseNotConfigured(notConfiguredMessage);
+  return new FirebaseUnavailableError(reason);
+}
+
 export function isFirebaseError(err: unknown): boolean {
   return (
     err instanceof FirebaseNotConfigured ||
@@ -215,5 +245,6 @@ export default {
   TRANSIENT_FIREBASE_AUTH_CODES,
   classifyFirebaseErrorCode,
   safeTokenReason,
+  firebaseErrorFromSdkCode,
   isFirebaseError,
 };

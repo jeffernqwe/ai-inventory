@@ -14,6 +14,7 @@ import {
   createFirebaseExchangeLimiter,
   createFirebaseRegisterLimiter,
   createSessionRenewLimiter,
+  resetLoginAccountBucketOnSuccess,
 } from '../middlewares/rateLimit.ts';
 import type { AuthRateConfig } from '../middlewares/rateLimit.ts';
 
@@ -41,7 +42,21 @@ export function createAuthRouter({ limits }: AuthRouterOptions = {}) {
 
   // Public — protected from credential stuffing / mass registration (Phase 07B).
   router.post('/register', createRegisterLimiter(limits), register);
-  router.post('/login', createLoginAccountLimiter(limits), createLoginIpLimiter(limits), login);
+
+  // The two login limiters are built here rather than inline because the third
+  // handler needs a handle on the ACCOUNT limiter: it clears that bucket (and
+  // only that bucket) once a login has actually succeeded. See
+  // `resetLoginAccountBucketOnSuccess` for why the IP bucket is deliberately
+  // excluded, and why this is a fourth handler rather than a call the controller
+  // makes — the reset is decided by the response, not by the controller's body.
+  const loginAccountLimiter = createLoginAccountLimiter(limits);
+  router.post(
+    '/login',
+    loginAccountLimiter,
+    createLoginIpLimiter(limits),
+    resetLoginAccountBucketOnSuccess(loginAccountLimiter),
+    login
+  );
 
   // Public — password recovery (Phase 26B-3). NO requireAuth and no session: the
   // whole point of these two routes is that the caller cannot authenticate. The

@@ -12,6 +12,13 @@
  * digest primitives, and the one configuration question the endpoints must ask
  * before they touch anything ("may this server key a code at all?").
  *
+ * AUTH-04-B3 adds the first operation this boundary actually performs —
+ * `requestEmailVerificationCode`, the challenge REQUEST lifecycle — together with
+ * the `EmailVerificationError` its callers catch. The transport question is still
+ * absent: there is no route, no controller and no HTTP status anywhere in this
+ * layer, so AUTH-04-C remains the only place a domain failure becomes a
+ * response.
+ *
  * The shape mirrors `services/firebase/index.ts` on purpose. That boundary
  * exposes `isFirebaseConfigured()` as a pure configuration question and never
  * initializes anything; this one exposes its counterpart in exactly the same
@@ -26,6 +33,10 @@ import {
   hashVerificationEmail,
   verificationHmacMatches,
 } from './code.ts';
+import { requestEmailVerificationCode } from './request.ts';
+import { EmailVerificationError } from './errors.ts';
+import type { RequestEmailVerificationCodeInput } from './request.ts';
+import type { EmailVerificationProblem } from './errors.ts';
 
 export {
   formatVerificationCode,
@@ -33,7 +44,10 @@ export {
   hashVerificationCode,
   hashVerificationEmail,
   verificationHmacMatches,
+  requestEmailVerificationCode,
+  EmailVerificationError,
 };
+export type { RequestEmailVerificationCodeInput, EmailVerificationProblem };
 
 /**
  * True when this server may run the AUTH-04 flow: Firebase is configured and the
@@ -56,4 +70,6 @@ export default {
   hashVerificationCode,
   hashVerificationEmail,
   verificationHmacMatches,
+  requestEmailVerificationCode,
+  EmailVerificationError,
 };

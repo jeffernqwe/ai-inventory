@@ -29,7 +29,7 @@
  * (e.g. Redis) — out of scope for V1, documented in the wiki of this library.
  */
 
-import type { Request, Response } from 'express';
+import type { NextFunction, Request, Response } from 'express';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 
 import { normalizeEmail } from '../utils/validate.ts';
@@ -154,6 +154,21 @@ function limitResponse(code: string, message: string) {
 }
 
 /**
+ * The exact bucket key createLoginAccountLimiter counts against: the client
+ * address (IPv6 masked to /56 so one host cannot fan out 2^64 keys) joined with
+ * the NORMALIZED email — normalization identical to auth.service's login, so
+ * case and surrounding whitespace cannot address a second bucket.
+ *
+ * Exported so the successful-login reset below addresses the SAME bucket rather
+ * than re-deriving the key and drifting from it.
+ */
+export function loginAccountKey(request: Request): string {
+  const ip = ipKeyGenerator(clientIp(request));
+  const email = normalizeEmail(request.body?.email);
+  return `${ip}|${email || '(no-email)'}`;
+}
+
+/**
  * Login limiter #1 — per IP + normalized email (strict). Only non-2xx
  * responses count, so failed password attempts accumulate and lock the
  * ip+account until the window elapses, while correct logins pass through.
@@ -164,19 +179,49 @@ export function createLoginAccountLimiter(overrides: Partial<AuthRateConfig> = {
     windowMs: loginWindowMs,
     limit: loginMax,
     skipSuccessfulRequests: true,
-    // ipKeyGenerator masks IPv6 down to /56 so one host can't fan out 2^64
-    // keys; the email half (normalized exactly like auth.service login) scopes
-    // the budget to a single account.
-    keyGenerator(request) {
-      const ip = ipKeyGenerator(clientIp(request));
-      const email = normalizeEmail(request.body?.email);
-      return `${ip}|${email || '(no-email)'}`;
-    },
+    keyGenerator: loginAccountKey,
     ...limitResponse(
       'LOGIN_RATE_LIMITED',
       'Too many login attempts. Please wait a moment and try again.'
     ),
   });
+}
+
+/**
+ * Clears the per-IP+email login bucket once the request finishes 2xx.
+ *
+ * WHY THIS IS SEPARATE FROM `skipSuccessfulRequests`. That option only undoes
+ * the SUCCESSFUL request's own increment — deliberately, so a legitimate user is
+ * never locked out by their own correct password. It does NOT clear failures the
+ * same account had already accumulated, so a person who mistypes a few times and
+ * then gets in still starts their next attempt part-way to the lock. This
+ * middleware closes that gap for the ACCOUNT bucket only: a proven-correct
+ * sign-in is evidence the account's owner is present, so the failures are spent.
+ *
+ * IT MUST NOT BE MOUNTED FOR THE IP BUCKET. The IP bucket defends against one
+ * SOURCE spraying many ACCOUNTS, and one account's correct password is no
+ * evidence about the source — resetting it would let an attacker accumulate
+ * per-account bucket budget for free by logging into an account they own
+ * between sprays. Only the account bucket is cleared; the IP bucket keeps
+ * `skipSuccessfulRequests` and nothing more.
+ *
+ * Registered on `res.on('finish')` rather than as a call the controller makes,
+ * because the decision depends on the OUTCOME and every route answer here is
+ * produced by the controller. It is mounted after the account limiter (so it can
+ * address that limiter) and before the controller, and it can only ever DELETE a
+ * bucket — it grants no request an outcome it would not otherwise have had.
+ */
+export function resetLoginAccountBucketOnSuccess(accountLimiter: {
+  resetKey: (key: string) => void;
+}) {
+  return (request: Request, response: Response, next: NextFunction): void => {
+    response.on('finish', () => {
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        accountLimiter.resetKey(loginAccountKey(request));
+      }
+    });
+    next();
+  };
 }
 
 /**

@@ -581,6 +581,102 @@ dbSuite('Phase 07B — H1 authentication rate limiting', dbOk, () => {
     });
   });
 
+  // -------------------------------------------------------------------------
+  // Issue 2 — a SUCCESSFUL login clears the account bucket it belongs to.
+  //
+  // `skipSuccessfulRequests` alone only undoes the successful request's OWN
+  // increment, so failures the same account had already accumulated used to
+  // survive a correct password. The reset closes that, and these two cases pin
+  // both halves of the boundary: the account bucket IS cleared, and the IP
+  // bucket is NOT.
+  // -------------------------------------------------------------------------
+
+  it('a successful login clears the account bucket (failures do not survive it)', async () => {
+    await build({ loginWindowMs: 60000, loginMax: 3, loginIpMax: 100 }, async (url2) => {
+      const seed = await seedBusinessUser();
+      // Two failures spend two of the three credits.
+      for (let i = 0; i < 2; i++) {
+        const res = await api(url2, 'POST', '/api/auth/login', {
+          body: { email: seed.email, password: 'WrongPass123!' },
+        });
+        assert.equal(res.status, 401);
+      }
+      // A correct password proves the account's owner is present, so its bucket
+      // starts empty afterwards.
+      const ok = await api(url2, 'POST', '/api/auth/login', {
+        body: { email: seed.email, password: seed.password },
+      });
+      assert.equal(ok.status, 200);
+      // THREE more failures must all be ordinary 401s. Without the reset the
+      // second of them is already a 429 (two leftovers plus its own increment).
+      for (let i = 0; i < 3; i++) {
+        const res = await api(url2, 'POST', '/api/auth/login', {
+          body: { email: seed.email, password: 'WrongPass123!' },
+        });
+        assert.equal(res.status, 401, 'post-reset attempt ' + (i + 1) + ' is still a normal 401');
+      }
+      // The fourth after the reset is the lock, exactly as it would be from cold.
+      const blocked = await api(url2, 'POST', '/api/auth/login', {
+        body: { email: seed.email, password: 'WrongPass123!' },
+      });
+      assertRateLimitBlock(blocked, 'LOGIN_RATE_LIMITED');
+    });
+  });
+
+  it('a successful login does NOT clear the per-IP bucket (spraying stays bounded)', async () => {
+    await build(
+      { loginWindowMs: 60000, loginMax: 100, loginIpWindowMs: 60000, loginIpMax: 4 },
+      async (url2) => {
+        const seed = await seedBusinessUser();
+        const other = await seedBusinessUser();
+        for (let i = 0; i < 2; i++) {
+          const res = await api(url2, 'POST', '/api/auth/login', {
+            body: { email: other.email, password: 'WrongPass123!' },
+          });
+          assert.equal(res.status, 401);
+        }
+        // A success on ONE account must not hand the source fresh IP budget.
+        const ok = await api(url2, 'POST', '/api/auth/login', {
+          body: { email: seed.email, password: seed.password },
+        });
+        assert.equal(ok.status, 200);
+        // Failures three and four on the OTHER account are still ordinary 401s...
+        for (let i = 0; i < 2; i++) {
+          const res = await api(url2, 'POST', '/api/auth/login', {
+            body: { email: other.email, password: 'WrongPass123!' },
+          });
+          assert.equal(res.status, 401, 'IP attempt ' + (i + 3) + ' is still a normal 401');
+        }
+        // ...and the fifth is the IP lock. It only arrives on time if the success
+        // above left the IP bucket alone: a reset that cleared every bucket would
+        // have bought the source two extra credits and pushed this out.
+        const blocked = await api(url2, 'POST', '/api/auth/login', {
+          body: { email: other.email, password: 'WrongPass123!' },
+        });
+        assertRateLimitBlock(blocked, 'LOGIN_RATE_LIMITED');
+      }
+    );
+  });
+
+  it('a login 429 states its wait as positive whole seconds in Retry-After', async () => {
+    await build({ loginWindowMs: 60000, loginMax: 1, loginIpMax: 100 }, async (url2) => {
+      const seed = await seedBusinessUser();
+      const first = await api(url2, 'POST', '/api/auth/login', {
+        body: { email: seed.email, password: 'WrongPass123!' },
+      });
+      assert.equal(first.status, 401);
+      const blocked = await api(url2, 'POST', '/api/auth/login', {
+        body: { email: seed.email, password: 'WrongPass123!' },
+      });
+      assertRateLimitBlock(blocked, 'LOGIN_RATE_LIMITED');
+      // The exact form the mobile client parses into a countdown, so the screen's
+      // contract with this header is pinned on the side that emits it.
+      const raw = blocked.header('retry-after');
+      const seconds = Number(raw);
+      assert.ok(Number.isInteger(seconds) && seconds > 0, 'Retry-After is positive whole seconds, got ' + raw);
+      assert.ok(seconds <= 60, 'Retry-After fits the 60 s window, got ' + raw);
+    });
+  });
   it('registration is rate limited per IP with a safe 429 body', async () => {
     await build({ registerWindowMs: 60000, registerMax: 3 }, async (url2) => {
       for (let i = 0; i < 3; i++) {

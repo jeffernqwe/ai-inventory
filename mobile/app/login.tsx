@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, Redirect } from 'expo-router';
 import { StyleSheet, Text, View } from 'react-native';
 
@@ -67,6 +67,38 @@ function fieldMap(err: unknown): Record<string, string> {
  */
 const REGISTRATION_REQUIRED = 'REGISTRATION_REQUIRED';
 
+/**
+ * The Inventory server's own login throttle, and the ONLY refusal this screen
+ * turns into a cooldown.
+ *
+ * It is deliberately distinct from Firebase's `auth/too-many-requests`. That one
+ * arrives as a `FirebaseAuthError` — nothing in it produced an HTTP response —
+ * and carries no `Retry-After`, so it cannot and must not drive a countdown;
+ * it is printed as an ordinary refusal. Keeping the two apart is what stops a
+ * provider-side throttle from being described in the Inventory server's words,
+ * or the reverse.
+ */
+const LOGIN_RATE_LIMITED = 'LOGIN_RATE_LIMITED';
+
+/**
+ * The sentence a rate-limited sign-in shows. The wait itself is NOT written here:
+ * it is read from the server's `Retry-After` for that exact response, so this
+ * screen never invents a cooldown length and there is no fixed three-minute
+ * constant to drift out of step with the server's window.
+ */
+const RATE_LIMIT_MESSAGE =
+  'Too many sign-in attempts. For your security, sign-in is paused for a moment.';
+
+/** A short, human wait: seconds below a minute, otherwise minutes and seconds. */
+function formatRemaining(seconds: number): string {
+  if (seconds >= 60) {
+    const minutes = Math.floor(seconds / 60);
+    const rest = seconds % 60;
+    return rest === 0 ? `${minutes}m` : `${minutes}m ${rest}s`;
+  }
+  return `${seconds}s`;
+}
+
 export default function LoginScreen() {
   const { status, user, signIn, signInWithGoogle, firebaseOnboarding } = useSession();
   const { colors } = useTheme();
@@ -78,6 +110,37 @@ export default function LoginScreen() {
   const [needsAccount, setNeedsAccount] = useState(false);
   const [busy, setBusy] = useState(false);
   const [googleBusy, setGoogleBusy] = useState(false);
+  // IN-MEMORY ONLY, deliberately: a cooldown is a fact about the server's current
+  // window, and persisting it would keep the form disabled after the window has
+  // already moved on (or after a restart the server no longer knows about).
+  const [cooldownUntil, setCooldownUntil] = useState<number | null>(null);
+  const [now, setNow] = useState<number>(() => Date.now());
+
+  // Ticks only while a cooldown is running. When it elapses the stale rate-limit
+  // banner is cleared with it, so the screen returns to its ordinary state rather
+  // than leaving a refused message sitting over a form that is usable again.
+  useEffect(() => {
+    if (cooldownUntil === null) return undefined;
+    const tick = (): void => {
+      const at = Date.now();
+      if (at >= cooldownUntil) {
+        setCooldownUntil(null);
+        setFormError(null);
+        return;
+      }
+      setNow(at);
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [cooldownUntil]);
+
+  const remainingSeconds =
+    cooldownUntil === null ? 0 : Math.ceil(Math.max(0, cooldownUntil - now) / 1000);
+  const coolingDown = cooldownUntil !== null && remainingSeconds > 0;
+  const bannerText = coolingDown
+    ? `${RATE_LIMIT_MESSAGE} Try again in ${formatRemaining(remainingSeconds)}.`
+    : formError;
 
   if (status === 'signedIn') return <Redirect href={defaultHomePath(user)} />;
 
@@ -94,11 +157,24 @@ export default function LoginScreen() {
    */
   function applyAuthError(err: unknown): void {
     const fields = fieldMap(err);
-    if (Object.keys(fields).length) setFieldErrors(fields);
-    else {
-      setNeedsAccount(err instanceof ApiError && err.code === REGISTRATION_REQUIRED);
-      setFormError((err as { message?: string } | null)?.message || 'Unable to sign in. Please try again.');
+    if (Object.keys(fields).length) {
+      setFieldErrors(fields);
+      return;
     }
+    if (err instanceof ApiError && err.code === LOGIN_RATE_LIMITED) {
+      setNeedsAccount(false);
+      const wait = err.retryAfter;
+      // A cooldown is started only when the server actually stated a wait. With
+      // no `Retry-After` the refusal is still shown, but no countdown is
+      // invented — an unstated wait is not a licence to guess one.
+      if (typeof wait === 'number' && wait > 0) {
+        setCooldownUntil(Date.now() + wait * 1000);
+      }
+      setFormError(RATE_LIMIT_MESSAGE);
+      return;
+    }
+    setNeedsAccount(err instanceof ApiError && err.code === REGISTRATION_REQUIRED);
+    setFormError((err as { message?: string } | null)?.message || 'Unable to sign in. Please try again.');
   }
 
   function resetFeedback(): void {
@@ -108,6 +184,11 @@ export default function LoginScreen() {
   }
 
   async function submit(): Promise<void> {
+    // No request is sent while the server's cooldown is running: the user is not
+    // shown a second identical refusal, and the limiter is not asked again before
+    // its window has moved. The button is disabled too, so this is the keyboard
+    // "→" path (the field's onSubmitEditing) as well as a belt-and-braces guard.
+    if (coolingDown) return;
     setBusy(true);
     resetFeedback();
     try {
@@ -159,7 +240,7 @@ export default function LoginScreen() {
         </View>
       }
     >
-      {needsAccount ? <Banner type="info" text={formError} /> : <Banner type="error" text={formError} />}
+      {needsAccount ? <Banner type="info" text={bannerText} /> : <Banner type="error" text={bannerText} />}
       {needsAccount ? (
         <Text style={styles.actionRow}>
           <Link href="/register-firebase" style={styles.link}>
@@ -191,7 +272,13 @@ export default function LoginScreen() {
         returnKeyType="go"
         onSubmitEditing={submit}
       />
-      <Button title="Sign In" onPress={submit} loading={busy} disabled={googleBusy} full />
+      <Button
+        title="Sign In"
+        onPress={submit}
+        loading={busy}
+        disabled={googleBusy || coolingDown}
+        full
+      />
       <Button
         title="Continue with Google"
         variant="secondary"

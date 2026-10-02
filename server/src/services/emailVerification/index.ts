@@ -14,10 +14,12 @@
  *
  * AUTH-04-B3 adds the first operation this boundary actually performs —
  * `requestEmailVerificationCode`, the challenge REQUEST lifecycle — together with
- * the `EmailVerificationError` its callers catch. The transport question is still
- * absent: there is no route, no controller and no HTTP status anywhere in this
- * layer, so AUTH-04-C remains the only place a domain failure becomes a
- * response.
+ * the `EmailVerificationError` its callers catch. AUTH-04-B4 adds its counterpart,
+ * `confirmEmailVerificationCode`, the challenge CONFIRM lifecycle, which checks a
+ * submitted code and then sets Firebase's `emailVerified` flag through the
+ * AUTH-04-B2 bridge. The transport question is still absent: there is no route, no
+ * controller and no HTTP status anywhere in this layer, so AUTH-04-C remains the
+ * only place a domain failure becomes a response.
  *
  * The shape mirrors `services/firebase/index.ts` on purpose. That boundary
  * exposes `isFirebaseConfigured()` as a pure configuration question and never
@@ -34,8 +36,10 @@ import {
   verificationHmacMatches,
 } from './code.ts';
 import { requestEmailVerificationCode } from './request.ts';
+import { confirmEmailVerificationCode } from './confirm.ts';
 import { EmailVerificationError } from './errors.ts';
 import type { RequestEmailVerificationCodeInput } from './request.ts';
+import type { ConfirmEmailVerificationCodeInput } from './confirm.ts';
 import type { EmailVerificationProblem } from './errors.ts';
 
 export {
@@ -45,9 +49,14 @@ export {
   hashVerificationEmail,
   verificationHmacMatches,
   requestEmailVerificationCode,
+  confirmEmailVerificationCode,
   EmailVerificationError,
 };
-export type { RequestEmailVerificationCodeInput, EmailVerificationProblem };
+export type {
+  RequestEmailVerificationCodeInput,
+  ConfirmEmailVerificationCodeInput,
+  EmailVerificationProblem,
+};
 
 /**
  * True when this server may run the AUTH-04 flow: Firebase is configured and the
@@ -71,5 +80,6 @@ export default {
   hashVerificationEmail,
   verificationHmacMatches,
   requestEmailVerificationCode,
+  confirmEmailVerificationCode,
   EmailVerificationError,
 };

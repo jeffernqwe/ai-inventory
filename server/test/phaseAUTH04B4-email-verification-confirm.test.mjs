@@ -987,16 +987,22 @@ dbSuite('AUTH-04-B4 — confirm lifecycle against MongoDB', dbOk, () => {
       withSeams({}, async () => {
         const uid = uniqueUid('audit');
         await seedChallenge({ uid });
-        const before = await AuditLog.countDocuments({});
+        // AUTH-04-E: scope the invariant to THIS identity, not the whole collection.
+        // The previous global `countDocuments({})` raced every other DB-backed suite
+        // that writes an audit row concurrently, so the case was order-dependent.
+        // This challenge's uid is unique per process, so "no governance row naming
+        // this identity appeared" is deterministic and still exactly the invariant.
+        const auditScope = { $or: [{ entityId: uid }, { 'metadata.uid': uid }] };
+        const before = await AuditLog.countDocuments(auditScope);
 
         assert.equal((await confirm(uid, CODE)).error, null);
         setFakeFirebaseUpdateFailure('auth/internal-error');
         await confirm(uid, CODE); // the refusal path
 
         assert.equal(
-          await AuditLog.countDocuments({}),
+          await AuditLog.countDocuments(auditScope),
           before,
-          'confirmation must not write the governance trail'
+          'confirmation must not write a governance row attributable to this identity'
         );
       })
     );

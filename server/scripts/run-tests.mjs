@@ -49,6 +49,7 @@ const PURE_UNIT = [
   'phaseAUTH04E-email-verification-hardening.test.mjs', // AUTH-04-E: the consolidated DB-free hardening guards over the complete AUTH-04 A-D surface — the four C/D modules declared alongside the B-layer set, the two fixed success envelopes and the fixed error-status set, no reflected caught/provider detail, safe-only controller log records, applyRetryAfter as the one cooldown Retry-After site, no AUTH-04 Retry-After in errorHandler, exactly two per-IP limiter factories, limiter->controller route wiring with no requireAuth, the phase23 PUBLIC declarations, no session/JWT path on the pre-session modules, transport-bound validators, the extended B-layer hygiene invariants, and the five .env.example names with the corrected status clause
   'phaseA-credential-authority.test.mjs', // Phase A (F-1) declaration guards: the unlink capability is gone, no reachable path clears firebaseUid, an identity is never resolved by email
   'phase-ts-3-migration-guards.test.mjs', // module-graph guards: duplicate .js/.ts stems + stale relative specifiers, resolved against the filesystem
+  'phase-cleanup-test-utilities.test.mjs', // development/test cleanup utilities: fail-closed guards (production env, wrong/mismatched database, unknown/production Firebase project, confirmation phrase), the successful clear/verify path, and the "no destructive call on a failed guard" property — all against fake ports, no real database
 ];
 const PURE_DB = [
   'phase03-auth.test.mjs',            // auth + RBAC over real routes + Mongo

@@ -190,14 +190,26 @@ The existing MongoDB email verification field is considered migration-era duplic
 
 ---
 
+> **Updated 2026-10-02 (AUTH-04); provider wording updated 2026-10-04 (AUTH-04-H).** Email verification is
+a **custom 6-digit Inventory AI code delivered through the provider-agnostic mail boundary** (Brevo is a
+supported provider and was used for the live acceptance; Resend remains supported), **not** a Firebase
+verification link. Firebase remains the identity provider and
+the **authority of record** for the final `email_verified` state, which Inventory AI sets through the
+Firebase Admin SDK (`updateUser(uid, { emailVerified: true })`) **after** it has verified its own code.
+The Firebase verification-link/resend mechanism is **superseded**; see the design authority **§14C.10**.
+Everything else in this section (Firebase as identity provider, MongoDB as application authority, the
+UID-only join, the separate Inventory JWT/session, and `requireAuth` unchanged) is preserved.
+
+---
+
 # 7. Owner Registration
 
 The initial Owner registration flow is:
 
 1. User enters email and password.
 2. Firebase creates the authentication identity.
-3. Firebase sends email verification.
-4. User verifies the email.
+3. Inventory AI sends a **6-digit verification code** to the address through the provider-agnostic mail boundary (Brevo / Resend).
+4. User enters the code; Inventory AI verifies it and then sets Firebase's email-verification state through the Admin SDK.
 5. Mobile reloads/refreshes the Firebase user state.
 6. Backend verifies the Firebase identity and verified-email state.
 7. Backend provisions the new Business and User.
@@ -1010,10 +1022,56 @@ Implementation should proceed approximately in this dependency order. These impl
 
 ### AUTH-04 — Registration & Email Verification
 
+> **Updated 2026-10-02; AUTH-04-H close-out 2026-10-04.** The verification mechanism is a **custom
+> 6-digit Inventory AI code delivered through the provider-agnostic mail boundary** (Brevo is the
+> provider used for the live acceptance; Resend remains a supported provider); the Firebase
+> verification-link/email/resend flow is **superseded**. Firebase remains the authority of record for
+> the final `email_verified` state, set via the Admin SDK. See design authority **§14C.10**.
+
 * Owner registration
 * verification gate
 * server-side provisioning
 * duplicate/concurrency safety
+* **custom 6-digit verification code (CSPRNG) delivered through the provider-agnostic mail boundary (Brevo / Resend)**
+* **Firebase Admin `updateUser(uid, { emailVerified: true })` as the final verification state**
+* **UID-bound, HMAC-protected challenge with unique `{uid}` + TTL `{expiresAt}` indexes**
+* **pre-session Firebase-authenticated endpoints `POST /api/auth/email-verification/request` and `.../confirm`**
+
+> **AUTH-04 letter phases (locked 2026-10-02).** AUTH-04 is delivered as eight sequenced letter
+> phases. Each letter is implemented and verified as one increment, and each depends on the letters
+> before it. The internal implementation steps of AUTH-04-B (mail extension, Admin bridge, request
+> service, confirm service) and the work of AUTH-04-C (validators, controller, routes) and
+> AUTH-04-D (limiters) are **steps inside those letters** — they are not letters of their own.
+
+* **AUTH-04-A — Challenge primitives.** Challenge model and its unique `{uid}` + TTL `{expiresAt}`
+  indexes, CSPRNG/HMAC code primitives, `EMAIL_VERIFICATION_CODE_PEPPER` configuration and production
+  validation, focused tests. **SHIPPED at `56a3f84`.**
+* **AUTH-04-B — Firebase Admin bridge + challenge-domain lifecycle.** The Firebase Admin
+  `updateUser(uid, { emailVerified: true })` write bridge, and the challenge-domain request/confirm
+  lifecycle: supersession, attempt reservation, consumption, mail send, and AD-18 logging. No HTTP
+  surface — that is AUTH-04-C.
+* **AUTH-04-C — HTTP surface.** Validators, controller handlers, Firebase error mapping, response
+  envelopes, and route registration.
+* **AUTH-04-D — Rate limiting.** The two AD-19 AUTH-04 limiter factories and their route wiring.
+* **AUTH-04-E — Server hardening close-out.** Source guards, plaintext-code/logging protections, the
+  security and integration test pass, and the final `.env.example` names.
+* **AUTH-04-F — Mobile verification flow.** The 6-digit verification UI, the restart/resume Firebase
+  identity probe, login/register parity, and removal of the old Firebase verification-link/resend flow.
+* **AUTH-04-G — Real end-to-end acceptance.** Live Firebase `updateUser`, real mail delivery, and Atlas
+  unique/TTL behavior. **PASSED live 2026-10-04 on Brevo** — see the status line below.
+* **AUTH-04-H — Documentation close-out.** Supersede the remaining verification-link records and
+  reconcile the stale AUTH-04 status statements. **Current phase.**
+
+**Delivery status (2026-10-04): AUTH-04-A through AUTH-04-F are shipped; AUTH-04-G PASSED its live
+end-to-end acceptance gate; AUTH-04-H is the documentation close-out.**
+
+**AUTH-04-G live acceptance (2026-10-04, Brevo).** The gate ran against the real backend with Brevo as
+`MAIL_PROVIDER`. Safe, non-secret evidence: the request returned **HTTP 200** with the exact success
+envelope; Brevo reported the message **`sent`** then **`delivered`**; confirmation returned **HTTP 200**
+with **`Email verified.`**; Firebase `emailVerified` transitioned **false → true**; the MongoDB challenge
+was **consumed** (`usedAt` set, one attempt spent); and the safe-log checks passed (no code, HMAC, token,
+API key, address, URI or pepper in the logs). The tested identity is now verified and must not be reused
+as an unverified fixture.
 
 ### AUTH-05 — Password Change & Recovery
 

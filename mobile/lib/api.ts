@@ -225,6 +225,71 @@ export function firebaseRegister({ idToken, businessName, name }: FirebaseRegist
   });
 }
 
+/**
+ * AUTH-04-F — the custom 6-digit email-verification code flow. Both endpoints are
+ * PRE-SESSION and Firebase-AUTHENTICATED, so neither sends an Inventory AI token:
+ * the caller holds a Firebase ID token and no session at all, precisely because the
+ * identity is not verified yet. `lib/client.ts` reports session loss only for a
+ * request that CARRIED a token, so neither route here can be mistaken for a dead
+ * session — the same reasoning `firebaseExchange`/`firebaseRegister` already carry.
+ *
+ * The Firebase ID token is consumed once, server-side, and is never stored.
+ */
+export interface EmailVerificationRequestPayload {
+  /** A Firebase ID token from `lib/firebase-auth`. Consumed once, never stored. */
+  idToken: string;
+}
+
+/**
+ * POST /api/auth/email-verification/request -> { message } (200). PUBLIC — no session.
+ *
+ * Mints a six-digit code for the identity the token proves and emails it. Answers the
+ * SAME `{ message }` for an already-verified identity (a no-op) — the caller never
+ * learns which happened.
+ *
+ * 429 `EMAIL_VERIFICATION_RATE_LIMITED` carries a `Retry-After` header, which is both
+ * the 60-second resend cooldown and the AD-19 per-IP limiter; 503
+ * `EMAIL_VERIFICATION_NOT_CONFIGURED` / `EMAIL_VERIFICATION_MAIL_FAILED`; 400
+ * `FIREBASE_TOKEN_INVALID` (a bad provider credential, deliberately NOT a 401).
+ */
+export function requestEmailVerification({
+  idToken,
+}: EmailVerificationRequestPayload): Promise<ApiResponse> {
+  return apiFetch('/api/auth/email-verification/request', {
+    method: 'POST',
+    body: { idToken },
+  });
+}
+
+export interface EmailVerificationConfirmPayload {
+  /** A Firebase ID token from `lib/firebase-auth`. Consumed once, never stored. */
+  idToken: string;
+  /** The six-digit code the person was emailed. Never persisted by this app. */
+  code: string;
+}
+
+/**
+ * POST /api/auth/email-verification/confirm -> { message } (200). PUBLIC — no session.
+ *
+ * Verifies a submitted code and, only on success, sets Firebase's `emailVerified`
+ * through the Admin bridge. A wrong, expired, exhausted, absent or already-used code
+ * answers ONE indistinguishable 400 `INVALID_VERIFICATION_CODE`.
+ *
+ * 429 `EMAIL_VERIFICATION_RATE_LIMITED`; 503 `EMAIL_VERIFICATION_NOT_CONFIGURED`; 400
+ * `VALIDATION_ERROR` with a `code` field problem for a missing/oversized value; 400
+ * `FIREBASE_TOKEN_INVALID` for a bad provider credential. It issues NO session — the
+ * Inventory AI JWT is still minted only by `firebaseExchange`.
+ */
+export function confirmEmailVerification({
+  idToken,
+  code,
+}: EmailVerificationConfirmPayload): Promise<ApiResponse> {
+  return apiFetch('/api/auth/email-verification/confirm', {
+    method: 'POST',
+    body: { idToken, code },
+  });
+}
+
 export interface FirebaseLinkPayload {
   /** A Firebase ID token from `lib/firebase-auth`. Consumed once, never stored. */
   idToken: string;
@@ -709,6 +774,8 @@ export default {
   firebaseExchange,
   renew,
   firebaseRegister,
+  requestEmailVerification,
+  confirmEmailVerification,
   firebaseLink,
   updateMe,
   logout,

@@ -52,7 +52,12 @@ export default function RegisterScreen() {
   // Phase 16 - an identity created but not yet verified has NO session, so it never
   // reaches the signedIn guard above; this is the route that carries it to the verify
   // screen. It reads the in-memory onboarding state, never a route parameter.
-  if (firebaseOnboarding === 'verify-email') return <Redirect href="/verify-email" />;
+  // AUTH-04-F - the READ-ONLY restart/resume probe can also decide that a persisted
+  // identity needs verification but its state could not be read; that transient state
+  // belongs on the same screen, which owns its Try Again and Sign out actions.
+  if (firebaseOnboarding === 'verify-email' || firebaseOnboarding === 'verify-unreachable') {
+    return <Redirect href="/verify-email" />;
+  }
 
   async function submit(): Promise<void> {
     // Required-field validation runs first, so an empty form never reaches the

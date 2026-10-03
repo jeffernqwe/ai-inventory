@@ -26,7 +26,7 @@ import type { ConfirmSignInOutcome, FirebaseConfirmMethod } from './firebase-aut
 import {
   nativeForceIdToken,
   nativeReloadUser,
-  nativeSendEmailVerification,
+  nativeHasCurrentUser,
   nativeUpdatePassword,
 } from './firebase-native';
 import type { Role } from './permissions';
@@ -312,7 +312,12 @@ export type ConnectFirebaseOutcome =
  * no live credential to resume from, so there is nothing to restore, and persisting it
  * would let a stale state outlive the identity it describes.
  */
-export type FirebaseOnboarding = 'none' | 'verify-email' | 'register';
+export type FirebaseOnboarding =
+  | 'none'
+  | 'verify-email'
+  /** AUTH-04-F — a persisted identity whose verification state could not be read. */
+  | 'verify-unreachable'
+  | 'register';
 
 /** The profile details an identity awaiting verification will need to register. */
 export interface PendingFirebaseRegistration {
@@ -327,10 +332,67 @@ const FIREBASE_VERIFICATION_REQUIRED = 'firebase/verification-required';
 const VERIFY_EMAIL_MESSAGE = 'Verify your email address to continue.';
 const VERIFY_CHECK_FAILED_MESSAGE =
   'Unable to check your email verification status. Please try again.';
-const RESEND_VERIFICATION_FAILED_MESSAGE =
-  'Unable to send the verification email. Please try again.';
 const NO_FIREBASE_TOKEN_MESSAGE =
   'Your sign-in could not be refreshed. Please sign in again.';
+
+/**
+ * AUTH-04-F (Option B) — what a person reads when the INITIAL verification-code request
+ * fails during registration. The server's own client-facing copy is preferred when the
+ * failure carries one; this is the fallback, so the verify screen always has a safe
+ * sentence and never a raw error, a provider reason, a uid, an email or a token.
+ */
+const VERIFICATION_REQUEST_FAILED_MESSAGE =
+  'We could not send your verification code. Please try again.';
+
+/** The safe, client-facing sentence for an initial-verification-request failure. */
+function verificationSendFailureMessage(err: unknown): string {
+  const message = (err as { message?: unknown } | null)?.message;
+  return typeof message === 'string' && message.trim()
+    ? message
+    : VERIFICATION_REQUEST_FAILED_MESSAGE;
+}
+
+/**
+ * AUTH-04-F — the READ-ONLY restart/resume probe (owner-ratified Option A).
+ *
+ * Answers which screen a SIGNED-OUT launch belongs on, from the DURABLE native
+ * Firebase identity alone. Five states:
+ *
+ *   no Firebase configuration         -> 'none'                (Login)
+ *   no persisted identity             -> 'none'                (Login)
+ *   persisted identity, verified      -> 'none'                (Login; user-driven)
+ *   persisted identity, unverified    -> 'verify-email'
+ *   identity present, state unreadable-> 'verify-unreachable'
+ *
+ * IT PROVES NOTHING AND MINTS NOTHING. It never signs in, never exchanges an ID token,
+ * never mints or applies an Inventory AI session, never retries and never clears or
+ * signs out the durable Firebase identity — not even on failure. A verified identity is
+ * deliberately sent to Login rather than exchanged, because only a user-driven sign-in
+ * may open a session.
+ *
+ * EXISTENCE IS CHECKED FIRST. `nativeReloadUser()` answers `false` when there is NO
+ * user, so it cannot tell "no identity" from "unverified identity" by itself; and the
+ * native boundary is lazily loaded, so a fault while asking means we cannot confirm an
+ * identity at all — which is the Login answer, never a verification screen.
+ */
+async function probeVerificationResume(): Promise<FirebaseOnboarding> {
+  if (!isFirebaseConfigured()) return 'none';
+
+  let hasIdentity = false;
+  try {
+    hasIdentity = nativeHasCurrentUser();
+  } catch {
+    hasIdentity = false;
+  }
+  if (!hasIdentity) return 'none';
+
+  try {
+    const verified = await nativeReloadUser();
+    return verified ? 'none' : 'verify-email';
+  } catch {
+    return 'verify-unreachable';
+  }
+}
 
 /** The native code on an error, or null. Structural, so no SDK class is required. */
 function nativeErrorCode(err: unknown): string | null {
@@ -361,9 +423,9 @@ async function readEmailVerified(): Promise<boolean> {
   status: AuthStatus;
   signIn: (credentials: SignInCredentials) => Promise<AuthUser>;
   /**
-   * Phase 16 - resolves the signed-in user, or `null` when the Firebase identity was
-   * created and a verification email sent but NO session exists yet; the caller should
-   * then follow `firebaseOnboarding` to the verify screen.
+   * Phase 16 / AUTH-04-F - resolves the signed-in user, or `null` when the Firebase
+   * identity was created and a verification code requested but NO session exists yet; the
+   * caller should then follow `firebaseOnboarding` to the verify screen.
    */
   signUp: (input: RegisterPayload) => Promise<AuthUser | null>;
   /**
@@ -406,15 +468,45 @@ async function readEmailVerified(): Promise<boolean> {
   firebaseOnboarding: FirebaseOnboarding;
   /** Profile details retained across the verify screen; never a route parameter. */
   pendingRegistration: PendingFirebaseRegistration | null;
-  /** Phase 16 - resends Firebase's verification email for the signed-in identity. */
-  resendVerificationEmail: () => Promise<void>;
   /**
-   * Phase 16 - the continue action. Resolves `null` while the address is STILL
-   * unverified (ordinary, not an error); otherwise mints a forced-refresh token
-   * (RG-9), registers a pending tenant, exchanges, applies the session and resolves
-   * the user.
+   * AUTH-04-F (Option B) — a safe, one-sentence reason the verification journey was armed
+   * after a FAILED initial code request, or `null`. In-memory; shown once on the verify
+   * screen and cleared when the person acts.
    */
-  completeEmailVerification: () => Promise<AuthUser | null>;
+  verificationEntryError: string | null;
+  /**
+   * AUTH-04-F (Option B) — clears {@link verificationEntryError}. It never signs anyone in
+   * and never touches the durable Firebase identity.
+   */
+  clearVerificationEntryError: () => void;
+  /**
+   * AUTH-04-F — requests a fresh six-digit verification code for the signed-in
+   * Firebase identity. Replaces the Phase 16 verification-LINK resend: the code is
+   * minted and mailed by the AUTH-04 server flow, and the plaintext code never
+   * touches this app.
+   *
+   * Throws `FirebaseAuthError` when no Firebase identity is present, and the
+   * server's `ApiError` (429 with `Retry-After`, 503, 400) for every refusal.
+   */
+  requestVerificationCode: () => Promise<void>;
+  /**
+   * AUTH-04-F — submits a six-digit code, and on success completes the journey.
+   *
+   * THE ORDER IS THE OPERATION: confirm the code with the server, reload Firebase so
+   * the address really reads verified, mint a FORCED-refresh token (RG-9), register a
+   * pending tenant, exchange, and apply the session. It resolves `null` when Firebase
+   * still reports the address unverified after a successful confirm — an ordinary
+   * state, not an error — and a wrong/expired/exhausted code propagates the server's
+   * single `INVALID_VERIFICATION_CODE` refusal.
+   */
+  confirmVerificationCode: (code: string) => Promise<AuthUser | null>;
+  /**
+   * AUTH-04-F — re-runs the READ-ONLY restart/resume probe. Exposed so the
+   * unreachable state's Try Again can ask Firebase again without any automatic retry
+   * loop. It never signs in, never exchanges, never mints a session and never clears
+   * the durable Firebase identity.
+   */
+  retryVerificationResume: () => Promise<void>;
   /** Phase 16 - abandons the journey: ends Firebase, clears the session, resets state. */
   cancelFirebaseOnboarding: () => Promise<void>;
   signOut: () => Promise<void>;
@@ -1002,6 +1094,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // and never a route parameter, so no token, uid or email travels through navigation.
   const [pendingRegistration, setPendingRegistration] =
     useState<PendingFirebaseRegistration | null>(null);
+  // AUTH-04-F (Option B) — why the verification journey was armed when the INITIAL code
+  // request failed during signup. The verify screen shows this once; the person's own
+  // actions take over from there. In-memory only, never persisted, and it holds nothing
+  // but a safe client-facing sentence: no provider text, uid, email or token.
+  const [verificationEntryError, setVerificationEntryError] = useState<string | null>(null);
   const firebaseRegistrationRequired = firebaseOnboarding === 'register';
 
   // Whether THIS attempt's `firebase/register` call already succeeded, so a retry
@@ -1043,13 +1140,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * and the identity's tenant state is discovered from the exchange after verification.
    */
   const armVerificationRequired = useCallback(
-    (info: PendingFirebaseRegistration | null): void => {
+    (
+      info: PendingFirebaseRegistration | null,
+      // AUTH-04-F (Option B) — present only when the INITIAL code request failed. Every
+      // other caller (sign-in, Google) passes nothing, which CLEARS any stale reason.
+      entryError: string | null = null
+    ): void => {
       firebaseAccountRegisteredRef.current = false;
       setPendingRegistration(info);
+      setVerificationEntryError(entryError);
       setFirebaseOnboarding('verify-email');
     },
     []
   );
+
+  /** AUTH-04-F (Option B) — clears the one-shot entry reason once it is shown or acted on. */
+  const clearVerificationEntryError = useCallback((): void => {
+    setVerificationEntryError(null);
+  }, []);
 
   /**
    * AUTH-03 — applies a session, optionally recording the server's absolute
@@ -1083,6 +1191,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // leave a stale verify-email behind for the next attempt to inherit.
     setFirebaseOnboarding('none');
     setPendingRegistration(null);
+    setVerificationEntryError(null);
     setToken(nextToken);
     setUser(nextUser);
     setStatus(nextToken && nextUser ? 'signedIn' : 'signedOut');
@@ -1413,13 +1522,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       // Phase 16 - NO TENANT BEFORE VERIFICATION (RG-1/RG-3). The identity is created
-      // and Firebase sends the verification email; the Business and the User wait, and
+      // and the server mails a verification code; the Business and the User wait, and
       // so does the exchange. The token minted here is deliberately not carried
       // anywhere: the verify screen reloads the identity and mints a FORCED-REFRESH
       // token (RG-9) once the address is verified, so no cached pre-verification claim
       // is ever presented to the server.
-      await ensureFirebaseAccount({ email, password, name });
-      await nativeSendEmailVerification();
+      // AUTH-04-F — the custom six-digit code is REQUESTED where the Phase 16 link was
+      // sent, so a registration still lands on the verification screen with a code
+      // already in flight. The server mints and mails it; the plaintext never reaches
+      // this app.
+      const { idToken } = await ensureFirebaseAccount({ email, password, name });
+      try {
+        await api.requestEmailVerification({ idToken });
+      } catch (err) {
+        // AUTH-04-F (Option B) — THE IDENTITY EXISTS AND IS UNVERIFIED, so the
+        // verification journey is armed even though the FIRST send failed. The send is an
+        // action WITHIN this journey, not the thing that creates it, and the restart/resume
+        // probe already routes this same identity to the verify screen — so arming keeps
+        // ONE rule instead of two (in-session vs after restart). Nothing is resent here:
+        // retry is the person's own action on the verify screen, where the server's
+        // `Retry-After` stays authoritative and "Wrong account? Sign out" is immediately
+        // reachable. No tenant, no exchange and no session can appear on this path; the
+        // registration context is the SAME in-memory value the success path passes.
+        armVerificationRequired({ businessName, name }, verificationSendFailureMessage(err));
+        return null;
+      }
       armVerificationRequired({ businessName, name });
       return null;
     },
@@ -1579,6 +1706,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       firebaseAccountRegisteredRef.current = false;
       setFirebaseOnboarding('none');
       setPendingRegistration(null);
+      setVerificationEntryError(null);
       await endFirebaseSession();
     },
     [clearSession, endFirebaseSession]
@@ -1807,6 +1935,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // offline retry cannot delay the login screen, and it is a no-op when nothing
         // is outstanding.
         if (active) await retryPendingFirebaseSignOut();
+        // AUTH-04-F — the READ-ONLY restart/resume probe. It runs AFTER the pending
+        // sign-out retry so a completed sign-out is never mistaken for a live unverified
+        // identity, and it sets ONLY the in-memory onboarding state: nothing durable is
+        // written, nothing is exchanged and no session can appear.
+        const resume = await probeVerificationResume();
+        if (active) setFirebaseOnboarding(resume);
         return;
       }
       try {
@@ -1855,61 +1989,93 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [endFirebaseSession, retryPendingFirebaseSignOut]);
 
   /**
-   * Phase 16 - resends Firebase's verification email for the signed-in identity. Every
-   * native fault becomes a FirebaseAuthError, so the screen has one shape to read and no
-   * native text can reach a person.
+   * AUTH-04-F — requests a fresh six-digit code for the signed-in Firebase identity.
+   *
+   * THE IDENTITY IS READ HERE, at the moment of use, and never passed in by a caller, so
+   * no screen holds a credential. A missing identity is a FirebaseAuthError; every server
+   * refusal (429 with Retry-After, 503, 400) propagates as the ApiError it is, which is
+   * what lets the screen render the cooldown from the server's own number.
    */
-  const resendVerificationEmail = useCallback(async (): Promise<void> => {
-    try {
-      await nativeSendEmailVerification();
-    } catch (err) {
-      throw new FirebaseAuthError(nativeErrorCode(err), RESEND_VERIFICATION_FAILED_MESSAGE);
+  const requestVerificationCode = useCallback(async (): Promise<void> => {
+    const idToken = await currentFirebaseIdToken();
+    if (!idToken) {
+      throw new FirebaseAuthError(NO_FIREBASE_IDENTITY, NO_FIREBASE_IDENTITY_MESSAGE);
     }
+    await api.requestEmailVerification({ idToken });
   }, []);
 
   /**
-   * Phase 16 - the continue action on the verify screen.
+   * AUTH-04-F — the confirm action on the verify screen, replacing the Phase 16
+   * "I have verified - continue" link check.
    *
-   * ORDER IS THE OPERATION: reload, read the LIVE state, and - only if verified - mint a
-   * FORCED-refresh token (RG-9), register the tenant when signup left one pending,
-   * exchange, and apply the session. It resolves `null` while the address is still
-   * unverified, which is an ORDINARY state rather than an error, so nothing here throws
-   * for it.
+   * ORDER IS THE OPERATION, and every step is load-bearing:
+   *
+   *   1. The Firebase identity is read here, at the moment of use, never passed in.
+   *   2. THE CODE IS CONFIRMED SERVER-SIDE. A wrong, expired, exhausted or absent code
+   *      is the server's ONE INVALID_VERIFICATION_CODE refusal and propagates unchanged
+   *      — nothing is reloaded and no token is minted for a failed confirm.
+   *   3. RELOAD, so Firebase itself reports the address verified: the Admin write
+   *      changed Firebase's record, not this device's cached copy.
+   *   4. RG-9 FORCED REFRESH. A cached token can still carry `email_verified:false`, so
+   *      only a token minted AFTER the reload may be presented to register/exchange.
+   *   5. Register a pending tenant when signup left one, then exchange, then apply.
+   *
+   * It resolves `null` when Firebase still reports the address unverified after a
+   * successful confirm — an ORDINARY state, not an error — so nothing throws for it.
    */
-  const completeEmailVerification = useCallback(async (): Promise<AuthUser | null> => {
-    const verified = await readEmailVerified();
-    if (!verified) return null;
-
-    let idToken: string | null;
-    try {
-      idToken = await nativeForceIdToken();
-    } catch (err) {
-      throw new FirebaseAuthError(nativeErrorCode(err), NO_FIREBASE_TOKEN_MESSAGE);
-    }
-    if (!idToken) throw new FirebaseAuthError(null, NO_FIREBASE_TOKEN_MESSAGE);
-
-    const deviceLabel = currentDeviceLabel();
-    try {
-      if (pendingRegistration && !firebaseAccountRegisteredRef.current) {
-        await api.firebaseRegister({
-          idToken,
-          businessName: pendingRegistration.businessName,
-          name: pendingRegistration.name,
-        });
-        firebaseAccountRegisteredRef.current = true;
+  const confirmVerificationCode = useCallback(
+    async (code: string): Promise<AuthUser | null> => {
+      const confirmToken = await currentFirebaseIdToken();
+      if (!confirmToken) {
+        throw new FirebaseAuthError(NO_FIREBASE_IDENTITY, NO_FIREBASE_IDENTITY_MESSAGE);
       }
-      const session: ApiResponse = await api.firebaseExchange({ idToken, deviceLabel });
-      await applySession(session.token, session.user, {
-        tokenExpiresAt: session.tokenExpiresAt ?? null,
-        sessionExpiresAt: session.sessionExpiresAt ?? null,
-      });
-      firebaseAccountRegisteredRef.current = false;
-      return session.user;
-    } catch (err) {
-      if (isRegistrationRequired(err)) armRegistrationRequired();
-      throw err;
-    }
-  }, [applySession, armRegistrationRequired, pendingRegistration]);
+
+      await api.confirmEmailVerification({ idToken: confirmToken, code });
+
+      const verified = await readEmailVerified();
+      if (!verified) return null;
+
+      let idToken: string | null;
+      try {
+        idToken = await nativeForceIdToken();
+      } catch (err) {
+        throw new FirebaseAuthError(nativeErrorCode(err), NO_FIREBASE_TOKEN_MESSAGE);
+      }
+      if (!idToken) throw new FirebaseAuthError(null, NO_FIREBASE_TOKEN_MESSAGE);
+
+      const deviceLabel = currentDeviceLabel();
+      try {
+        if (pendingRegistration && !firebaseAccountRegisteredRef.current) {
+          await api.firebaseRegister({
+            idToken,
+            businessName: pendingRegistration.businessName,
+            name: pendingRegistration.name,
+          });
+          firebaseAccountRegisteredRef.current = true;
+        }
+        const session: ApiResponse = await api.firebaseExchange({ idToken, deviceLabel });
+        await applySession(session.token, session.user, {
+          tokenExpiresAt: session.tokenExpiresAt ?? null,
+          sessionExpiresAt: session.sessionExpiresAt ?? null,
+        });
+        firebaseAccountRegisteredRef.current = false;
+        return session.user;
+      } catch (err) {
+        if (isRegistrationRequired(err)) armRegistrationRequired();
+        throw err;
+      }
+    },
+    [applySession, armRegistrationRequired, pendingRegistration]
+  );
+
+  /**
+   * AUTH-04-F — re-runs the READ-ONLY restart/resume probe. The unreachable state's
+   * Try Again calls this; it is user-initiated, never an automatic loop, and it can only
+   * ever set the in-memory onboarding state.
+   */
+  const retryVerificationResume = useCallback(async (): Promise<void> => {
+    setFirebaseOnboarding(await probeVerificationResume());
+  }, []);
 
   /**
    * Phase 16 - abandons the verification journey: ends the durable Firebase session and
@@ -1930,8 +2096,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       firebaseRegistrationRequired,
       firebaseOnboarding,
       pendingRegistration,
-      resendVerificationEmail,
-      completeEmailVerification,
+      verificationEntryError,
+      clearVerificationEntryError,
+      requestVerificationCode,
+      confirmVerificationCode,
+      retryVerificationResume,
       cancelFirebaseOnboarding,
       signInWithGoogle: googleSignIn,
       signOut,
@@ -1956,8 +2125,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       firebaseRegistrationRequired,
       firebaseOnboarding,
       pendingRegistration,
-      resendVerificationEmail,
-      completeEmailVerification,
+      verificationEntryError,
+      clearVerificationEntryError,
+      requestVerificationCode,
+      confirmVerificationCode,
+      retryVerificationResume,
       cancelFirebaseOnboarding,
       googleSignIn,
       signOut,

@@ -204,6 +204,9 @@ Retire the Browser Dependencies, the Plugin, the Second Scheme and the Native-In
         ↓
 Phase F2.9
 EAS Development Build & Android Runtime/Native Verification of F2
+        ↓
+AUTH-04
+Custom 6-Digit Email Verification (AUTH-04-A…H; G PASSED live 2026-10-04, H = documentation close-out)
 ```
 
 ---
@@ -5935,6 +5938,73 @@ this record.**
 - `docs/SYSTEM_SPECIFICATION.md` **§29** — the bridge paragraph now states the locked marker and its limits.
 - `CLAUDE.md` §2 and `README.md` — the phase entries gain this record.
 - **No historical record, snapshot, test-count figure or phase section was rewritten**, and **no file was deleted**. `requireAuth`, the session model/service, the bridge's design, the recovery screen and every existing route are **unchanged** — and the bridge itself is still **not implemented**.
+
+---
+
+# 27Y. AUTH-04 — the custom 6-digit email-verification code flow (documentation supersession)
+
+**Documentation only.** No application, mobile or server source, test, dependency, schema, index,
+environment variable, Firebase Console setting, EAS configuration or deployment change was made for this
+record, and no secret value is recorded. It supersedes the Firebase verification-link/resend
+*mechanism* selected by the design authority §14C.9.
+
+## What changed
+
+Email verification moves from **Firebase's own verification email/link plus native resend** to a
+**custom 6-digit Inventory AI verification code delivered through the provider-agnostic mail boundary (Brevo / Resend)**, with Firebase Admin
+`updateUser(uid, { emailVerified: true })` setting the final Firebase verification state. Firebase
+remains the identity provider; MongoDB remains the application authority; `requireAuth` is unchanged;
+the Inventory JWT/session is unchanged; Firebase UID remains the only join key and email is never a
+join key.
+
+## Locked design (design authority §14C.10, AD-1…AD-19)
+
+CSPRNG 6-digit code · HMAC-SHA256 with domain separation (`codeHmac`/`emailHmac`) · required
+`EMAIL_VERIFICATION_CODE_PEPPER` (503 `EMAIL_VERIFICATION_NOT_CONFIGURED`, no unkeyed fallback,
+production fail-fast) · 10-minute expiry · 5 attempts · 60-second resend cooldown · one active challenge
+per uid in `email_verification_challenges` · unique `{uid}` index + TTL `{expiresAt}` index (cleanup
+only) · atomic supersession · atomic attempt reservation · write-first/consume-second with `usedAt`
+never unset · concurrency-safe confirmation · already-verified idempotency · no plaintext
+code/email/pepper storage or logging · allowlisted structured logging.
+
+## API contract
+
+Two **pre-session Firebase-authenticated** (not public) endpoints —
+`POST /api/auth/email-verification/request { idToken }` and
+`POST /api/auth/email-verification/confirm { idToken, code }` — no `requireAuth`, no Inventory session,
+no client-controlled uid/email/userId/businessId/role. Error codes are recorded in design authority
+§14C.10.
+
+## Status (AUTH-04-H close-out, 2026-10-04)
+
+**SHIPPED.** AUTH-04-A through AUTH-04-F are shipped; **AUTH-04-G PASSED its live end-to-end acceptance
+gate on 2026-10-04 (Brevo)**; **AUTH-04-H** is this documentation close-out. The custom 6-digit flow is
+the shipped mechanism and the Firebase verification-link flow is no longer the current path.
+
+**Brevo / Resend.** The AUTH-04 delivery path runs through the provider-agnostic mail boundary. **Brevo
+is a supported provider and was the provider used for the AUTH-04-G live acceptance; Resend remains a
+supported provider.** `MAIL_PROVIDER` selects between them; `server/.env.example` documents both.
+
+**AUTH-04-G live acceptance (2026-10-04, Brevo).** Safe, non-secret evidence: request **HTTP 200** with
+the exact success envelope; Brevo **`sent`** → **`delivered`**; confirmation **HTTP 200** with
+**`Email verified.`**; Firebase `emailVerified` **false → true**; Mongo challenge **consumed** (`usedAt`
+set, one attempt spent); safe-log checks passed (no code, HMAC, token, API key, address, URI or pepper).
+
+## Resolved decision
+
+**Restart while unverified** is **closed by the shipped AUTH-04-F behaviour**: on restart, when no
+Inventory AI session token exists, the native Firebase identity is probed **read-only**; an **unverified**
+identity **resumes the verification screen**, a **verified** identity goes to **Login** for a user-driven
+exchange, and a **probe failure** produces the unreachable verification state. The probe performs **no
+automatic sign-in, exchange or session restoration**.
+
+## Files reconciled
+
+`docs/superpowers/specs/2026-09-18-firebase-auth-design.md` (§14C.9 RG-12/RG-13 annotated;
+**§14C.10** added), `docs/AUTH_SECURITY_MASTER_CHECKLIST.md` (§9 and §39 annotated; **§40** added),
+`docs/AUTHENTICATION_AND_USER_VERIFICATION_TARGET_ARCHITECTURE.md` (§6, §7, §44),
+`server/.env.example` (`EMAIL_VERIFICATION_CODE_PEPPER` name added). **Also reconciled by AUTH-04-H (2026-10-04):**
+`CLAUDE.md`, `README.md`.
 
 ---
 

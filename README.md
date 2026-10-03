@@ -185,7 +185,7 @@ default and needs no dashboard entry. Verify the current values in the Render da
 | `OPENROUTER_API_KEY`, `OPENROUTER_BASE_URL`, `AI_MODEL_OPENROUTER` | **required when `AI_PROVIDER=openrouter`** | the model has no default |
 | `FIREBASE_SERVICE_ACCOUNT_JSON` — or the three-variable form | **all-or-nothing** | a partially supplied service account fails fast; none at all = Firebase disabled |
 | `TRUST_PROXY` | **effectively required behind Render** | set to `1`; see below |
-| `MAIL_PROVIDER`, `MAIL_FROM`, `RESEND_API_KEY`, `PASSWORD_RESET_URL` | optional | missing any of them **disables password recovery only** (`forgot-password` answers 503) — the server still starts and serves every other feature. Resend remains the implemented transport; no Firebase reset flow is implemented |
+| `MAIL_PROVIDER`, `MAIL_FROM`, `RESEND_API_KEY`, `BREVO_API_KEY`, `PASSWORD_RESET_URL` | optional | `MAIL_PROVIDER` selects the transport (`resend` or `brevo`, each with its own key). Missing configuration **disables password recovery only** (`forgot-password` answers 503) — the server still starts and serves every other feature. The mail layer is provider-agnostic and both Brevo and Resend are supported (Brevo was used for the AUTH-04-G live acceptance); no Firebase reset flow is implemented |
 | `AUTH_*_RATE_LIMIT_*` — **eighteen** variables (nine window/limit pairs) | optional | the documented defaults are the production values; the count is taken from code, not estimated. AUTH-03 added the per-IP session-renewal pair (`AUTH_SESSION_RENEW_RATE_LIMIT_WINDOW_MS` / `AUTH_SESSION_RENEW_RATE_LIMIT_MAX`, default 15 min / 120). `TRUST_PROXY` and `JWT_SECRET` / `JWT_EXPIRES_IN` / `JWT_ISSUER` / `JWT_AUDIENCE` are listed separately above and are **not** `AUTH_*` variables |
 | `CORS_ORIGINS`, `JSON_BODY_LIMIT`, `SHUTDOWN_TIMEOUT_MS`, `LOG_REQUESTS` | optional | the documented defaults are the production values |
 
@@ -1204,6 +1204,21 @@ gate stays open and **iOS is entirely unverified**. **Nothing
   reset does **not** revoke Inventory AI sessions, which is the credential-change bridge's job (N-4,
   designed and not implemented). See `docs/DEVELOPMENT_ROADMAP.md` **§27U** and
   `docs/superpowers/specs/2026-09-18-firebase-auth-design.md` **§14C.4.2**.
+
+> **AUTH-04 supersession (2026-10-02; status updated 2026-10-04).** The entry below chose a **Firebase
+> verification link + native resend** mechanism. That mechanism is **superseded**: email verification is a
+> **custom 6-digit Inventory AI code delivered through the provider-agnostic mail boundary** (Brevo is a
+> supported provider and was used for the live acceptance; Resend remains supported), and Firebase's
+> `email_verified` state is set through the Admin SDK after a successful confirmation. The registration
+> ordering gate, the Firebase-UID-only join, MongoDB authority and the unmodified `requireAuth` are
+> preserved, and the server-side `EMAIL_NOT_VERIFIED` enforcement remains. This entry is preserved as the
+> historical record. See design `§14C.10`, checklist `§40`, roadmap `§27Y`.
+>
+> **AUTH-04 status (2026-10-04).** AUTH-04-A through AUTH-04-F are **shipped**; **AUTH-04-G PASSED its
+> live end-to-end acceptance gate on Brevo** (request HTTP 200 with the exact success envelope, Brevo
+> `sent` → `delivered`, confirmation HTTP 200 with `Email verified.`, Firebase `emailVerified` false →
+> true, Mongo challenge consumed, safe-log checks passed); **AUTH-04-H** is the documentation close-out.
+> The AUTH-04 request path also enforces a **60-second per-UID resend cooldown**.
 
 - **Phase 32O — Registration & Email-Verification Decisions (documentation only):** the **read-only
   registration/sign-up audit** is now written down and its open questions are **decided**, so N-5 no

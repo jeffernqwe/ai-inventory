@@ -4407,6 +4407,17 @@ user object keeps the historical behaviour. **The screen is not the boundary** �
 `/change-password` anyway is refused by the server, and the screen's existing error path renders that
 message.
 
+> **Widened 2026-10-07 (Phase C3 — see §27Z).** The paragraph above is **not rewritten**, and
+> `=== false` is still what keeps an older server's user object on the historical path. It became an
+> **under-statement**, though: the shipped gate now also denies the local password action to
+> `{ password: true, firebase: true }` — a legacy password account that later attached a Firebase
+> identity. `authMethodsFor` derives the two capabilities as exact complements today, so the current
+> server never produces that shape; the account it describes still has **no local password to
+> manage**, because `loginWithPassword` refuses it with 403 `FIREBASE_SIGN_IN_REQUIRED` and
+> `/change-password` answers 409 `PASSWORD_NOT_APPLICABLE` — its retained `passwordHash` is inert.
+> The shipped gate is therefore
+> `user?.authMethods?.password === false || user?.authMethods?.firebase === true`.
+
 ## 4. What was deliberately NOT done
 
 - **No retained `passwordHash` was deleted.** The unlink / last-authentication-method disposition is
@@ -6013,6 +6024,98 @@ automatic sign-in, exchange or session restoration**.
 `docs/AUTHENTICATION_AND_USER_VERIFICATION_TARGET_ARCHITECTURE.md` (§6, §7, §44),
 `server/.env.example` (`EMAIL_VERIFICATION_CODE_PEPPER` name added). **Also reconciled by AUTH-04-H (2026-10-04):**
 `CLAUDE.md`, `README.md`.
+
+---
+
+# 27Z. Phase C3 — the mobile sign-in vocabulary standard and the widened local-password gate (presentation only)
+
+**Presentation and gating only.** No server file, route, permission, role grant, session, schema, index,
+environment variable, dependency, EAS configuration or deployment setting changed, and **no new
+authentication capability was added**. The server remains the security boundary in every case below; this
+record documents the words the app uses and the condition under which it offers a local password action.
+Shipped in commit `ca0d4ae` — `refactor: standardise the mobile sign-in vocabulary and gate local password
+actions` — 7 files, +312/−59.
+
+## 1. The vocabulary standard
+
+The Profile identity area is now a **"Sign-in methods"** section that states what it is for ("Manage the
+ways you can sign in to your Inventory AI account.") and names each method in the user's terms rather than
+the implementation's:
+
+| Surface | Shipped wording |
+| --- | --- |
+| Local credential | **"Email & Password"** with the existing **"Change password"** action |
+| No identity attached | **"Google sign-in"** — "Use your Google account to sign in to Inventory AI." — action **"Add Google sign-in"** |
+| Credential held by the sign-in provider | **"Change sign-in password"**, and the same title on the `disconnect-firebase` screen in `mobile/app/(app)/_layout.tsx` |
+
+A separate **"Security"** card now holds the device-storage statement and the **"Active sessions"** entry,
+so the sign-in vocabulary is no longer mixed with storage and session hygiene.
+
+## 2. The rules the wording is held to
+
+- **An action is named for the person, not the implementation.** "Add Google sign-in", **never** "Connect
+  Google" as the app-facing action.
+- **"Disconnect Firebase" is retired and must not return.** That action was re-scoped into a password
+  change by Phase A / F-1; no Profile surface may carry the substring `disconnect` at all.
+- **No provider is named where the capability block does not establish which provider is involved.**
+  `authMethods` publishes a capability rather than the identity behind it, so a provider-held credential
+  could be Google **or** a Firebase email/password identity and the app cannot tell them apart. For
+  `{ password: false, firebase: true }` the rendered surface must contain neither `google` nor `firebase`.
+
+## 3. The widened gate
+
+The shipped condition is exactly:
+
+```ts
+user?.authMethods?.password === false || user?.authMethods?.firebase === true
+```
+
+The first half is Phase 32K's condition (§27M) — `password: false` is the server saying the local
+credential cannot authenticate. The second half is defensive, and it is the point of the pass:
+`{ password: true, firebase: true }` describes a **legacy password account that later attached a Firebase
+identity**, and for it the server keeps the `passwordHash` while `loginWithPassword` refuses the account
+with 403 `FIREBASE_SIGN_IN_REQUIRED` (Phase 32E, §27H) and `/change-password` answers 409
+`PASSWORD_NOT_APPLICABLE` (Phase 32K) **before** any hash comparison. The retained hash is inert, so the
+account has no local password to manage, and offering the action could only produce an error.
+
+**Capability is not credential existence.** `authMethodsFor` (`server/src/services/auth.service.ts:230`)
+derives `{ password: !firebaseUid, firebase: Boolean(firebaseUid) }`, so the current server produces only
+`{ true, false }` and `{ false, true }`; the widened branch covers a shape the server does not produce
+today. `password: false` does **not** mean "no credential exists" — a Firebase-linked account still
+retains its legacy hash.
+
+| Account | Password authority | Local password action offered |
+| --- | --- | --- |
+| Mongo-only (`firebaseUid` absent) | Local bcrypt hash | Yes |
+| Firebase-linked legacy (`{ password: true, firebase: true }`) | Firebase | No — provider-managed line |
+| Firebase-native / provider-held (`{ password: false, firebase: true }`) | Firebase | No — provider-managed line |
+| User object without `authMethods` (older server) | Unchanged | Yes — historical behaviour preserved |
+
+Both halves are tested with `===`, so an older server's user object — one without `authMethods` at all —
+keeps the historical behaviour rather than losing the control.
+
+## 4. What was deliberately NOT done
+
+- **No authentication capability was added and no server guard changed.** 403 `FIREBASE_SIGN_IN_REQUIRED`,
+  409 `PASSWORD_NOT_APPLICABLE`, `requireAuth`, the session model and the RBAC matrix are exactly as Phases
+  32E and 32K left them; no server file was touched by this pass.
+- **No credential was deleted or re-enabled.** The retained `passwordHash` stays retained and inert, and
+  the unlink / last-authentication-method disposition remains Phase 32L's **Policy B** (§27Q).
+- **The gate is not a security control.** It only stops the UI offering an action the server would refuse;
+  the server refuses it regardless, and the screen re-checks the same capability.
+
+## Verification
+
+- **Mobile:** the four focused suites — `auth-terminology-standard`, `phase32k-password-capability-gating`,
+  `phase32m-connect-google-profile`, `phaseA-change-password-screen` — **4 suites / 29 tests, 0 fail**;
+  full `npx jest` — **47 suites / 644 tests, 0 fail**; `tsc --noEmit` and `eslint .` clean.
+- **New suite:** `mobile/__tests__/auth-terminology-standard.test.tsx` (182 lines, 5 cases) pins the
+  vocabulary and the two rules above, including that the provider-held surface names neither provider.
+- **No server suite was run for this pass**, because no server file changed.
+
+> **Cross-reference added 2026-10-07 (Phase C3).** The Phase 32K gate sentence at §27M — "The test is
+> `=== false`, not falsiness" — is **not rewritten**; it is annotated as widened. See the annotation in
+> §27M and §41 of `docs/AUTH_SECURITY_MASTER_CHECKLIST.md`.
 
 ---
 

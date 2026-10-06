@@ -350,7 +350,7 @@ export default function ChangeFirebasePasswordScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: 'Change password' }} />
+      <Stack.Screen options={{ title: 'Change sign-in password' }} />
       <Screen scroll contentStyle={styles.content}>
         <Banner type="error" text={formError} />
         {info ? <Banner type="info" text={info} /> : null}
@@ -441,8 +441,8 @@ export default function ChangeFirebasePasswordScreen() {
             <SectionHeader title="Step 2 · Choose a new password" />
             <Card>
               <Text style={styles.help}>
-                This account will sign in with this password from now on. Your Firebase sign-in stays
-                connected — this replaces the password, it does not remove the account&apos;s sign-in.
+                This account will sign in with this password from now on. Changing your password does
+                not remove the account&apos;s sign-in — it replaces the password only.
               </Text>
               <Input
                 name="newPassword"
@@ -466,7 +466,12 @@ export default function ChangeFirebasePasswordScreen() {
                 required
                 autoCapitalize="none"
               />
-              <Button title="Change password" loading={busy} style={styles.spaced} onPress={submit} />
+              <Button
+                title="Change sign-in password"
+                loading={busy}
+                style={styles.spaced}
+                onPress={submit}
+              />
               <Button
                 title="Back"
                 variant="secondary"

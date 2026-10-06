@@ -46,7 +46,7 @@ export default function ProfileScreen() {
   const [connectNotice, setConnectNotice] = useState<string | null>(null);
 
   /**
-   * Phase 32M — Connect Google, from the Security card.
+   * Phase 32M — Add Google sign-in, from the Sign-in methods card.
    *
    * THE SERVER DECIDES EVERYTHING. This handler starts the flow, reports what came
    * back, and does nothing else: it holds no token, no uid and no email, and it sends
@@ -57,8 +57,8 @@ export default function ProfileScreen() {
    * `cancelled` and `in-flight` are ORDINARY, so neither shows anything: closing the
    * Google sheet is not a failure, and a duplicate tap that started nothing must not
    * report one. A success shows a notice rather than a banner-only silence, because the
-   * Connect action disappears in the same commit — the visible change is that the
-   * account now offers Disconnect instead, and the sentence is what explains it.
+   * action disappears in the same commit — the account can no longer be offered the
+   * method it now has — and the sentence is what explains the change.
    *
    * A REFUSAL SHOWS THE SERVER'S OWN SENTENCE. The conflict message is deliberately
    * generic server-side — it may not say whether the identity belongs to someone else or
@@ -74,12 +74,14 @@ export default function ProfileScreen() {
     try {
       const outcome = await connectFirebase();
       if (outcome.kind === 'linked') {
-        setConnectNotice('Google is now connected. You can sign in with Google or your password.');
+        setConnectNotice(
+          'Google sign-in connected. You can now sign in with Google or your password.'
+        );
       }
     } catch (err) {
       setConnectError(
         (err as { message?: string } | null)?.message ||
-          'Unable to connect Google. Please try again.'
+          'Unable to add Google sign-in. Please try again.'
       );
     } finally {
       setConnectBusy(false);
@@ -125,47 +127,62 @@ export default function ProfileScreen() {
         />
       </Card>
 
-      <SectionHeader title="Security" style={styles.section} />
+      <SectionHeader title="Sign-in methods" style={styles.section} />
       <Card>
+        <Text style={styles.securityText}>
+          Manage the ways you can sign in to your Inventory AI account.
+        </Text>
         {/* Both render nothing when empty, so only the live feedback shows. */}
         <Banner type="success" text={connectNotice} />
         <Banner type="error" text={connectError} />
-        <Text style={styles.securityText}>
-          Inventory AI keeps your sign-in on this device&apos;s secure storage. Permissions and business data are
-          always enforced by the server — the app never stores your password.
-        </Text>
-        <Button
-          title="Active sessions"
-          variant="secondary"
-          style={styles.editName}
-          onPress={() => router.push('/sessions')}
-        />
         {/**
-         * Phase 32K — local password management is offered only where the server
-         * says it applies. `authMethods.password` is false for an account whose
-         * credential is held by its sign-in provider: Firebase is the
-         * authentication authority for such an account, so the server refuses a
-         * local password change outright (409 `PASSWORD_NOT_APPLICABLE`) and
+         * Phase 32K, widened by this pass — local password management is offered only
+         * where the server will actually accept it. `authMethods.password` is false
+         * for an account whose credential is held by its sign-in provider: Firebase
+         * is the authentication authority for such an account, so the server refuses
+         * a local password change outright (409 `PASSWORD_NOT_APPLICABLE`) and
          * showing the control would only lead to that rejection.
          *
-         * The test is `=== false`, not falsiness, so the historical behaviour is
-         * the default: a user object without the field — an older server, or a
-         * response that predates this phase — still gets the button.
+         * THIS PASS ADDS THE SECOND HALF OF THE CONDITION, and it is the point rather
+         * than a tidy-up. `{ password: true, firebase: true }` describes an account
+         * that still carries a local password AND authenticates through a Firebase
+         * identity — a legacy password account that later attached one. For it the
+         * server keeps the `passwordHash` but `loginWithPassword` refuses the account
+         * with 403 `FIREBASE_SIGN_IN_REQUIRED`, so the retained hash no longer
+         * authenticates anyone and `/change-password` answers 409
+         * `PASSWORD_NOT_APPLICABLE` exactly as it does for a native Firebase account.
+         * Reading `password: true` alone as "this account manages its own password"
+         * therefore offered an action whose only possible outcome was an error.
          *
-         * Nothing here is a security control. The server is the boundary either
-         * way; this only stops the UI from offering an action it knows will fail.
+         * THE CURRENT SERVER DOES NOT PRODUCE THAT SHAPE. `authMethodsFor` derives the
+         * two capabilities as exact complements of `firebaseUid`, so today an account
+         * is either `{ true, false }` or `{ false, true }`. This branch is defensive:
+         * the shape is reachable if the capability block is ever derived differently
+         * (the reasoning Phase 32M already pins for the same combination), and the
+         * cost of covering it now is one condition instead of a dead end later.
+         *
+         * Both halves are tested with `===`, so the historical behaviour survives in
+         * exactly the cases that must keep it: a user object without `authMethods` (an
+         * older server, or a response that predates these fields) still gets the local
+         * button, and so does an account that is neither provider-owned nor linked.
+         *
+         * Nothing here is a security control. The server is the boundary either way;
+         * this only stops the UI from offering an action it knows will fail.
          */}
-        {user?.authMethods?.password === false ? (
+        {user?.authMethods?.password === false || user?.authMethods?.firebase === true ? (
           <Text style={[styles.securityText, styles.spaced]}>
             Your password is managed by your sign-in provider. Use the action below to change it.
           </Text>
         ) : (
-          <Button
-            title="Change password"
-            variant="secondary"
-            style={styles.spaced}
-            onPress={() => router.push('/change-password')}
-          />
+          <>
+            <Text style={styles.methodLabel}>Email & Password</Text>
+            <Button
+              title="Change password"
+              variant="secondary"
+              style={styles.spaced}
+              onPress={() => router.push('/change-password')}
+            />
+          </>
         )}
         {/**
          * Phase A (F-1) — the password-change entry point for a Firebase account.
@@ -192,7 +209,7 @@ export default function ProfileScreen() {
          * capability, and the server is the boundary in every case.
          */}
         {/**
-         * Phase 32M — the Connect Google entry point, offered only where reconnecting
+         * Phase 32M — the Add Google sign-in entry point, offered only where reconnecting
          * is both possible and meaningful.
          *
          * THE GATE IS THE SERVER'S OWN CAPABILITY BLOCK, tested with `===` on BOTH
@@ -210,23 +227,48 @@ export default function ProfileScreen() {
          * from the session and the verified token, and no client value reaches it.
          */}
         {user?.authMethods?.firebase === false && user?.authMethods?.password === true ? (
-          <Button
-            title="Connect Google"
-            variant="secondary"
-            style={styles.spaced}
-            loading={connectBusy}
-            disabled={connectBusy}
-            onPress={onConnectGoogle}
-          />
+          <>
+            <Text style={styles.methodLabel}>Google sign-in</Text>
+            <Text style={styles.securityText}>
+              Use your Google account to sign in to Inventory AI.
+            </Text>
+            <Button
+              title="Add Google sign-in"
+              variant="secondary"
+              style={styles.spaced}
+              loading={connectBusy}
+              disabled={connectBusy}
+              onPress={onConnectGoogle}
+            />
+          </>
         ) : null}
         {user?.authMethods?.firebase === true ? (
-          <Button
-            title="Change sign-in password"
-            variant="secondary"
-            style={styles.spaced}
-            onPress={() => router.push('/disconnect-firebase')}
-          />
+          <>
+            <Text style={[styles.securityText, styles.spaced]}>
+              Change the password you use to sign in to your Inventory AI account.
+            </Text>
+            <Button
+              title="Change sign-in password"
+              variant="secondary"
+              style={styles.spaced}
+              onPress={() => router.push('/disconnect-firebase')}
+            />
+          </>
         ) : null}
+      </Card>
+
+      <SectionHeader title="Security" style={styles.section} />
+      <Card>
+        <Text style={styles.securityText}>
+          Inventory AI keeps your sign-in on this device&apos;s secure storage. Permissions and business data are
+          always enforced by the server — the app never stores your password.
+        </Text>
+        <Button
+          title="Active sessions"
+          variant="secondary"
+          style={styles.editName}
+          onPress={() => router.push('/sessions')}
+        />
       </Card>
 
       <Button title="Refresh account" variant="secondary" style={styles.spaced} onPress={() => refresh()} />
@@ -258,5 +300,9 @@ const createStyles = (colors: Palette) => StyleSheet.create({
   detailValue: { ...type.body, color: colors.text, fontWeight: '600' },
   editName: { marginTop: spacing.lg },
   securityText: { ...type.bodySmall, color: colors.textSecondary },
+  // The user-facing NAME of a sign-in method, above its description and action.
+  // Sentence-cased words rather than implementation names, and no provider is
+  // named where the account's provider is not knowable (see the phase comments).
+  methodLabel: { ...type.label, color: colors.text, marginTop: spacing.lg },
   spaced: { marginTop: spacing.md },
 });

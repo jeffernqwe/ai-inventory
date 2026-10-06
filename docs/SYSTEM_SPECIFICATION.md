@@ -1358,6 +1358,19 @@ signed-in Firebase user; the server neither performs it nor has an API for it, a
 provider is not a server-side operation at all — the UID does not change, so from the Inventory AI
 side a Firebase account with several providers is simply one `firebaseUid`.
 
+> **Superseded in part 2026-10-07.** Three of the claims above no longer hold. **A "Connect Google" UI
+> exists** — the Profile action is **"Add Google sign-in"** (Phase C3; Phase 32M before it) — and it
+> **acquires a provider credential**: `nativeSignInWithGoogle` (`mobile/lib/firebase-native.ts`) runs the
+> native Google consent, wraps Google's `id_token` with `GoogleAuthProvider.credential` and calls
+> `signInWithCredential`, and `connectFirebase` (`mobile/lib/auth.tsx`) then sends the resulting Firebase
+> ID token to the shipped `POST /api/auth/firebase/link`. **There is still no OAuth redirect flow** (the
+> browser path was retired by Phases F1/F2) **and no provider field on any model** — both remain true. And
+> **the `unlink` route is absent again, for a different reason**: Phase 32L *shipped* it and Phase A / F-1
+> (`6e2252f`) *removed* it, so its absence is a removal rather than an omission. The closing sentence still
+> stands in substance: Firebase's own provider linking (`linkWithCredential`) is performed by no code path
+> in this implementation — the client authenticates with Google at Firebase, and the server attaches the
+> verified UID.
+
 ### Facebook and Missing Email
 
 The `User` model requires an email. Facebook may not provide a usable email address for every
@@ -1683,6 +1696,14 @@ model. *(**Superseded in part 2026-09-26 (Phase 32L): the server-side unlink bou
 `POST /api/auth/firebase/unlink`, under Policy B — while Firebase-side provider unlinking remains a
 client-SDK operation the server cannot observe and no provider SDK was installed. This sentence is the
 Phase 32F record and is not rewritten.)* The boundary is what Google and Facebook will converge on; it is not Google or Facebook.
+
+> **Further superseded 2026-10-07 (Phase A / F-1).** The 32L note above is itself now historical: Phase A /
+> F-1 (`6e2252f`) **removed `POST /api/auth/firebase/unlink`** — route, service, controller handler, payload
+> validator, both audit actions and the mobile API wrapper — and re-scoped the operation into a **credential
+> change** (Firebase `updatePassword` → the credentials-changed bridge). **There is no unlink capability and
+> no unlink route**, and `firebaseUid` is never cleared. The provider side is meanwhile **partly
+> implemented**: a Google sign-in UI exists ("Add Google sign-in") and acquires a Google credential, while
+> Facebook and Apple remain unimplemented and no Facebook provider SDK is installed.
 
 ---
 

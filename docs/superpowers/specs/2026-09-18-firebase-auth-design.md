@@ -1548,6 +1548,15 @@ audit action.
 > finding about *recency*. That is why the protection is enforced **server-side and never delegated to
 > Firebase**. `O-1`'s row in §14A.5 carries the same dated annotation.
 
+> **Superseded again 2026-10-01 (Phase A / F-1 — `6e2252f`).** The capability the note above records as
+> shipped **no longer exists**: `POST /api/auth/firebase/unlink`, `firebaseUnlink.service.ts`, the controller
+> handler, the payload validator, both audit actions and the mobile API wrapper were **removed, not
+> deprecated**, and the operation was re-scoped into a **credential change** (Firebase `updatePassword` →
+> the credentials-changed bridge). The measurements that note records — the last-provider refutation and the
+> 390-second recency finding — remain historical facts about Firebase and are **not** rewritten; Policy B's
+> *server-side* unlink path is simply no longer reachable, because the path is gone. See
+> `CLAUDE.md`'s committed Phase F-1 correction and `docs/AUTH_SECURITY_MASTER_CHECKLIST.md` §8.
+
 ### 14B.7 Verification
 
 `server/test/phase32h-firebase-linking.test.mjs` — one unit suite (no database) and one DB-backed
@@ -2435,7 +2444,7 @@ password can be reset through one system and not the other."* The plan closes in
 | # | Item | Kind |
 | --- | --- | --- |
 | **OD-1** | The bridge's exact endpoint name and payload shape. `POST /api/auth/credentials-changed` with `{ idToken }` is proposed; the semantics of §14C.3 are the substance and the name is not. | Decision |
-| **OD-2** | **Does unlink survive at all?** Policy B exists to move an account **from Firebase to a local password**. Firebase-only removes the destination. Options: remove unlink entirely; re-scope it to provider changes only; or keep a client-side "disconnect Google" the server cannot observe. **Blocks N-8.** | Decision |
+| **OD-2** | **Does unlink survive at all?** Policy B exists to move an account **from Firebase to a local password**. Firebase-only removes the destination. Options: remove unlink entirely; re-scope it to provider changes only; or keep a client-side "disconnect Google" the server cannot observe. **Blocks N-8.** — **PARTLY ANSWERED 2026-10-01 (Phase A / F-1):** the server-side ability to unlink was **removed outright** (`6e2252f`) and the operation re-scoped into a credential change, so the "remove unlink entirely" option is what shipped at the server; what stays open is the Firebase-side provider unlink the server cannot observe. | Decision |
 | **OD-3** | **`emailVerified` enforcement mechanics (L-6, L-7).** — **RESOLVED 2026-09-29 (Phase 32O, §14C.9).** The gate is the **registration ordering** — no tenant, no account and no session exist until the email is verified — plus a **client verify screen** for the signed-in-but-unverified identity; **`requireAuth` is deliberately NOT modified (RG-7)**, so the Phase 23/24 authorization order and status-code contract are preserved; an unverified Google identity is **refused**, not merely warned (RG-11); resend is **native Firebase Auth** (RG-12); and the stale `User.emailVerified` problem (F-6) is **bounded rather than eliminated** — the gate applies at registration time and no per-request Firebase check is added (RG-10). The fifteen registration decisions are **RG-1…RG-15**, and audit gaps **D-5…D-9** are closed there. **This resolves O-3, and it is a behaviour change** (§14.2) — of the registration flow only. | **RESOLVED (§14C.9)** |
 | **OD-4** | **O-10, the invitation model** — model, lifetime, single-use semantics, route surface, revocation, and how it replaces `users.manage` create. **Blocks N-9 (and therefore N-6).** | Decision, already open |
 | **OD-5** | **The 26B/27 artefact disposition** on removal: deleted, or archived. Project convention forbids silent deletion. | Decision |

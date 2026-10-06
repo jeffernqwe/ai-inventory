@@ -52,10 +52,10 @@ These are non-negotiable. Future work must not break any of them.
 | I-10 | **A Firebase-linked user has no second password door** — legacy login refuses with 403 `FIREBASE_SIGN_IN_REQUIRED`. | `[✓]` | Phase 32E/32K. |
 | I-11 | **Session revocation rules** — a token with no/invalid/revoked/expired `jti` is refused. | `[✓]` | Phase 26A; `middlewares/authenticate.ts`. |
 | I-12 | **Password/session invalidation** — `passwordChangedAt` rejects earlier tokens (`SESSION_INVALIDATED`). | `[✓]` | Phase 15; unchanged vs `SESSION_REVOKED`. |
-| I-13 | **Re-authentication required** for the Firebase unlink sensitive operation (signed `auth_time`, 300 s, fail-closed). | `[✓]` | `constants/firebase.ts`; `firebaseUnlink.service.ts`. |
+| I-13 | **Re-authentication required** for the Firebase unlink sensitive operation (signed `auth_time`, 300 s, fail-closed). *(The unlink operation was removed by Phase A / F-1; the same requirement now guards the credential-change bridge — see §8.)* | `[✓]` | `constants/firebase.ts`. *(`firebaseUnlink.service.ts` was removed by Phase A / F-1 — see §8.)* |
 | I-14 | **Account linking rules** — authenticated, own-account only, email never a join key, conflicts refused with one 409. | `[✓]` | Phase 32H. |
-| I-15 | **Account unlinking rules** — Policy B: a new local password must be established in the same transition; no zero-method account. | `[✓]` | Phase 32L-A; design §27Q. |
-| I-16 | **No cross-business account movement** — a link/unlink writes only `firebaseUid`/`emailVerified`/`passwordHash`; `businessId` is never assigned. | `[✓]` | `firebaseLink.service.ts`, `firebaseUnlink.service.ts`. |
+| I-15 | **Account unlinking rules** — Policy B: a new local password must be established in the same transition; no zero-method account. *(The unlink operation itself was removed by Phase A / F-1 — see §8.)* | `[✓]` | Phase 32L-A — **removed by Phase A / F-1** (see §8); design §27Q. |
+| I-16 | **No cross-business account movement** — a link/unlink writes only `firebaseUid`/`emailVerified`/`passwordHash`; `businessId` is never assigned. *(The invariant holds for linking; the unlink half was removed by Phase A / F-1 — see §8.)* | `[✓]` | `firebaseLink.service.ts`. *(`firebaseUnlink.service.ts` was removed by Phase A / F-1 — see §8.)* |
 | I-17 | **No sensitive credential/token/hash logging** — no password, Firebase token, JWT, `jti`, reset token, or secret is logged. | `[✓]` | `mail/*` discards provider message; audit rows omit `jti` and uid. |
 | I-18 | **Disabled users cannot authenticate or use protected APIs.** | `[✓]` | `authenticate.ts` ACTIVE check; Phase 14A disable-revokes-login. |
 | I-19 | **Business suspension/archive** blocks authentication and protected use. | `[✓]` | `assertActiveBusiness` (live); `ACCOUNT_DISABLED` / business-status refusal. |
@@ -166,7 +166,7 @@ Repository implementation is separated from Firebase Console / external setup.
 | `[~]` | **Firebase sign-out** | Yes (pending marker) | device-time | D-E1 |
 | `[~]` | **Reauthentication** | `auth_time` freshness implemented | live-project needed | `constants/firebase.ts` |
 | `[✓]` | **Linking (native provider side)** | Client-SDK operation | **not server-observable** | §7 |
-| `[✓]` | **Unlinking (server side)** | Policy B | code + test | Phase 32L-A |
+| `[✓]` | **Unlinking (server side)** | Policy B | code + test | Phase 32L-A — **removed by Phase A / F-1** (see §8) |
 | `[✓]` | **Android build** | EAS build `f3038fa1…` | FINISHED | §27P |
 | `[✓]` | **Android runtime** | `emulator-5554`, 0 fatals | verified | §27P |
 | `[⛔]` | **iOS build** | Not possible on host | P-6 | design §14A.11 |
@@ -307,6 +307,19 @@ verified. It is **not** recorded as deferred work.
 
 ## 8. ACCOUNT UNLINKING (Phase 32L-A / 32L-B, Policy B)
 
+> **⛔ SUPERSEDED 2026-10-01 (Phase A / F-1).** `POST /api/auth/firebase/unlink` **does not exist**. Phase
+> F-1 (`6e2252f`) **removed it rather than deprecating it**: the route, the controller handler, the payload
+> validator, `server/src/services/firebaseUnlink.service.ts` (402 lines), both audit actions
+> (`FIREBASE_IDENTITY_UNLINKED` and `FIREBASE_IDENTITY_UNLINK_CONFLICT` — no longer declared in
+> `server/src/constants/audit.ts`), the mobile API wrapper and `server/test/phase32l-firebase-unlink.test.mjs`
+> are all gone. The operation was re-scoped into a **credential change** — Firebase `updatePassword`, then
+> the credentials-changed bridge, then the session the sequence ends with — so `firebaseUid` is **never
+> cleared** and no reachable path clears it. **The table below is the historical Phase 32L record and is not
+> rewritten:** its `[✓]` rows describe a capability that shipped and was later removed, and none of them
+> describes the current state. The removal is recorded in `CLAUDE.md`'s committed **Phase F-1 correction**
+> and in commit `6e2252f` itself; design authority **§14B.6**. **The roadmap has no section recording this
+> removal** — that history gap is noted here rather than papered over.
+
 | Status | Item | Detail |
 | --- | --- | --- |
 | `[✓]` | **Authenticated unlink** | `POST /api/auth/firebase/unlink`. |
@@ -346,7 +359,7 @@ verified. It is **not** recorded as deferred work.
 | Status | Item | Detail |
 | --- | --- | --- |
 | `[✓]` | **Firebase email verification state** | `email_verified` read from the verified token. |
-| `[✓]` | **Mongo `emailVerified` persistence** | Written on exchange/link/unlink (`models/user.model.ts`). |
+| `[✓]` | **Mongo `emailVerified` persistence** | Written on exchange/link/unlink (`models/user.model.ts`). *(The unlink part was removed by Phase A / F-1 — see §8.)* |
 | `[—]` | **Whether verification is currently enforced** | **NOT enforced.** No authorization decision reads `emailVerified` (verified: write-only sites). |
 | `[—]` | **Authorization gates** | None. |
 | `[—]` | **Login restrictions** | None. |
@@ -393,7 +406,7 @@ verified. It is **not** recorded as deferred work.
 
 | Status | Item | Detail |
 | --- | --- | --- |
-| `[✓]` | **Password creation** | Register / reset / unlink establish a bcrypt hash. |
+| `[✓]` | **Password creation** | Register / reset / unlink establish a bcrypt hash. *(The unlink part was removed by Phase A / F-1 — see §8.)* |
 | `[✓]` | **Password hashing** | bcrypt cost 10; `select:false`. |
 | `[✓]` | **Password login** | See §2. |
 | `[✓]` | **Password change** | `POST /api/auth/change-password`; policy min 8. |
@@ -443,7 +456,7 @@ verified. It is **not** recorded as deferred work.
 | `[✓]` | **Revoked sessions** | Kept until TTL; cannot be silently re-created. |
 | `[✓]` | **Password-change invalidation** | `SESSION_INVALIDATED` (distinct from `SESSION_REVOKED`). |
 | `[✓]` | **Password-reset invalidation** | `passwordChangedAt` + `revokeAllSessions`. |
-| `[✓]` | **Firebase unlink invalidation** | All sessions revoked. |
+| `[✓]` | **Firebase unlink invalidation** | All sessions revoked. *(Removed by Phase A / F-1 — see §8.)* |
 | `[✓]` | **Disabled-user behaviour** | ACTIVE check each request. |
 | `[✓]` | **Business suspension/archive behaviour** | `assertActiveBusiness`. |
 | `[✓]` | **Role reload** | Per request from Mongo. |
@@ -461,12 +474,12 @@ verified. It is **not** recorded as deferred work.
 
 | Status | Item | Detail |
 | --- | --- | --- |
-| `[✓]` | **Firebase reauth** | Required for unlink. |
+| `[✓]` | **Firebase reauth** | Required for unlink. *(Re-scoped: Phase A / F-1 removed unlink; the same freshness now guards the credential-change bridge — see §8.)* |
 | `[✓]` | **Signed `auth_time`** | Read from verified claim. |
 | `[✓]` | **300-second freshness window** | Frozen (Option D). |
 | `[✓]` | **Fail-closed handling** | Cannot be chosen by a client. |
-| `[✓]` | **Unlink protection** | The one implemented step-up point. |
-| `[ ]` | **Future sensitive-operation step-up** | Not implemented beyond unlink. |
+| `[✓]` | **Unlink protection** | The one implemented step-up point. *(Removed by Phase A / F-1 — see §8.)* |
+| `[ ]` | **Future sensitive-operation step-up** | Not implemented beyond unlink. *(Unlink no longer exists — Phase A / F-1; see §8.)* |
 | `[ ]` | **Password-change step-up** | Not implemented. |
 | `[ ]` | **Email-change step-up** | Not applicable yet (§10). |
 | `[ ]` | **MFA step-up** | Future (§21). |
@@ -514,7 +527,7 @@ verified. It is **not** recorded as deferred work.
 | `[✓]` | **Subscription/billing ownership** | **Business/tenant**, never a Firebase identity (V4 direction recorded). |
 | `[✓]` | **Firebase identity separation from tenant authority** | Structure. |
 | `[✓]` | **Account linking across businesses** | Impossible — no `businessId` write. |
-| `[✓]` | **Account unlinking across businesses** | Impossible — same. |
+| `[✓]` | **Account unlinking across businesses** | Impossible — same. *(Removed by Phase A / F-1 — see §8.)* |
 
 ---
 
@@ -527,13 +540,13 @@ verified. It is **not** recorded as deferred work.
 | `[✓]` | **Firebase-linked** | `firebaseUid` set; password door refused. |
 | `[✓]` | **Password-authenticated** | Legacy path. |
 | `[✓]` | **Provider-linked** | Provider recorded on the Firebase identity. |
-| `[✓]` | **Unlinked** | Policy B; new local password. |
+| `[✓]` | **Unlinked** | Policy B; new local password. *(Removed by Phase A / F-1 — see §8.)* |
 | `[✓]` | **Password changed** | Stamps `passwordChangedAt`. |
 | `[✓]` | **Password reset** | Full flow. |
-| `[✓]` | **Sessions revoked** | On change/reset/unlink/logout. |
+| `[✓]` | **Sessions revoked** | On change/reset/unlink/logout. *(The unlink part was removed by Phase A / F-1 — see §8.)* |
 | `[ ]` | **Account recovery (broader)** | Beyond password reset — missing (§22). |
 | `[ ]` | **Future deletion/deactivation rules** | Undefined; products are archive-only; user hard-delete not specified. |
-| `[✓]` | **Audit implications** | Status/role/link/unlink/session events recorded (§17). |
+| `[✓]` | **Audit implications** | Status/role/link/unlink/session events recorded (§17). *(The unlink part was removed by Phase A / F-1 — see §8.)* |
 
 ---
 
@@ -549,7 +562,7 @@ verified. It is **not** recorded as deferred work.
 | `[✓]` | **Password reset** | `PASSWORD_RESET_REQUESTED` / `_COMPLETED` (no metadata). |
 | `[✓]` | **Password change** | `USER_UPDATED` path. |
 | `[✓]` | **Linking** | `FIREBASE_IDENTITY_LINKED` / `_CONFLICT` (uid omitted). |
-| `[✓]` | **Unlinking** | `FIREBASE_IDENTITY_UNLINKED` / `_CONFLICT`. |
+| `[✓]` | **Unlinking** | `FIREBASE_IDENTITY_UNLINKED` / `_CONFLICT`. *(Both actions were removed by Phase A / F-1 — see §8.)* |
 | `[✓]` | **Role changes** | `USER_UPDATED`. |
 | `[✓]` | **User status changes** | `USER_UPDATED`. |
 | `[~]` | **Business lifecycle changes** | No dedicated business-status audit action observed. |
@@ -597,7 +610,7 @@ Connects existing controls to future controls **without** claiming missing featu
 | `[✓]` | **Session revocation** | Immediate, server-side. |
 | `[✓]` | **Sign-out-everywhere** | Implemented. |
 | `[✓]` | **Firebase identity authority** | UID-authoritative; no email join. |
-| `[✓]` | **Reauthentication** | 300 s freshness for unlink. |
+| `[✓]` | **Reauthentication** | 300 s freshness for unlink. *(Re-scoped: Phase A / F-1 removed unlink — see §8.)* |
 | `[!]` | **Email verification** | Not enforced (O-3) — a real gap for provider-asserted addresses. |
 | `[ ]` | **Email change protection** | Capability absent (§10). |
 | `[ ]` | **MFA** | Future (§21). |
@@ -605,7 +618,7 @@ Connects existing controls to future controls **without** claiming missing featu
 | `[ ]` | **Failed-login detection** | Only rate limiting. |
 | `[ ]` | **Suspicious-login detection** | Not implemented. |
 | `[✓]` | **Provider linking protection** | Own-account, conflict-refused, no email auto-link. |
-| `[✓]` | **Provider unlink protection** | Policy B + freshness + sessions revoked. |
+| `[✓]` | **Provider unlink protection** | Policy B + freshness + sessions revoked. *(Removed by Phase A / F-1 — see §8.)* |
 | `[ ]` | **Break-glass recovery** | Not implemented (§22). |
 | `[~]` | **Firebase revocation** | `checkRevoked:true` (**AUTH-01**); no disable sync (§23). |
 | `[~]` | **Account containment** | Disable-user revokes access immediately; no compromise playbook. |

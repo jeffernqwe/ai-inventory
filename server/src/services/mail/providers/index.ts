@@ -2,11 +2,11 @@
  * Mail provider registry, mirroring services/ai/providers/index.ts.
  *
  * A module-level registry sits in front of a small BUILTINS table so tests can
- * swap the transport through a seam rather than through the network. `resend` is
- * the only built-in, and there is deliberately no console or file provider: a
- * development provider that "delivers" by printing would put the raw reset token
- * into the logs, which is the one thing this whole layer exists to prevent. When
- * mail is unconfigured the honest behaviour is to say so.
+ * swap the transport through a seam rather than through the network. `resend` and
+ * `brevo` are the two built-ins, and there is deliberately no console or file
+ * provider: a development provider that "delivers" by printing would put the raw
+ * reset token into the logs, which is the one thing this whole layer exists to
+ * prevent. When mail is unconfigured the honest behaviour is to say so.
  *
  * Configuration is read at call time, never at import time, so a test can change
  * process.env and observe the new value without reloading the module — and so a
@@ -14,6 +14,7 @@
  */
 
 import { createResendProvider } from './resendProvider.ts';
+import { createBrevoProvider } from './brevoProvider.ts';
 import { MailNotConfigured } from '../mailErrors.ts';
 
 /**
@@ -63,6 +64,10 @@ const BUILTINS: Record<string, MailProviderEntry> = {
   resend: {
     factory: createResendProvider,
     requiredEnv: ['RESEND_API_KEY', 'MAIL_FROM'],
+  },
+  brevo: {
+    factory: createBrevoProvider,
+    requiredEnv: ['BREVO_API_KEY', 'MAIL_FROM'],
   },
 };
 

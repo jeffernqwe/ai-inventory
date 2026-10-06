@@ -239,6 +239,30 @@ describe('N-3 — the request: Firebase first, the custom flow only when unconfi
     }
   );
 
+  it('also reports the NATIVE spelling `auth/email-not-found` as sent', async () => {
+    mockIsFirebaseConfigured.mockReturnValue(true);
+    mockNativeBehaviour.sendError = firebaseError('auth/email-not-found');
+
+    // THE DEFECT THIS CASE PINS, AND IT IS A DEFECT OF ASSUMING NORMALISATION.
+    //
+    // The Identity Toolkit answers `EMAIL_NOT_FOUND` for an address with no account. The
+    // JavaScript SDK maps that onto `auth/user-not-found`, so a list containing only the
+    // JS spelling is complete FOR THE JS SDK. The native Android mapping does not map it:
+    // it lowercases and de-hyphenates whatever it was given, and its explicit rewrite
+    // table has no entry for `EMAIL_NOT_FOUND` — so the native client sees
+    // `auth/email-not-found`, a code this module used to have no wording for. That made
+    // the send fail with the generic sentence for exactly the accounts that have no
+    // Firebase identity (the legacy population), which is simultaneously a wrong message
+    // and a rebuilt enumeration oracle, since only a real account would have succeeded.
+    //
+    // It is asserted as its own case rather than folded into the table above so that the
+    // reason survives: a future reader must not "tidy" it away as a duplicate of
+    // `user-not-found`, because the two are the same fact only under the JS SDK.
+    await expect(classification().sendFirebasePasswordResetEmail('user@example.com')).resolves.toEqual({
+      kind: 'sent',
+    });
+  });
+
   it('puts a malformed address on the email input, in our own words', async () => {
     mockIsFirebaseConfigured.mockReturnValue(true);
     mockNativeBehaviour.sendError = firebaseError('auth/invalid-email');
@@ -317,12 +341,25 @@ describe('N-3 — the confirmation: an action code is a Firebase credential only
 
       // `user-not-found` belongs here rather than with the request's indistinguishable
       // codes: at this point the person is holding a code, so the link is unusable and
-      // the remedy is a new one.
+      // the remedy is a new one. `email-not-found` is listed alongside it for the same
+      // native-spelling reason the request path lists it.
       await expect(
         classification().confirmFirebasePasswordReset({ oobCode: 'oob-code-1', newPassword: 'a-new-password' })
       ).resolves.toEqual({ kind: 'invalid-code' });
     }
   );
+
+  it('collapses the native spelling `auth/email-not-found` into that same unusable-link state', async () => {
+    mockIsFirebaseConfigured.mockReturnValue(true);
+    mockNativeBehaviour.confirmError = firebaseError('auth/email-not-found');
+
+    // The two steps must agree about which links are dead: a code that reads as `sent`
+    // when the link is requested cannot read as an unclassified failure when the same
+    // link is opened.
+    await expect(
+      classification().confirmFirebasePasswordReset({ oobCode: 'oob-code-1', newPassword: 'a-new-password' })
+    ).resolves.toEqual({ kind: 'invalid-code' });
+  });
 
   it('fails when the build has no Firebase, without touching anything else', async () => {
     mockIsFirebaseConfigured.mockReturnValue(false);
@@ -398,6 +435,15 @@ describe('N-3 — where the policy must NOT live', () => {
       expect(code).not.toMatch(/console\./);
       expect(code).not.toMatch(/console\b/);
     }
+  });
+
+  it('renders the request-failure diagnostic only under `__DEV__`', () => {
+    // A behaviour test runs in ONE value of `__DEV__`, so the production half of the
+    // claim is asserted where it lives. The user's sentence may not change in a release
+    // bundle, which it cannot if the extra element is never rendered there.
+    const code = codeOf(read('app/forgot-password.tsx'));
+
+    expect(code).toMatch(/__DEV__ && diagnostic/);
   });
 
   it('keeps the native packages confined to the boundary', () => {

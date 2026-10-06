@@ -490,7 +490,7 @@ the database on every request (§30).
 | `email` | Globally unique. **Not an account-linking join key** — see §29. |
 | `passwordHash` | **Optional.** Absent for an account created through Firebase, which never receives a password through the API. Never returned by any endpoint. |
 | `firebaseUid` | Optional, and **sparse-unique**: at most one account per Firebase identity, while any number of accounts may have none. Sparse is mandatory — without it the index cannot be built once two accounts lack the field. |
-| `emailVerified` | Persisted from the verified Firebase token claim, and **not enforced**. No authorization decision reads it. |
+| `emailVerified` | Persisted from the verified Firebase token claim. **Enforced** at the Firebase register/exchange/renew boundaries — an unverified identity is refused `400 EMAIL_NOT_VERIFIED` — while `requireAuth` itself deliberately reads no `emailVerified`. The verification **mechanism** is being superseded by AUTH-04 (a custom 6-digit Inventory AI code); see §29. |
 | `passwordChangedAt` | The revocation clock for §29's `SESSION_INVALIDATED`. |
 
 An account may hold both a retained `passwordHash` and a `firebaseUid`. Where it does, **Firebase is
@@ -1426,7 +1426,7 @@ requires an explicit owner decision before the phase that would implement it:
 | Open item | Blocks |
 | --- | --- |
 | The unlink policy and last-authentication-method protection — **RESOLVED FOR THE SERVER-SIDE PATH 2026-09-26 (Phase 32L): the policy is Policy B** (an account may leave Firebase authority only by establishing a new local password in the same transition, so the server-side last-authentication-method invariant holds structurally). **Residual, recorded and NOT closed:** Firebase's own provider set is a client-side operation the server cannot observe. | ~~Any unlink capability~~ — the server-side capability shipped in Phase 32L; the residual above is recorded rather than closed |
-| Whether `emailVerified` is enforced | Provider sign-in that relies on a provider-asserted address |
+| ~~Whether `emailVerified` is enforced~~ — **DECIDED and IMPLEMENTED:** enforced at the Firebase register/exchange/renew boundaries (`400 EMAIL_NOT_VERIFIED`); the verification **mechanism** is being superseded by AUTH-04 (a custom 6-digit code, §29). | Provider sign-in that relies on a provider-asserted address |
 | M1 (native SDK) vs M2 (`expo-auth-session`) for the mobile provider integration — **CLOSED 2026-09-25 (Phase F1): RESOLVED as M1, the shipped architecture; M2 is superseded and its browser machinery removed** | ~~All Google/Facebook mobile work~~ — this row no longer blocks Google, which ships natively. Facebook Login remains future scope, and it inherits the M1 decision |
 | The Facebook missing-email onboarding flow | Facebook Login |
 | The remedy, if any, for the unhealable orphan (a legacy account whose email already has a Firebase identity that can never resolve to it) | The legacy migration/linking phase |
@@ -1674,7 +1674,7 @@ the existing-account Android flow is E2E verified (2026-09-26), while the new-id
 `REGISTRATION_REQUIRED` path remains environment-blocked. Facebook is the one approved provider still
 unimplemented: **no Facebook provider SDK is installed and no Facebook provider route exists.** Apple
 Sign-In is future scope and is not part of the current implementation. Enforcing `emailVerified` is
-likewise not implemented.
+likewise **implemented at the Firebase register/exchange/renew boundaries** (see §29's AUTH-04 note). *(The "likewise not implemented" wording was the pre-2026-09-30 state and is corrected here.)*
 
 Account linking is **half** implemented, and the half matters: since Phase 32H the **server-side
 boundary** exists (`POST /api/auth/firebase/link`, authenticated — see §29), while the provider side
@@ -1687,6 +1687,18 @@ Phase 32F record and is not rewritten.)* The boundary is what Google and Faceboo
 ---
 
 ## Firebase-Only Authentication — the Locked Direction (design only; nothing removed)
+
+> **AUTH-04 supersession (2026-10-02).** Within this locked direction, email verification is now a
+> **custom 6-digit Inventory AI code delivered by Resend**, **not** a Firebase verification link, and the
+> client resends through Inventory AI rather than native Firebase Auth. A successful confirmation sets
+> Firebase's own `email_verified` state through the Admin SDK (`updateUser(uid, { emailVerified: true })`).
+> Everything else in this subsection is preserved: Firebase remains the identity provider and the authority
+> of record for the final verification state, MongoDB remains authoritative for
+> `businessId`/`role`/`status`/permissions/lifecycle, the Firebase UID stays the only join key, and
+> `requireAuth` is unchanged. The registration **ordering** gate (no `User`, no `Business`, no JWT and no
+> session before verification) is retained, and the server-side `EMAIL_NOT_VERIFIED` enforcement remains.
+> This supersedes only the link/resend **mechanism** described below. See design **§14C.10**,
+> checklist **§40**, roadmap **§27Y**.
 
 **2026-09-29.** The owner has locked the direction of this subsystem: **Firebase Authentication becomes
 the sole authentication authority**, and the application-owned password path is **retired** rather than
@@ -1746,7 +1758,7 @@ credential.
 
 A Firebase-native password reset or password change completes **entirely inside Firebase**, on the
 client. Because `passwordChangedAt` is the only mechanism that invalidates existing Inventory AI
-sessions — and `checkRevoked` is `false` — a client-side credential change would **revoke nothing**,
+sessions — and Firebase cannot invalidate them either, since the ID token is never the API bearer credential (`checkRevoked` is `true` as of **AUTH-01**, §29) — a client-side credential change would **revoke nothing**,
 leaving every prior session alive, including an attacker's. **This is a requirement, not an
 enhancement:** native recovery may not ship before a bridge exists.
 
@@ -1804,11 +1816,16 @@ decision, with nothing of it introduced** — no Mongo field and no extra Admin 
 and the JWT/session architecture are **unchanged**, and **no new session type or session field** is
 introduced. Design: **§14C.3.9** (**M-1…M-10**).
 
-**`checkRevoked` is reviewed and stays `false`.** MongoDB `status`, checked per request, is the
-revocation authority; enabling Firebase-side revocation checking would add a network call to Google on
-every exchange, fail closed during a Google outage, and still not end a live Inventory AI session.
-**Disabling a user in Firebase only does not stop their Inventory AI session, and will not while
-Firebase is not the bearer credential.**
+**`checkRevoked` is `true` (AUTH-01), superseding the earlier L-19 review that recommended `false`.**
+The approved target architecture §9/§10 requires Firebase revocation checking, and
+`services/firebase/tokenVerifier.ts` passes `checkRevoked: true`, so a Firebase-side disable/delete is
+consulted at every verification (exchange, renewal and the AUTH-04 pre-session routes). Two things are
+unchanged by that: MongoDB `status`, checked per request, remains the revocation authority for
+*Inventory AI sessions*, and **disabling a user in Firebase still does not stop their Inventory AI
+session, and will not while Firebase is not the bearer credential.** The cost is the one the review
+named — a network call to Google on every verification, failing closed during a Google outage — and it
+is the accepted trade-off of enforcing that boundary; the failure is classified as transient
+(`FIREBASE_UNAVAILABLE` → `503` on authenticated routes), never as a credential rejection.
 
 ### What is to be retired, eventually and in separately approved steps
 

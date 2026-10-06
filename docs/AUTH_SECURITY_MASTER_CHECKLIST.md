@@ -1845,6 +1845,55 @@ session restoration**.
 
 ---
 
+## 41. C3 — MOBILE SIGN-IN VOCABULARY STANDARD & THE WIDENED LOCAL-PASSWORD GATE (2026-10-07)
+
+**Mobile presentation and gating only.** No server file, route, permission, role grant, session, schema,
+index, environment variable, dependency, EAS configuration or deployment setting changed, and **no new
+authentication capability was added**. The server remains the security boundary; this section records the
+words the app uses and the condition under which it offers a local password action. Shipped record:
+`docs/DEVELOPMENT_ROADMAP.md` **§27Z**.
+
+**The vocabulary standard.** The Profile identity area is a **"Sign-in methods"** section ("Manage the ways
+you can sign in to your Inventory AI account.") that names methods in user terms: **"Email & Password"**
+with the existing **"Change password"** action; **"Google sign-in"** ("Use your Google account to sign in
+to Inventory AI.") with the action **"Add Google sign-in"**; and **"Change sign-in password"**, the title of
+the provider-held branch and of the `disconnect-firebase` screen. A separate **"Security"** card holds the
+device-storage statement and **"Active sessions"**. The retired wording is pinned out: **no** "Connect
+Google" as the app-facing action, **no** "Disconnect Firebase", and no `disconnect` substring on the
+Profile surface at all.
+
+**Rule — no provider is named where the provider is not known.** `authMethods` publishes a capability, not
+the identity behind it, so a provider-held credential could be Google **or** a Firebase email/password
+identity and the app cannot tell them apart. For `{ password: false, firebase: true }` the rendered surface
+must contain neither `google` nor `firebase`.
+
+**The widened gate.** The shipped condition is exactly
+`user?.authMethods?.password === false || user?.authMethods?.firebase === true`. The first half is Phase
+32K's; the second is defensive and is the point of the pass: `{ password: true, firebase: true }` is a
+legacy password account that later attached a Firebase identity, whose retained `passwordHash` is **inert**
+— `loginWithPassword` refuses it with 403 `FIREBASE_SIGN_IN_REQUIRED` (Phase 32E) and `/change-password`
+answers 409 `PASSWORD_NOT_APPLICABLE` (Phase 32K) **before** any hash comparison — so it has no local
+password to manage. **Capability is not credential existence:** a Firebase-linked account still retains its
+legacy hash, and `password: false` does not mean "no credential exists".
+
+**Authority and guards — unchanged by C3.** `authMethodsFor`
+(`server/src/services/auth.service.ts:230`) derives `{ password: !firebaseUid, firebase: Boolean(firebaseUid) }`,
+so the current server produces only the two complementary shapes and the widened branch covers a shape it
+does not produce. Mongo-only accounts keep the local bcrypt/password authority; Firebase-linked and
+Firebase-native accounts have Firebase as password authority. The server guards and their meanings are
+preserved exactly as Phases 32E/32K pin them.
+
+**Verification (mobile only).** `auth-terminology-standard` (new, 182 lines, 5 cases),
+`phase32k-password-capability-gating`, `phase32m-connect-google-profile` and `phaseA-change-password-screen`
+— **4 suites / 29 tests, 0 fail**; full `npx jest` — **47 suites / 644 tests, 0 fail**; `tsc --noEmit` and
+`eslint .` clean. **No server suite was run for this pass**, because no server file changed. Commit
+`ca0d4ae` — `refactor: standardise the mobile sign-in vocabulary and gate local password actions` — 7 files,
++312/−59.
+
+session restoration**.
+
+---
+
 > **MAINTENANCE.** This is a living navigation document. On any authentication/security change:
 > reconcile against evidence, update only evidence-supported statuses, record newly completed and
 > remaining work, preserve unresolved decisions and deferred items, update external-verification

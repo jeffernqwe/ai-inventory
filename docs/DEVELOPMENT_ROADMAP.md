@@ -4052,6 +4052,14 @@ Phase 32H added no unlink route, no unlink service and no unlink audit action.
 > — because the Phase 32L runtime experiment **refuted** the "Firebase refuses to remove the last
 > provider" belief this paragraph rests on. This paragraph is the Phase 32H record and is not rewritten.
 
+> **Superseded in part — 2026-10-01 (`Phase A / F-1 — 6e2252f4c63a7bd98e1d63a4703f21ab236c93a9`).** The
+> unlink capability the note above records as **shipped** was **REMOVED**, not deprecated: the route
+> `POST /api/auth/firebase/unlink`, its service and its two audit actions no longer exist in the committed
+> tree, and the operation was re-scoped into a **credential change** — so no reachable path clears
+> `firebaseUid` by unlinking. **The Policy B measurements above remain valid history**; what changed is
+> that the capability itself is gone. See the Phase F-1 correction in `CLAUDE.md` and
+> `docs/AUTH_SECURITY_MASTER_CHECKLIST.md` §8.
+
 ## Google / Facebook / Apple status
 
 **Not implemented, and not partially implemented.** No provider SDK was installed on either platform,
@@ -4833,6 +4841,16 @@ before this section was written**. This section is therefore a **documentation c
 record**, not an implementation: it changes no code, and it exists because the roadmap had **no section
 for Phase 32L at all** while **three statements across two sections** — §27K (two) and §27M (one) —
 still asserted that Phase 32L had not started.
+
+> **Superseded in part — 2026-10-01 (`Phase A / F-1 — 6e2252f4c63a7bd98e1d63a4703f21ab236c93a9`).** The
+> unlink capability this section documents was **REMOVED**, not deprecated: the server route
+> `POST /api/auth/firebase/unlink`, its service and its two audit actions no longer exist in the committed
+> tree, and the operation was re-scoped into a **credential change**. **Everything below — the Status
+> table, the "What shipped — 32L-A / 32L-B" sections, the Policy B mechanics and the refuted-assumption
+> measurements — is the Phase 32L record: it remains valid as history and is annotated here rather than
+> rewritten**, and the Policy B measurements stay valid historical facts. What is no longer true is only
+> this: the capability itself is gone, and no reachable path clears `firebaseUid`. See the Phase F-1
+> correction in `CLAUDE.md` and `docs/AUTH_SECURITY_MASTER_CHECKLIST.md` §8.
 
 ## Status
 
@@ -6101,6 +6119,11 @@ keeps the historical behaviour rather than losing the control.
   32E and 32K left them; no server file was touched by this pass.
 - **No credential was deleted or re-enabled.** The retained `passwordHash` stays retained and inert, and
   the unlink / last-authentication-method disposition remains Phase 32L's **Policy B** (§27Q).
+  *(**Annotated 2026-10-01 — `Phase A / F-1 — 6e2252f4c63a7bd98e1d63a4703f21ab236c93a9`:** the Phase 32L
+  unlink capability this line defers to was **REMOVED**, not deprecated, and the operation was re-scoped
+  into a credential change — so no reachable path clears `firebaseUid`. The Policy B measurements remain
+  valid history. See the Phase F-1 correction in `CLAUDE.md` and
+  `docs/AUTH_SECURITY_MASTER_CHECKLIST.md` §8.)*
 - **The gate is not a security control.** It only stops the UI offering an action the server would refuse;
   the server refuses it regardless, and the screen re-checks the same capability.
 

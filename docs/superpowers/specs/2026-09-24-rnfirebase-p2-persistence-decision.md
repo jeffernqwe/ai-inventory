@@ -266,3 +266,10 @@ not, until the owner approves its implementation.
   editing it.
 - **No implementation is authorized by this document.** No package is installed, no Console setting is
   changed, no environment variable is set, no MongoDB record is read or written, and no commit is made.
+- **§6.4 "Firebase unlink" is superseded in part — 2026-10-01 (`Phase A / F-1 — 6e2252f4c63a7bd98e1d63a4703f21ab236c93a9`):**
+  the "Phase 32L-A server contract" §6.4 is written against was **REMOVED**, not deprecated — the route
+  `POST /api/auth/firebase/unlink`, its service and its two unlink audit actions no longer exist in the
+  committed tree, and the operation was re-scoped into a **credential change**, so no reachable path clears
+  `firebaseUid`. §6.4 stays the historical record of that contract; **Policy B remains the recorded policy
+  and its measurements remain valid history**, and the residual (Firebase's own provider set) stays recorded
+  rather than closed. See the Phase F-1 correction in `CLAUDE.md` and `docs/AUTH_SECURITY_MASTER_CHECKLIST.md` §8.

@@ -1046,6 +1046,16 @@ sentence's second clause: it was the reset flow, not `change-password`, that rep
   (`0c3f87d`), and both are contained in `main` (`dbdf673`). **This entry is the documentation close-out,
   not an implementation.**
 
+  > **Superseded in part — 2026-10-01 (`Phase A / F-1 — 6e2252f4c63a7bd98e1d63a4703f21ab236c93a9`).** The
+  > unlink capability this entry documents as shipped was **REMOVED**, not deprecated: the route
+  > `POST /api/auth/firebase/unlink`, its service and its two audit actions no longer exist in the committed
+  > tree, and the operation was re-scoped into a **credential change**. **Everything below — the route
+  > description, the Policy B mechanics, the refuted-assumption measurements and the two audit actions — is
+  > the Phase 32L record and remains valid as history**; it is annotated here rather than rewritten. The
+  > Policy B measurements stay valid historical facts. What is no longer true is only this: the capability
+  > itself is gone, and no reachable path clears `firebaseUid`. See the Phase F-1 correction in `CLAUDE.md`
+  > and `docs/AUTH_SECURITY_MASTER_CHECKLIST.md` §8.
+
   **The server boundary is ONE route:** `POST /api/auth/firebase/unlink` — `requireAuth` + controller,
   **no permission** (it acts only on the caller's own account), and no rate limiter, matching the
   existing `firebase/link` precedent — every attempt first needs a live session, a verified Firebase

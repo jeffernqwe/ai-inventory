@@ -5651,7 +5651,11 @@ the plan closes in a definite direction rather than settling into permanent dual
 ## Open decisions and blockers (design §14C.7)
 
 **Decisions:** **OD-1** the bridge's name/shape · **OD-2** does unlink survive at all (Policy B's
-destination disappears — blocks N-8) · **OD-3** `emailVerified` enforcement mechanics — **RESOLVED
+destination disappears — blocks N-8) — **PARTLY ANSWERED 2026-10-01 (`Phase A / F-1 — 6e2252f4c63a7bd98e1d63a4703f21ab236c93a9`), matching
+design §14C.7 OD-2:** the server-side ability to unlink was **removed outright** and the operation
+**re-scoped into a credential change** (roadmap §27AA), so "remove unlink entirely" is what shipped at the
+server; what stays open is only the **Firebase-side** provider unlink the server cannot observe. **This is a
+historical/partial disposition, not an instruction to implement the removed route.** · **OD-3** `emailVerified` enforcement mechanics — **RESOLVED
 2026-09-29 (§27V / design §14C.9)** · **OD-4** the invitation model (O-10 — blocks N-9 and therefore
 N-6) · **OD-5** the 26B/27 artefact disposition
 (deleted vs archived) · **OD-6** whether `/firebase/link` survives · **OD-7** whether `/register` is
@@ -6139,6 +6143,58 @@ keeps the historical behaviour rather than losing the control.
 > **Cross-reference added 2026-10-07 (Phase C3).** The Phase 32K gate sentence at §27M — "The test is
 > `=== false`, not falsiness" — is **not rewritten**; it is annotated as widened. See the annotation in
 > §27M and §41 of `docs/AUTH_SECURITY_MASTER_CHECKLIST.md`.
+
+---
+
+# 27AA. Phase A / F-1 — removal and re-scope of the Firebase unlink capability (retrospective record)
+
+**Retrospective documentation record.** This section records a change that shipped on **2026-10-01** in
+commit **`6e2252f4c63a7bd98e1d63a4703f21ab236c93a9`** ("feat: re-scope Firebase disconnect into a password
+change (Phase A / F-1)"). It is written **after** §27Z even though it **predates** §27Z, §27Y and their
+neighbours, because the roadmap had **no section recording it** while §27K–§27Z each record a sibling
+phase. **Nothing was renumbered:** the section takes the next lettered slot and says so here rather than
+being back-dated into the sequence.
+
+## What was removed
+
+**The server-side Firebase unlink capability was REMOVED, not deprecated.** `POST
+/api/auth/firebase/unlink` and the path that served it no longer exist in the committed tree.
+
+- **Deleted:** `server/src/services/firebaseUnlink.service.ts` (402 lines), its DB-backed suite
+  `server/test/phase32l-firebase-unlink.test.mjs` (1,423 lines), and the mobile suite
+  `mobile/__tests__/phase32l-b-disconnect-session.test.tsx` (559 lines).
+- **Modified / re-scoped:** `server/src/routes/auth.routes.ts` (the route),
+  `server/src/controllers/firebaseAuth.controller.ts` (the controller handler),
+  `server/src/utils/validate.ts` (the payload validator), `server/src/constants/audit.ts` (both audit
+  actions — `FIREBASE_IDENTITY_UNLINKED` and `FIREBASE_IDENTITY_UNLINK_CONFLICT` are no longer declared),
+  `mobile/lib/api.ts` (the `firebaseUnlink` wrapper), `mobile/app/(app)/disconnect-firebase.tsx`,
+  `mobile/lib/auth.tsx` and `mobile/lib/firebase-native.ts` (the client unlink surface).
+- **Added:** `server/test/phaseA-credential-authority.test.mjs` and the two `phaseA-*` mobile suites that
+  pin the replacement flow.
+- **Size:** 27 files, **+1,347 / −3,372**.
+
+## Why it was removed — the credential-authority dead end
+
+The old flow detached the identity and wrote a new local password hash, but **the Firebase user was never
+deleted or re-passworded**, so **the OLD password stayed valid at Firebase while the server no longer knew
+the account**. Signing in with it succeeded at Firebase, resolved to **no MongoDB user** at the exchange —
+which is `firebaseUid`-authoritative and never matches by email — answered **`REGISTRATION_REQUIRED`**, and
+then met **`EMAIL_IN_USE`** at the end of the business-registration form. **Removing the capability is what
+removes the state that produced it.**
+
+## What replaced it — credential-change authority
+
+The operation was **re-scoped into a credential change**: Firebase **`updatePassword`**, then the shipped
+**N-4 `credentials-changed` bridge**, then the session the sequence ends with. The flow reuses
+`confirmFirebaseSignIn` for the recent-authentication proof and holds a **temporary session** across the
+bridge so the app's own token is not the one the bridge destroys. **Firebase stays the sole authority for
+the account's password**, and **`firebaseUid` is never cleared — no reachable path clears it.**
+
+## Verification note
+
+**Documentation only.** This section adds no test run and makes **no runtime-verification claim**: the
+artifact list and the figures above are the removal commit's own evidence, and the Phase 32L **Policy B**
+measurements remain valid **history** (see §27Q and `docs/AUTH_SECURITY_MASTER_CHECKLIST.md` §8).
 
 ---
 

@@ -267,7 +267,7 @@ verified. It is **not** recorded as deferred work.
 | `[ ]` | **Account creation** | Future. |
 | `[ ]` | **Existing-account conflict** | Policy fixed (no auto-link); flow future. |
 | `[ ]` | **Linking** | Via the 32H boundary (future convergence). |
-| `[ ]` | **Unlinking** | Future. |
+| `[ ]` | **Unlinking** | Future. *(Obsolete — the server-side unlink capability was **removed and re-scoped** into a credential change by `Phase A / F-1 — 6e2252f4c63a7bd98e1d63a4703f21ab236c93a9`; see roadmap §27AA and §8 of this checklist.)* |
 | `[ ]` | **Security implications** | R-10 recorded. |
 
 ### 6b. Apple
@@ -318,7 +318,8 @@ verified. It is **not** recorded as deferred work.
 > rewritten:** its `[✓]` rows describe a capability that shipped and was later removed, and none of them
 > describes the current state. The removal is recorded in `CLAUDE.md`'s committed **Phase F-1 correction**
 > and in commit `6e2252f` itself; design authority **§14B.6**. **The roadmap has no section recording this
-> removal** — that history gap is noted here rather than papered over.
+> removal** — that history gap is noted here rather than papered over. *(**Resolved 2026-10-07 (C4-5):** the gap is closed — the roadmap now records it as **§27AA**, a
+> retrospective `# 27AA.` section appended after §27Z without renumbering anything.)*
 
 | Status | Item | Detail |
 | --- | --- | --- |
@@ -847,8 +848,8 @@ Chronological. **History is not rewritten.**
 | **32H** | Server-side linking boundary | `[✓]` | 25/25 | `d8b693a` |
 | **32J** | Mobile registration onboarding | `[~]` | targeted | `0c3f87d` |
 | **32K** | Firebase password authority boundary | `[✓]` | 12-case suite | `8af1d49` |
-| **32L-A** | Server unlink (Policy B) | `[✓]` | code + tests | `01ae73f` |
-| **32L-B** | Mobile unlink | `[~]` | not runtime-verified | `0c3f87d` |
+| **32L-A** | Server unlink (Policy B) *(removed by Phase A / F-1 — see §8.)* | `[✓]` | code + tests | `01ae73f` |
+| **32L-B** | Mobile unlink *(client surface re-scoped by Phase A / F-1 — see §8.)* | `[~]` | not runtime-verified | `0c3f87d` |
 | **RNFirebase foundation** | Native packages + plugins | `[✓]` | — | `c5d07f5` |
 | **B** | Native Firebase auth migration | `[✓]` | Android runtime | `0c3f87d` |
 | **C** | Native Google Sign-In | `[~]` | not E2E-verified | `ea52c2c` |
@@ -987,7 +988,10 @@ blocked — §5a/§25.)
 **O-11** (Expo Go policy), plus the Firebase-only register **OD-1, OD-2, OD-4…OD-8, OD-10** (design
 §14C.7):
 the bridge's name/shape, unlink's fate, the invitation model, the 26B/27 artefact disposition, whether
-`/firebase/link` survives, and whether `/register` is removed outright.
+`/firebase/link` survives, and whether `/register` is removed outright. *(**OD-2 disposition 2026-10-07 (matching design §14C.7):** "unlink's fate" is **partly answered** — the
+server-side ability was **removed outright** by `Phase A / F-1 — 6e2252f4c63a7bd98e1d63a4703f21ab236c93a9`
+and re-scoped into a credential change (roadmap §27AA) — so this is **not** an instruction to re-implement
+the removed route; only the Firebase-side provider unlink the server cannot observe remains open.)*
 *(**D2 is resolved in design §14C.3.8 and its trigger **OD-9 is now LOCKED in §14C.3.9** (2026-09-29,
 Phase 32Q — M-1…M-10); **Option E** is a separate deferred owner decision — **OD-10** — and **D2 retains the
 cross-device residue F-19**.)*
@@ -1032,7 +1036,9 @@ Firebase = identity provider; **MongoDB/Inventory AI = application authority**; 
 them; tenant isolation is server-side; **email is never an automatic linking key**; `firebaseUid` is
 authoritative and unique (sparse); Firebase-linked users have no second password door; sessions are
 revocable via `jti`; `passwordChangedAt` invalidates older tokens; unlink requires a fresh Firebase
-auth and a new local password; no cross-business movement; no credential/token/hash logging; disabled
+auth and a new local password *(**Corrected 2026-10-07:** there is **no unlink operation** — the server-side capability was **removed
+and re-scoped** by `Phase A / F-1 — 6e2252f4c63a7bd98e1d63a4703f21ab236c93a9` (roadmap §27AA); the same
+300-second freshness rule now governs the **credential change** that replaced it.)*; no cross-business movement; no credential/token/hash logging; disabled
 users and suspended businesses cannot authenticate or use protected APIs.
 
 ### Current Project Position
@@ -1040,7 +1046,9 @@ Inventory AI has a **complete, backend-authoritative authentication architecture
 identity provider, MongoDB remains the source of truth for accounts, roles, tenancy and sessions, and
 the Inventory AI JWT/session is the API bearer. The Firebase/RNFirebase migration is **code-complete
 and Android-runtime verified**, and the server-side linking/unlinking boundaries, password recovery
-and session hardening have all shipped. What remains is **not new architecture but validation and
+and session hardening have all shipped. *(**Corrected 2026-10-07:** the server-side **unlinking** boundary did **not** survive — it was **removed
+and re-scoped** by `Phase A / F-1 — 6e2252f4c63a7bd98e1d63a4703f21ab236c93a9` (roadmap §27AA; §8 of this
+checklist); the linking boundary, password recovery and session hardening are unaffected.)* What remains is **not new architecture but validation and
 decision**: the project is gated on an iOS build environment, the environment-blocked new-identity
 path (§5b), and a set of open owner decisions — the live Firebase project now exists, the server-side
 Admin config is verified live, and the Android existing-account provider path is E2E-verified (§5a) —
@@ -1074,7 +1082,9 @@ Recorded rather than silently resolved.
 1. **Design doc §14A.7 vs shipped work.** §14A.7 still reads "Account linking: NOT implemented.
    Account unlinking: NOT implemented", with a supersession note for linking only. Unlinking shipped
    in Phase 32L and is recorded in §27Q / spec §29, but §14A.7 carries **no supersession note for
-   unlink**.
+   unlink**. **Resolved in substance 2026-10-07:** design **§14A.7** now carries the unlink supersession note (added
+   by the C4-4 documentation pass — see the annotation on that bullet), so this discrepancy is **closed**;
+   the record above is preserved as the conflict as it stood.
 2. **Design doc §21 "No phase beyond 32F is authorised"** is stale in effect — 32G, 32H, 32J, 32K,
    32L and F1/F2/F2.9 shipped after it. It is a plan, not a schedule, and is marked reconciled.
 3. **CLAUDE.md phase index lags.** The numbered phase list ends at Phase 32H; 32J, 32K, 32L, F1, F2,

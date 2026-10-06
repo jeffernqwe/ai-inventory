@@ -33,6 +33,7 @@ import type { ReactNode } from 'react';
 import ForgotPasswordScreen from '../app/forgot-password';
 import ResetPasswordScreen from '../app/reset-password';
 import { forgotPassword, resetPassword } from '../lib/api';
+import { ApiError } from '../lib/client';
 import { clearPasswordResetPending, markPasswordResetPending, useSession } from '../lib/auth';
 import {
   confirmFirebasePasswordReset,
@@ -192,6 +193,64 @@ describe('N-3 — Forgot Password chooses the flow by the build, never by a fail
     await waitFor(() => expect(view.getByText('Enter a valid email address.')).toBeTruthy());
     expect(mockedForgotPassword).not.toHaveBeenCalled();
     expect(view.queryByText(REQUEST_ACCEPTED)).toBeNull();
+  });
+
+  it('names the failing side and the SDK code to a DEVELOPER, and to nobody else', async () => {
+    mockedSendFirebase.mockResolvedValue({
+      kind: 'failure',
+      code: 'auth/email-not-found',
+      message: 'Unable to send the reset link. Please try again.',
+    });
+
+    const view = await mountForgot();
+    await requestLink(view);
+
+    // The person's sentence is unchanged: the diagnostic is a SECOND element, never a
+    // clause appended to theirs.
+    await waitFor(() =>
+      expect(view.getByText('Unable to send the reset link. Please try again.')).toBeTruthy()
+    );
+    // And the code the classification layer decided from is now observable, which is the
+    // whole of what this adds — before it, a device failure was one sentence and four
+    // different causes were indistinguishable behind it.
+    expect(
+      view.getByText('Diagnostic (dev only) — firebase: auth/email-not-found')
+    ).toBeTruthy();
+    expect(mockedForgotPassword).not.toHaveBeenCalled();
+  });
+
+  it('names the custom endpoint and its code when that is the side that failed', async () => {
+    // The one state a production deployment is in today: the 26B endpoint answers 503
+    // MAIL_NOT_CONFIGURED, because no mail transport is configured on it. The screen
+    // shows the server's own sentence and, to a developer, which server code produced it.
+    mockedSendFirebase.mockResolvedValue({ kind: 'legacyFallback' });
+    mockedForgotPassword.mockRejectedValue(
+      new ApiError(
+        503,
+        'MAIL_NOT_CONFIGURED',
+        'Password reset is temporarily unavailable. Please try again later.'
+      )
+    );
+
+    const view = await mountForgot();
+    await requestLink(view);
+
+    await waitFor(() =>
+      expect(
+        view.getByText('Password reset is temporarily unavailable. Please try again later.')
+      ).toBeTruthy()
+    );
+    expect(view.getByText('Diagnostic (dev only) — server: MAIL_NOT_CONFIGURED')).toBeTruthy();
+  });
+
+  it('shows no diagnostic on the path where nothing failed', async () => {
+    mockedSendFirebase.mockResolvedValue({ kind: 'sent' });
+
+    const view = await mountForgot();
+    await requestLink(view);
+
+    await waitFor(() => expect(view.getByText(REQUEST_ACCEPTED)).toBeTruthy());
+    expect(view.queryByText(/Diagnostic \(dev only\)/)).toBeNull();
   });
 
   it('asks the network for nothing when the field is empty', async () => {

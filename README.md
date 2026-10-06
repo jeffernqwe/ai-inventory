@@ -1315,3 +1315,18 @@ gate stays open and **iOS is entirely unverified**. **Nothing
   test, schema, dependency, environment, EAS or Firebase Console change, and the bridge is still **not
   implemented**. Full record: `docs/superpowers/specs/2026-09-18-firebase-auth-design.md` **§14C.3.9**;
   `docs/DEVELOPMENT_ROADMAP.md` **§27X**; `docs/AUTH_SECURITY_MASTER_CHECKLIST.md` **§39**.
+
+- **Phase A / F-1 — Firebase Disconnect Re-scoped into a Credential Change (the unlink capability
+  removed):** the server-side Firebase unlink capability was **REMOVED, not deprecated** — `POST
+  /api/auth/firebase/unlink`, its service, controller handler, payload validator, both audit actions
+  (`FIREBASE_IDENTITY_UNLINKED`, `FIREBASE_IDENTITY_UNLINK_CONFLICT`) and the mobile `firebaseUnlink`
+  wrapper are gone from the committed tree, and the client disconnect surface was re-scoped. The
+  operation moved into **credential-change authority**: Firebase `updatePassword` → the shipped N-4
+  `credentials-changed` bridge → the session the sequence ends with, so **`firebaseUid` is never cleared
+  and no reachable path clears it**. What the removal closes is the old path's credential-authority dead
+  end — the OLD password stayed valid at Firebase while the server no longer knew the account, so the
+  sign-in resolved to `REGISTRATION_REQUIRED` and then met `EMAIL_IN_USE`. Exact commit
+  **`6e2252f4c63a7bd98e1d63a4703f21ab236c93a9`** (2026-10-01; **27 files, +1,347 / −3,372**); the formal
+  record is **`docs/DEVELOPMENT_ROADMAP.md` §27AA**, written retrospectively because the commit predates
+  §27Z. See also the Phase 32L entry above, `CLAUDE.md`, and
+  `docs/AUTH_SECURITY_MASTER_CHECKLIST.md` §8.

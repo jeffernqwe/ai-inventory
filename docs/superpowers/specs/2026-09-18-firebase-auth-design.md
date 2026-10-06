@@ -1097,7 +1097,10 @@ one — the old Firebase credential can create a *second* Inventory AI business.
 but distinct, from the pre-link orphan of §16.6: that one is an identity created for an
 existing account and never linked to it, whereas this is an identity that was linked and
 then deliberately detached. **No code change, no schema change, and this does not settle
-`O-1`, `O-2` or `O-6`.**
+`O-1`, `O-2` or `O-6`.** *(**Update 2026-10-07 (`Phase A / F-1 — 6e2252f4c63a7bd98e1d63a4703f21ab236c93a9`):** the risk this note
+accepts is now **unreachable** — the unlink capability was **removed and re-scoped** into a credential
+change (roadmap §27AA, §14B.6), so **no reachable path detaches a Firebase mapping** and the detached-identity
+scenario described above cannot arise. The paragraphs above are the accepted record and are not rewritten.)*
 
 **D-E4 — other devices' Firebase sessions. ACCEPTED FOR V1.** "Sign out everywhere"
 revokes **every Inventory AI session** the user holds, on every device, in one call —
@@ -1633,7 +1636,7 @@ cite them individually.
 | **L-10** | **Legacy bcrypt login and register will eventually be removed.** |
 | **L-11** | **Custom password-reset tokens, the reset endpoints and the Resend password-reset infrastructure will eventually be removed.** |
 | **L-12** | **Admin-created password accounts must eventually be replaced by invitation-based Firebase onboarding.** |
-| **L-13** | **The Inventory-specific Firebase link/unlink lifecycle should eventually be removed or re-scoped.** Firebase-native provider linking may remain where appropriate. |
+| **L-13** | **The Inventory-specific Firebase link/unlink lifecycle should eventually be removed or re-scoped.** Firebase-native provider linking may remain where appropriate. **Done in part, 2026-10-01 (`Phase A / F-1 — 6e2252f4c63a7bd98e1d63a4703f21ab236c93a9`):** the server-side **unlink** half was **removed and re-scoped** into a credential change (roadmap §27AA); the link route and the Firebase-side provider linking remain as this item describes. |
 | **L-14** | **Before Firebase-native password recovery or change-password ships, a secure credential-change notification/revocation bridge must be designed** so a Firebase password change can invalidate existing Inventory AI sessions. Design: **§14C.3**. |
 | **L-15** | **The bridge must not trust an arbitrary Firebase UID from the client.** It must be authenticated and securely tied to the verified Firebase identity. |
 | **L-16** | **The bridge must avoid immediately invalidating the newly created Inventory AI session after a credential change.** |
@@ -2422,7 +2425,7 @@ capability is never briefly absent between two phases.
 | **N-5** | **Firebase-native change-password + email verification.** `updatePassword` calling N-4; `sendEmailVerification`; `reload()`; a verify-email screen; the L-6/L-7 gate. Reconcile `authMethods` and the Profile screen. **Its mechanics are now DECIDED (2026-09-29, §14C.9 — OD-3 resolved): the registration ordering, the verify screen, the client gate instead of a `requireAuth` change, and the selected deep-link return with its hosted-page fallback.** Its **delivery** half is still gated by **B-2/L-17**, and a forced token refresh is required for RG-9. | N-4 | nothing |
 | **N-6** | **Retire the legacy password path.** Remove `/login`, `/register`, `loginWithPassword`, `registerBusinessOwner`, the `FIREBASE_SIGN_IN_REQUIRED` guard, their limiters, `authMethodsFor`, and the legacy branches in `lib/auth.tsx` (L-10). | N-5 | legacy login + register |
 | **N-7** | **Retire the custom recovery stack.** The two reset routes, controller, service, token model, the **entire mail layer** (Resend's only production consumer), the six mail env names, and the 26B/27 test suites (L-11). | N-3, N-4 | 26B/27 + Resend |
-| **N-8** | **Re-scope the identity lifecycle.** `/firebase/link` and `/firebase/unlink`, `firebaseLink.service.ts`, `firebaseUnlink.service.ts`, `constants/firebase.ts`, `disconnect-firebase.tsx`, `confirmFirebaseSignIn`, `connectFirebase` (L-13). | N-1, **OD-2** | link/unlink (Policy B has no destination) |
+| **N-8** | **Re-scope the identity lifecycle.** `/firebase/link` and `/firebase/unlink`, `firebaseLink.service.ts`, `firebaseUnlink.service.ts`, `constants/firebase.ts`, `disconnect-firebase.tsx`, `confirmFirebaseSignIn`, `connectFirebase` (L-13). — **server-side unlink portion DONE 2026-10-01 (`Phase A / F-1 — 6e2252f4c63a7bd98e1d63a4703f21ab236c93a9**):** `/firebase/unlink` and `firebaseUnlink.service.ts` are **removed** from the committed tree and the operation re-scoped into a credential change (roadmap §27AA); what remains of N-8 is the **link** side and the Firebase-side provider surface. | N-1, **OD-2** | link/unlink (Policy B has no destination) |
 | **N-9** | **Invitation-based onboarding (L-12).** Replaces `users.service.ts` `create`, which today writes a bcrypt `passwordHash` and **no `firebaseUid`** and therefore produces an account nobody can sign into once the legacy path is gone. | **O-10**, and **must land with or before N-6** | admin-created passwords |
 | **N-10** | **Final verification.** Full server suite + `test:unit` + `test:db`, mobile Jest, `typecheck`, `lint`, an Android development build; iOS deferred to macOS; documentation close-out with historical records left intact. | all | — |
 

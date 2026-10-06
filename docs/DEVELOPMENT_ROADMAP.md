@@ -5207,7 +5207,7 @@ dashboard value was changed.
 | G-3 Render `TRUST_PROXY=1` | dashboard (owner-verified) + code-derived | **VERIFIED** |
 | G-4 Render production configuration documentation | repository | **DONE** — now enumerated in `README.md` |
 | Mail configuration | code-derived | **VERIFIED — NO ACTION REQUIRED** for startup; **OPEN** for password recovery — the reset-architecture decision is pending a **separate read-only audit** |
-| Auth/rate-limit configuration | code-derived | **VERIFIED — NO ACTION REQUIRED** — **sixteen** optional `AUTH_*` variables, code-counted (not an estimate) |
+| Auth/rate-limit configuration | code-derived | **VERIFIED — NO ACTION REQUIRED** — **twenty-two** optional `AUTH_*` variables (eleven pairs), code-counted (not an estimate). *(Corrected 2026-10-07: this row read **sixteen**. **AUTH-03** added the session-renewal pair and **AUTH-04** the two email-verification pairs; sixteen was correct for this row's own baseline.)* |
 | Ignore-boundary decisions (`.freebuff/`, `.claude/settings.local.json`) | repository | **DONE / VERIFIED** (`a95a461`) |
 
 `EXPO_PUBLIC_FIREBASE_*` (all six client values), `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID`,
@@ -5356,8 +5356,9 @@ into Firebase custom claims (**L-18**); and `checkRevoked` was reviewed (**L-19*
 ## The security finding this phase exists to close
 
 **A Firebase-native password reset would revoke nothing.** `passwordChangedAt` is the *only* mechanism
-that invalidates existing Inventory AI sessions on a credential change, and `checkRevoked` is `false`,
-so Firebase cannot invalidate them either. A client-side `confirmPasswordReset()` or `updatePassword()`
+that invalidates existing Inventory AI sessions on a credential change, and Firebase cannot invalidate
+them either (`checkRevoked` was `false` when this was written — **AUTH-01 now sets it `true`**, see the
+review below). A client-side `confirmPasswordReset()` or `updatePassword()`
 never reaches the server, so **every session that existed before the change — including an attacker's —
 survives it**, which inverts the purpose of a reset. Today's 26B/27 flow does not have that hole because
 the server stamps the field. **This is O-9 becoming live**, and it is why L-14 forbids shipping native
@@ -5398,6 +5399,13 @@ secrets, cost and runtime that this repository has never had and no phase author
 (contradicts L-14).
 
 ## `checkRevoked` review (L-19)
+
+> **SUPERSEDED BY AUTH-01 (recorded 2026-10-07). The shipped behaviour is `checkRevoked: true`** —
+> `services/firebase/tokenVerifier.ts` passes it explicitly, as the approved target architecture §9/§10
+> requires ("Firebase revocation checking is a security boundary"). The recommendation below is retained
+> **unrewritten** as the L-19 review record and is **not current policy**; the availability trade-off it
+> names is the accepted cost of that change. The same correction is made in `AUTH_SECURITY_MASTER_CHECKLIST.md`
+> §23 and in design §14C.5.
 
 **Recommendation: REMAIN `false`.** MongoDB `status` is checked **per request** by `requireAuth` and is
 the revocation authority (L-9). Setting it `true` would add a network round trip to Google on **every**

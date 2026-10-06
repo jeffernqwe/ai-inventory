@@ -1416,6 +1416,13 @@ the last provider. Firebase's "last provider" protection therefore cannot be rel
 server cannot observe; the server owns only the MongoDB `firebaseUid` detachment, and no server-side
 provider-unlink capability was faked.
 
+> **Superseded in part — 2026-10-01 (`Phase A / F-1 — 6e2252f4c63a7bd98e1d63a4703f21ab236c93a9`).** The
+> server-side unlink capability the note above records as shipped was **REMOVED**, not deprecated: the
+> route `POST /api/auth/firebase/unlink`, its service and its two audit actions no longer exist in the
+> committed tree, and the operation was re-scoped into a **credential change** — so no reachable path
+> clears `firebaseUid`. **The Policy B measurements above remain valid history**; only the capability is
+> gone. See the Phase F-1 correction in `CLAUDE.md` and `docs/AUTH_SECURITY_MASTER_CHECKLIST.md` §8.
+
 Ending an Inventory AI session revokes that session only. It never revokes the Firebase identity, and
 disabling an Inventory AI user does not disable the corresponding Firebase user — the exchange refuses
 the disabled account, which is what denies access.
@@ -1438,7 +1445,7 @@ requires an explicit owner decision before the phase that would implement it:
 
 | Open item | Blocks |
 | --- | --- |
-| The unlink policy and last-authentication-method protection — **RESOLVED FOR THE SERVER-SIDE PATH 2026-09-26 (Phase 32L): the policy is Policy B** (an account may leave Firebase authority only by establishing a new local password in the same transition, so the server-side last-authentication-method invariant holds structurally). **Residual, recorded and NOT closed:** Firebase's own provider set is a client-side operation the server cannot observe. | ~~Any unlink capability~~ — the server-side capability shipped in Phase 32L; the residual above is recorded rather than closed |
+| The unlink policy and last-authentication-method protection — **RESOLVED FOR THE SERVER-SIDE PATH 2026-09-26 (Phase 32L): the policy is Policy B** (an account may leave Firebase authority only by establishing a new local password in the same transition, so the server-side last-authentication-method invariant holds structurally). **Residual, recorded and NOT closed:** Firebase's own provider set is a client-side operation the server cannot observe. | ~~Any unlink capability~~ — the server-side capability shipped in Phase 32L; the residual above is recorded rather than closed. **Annotated 2026-10-01 (`Phase A / F-1 — 6e2252f4c63a7bd98e1d63a4703f21ab236c93a9`):** the server-side capability is **REMOVED**, not deprecated — the route, its service and its two audit actions are gone from the committed tree, and the operation was re-scoped into a credential change; the residual above stays recorded rather than closed. See `CLAUDE.md` and `docs/AUTH_SECURITY_MASTER_CHECKLIST.md` §8. |
 | ~~Whether `emailVerified` is enforced~~ — **DECIDED and IMPLEMENTED:** enforced at the Firebase register/exchange/renew boundaries (`400 EMAIL_NOT_VERIFIED`); the verification **mechanism** is being superseded by AUTH-04 (a custom 6-digit code, §29). | Provider sign-in that relies on a provider-asserted address |
 | M1 (native SDK) vs M2 (`expo-auth-session`) for the mobile provider integration — **CLOSED 2026-09-25 (Phase F1): RESOLVED as M1, the shipped architecture; M2 is superseded and its browser machinery removed** | ~~All Google/Facebook mobile work~~ — this row no longer blocks Google, which ships natively. Facebook Login remains future scope, and it inherits the M1 decision |
 | The Facebook missing-email onboarding flow | Facebook Login |

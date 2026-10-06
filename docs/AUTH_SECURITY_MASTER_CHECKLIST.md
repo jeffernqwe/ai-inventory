@@ -779,7 +779,7 @@ are missing.
 
 | # | Decision | State | Evidence | Dependency / impact | Next owner action |
 | --- | --- | --- | --- | --- | --- |
-| **O-1** | Unlink policy + last-authentication-method protection | **Policy B RESOLVED**; residual (Firebase's own provider set) recorded, **NOT closed** | design §14A.5; §27Q | Affects any unlink/provider work | Accept residual or scope a follow-up |
+| **O-1** | Unlink policy + last-authentication-method protection | **Policy B RESOLVED**; residual (Firebase's own provider set) recorded, **NOT closed** | design §14A.5; §27Q | Affects any unlink/provider work | Accept residual or scope a follow-up **Annotated 2026-10-01 (`Phase A / F-1 — 6e2252f4c63a7bd98e1d63a4703f21ab236c93a9`):** the 32L-A server unlink capability is **REMOVED**, not deprecated, and the operation was re-scoped into a credential change — no reachable path clears `firebaseUid`; the residual above stays **NOT closed**. See `CLAUDE.md` and §8 of this checklist. |
 | **O-2** | Linked-account disposition of `change-password` / reset | **CLOSED / decided in Phase 32K** | README 32K entry | Inert-hash behaviour recorded | No further action (residual O-8/O-9) |
 | **O-3** | Whether `emailVerified` is enforced | **RESOLVED 2026-09-29** — direction (§39, L-6/L-7) **and** mechanics (§39 / design §14C.9, RG-1…RG-15) | design §14A.5; §14C.9 | Gate is the registration **ordering** + a client verify screen; `requireAuth` deliberately unmodified; unverified Google refused; resend native | None — implement in N-5 (still gated by N-4 and B-2/L-17) |
 | **O-4** | M1 vs M2 | **RESOLVED** — M1 (RNFirebase) + P2 durable persistence | P2 decision §8.1 | Forfeits Expo Go (O-11) | None |
@@ -965,7 +965,7 @@ uncommitted protected entries.
 ### Completed
 Email/password register + login; Firebase Admin verify boundary; Firebase exchange + register;
 sessions/JWT with `jti` (revocation, logout, sign-out-everywhere, per-device list); password change;
-**password reset (26B/27/28)**; account linking (32H) and server unlink under Policy B (32L-A);
+**password reset (26B/27/28)**; account linking (32H) and server unlink under Policy B (32L-A) *(`Phase A / F-1 — 6e2252f4c63a7bd98e1d63a4703f21ab236c93a9`, 2026-10-01: the 32L-A capability is **REMOVED**, not deprecated, and the operation was re-scoped into a credential change — no reachable path clears `firebaseUid`; see `CLAUDE.md` and §8 of this checklist)*;
 password-authority guard (32K); RBAC (4 roles / 21 keys) and tenant isolation; rate limiting; audit
 trail + viewer; sensitive-logging protections; native RNFirebase migration B–E; JS-SDK/browser OAuth
 retirement F1/F2; Android runtime verification F2.9; **Android Google existing-account E2E verification (§5a)**.

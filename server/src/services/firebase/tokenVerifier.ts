@@ -73,7 +73,9 @@ import {
  * because Google capitalized a letter.
  *
  * `authTime` is Phase 32L's addition, and it is the ONLY new claim the
- * Firebase-unlink operation needs. It is the signed `auth_time` — "when the user
+ * credential-change security path needs: the credentials-changed bridge
+ * (`services/credentialsChanged.service.ts`) is its live consumer, and the freshness
+ * rule keyed on it is that bridge's. It is the signed `auth_time` — "when the user
  * authenticated", per Firebase's own token reference — as distinct from `iat`,
  * which is when THIS token was issued and moves on every hourly refresh. A
  * freshness rule keyed on `iat` would therefore accept an arbitrarily old

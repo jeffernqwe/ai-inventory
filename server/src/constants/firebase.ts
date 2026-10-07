@@ -27,8 +27,11 @@ export const FIREBASE_REAUTH_WINDOW_SECONDS = 300;
 
 /**
  * The caller must reauthenticate with Firebase before this operation may
- * proceed. A 409, never a 401 or a 403 — see the unlink controller for why the
- * status is load-bearing rather than cosmetic.
+ * proceed. A 409, never a 401 or a 403 — see the credentials-changed bridge
+ * (`services/credentialsChanged.service.ts`), whose recency refusal is the live
+ * consumer: `mobile/lib/client.ts` treats a 401 or 403 on a token-bearing request
+ * as session loss, so either status would sign the user out over a freshness check
+ * rather than over a dead session.
  */
 export const FIREBASE_REAUTHENTICATION_REQUIRED = 'FIREBASE_REAUTHENTICATION_REQUIRED';
 

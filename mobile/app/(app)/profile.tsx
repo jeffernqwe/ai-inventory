@@ -203,7 +203,7 @@ export default function ProfileScreen() {
          *
          * The test is `=== true`, not truthiness, so a user object that predates the
          * field simply shows no action instead of opening a flow the server would
-         * refuse with 409 `FIREBASE_IDENTITY_NOT_LINKED`.
+         * refuse with 409 `FIREBASE_IDENTITY_CONFLICT`.
          *
          * Nothing here is a security control: the screen re-checks the same
          * capability, and the server is the boundary in every case.

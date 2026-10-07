@@ -207,6 +207,12 @@ EAS Development Build & Android Runtime/Native Verification of F2
         ↓
 AUTH-04
 Custom 6-Digit Email Verification (AUTH-04-A…H; G PASSED live 2026-10-04, H = documentation close-out)
+        ↓
+Phase C3
+Mobile Sign-in Vocabulary Standard & Widened Local-Password Gate (presentation only; §27Z)
+        ↓
+Phase A / F-1
+Removal and Re-scope of the Firebase Unlink Capability (retrospective record; §27AA)
 ```
 
 ---

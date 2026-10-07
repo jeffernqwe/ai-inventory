@@ -33,15 +33,12 @@ export const FIREBASE_REAUTH_WINDOW_SECONDS = 300;
 export const FIREBASE_REAUTHENTICATION_REQUIRED = 'FIREBASE_REAUTHENTICATION_REQUIRED';
 
 /**
- * The caller's own account carries no Firebase identity, so there is nothing to
- * detach.
- *
- * Deliberately distinct from `FIREBASE_IDENTITY_CONFLICT` (Phase 32H): "nothing
- * is linked" and "the identity you presented belongs to someone else" are
- * different facts, and collapsing them would tell a caller that a mapping exists
- * when none does.
+ * Tombstone — the Firebase-unlink refusal vocabulary this module used to export
+ * was retired with Phase A / F-1, which removed the unlink route, controller and
+ * service; no current route emits that former refusal. For an account with no
+ * Firebase identity — or a mismatched one — the live refusal is
+ * `FIREBASE_IDENTITY_CONFLICT`, emitted by the credentials-changed bridge.
  */
-export const FIREBASE_IDENTITY_NOT_LINKED = 'FIREBASE_IDENTITY_NOT_LINKED';
 
 /**
  * AUTH-03 — the Firebase-backed session boundary refused an UNVERIFIED identity.
@@ -93,7 +90,6 @@ export function authTimeIsFresh(
 export default {
   FIREBASE_REAUTH_WINDOW_SECONDS,
   FIREBASE_REAUTHENTICATION_REQUIRED,
-  FIREBASE_IDENTITY_NOT_LINKED,
   EMAIL_NOT_VERIFIED,
   authTimeIsFresh,
 };

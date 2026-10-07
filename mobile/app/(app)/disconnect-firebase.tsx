@@ -190,7 +190,7 @@ export default function ChangeFirebasePasswordScreen() {
    * publishes to say this account authenticates through a Firebase identity. When it
    * is not true there is nothing to disconnect, so the screen is not merely hidden —
    * it is unreachable. Nothing here is a security control; the server would refuse an
-   * unlinked account with 409 `FIREBASE_IDENTITY_NOT_LINKED` regardless.
+   * unlinked account with 409 `FIREBASE_IDENTITY_CONFLICT` regardless.
    *
    * The check is `!== true`, so a user object without the field (an older server, or
    * a response that predates Phase 32K) does not open a flow it cannot finish.

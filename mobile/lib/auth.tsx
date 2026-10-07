@@ -108,17 +108,18 @@ function isRegistrationRequired(err: unknown): boolean {
 }
 
 /**
- * Phase 32L-B — the one unlink refusal that is an INSTRUCTION, not a verdict.
+ * Phase 32L-B — the one credential-change refusal that is an INSTRUCTION, not a verdict.
  *
  * The server refuses with this when the Firebase authentication behind the
  * request is older than its 300 s window. Nothing is wrong with the account and
  * nothing was mutated; the caller simply has to prove the sign-in again and ask
  * once more. It is a 409 precisely so it cannot be mistaken for a dead session
- * (see `lib/client.ts`), and it is the ONLY unlink refusal this layer retries.
+ * (see `lib/client.ts`), and it is the ONLY credential-change refusal this layer
+ * retries.
  */
 const REAUTHENTICATION_REQUIRED = 'FIREBASE_REAUTHENTICATION_REQUIRED';
 
-/** True for the recoverable unlink refusal, and for nothing else. */
+/** True for the recoverable credential-change freshness refusal, and nothing else. */
 function isReauthenticationRequired(err: unknown): boolean {
   return err instanceof ApiError && err.code === REAUTHENTICATION_REQUIRED;
 }

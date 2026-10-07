@@ -169,10 +169,24 @@ unitSuite('AUTH-03 — renewal structure and guards (no database)', () => {
     );
   });
 
-  it('★ the identity match is UID-only; the email is never a join key', () => {
+  it('★ the identity match is UID-only, and the FULL predicate is pinned — the email is never a join key', () => {
+    // The WHOLE predicate, disjunct included — not just its comparison half.
+    // `!user.firebaseUid` is the "this account carries no Firebase authority at all"
+    // half, and it is the input the DB suite now exercises (case 8b). An assertion on
+    // `user.firebaseUid !== identity.uid` alone still passes when that disjunct is
+    // deleted, which is exactly how this guard used to be written.
     assert.ok(
-      renewSrc.includes('user.firebaseUid !== identity.uid'),
-      'the uid equality check is the identity match'
+      renewSrc.includes('!user.firebaseUid || user.firebaseUid !== identity.uid'),
+      'the full identity predicate is not pinned'
+    );
+    // WHY the equality half happens to refuse an absent uid today, stated so the
+    // disjunct is not mistaken for the only defence: the AUTH-01 verifier REJECTS a
+    // token whose uid is missing or empty, so `identity.uid` is always a non-empty
+    // string by the time this predicate runs.
+    assert.ok(
+      verifierSrc.includes('if (!uid) {') &&
+        verifierSrc.includes("throw new FirebaseTokenError('missing-uid')"),
+      'a token with no usable uid must be rejected before the renewal predicate runs'
     );
     // The exchange could not be reached by email even if someone tried: the
     // renewal service never queries by email.
@@ -228,6 +242,36 @@ unitSuite('AUTH-03 — renewal structure and guards (no database)', () => {
       withAudit.includes('recordAudit('),
       true,
       'the no-audit guard is sensitive to an injected audit write'
+    );
+
+    // The identity predicate, mutated the way it could actually regress. Removing the
+    // `!user.firebaseUid` disjunct ALONE leaves a service whose equality half still
+    // refuses an absent uid (see the verifier narrowing asserted above), so the mutant
+    // is behaviourally equivalent — but the substring-only guard this suite used to
+    // carry passed on it, while the full-predicate guard does not. That is the whole
+    // reason the disjunct is pinned.
+    const withoutNullDisjunct = renewSrc.replace('!user.firebaseUid || ', '');
+    assert.equal(
+      withoutNullDisjunct.includes('!user.firebaseUid || user.firebaseUid !== identity.uid'),
+      false,
+      'the full-predicate guard is sensitive to a removed null disjunct'
+    );
+    assert.ok(
+      withoutNullDisjunct.includes('user.firebaseUid !== identity.uid'),
+      'the mutant still contains the comparison, so only the full predicate catches it'
+    );
+
+    // And the mutant that neuters the null REFUSAL instead of deleting the disjunct —
+    // the behavioural mutation DB case 8b observes, where an account with no Firebase
+    // authority would be renewed rather than refused. It fails the same assertion.
+    const neutered = renewSrc.replace(
+      '!user.firebaseUid || user.firebaseUid !== identity.uid',
+      'user.firebaseUid && user.firebaseUid !== identity.uid'
+    );
+    assert.equal(
+      neutered.includes('!user.firebaseUid || user.firebaseUid !== identity.uid'),
+      false,
+      'the full-predicate guard is sensitive to a neutered null refusal'
     );
   });
 });
@@ -457,6 +501,41 @@ dbSuite('AUTH-03 — session renewal over HTTP', dbOk, () => {
     // Nothing changed, and the email was never an input to the match.
     const after = await Session.findById(session._id);
     assert.equal(after.expiresAt.toISOString(), session.expiresAt.toISOString());
+  });
+
+  it('8b. ★ an account carrying NO Firebase identity takes the same refusal', async () => {
+    // The `!user.firebaseUid` half of the renewal predicate — the one input this suite
+    // did not exercise. `makeUser` omits the field entirely when no uid is given, so
+    // this account carries no Firebase authority at all: it cannot satisfy "renew
+    // through THIS Firebase identity", and it must be refused exactly as a mismatch is.
+    // Modelled on case 8 above and on the N-4 bridge's case 3b.
+    const user = await makeUser(); // legacy account: no firebaseUid at all
+    const { token, session } = await sessionFor(user);
+
+    // The presented identity's address IS this account's address, so a match on the
+    // email could not rescue it — the email is not a join key here either.
+    setFakeFirebaseToken({ uid: uid('nobody'), email: user.email, email_verified: true });
+    const res = await renew(token);
+
+    assert.equal(res.status, 409, 'refused at the identity boundary, not a session failure');
+    assert.equal(res.json.code, 'FIREBASE_IDENTITY_CONFLICT');
+    assert.equal(res.json.token, undefined, 'no token is issued');
+
+    const after = await Session.findById(session._id);
+    assert.equal(after.expiresAt.toISOString(), session.expiresAt.toISOString());
+    assert.equal(after.revokedAt, null, 'the account keeps its live session');
+    assert.equal(await Session.countDocuments({ userId: user._id }), 1, 'no session was created');
+
+    // The identity boundary is reached BEFORE the verification gate: the same account is
+    // answered the same way when the presented identity is UNVERIFIED. That is the
+    // service's documented order (uid, then `emailVerified`) and it is what a predicate
+    // that admitted an account with no Firebase authority would break.
+    setFakeFirebaseToken({ uid: uid('nobody2'), email: user.email, email_verified: false });
+    const unverified = await renew(token);
+
+    assert.equal(unverified.status, 409, 'the identity check precedes the verification gate');
+    assert.equal(unverified.json.code, 'FIREBASE_IDENTITY_CONFLICT');
+    assert.notEqual(unverified.json.code, 'EMAIL_NOT_VERIFIED');
   });
 
   it('9. ★ an UNVERIFIED email is refused with 400 EMAIL_NOT_VERIFIED', async () => {

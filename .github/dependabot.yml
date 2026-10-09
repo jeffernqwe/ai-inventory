@@ -5,8 +5,11 @@ version: 2
 # scope below, so a security bump always arrives as its own visible pull request
 # rather than folded into a routine minor/patch batch.
 #
-# These PRs land on a protected `main`, so they must pass the required `server`
-# and `mobile` checks like any other change.
+# `main` is no longer protected at this plan level — branch protection and rulesets both
+# answer `403 Upgrade to GitHub Pro or make this repository public` on a private personal
+# repository (roadmap §27AF). The `server` and `mobile` checks still run on every one of
+# these PRs, but nothing forces them to pass, so a red Dependabot PR must not be merged by
+# hand, and `main-guard` still flags anything that reaches `main` outside a pull request.
 
 updates:
   - package-ecosystem: npm
@@ -25,6 +28,19 @@ updates:
         update-types:
           - minor
           - patch
+
+  # The workflow actions are pinned to commit SHAs, so they need an updater of their own:
+  # without this entry a pinned action would sit at its current SHA forever instead of
+  # receiving the security fixes the pin exists to make safe to take.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:30"
+      timezone: Etc/UTC
+    labels:
+      - dependencies
 
   - package-ecosystem: npm
     directory: /mobile

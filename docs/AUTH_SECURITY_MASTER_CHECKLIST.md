@@ -1971,6 +1971,21 @@ shipped defaults and an ambient override would mask a regression instead of catc
 hand-copying `.env.example` to `.env`. A test-only bootstrap default is the candidate remedy and is **not
 implemented**.
 
+### Enforcement of the CI gate — unavailable on this plan (recorded 2026-10-09)
+
+**`main` cannot be protected on this repository.** Classic branch protection and the rulesets API both
+answer `403 — Upgrade to GitHub Pro or make this repository public to enable this feature` on a **private**
+repository, so the two `ci` checks run but are **not required**: a direct push to `main` or a merge past a
+red check is possible. Verified by attempting both endpoints, not inferred.
+
+The substitute is **`.github/workflows/main-guard.yml`**: on every push to `main` it requires every commit
+the push introduced to be associated with a **merged pull request**, per the API's own PR record, and fails
+otherwise. It is **detection, not prevention**, and it does not re-check that the checks were green at
+merge time — the primary `ci` run on the same push covers that. The rule was proven against real data
+before shipping (`5acaf44` → PR #8, `3e5d2aa` → PR #7, `0c54613` → PR #8, non-PR `e9616cf` → none).
+**If hard enforcement is wanted later, it needs a plan upgrade; making the repository public would also
+unlock it and is not recommended.**
+
 ### What remains open, unchanged
 
 **L-17** (recovery-mail delivery never inspected end-to-end), **P-6 / P-3 / P-4** and **Gates 1/2** (iOS and

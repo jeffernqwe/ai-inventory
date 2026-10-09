@@ -6352,6 +6352,31 @@ It runs on **every pull request** and on **pushes to `main`**, with **no path fi
 required check is the classic way to block a merge with a check that never reports — and **no GitHub
 secrets**.
 
+## Enforcement — what this gate cannot do on this plan (recorded 2026-10-09)
+
+**The gate cannot be made mandatory on this repository.** Classic branch protection and the newer
+rulesets API are both unavailable on a **private** repository without GitHub Pro; each answers:
+
+```text
+Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)
+```
+
+So `ci / server` and `ci / mobile` run on every pull request and every push to `main`, but nothing
+**prevents** a direct `git push origin main` or a merge past a red check. That is a **plan limitation,
+not a configuration mistake** — both endpoints were attempted and both refused.
+
+The compensating control is **`.github/workflows/main-guard.yml`** (added 2026-10-09, shipped through a
+pull request): on every push to `main` it requires **every commit the push introduced to be associated
+with a merged pull request**, using the API's own PR record, and fails the run otherwise. Its rule was
+verified against real repository data before it shipped (`5acaf44` → PR #8, `3e5d2aa` → PR #7,
+`0c54613` → PR #8, and a non-PR commit `e9616cf` → none).
+
+**What it is and is not, stated plainly:** it is **detection, not prevention** — a bypass lands, then shows
+up red on `main` instead of passing silently. It does **not** re-verify that the checks were green at
+merge time; the primary `ci` run on the same push covers that. It is a compensating control for a paid
+feature, and the limitation is recorded here so no later reader mistakes the green checkmarks for
+enforcement.
+
 ## The defect its first run caught — a missing test-owned variable
 
 The gate's first-ever execution, on **PR #7**, failed the `server` job with **118 failing tests**, every one

@@ -86,6 +86,19 @@ jobs:
           MONGODB_URI: mongodb://127.0.0.1:27017
           TEST_DB_MAX_ATTEMPTS: '30'
           TEST_DB_RETRY_MS: '2000'
+          # A FIXED, NON-SECRET TEST VALUE — not a credential, and not a repository
+          # secret. Locally the suites read the git-ignored `server/.env` (every
+          # suite starts with `import 'dotenv/config'`); a CI checkout has no such
+          # file, so the first `signAccessToken` throws `AUTH_NOT_CONFIGURED` and
+          # every auth-dependent suite fails — 118 failing tests on the first run
+          # of this workflow. It must stay at least 32 characters, the length the
+          # production validator enforces.
+          #
+          # JWT_ISSUER / JWT_AUDIENCE / JWT_EXPIRES_IN are deliberately NOT set
+          # here: their shipped defaults are the contract, and suites assert it.
+          # Overriding them in the ambient environment would mask a regression in
+          # those defaults instead of catching it.
+          JWT_SECRET: 'ci-only-test-secret-not-a-real-credential-0123456789'
         run: npm test
 
       # Boot smoke. Asserts the readiness gate really opens, that liveness is

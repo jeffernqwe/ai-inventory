@@ -2089,6 +2089,43 @@ in the UI. **Forking is not disableable on a personal private repo** (`422 … o
 protected branch) and were **corrected**, not left standing. Full posture, limitations and growth plan:
 `docs/SOURCE_PROTECTION.md`.
 
+### Owner-only access — enforced where GitHub allows it, monitored where it does not (2026-10-09)
+
+Asked to make the owner **the only human with authorized access**, the audit **changed no repository setting
+and touched no integration** — every change is additive. **Confirmed by read:** one collaborator (the owner,
+`admin`), **no** pending invitations, deploy keys, webhooks, Actions secrets or deployment environments, the
+Actions of this repository **not shared** with any other (`access_level: none`), the default `GITHUB_TOKEN`
+already **read-only** and unable to create or approve pull requests, **no public gists**, and **no
+InventoryAI code in any public repository** (an account-scoped code search for two distinctive identifiers
+returned zero across 21 public and 4 private repositories). The **history scan was re-run over every ref
+with controls** — a positive control that must be found and a negative canary that must not, because a scan
+that cannot fail proves nothing: no `.env`, keystore, `.pem`, `.p12` or service-account file was **ever**
+added, the only `PRIVATE KEY` hits are the **27-character header string** (a docs example, the guard's own
+pattern, dummy fixtures), a scan for a base64-shaped body line found **nothing anywhere in history**, and
+both `.env.example` files carry **empty** credential values. **No secret has ever been committed, so no
+rotation is owed.**
+
+**The planner's limit is recorded, not assumed:** protection and rulesets answer `403`, secret scanning is
+`null`, and `allow_forking: false` answers `422 "Allow forks setting can only be changed on org-owned
+private repositories"` on a personal private repository. The response is to make the policy **observable**:
+**`.github/workflows/access-guard.yml`** runs **daily** and **hard-fails** on a non-private repository, a
+fork or fork network, or a collaborator other than the owner. Its **first real run (`37893715498`) supplied
+the measurement the design depends on** — the **collaborators endpoint answers `200` to `GITHUB_TOKEN`**,
+while invitations, deploy keys, webhooks, Actions secrets, the Actions policy, protection and rulesets all
+answer **`403`** — so owner-only membership is **asserted unattended** and the unreadable endpoints are
+**printed with their HTTP status**, never counted as a pass. The deep audit is
+**`scripts/audit-access.mjs`**, which needs the owner's own `gh` session for the rights CI lacks:
+dependency-free, **names only and never a value**, non-zero exit on a violation, verified by running it
+against the live API (**no policy violations**, with the unavailable settings listed as unavailable). Two
+workflow actions are now **pinned to commit SHAs** verified to be what the floating `v4` tags already
+resolved to, with a `github-actions` Dependabot entry to keep them current; two stale claims were
+**corrected rather than left standing**. Verified by PR **#28** → merge **`99e1eac`**, with `ci` green at job
+level (`server`, `mobile`, `secret-guard` — which also proves the pins execute) and `access-guard` green on
+`main`. **Still owner-side:** account **2FA** and the **GitHub Apps with repository access** list — an app is
+not a collaborator, so **no automated check here can see one**, and Render reaches this repository through
+exactly such an installation rather than a webhook. Nothing was revoked, narrowed or disabled. **A private
+repository is not an uncopyable one.** Roadmap §27AF; posture and growth plan in `docs/SOURCE_PROTECTION.md`.
+
 ### What remains open, unchanged
 
 **L-17** (recovery-mail delivery never inspected end-to-end), **P-6 / P-3 / P-4** and **Gates 1/2** (iOS and

@@ -21,15 +21,22 @@ name: access-guard
 # WHAT IT ASSERTS (hard, and all of it readable without admin rights)
 #   * the repository is still private
 #   * it has no forks and no network — nothing has been copied through GitHub
+#   * the owner is the only collaborator
+#
+# The third one is measured rather than assumed: on its first real run (2026-10-09,
+# run 37893715498) the collaborators endpoint answered **200** to GITHUB_TOKEN while
+# every administration-level endpoint below answered 403, so owner-only membership
+# is enforced unattended instead of merely reported.
 #
 # WHAT IT MERELY REPORTS, AND WHY THAT IS DELIBERATE
-# Collaborators, invitations, deploy keys, webhooks and Actions secrets sit behind
-# the `Administration` repository permission, which GITHUB_TOKEN cannot be granted
-# (it is absent from the permissions the token can hold). Those endpoints answer
-# 403 here. The job prints each endpoint's HTTP status, and asserts emptiness only
-# when it actually got a 200, so an unreadable endpoint is visible in the log
-# rather than silently counted as a pass. The deep audit needs a credential that
-# may read them, so it is a manual, owner-run check instead:
+# Invitations, deploy keys, webhooks, Actions secrets, the Actions policy, branch
+# protection and repository rulesets sit behind the `Administration` repository
+# permission, which GITHUB_TOKEN cannot be granted (it is absent from the
+# permissions the token can hold) — all seven were measured answering 403. The job
+# prints each endpoint's HTTP status, and asserts emptiness whenever it does get a
+# 200, so an unreadable endpoint is visible in the log rather than silently counted
+# as a pass. Those need a credential that may read them, so the deep audit is a
+# manual, owner-run check instead:
 #
 #   node scripts/audit-access.mjs        # uses the owner's `gh` session
 #

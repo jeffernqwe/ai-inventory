@@ -6584,6 +6584,98 @@ container was not literally the same database; the green run — not the simulat
 
 ---
 
+# 27AF. Owner-only access — audited, monitored and pinned (2026-10-09)
+
+**The requirement, in the owner's words:** *"I must be the only human with authorized access to the
+InventoryAI GitHub repository."* This section records what could be **confirmed**, what could be
+**enforced**, what could only be **reported**, and the fact that **no repository setting was changed and no
+integration was touched** to reach it — every change below is additive.
+
+## Confirmed by API read, not assumed
+
+| Surface | Finding |
+| --- | --- |
+| Collaborators | exactly one — the owner, with `admin` |
+| Pending invitations | none |
+| Deploy keys | none |
+| Webhooks | none |
+| Actions secrets / environments | none / none — no credential exists inside GitHub |
+| Owner type | a **personal** account, not an organization (this is why two controls below are unavailable) |
+| Actions shared with other repositories | `access_level: none` |
+| Default `GITHUB_TOKEN` | `read`, and workflows cannot create or approve pull requests |
+| Public gists on the account | none |
+| InventoryAI code in public repositories | none — a code search scoped to the account for two distinctive identifiers returned zero, over 21 public and 4 private repositories |
+
+**History re-verified over every ref, with controls.** `git grep` across every commit of every ref found
+no `.env`, keystore, `.pem`, `.p12` or service-account file that was **ever** added, and both `.env.example`
+files carry **empty** credential values. The only `-----BEGIN … PRIVATE KEY-----` matches are the
+**27-character header string** — a documentation example, the guard's own pattern, and dummy test fixtures —
+and a separate scan for a base64-shaped body line returned **nothing anywhere in history**, so no real key
+block ever existed. A positive control (`PRODUCT_ARCHIVED`, which must be found) and a negative control (a
+canary shape that must not be) were run through the identical traversal, because a scan that cannot fail
+proves nothing.
+
+## What GitHub cannot do here, measured
+
+- branch protection and repository rulesets: `403 Upgrade to GitHub Pro or make this repository public`
+- secret scanning and push protection: public-repository-only on this plan (`security_and_analysis: null`)
+- `allow_forking: false`: `422 Allow forks setting can only be changed on org-owned private repositories`
+
+So the policy is **enforced where the platform allows it and made observable where it does not**.
+
+## What was added
+
+- **`.github/workflows/access-guard.yml`** — a daily, also manually dispatchable monitor that **hard-fails**
+  on a repository that is no longer private, on any fork or fork network, or on any collaborator other than
+  the owner. Its **first real run (`37893715498`) produced the measurement that shapes it**: the
+  collaborators endpoint answers **`200` to `GITHUB_TOKEN`**, while invitations, deploy keys, webhooks,
+  Actions secrets, the Actions policy, branch protection and rulesets all answer **`403`**. Owner-only
+  membership is therefore **asserted unattended**, and the seven unreadable endpoints are **printed with
+  their HTTP status** — asserted empty whenever a 200 does arrive, and never counted as a pass when it does
+  not. The scheduled trigger is deliberate: the policy changes through repository settings, not through a
+  commit, so a push trigger would miss the very thing being watched.
+- **`scripts/audit-access.mjs`** — the deep audit, which needs a credential that *can* read those
+  endpoints: the owner's own `gh` session. Dependency-free, `PASS`/`FAIL`/`INFO`, **non-zero exit on any
+  violation**, printing **names only and never a value**, and listing the unavailable settings so their
+  absence is visible rather than forgotten. Verified by running it against the live API: **no policy
+  violations**, with account 2FA, protection and rulesets reported as unavailable or unverifiable.
+- **Action pinning** — `actions/checkout` and `actions/setup-node` are pinned to full commit SHAs, each
+  confirmed by `git ls-remote` to be the commit its floating `v4` tag already resolved to (`v4.4.0` of
+  both), so the change is behaviour-identical and an upstream tag re-point can no longer alter what CI
+  executes. A `github-actions` entry in `.github/dependabot.yml` keeps the pins current, because a pin with
+  no updater silently stops receiving the fixes it exists to make safe to take.
+- **Two stale claims corrected rather than left standing** — `dependabot.yml`'s comment that these PRs land
+  on a **protected** `main` (they do not, at this plan level: nothing forces the checks to pass, so a red
+  Dependabot PR must not be merged by hand), and the monitor's own first draft, which described the
+  collaborator check as unreadable — the run showed otherwise, so the file now records the measurement.
+
+## Verification
+
+PR **#28** → merge **`99e1eac`**. The `ci` run on the PR is green at job level — **`server`** (full suite),
+**`mobile`**, **`secret-guard`** — which is also the proof that the **pinned** actions execute correctly.
+`access-guard` then ran on `main` (`37893715498`, **success**) and printed the matrix quoted above. All
+three YAML files were parsed before the PR, `node --check` passed on the new script, and
+`scripts/check-secrets.mjs` was run over every changed file (clean).
+
+## Integrations, and what was not touched
+
+The repository holds **no deploy configuration** — no `render.yaml`, no Dockerfile — so the Render and
+MongoDB Atlas connections live in their own dashboards and in Render's environment variables, and the
+mobile build config in `mobile/eas.json` carries project identifiers, not credentials. **Render reaches
+this repository through a GitHub App installation, not through a repository webhook** — which is precisely
+why it is invisible to every CLI check here: `GET /user/installations` needs a token authorised to an App
+and `GET /repos/…/installation` needs an App JWT (both `403`/`401`). No app installation, deploy key,
+hook, secret, collaborator or permission was revoked, narrowed or modified, and the only settings call made
+was the deliberate `allow_forking: false` attempt that the platform refused with `422`.
+
+## Still owner-side
+
+Account **2FA** (`two_factor_authentication: null`) and the **GitHub Apps with repository access** list
+cannot be read from the CLI, and **no automated check here can see an app**, because an app is not a
+collaborator. Both must be confirmed in the UI, and the hosting app's repository scope narrowed there.
+
+---
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

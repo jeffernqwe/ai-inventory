@@ -2035,7 +2035,13 @@ invented mailbox — and it discloses the open items above (`B1`, `B2`, `E3`, `O
 re-reported as fresh. **`LICENSE`** is **proprietary, all rights reserved** (the owner's decision: public for
 hosting, not a grant of reuse rights), replacing an unstated default; **`.github/dependabot.yml`** covers
 version updates for both `server/` and `mobile/`, validated against the published `dependabot-2.0` schema,
-with security updates deliberately left ungrouped. None of this changes application behaviour: no server or
+with security updates deliberately left ungrouped. Enabling the alerts produced a result worth recording: GitHub immediately reported
+**9 open advisories, all in `mobile/package-lock.json`** (1 critical, 4 high, 3 moderate, 1 low) and
+**Dependabot opened three security-update pull requests on its own (`#12`–`#14`)** — the feature working,
+not merely enabled. Three of the nine (`braces`, `node-forge`, `sprintf-js`) have **no published fix** and
+are **open dependency debt**; all nine are transitive dependencies of the mobile build/tooling chain rather
+than server runtime dependencies, which lowers but does not remove their exposure. None of this changes
+application behaviour: no server or
 mobile source file, route, model, permission or test was touched.
 
 ### What remains open, unchanged

@@ -1996,9 +1996,14 @@ URI; the "PRIVATE KEY" hits are dummy bodies in `phase32b-firebase-admin.test.mj
 strings are fixtures. **Branch protection is applied and verified by API readback:** required checks
 `server` and `mobile` (**check-run names, not the UI's `ci / server` display form** — F-24), strict
 up-to-date enforcement, pull request required (**0** approvals — no
-self-approval deadlock), stale reviews dismissed, force-push and deletion blocked, `enforce_admins: false`
-so the owner retains an escape hatch. `.github/workflows/main-guard.yml` is **retained** as a second layer
-for the routes protection does not cover. **The exposure trade-off is the owner's decision**, recorded
+self-approval deadlock), stale reviews dismissed, force-push and deletion blocked, and
+`enforce_admins: true` — **set the same day, after `false` was shown to bind nobody**: the only
+collaborator is the owner-admin, so admin enforcement off made the required checks advisory for every actor
+on the repository. **Verified by attempting both outcomes:** with the checks pending the merge was refused
+(`the base branch policy prohibits the merge`, exit 1, PR left open and `BLOCKED`), and with them green the
+same merge succeeded, so the gate blocks the admin without deadlocking a green pull request.
+`.github/workflows/main-guard.yml` is **retained** as a second layer for the routes protection does not
+cover (a setting later relaxed, or an actor added without admin enforcement). **The exposure trade-off is the owner's decision**, recorded
 with the scan results: a public repository exposes the full source, history and documentation, and
 switching back to private does not un-expose what has already been cloned, forked or indexed.
 

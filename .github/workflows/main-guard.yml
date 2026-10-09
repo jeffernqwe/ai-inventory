@@ -18,12 +18,13 @@ name: main-guard
 # tier: `server` and `mobile` are now REQUIRED on main, strict up-to-date, with force-pushes
 # and deletion blocked (roadmap §27AE, checklist §42 — those context names are the CHECK-RUN
 # names, not the `ci / server` form the pull-request page displays; configuring the display
-# form leaves a green PR blocked on a status that never reports). Protection does not cover
-# every route to main, and it is switched off for admins deliberately: `enforce_admins` stays
-# false so the owner keeps an escape hatch, which is exactly the setting that lets an admin
-# push slip past it. This job depends on no setting and records the pull-request rule in the
-# repository itself. It is still detection, not prevention — that difference is deliberate
-# and documented rather than papered over.
+# form leaves a green PR blocked on a status that never reports). Protection covers every
+# route to main only while it is left switched on: as first applied, `enforce_admins` was false,
+# which left the required checks advisory for the ONLY account on this repository — it was set
+# true the same day, verified by a refused merge while the checks were pending. This job depends
+# on no setting at all and records the pull-request rule in the repository itself, so a relaxed
+# setting or a later actor is still visible. It is detection, not prevention — that difference is
+# deliberate and documented rather than papered over.
 #
 # WHAT IT ASSERTS
 # Every commit a push to main introduced is associated — by the GitHub API's own PR
@@ -95,9 +96,9 @@ jobs:
 
           if [ "${failed}" -ne 0 ]; then
             echo "FAIL: this push bypassed the pull-request flow." >&2
-            echo "Protection's required checks do not stop an admin bypass (enforce_admins is" >&2
-            echo "off by design), so this job is what catches it; re-land the work through a" >&2
-            echo "pull request. See this file's header." >&2
+            echo "Protection requires a pull request to reach main, so either it has been" >&2
+            echo "changed or it does not cover this actor; this job is the layer that does not" >&2
+            echo "depend on that setting. Re-land the work through a pull request. See the header." >&2
             exit 1
           fi
 

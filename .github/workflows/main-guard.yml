@@ -1,0 +1,92 @@
+name: main-guard
+
+# The free-plan substitute for branch protection.
+#
+# WHY IT EXISTS
+# GitHub's classic branch protection and the rulesets API are BOTH unavailable on a
+# private repository without GitHub Pro. Attempting either answers:
+#
+#   "Upgrade to GitHub Pro or make this repository public to enable this feature." (HTTP 403)
+#
+# So nothing on this plan PREVENTS a direct `git push origin main`, or a merge past a
+# red `ci / server` job. This workflow is the substitute: it detects the bypass after
+# the fact and fails the run, so a violation shows up as red on main instead of
+# passing silently. It is detection, not prevention — that difference is deliberate
+# and documented rather than papered over.
+#
+# WHAT IT ASSERTS
+# Every commit a push to main introduced is associated — by the GitHub API's own PR
+# record — with a MERGED pull request. A merge performed through the web UI (merge
+# commit, squash or rebase) carries that association; a direct push does not, and
+# fails. The rule was verified against real repository data before it shipped:
+# `5acaf44` → PR #8, `3e5d2aa` → PR #7, `0c54613` → PR #8, while a non-PR commit
+# (`e9616cf`) resolves to none.
+#
+# WHAT IT DOES NOT DO
+# It does not re-check that the required checks were green at merge time: the sibling
+# `ci` workflow already runs the full gate on every push to main, so a bad merge is
+# independently visible there. This job answers one question only — did this reach
+# main through a pull request?
+#
+# LIMITS RECORDED, NOT HIDDEN
+# A push webhook payload is truncated at 20 commits, so a very large push is audited
+# from the compare API when that is available and from the payload when it is not; the
+# head commit is always checked. This is a compensating control for a paid feature,
+# not a replacement for it.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  bypass-detector:
+    runs-on: ubuntu-latest
+    steps:
+      # No checkout: every fact comes from the API, and `gh` ships on GitHub-hosted
+      # runners.
+      - name: Every commit on main arrived through a merged pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+          PAYLOAD_SHAS: ${{ join(github.event.commits.*.id, ' ') }}
+        run: |
+          set -euo pipefail
+
+          ZEROES=0000000000000000000000000000000000000000
+          shas=""
+
+          # Preferred source: the API's own list of what this push introduced.
+          if [ -n "${BEFORE}" ] && [ "${BEFORE}" != "${ZEROES}" ]; then
+            shas="$(gh api "repos/${REPO}/compare/${BEFORE}...${AFTER}" --jq '.commits[].sha' 2>/dev/null || true)"
+          fi
+
+          # Fallbacks: the webhook payload, then the head commit itself.
+          if [ -z "${shas}" ]; then shas="${PAYLOAD_SHAS}"; fi
+          if [ -z "${shas}" ]; then shas="${AFTER}"; fi
+
+          failed=0
+          for sha in ${shas}; do
+            prs="$(gh api "repos/${REPO}/commits/${sha}/pulls" \
+              --jq '[.[] | select(.merged_at != null) | .number] | join(",")')"
+            if [ -z "${prs}" ]; then
+              echo "::error::commit ${sha} reached main without a merged pull request"
+              failed=1
+            else
+              echo "OK: ${sha} arrived through PR ${prs}"
+            fi
+          done
+
+          if [ "${failed}" -ne 0 ]; then
+            echo "FAIL: this push bypassed the pull-request flow." >&2
+            echo "Branch protection is unavailable on a private repository without GitHub Pro" >&2
+            echo "(see this file's header); re-land the work through a pull request." >&2
+            exit 1
+          fi
+
+          echo "OK: every commit in this push came from a merged pull request."

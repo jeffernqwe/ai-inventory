@@ -136,21 +136,23 @@ Credit in the advisory is offered if you want it, and withheld if you prefer.
 These are verifiable settings on this repository, not claims:
 
 - The repository is **private**.
-- **Pull requests are the only route to `main`** in practice: the `ci` workflow runs the
-  `server`, `mobile` and `secret-guard` jobs on every pull request and every push to
-  `main`, and `.github/workflows/main-guard.yml` fails a push that reached `main` outside
-  a merged pull request.
+- The `ci` workflow runs the `server`, `mobile` and `secret-guard` jobs on every pull request
+  and every push to `main`. Pull requests are how work is landed here, but this is a
+  **convention, not an enforced control**: `main` cannot be protected on a private repository at
+  this plan level, and the `main-guard` workflow that used to flag a direct push was **removed on
+  2026-10-09** as part of keeping the workflow minimal (docs/DEVELOPMENT_ROADMAP.md §27AE).
 - **Dependabot alerts and security updates** are enabled, with version-update
   configuration in [`.github/dependabot.yml`](.github/dependabot.yml).
 - **`scripts/check-secrets.mjs`** scans every tracked file for credential-shaped content
   on each CI run, replacing the GitHub-side scanner (see below).
 
-**Three protections this repository does NOT have, stated plainly:**
+**Four protections this repository does NOT have, stated plainly:**
 
 1. **Branch protection is unavailable on this plan for a private repository** — the API
    answers `403 Upgrade to GitHub Pro`. The checks therefore **report** rather than
-   **gate**, and `main-guard` is **detection after the fact, not prevention**. Making the
-   repository public or upgrading the plan restores enforcement (roadmap §27AE).
+   **gate**: nothing stops a merge past a red check, and nothing flags a direct push to
+   `main`. Making the repository public or upgrading the plan restores enforcement
+   (roadmap §27AE).
 2. **GitHub secret scanning and push protection are unavailable here** for the same
    reason; `scripts/check-secrets.mjs` is the replacement. It is pattern matching over
    tracked files, so it cannot see a credential that is split, encoded or assembled at
@@ -160,3 +162,9 @@ These are verifiable settings on this repository, not claims:
    private repositories`. Nobody outside the repository can fork it, but anyone granted
    access could. Moving the work into a GitHub Organization is the fix, and it is
    recommended in [`docs/SOURCE_PROTECTION.md`](docs/SOURCE_PROTECTION.md).
+4. **No automated check watches the repository's visibility or its access list.** A daily
+   monitor (`access-guard.yml`) existed briefly and was **removed on 2026-10-09** to keep
+   the workflow minimal, so an accidental change of visibility or a new collaborator is
+   noticed by nobody until someone looks. The replacement is a manual, one-command check —
+   `node scripts/audit-access.mjs` — and it is worth running before anything that touches
+   repository settings (roadmap §27AF).

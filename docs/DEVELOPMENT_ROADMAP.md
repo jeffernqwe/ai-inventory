@@ -6676,6 +6676,79 @@ collaborator. Both must be confirmed in the UI, and the hosting app's repository
 
 ---
 
+# 27AG. Workflow simplification — fewer moving parts, dependency policy, and a leaner instruction file (2026-10-09)
+
+**The owner's report:** the GitHub setup "has become more complicated than necessary" — the goal
+being plain code tracking, feature management and pull requests, not security machinery. This section
+records what was **measured**, what was **removed**, and what is now **not watched**, so the trade is
+on the record rather than implicit.
+
+## Measured first
+
+| Question | Answer |
+| --- | --- |
+| Does anything block the daily git flow? | **No.** No protected branch, no required check, no required reviewer, no local hook, no approval gate — protection answers `403` on a private repo at this plan level |
+| What does a pull request cost? | `ci` runs **160–214 s** (three parallel jobs), plus a second run on the `main` push; `main-guard` 8 s, `access-guard` 11 s/day. Human time added: **none** |
+| What was actually noisy? | **14 open Dependabot PRs, 8 of them major versions, 5 of them red**; 16 remote branches; and a **143 KB `CLAUDE.md`** loaded into every agent session |
+
+## Dependency policy changed
+
+[`.github/dependabot.yml`](../.github/dependabot.yml) now queues **minor and patch updates only**,
+grouped per package, `open-pull-requests-limit: 2`, weekly, for `/server`, `/mobile` and
+`github-actions`. Major versions are **excluded** from the queue. Two GitHub-documented facts made this
+safe: security-update pull requests **are not subject to `open-pull-requests-limit` and do not count
+toward it**, and `update-types` filters version updates — so a vulnerability fix still arrives
+immediately as its own PR regardless of the ignore rule.
+
+**Queue cleared the same day, on evidence rather than policy alone:** three green non-major PRs were
+**merged** (`#16` server group, `#14` shell-quote, `#13` source-map-js — the last two were two of the
+three security updates Dependabot had raised itself); **nine major PRs and two blocked ones were
+closed** (`#17`, `#18`, `#20`, `#21`, `#22`, `#23`, `#24`, `#29`, `#30`; plus `#12` and `#19`), each with
+the reason stated on the PR. Open PRs went **14 → 0** and remote branches **16 → 2** (each closed
+Dependabot PR takes its own branch).
+
+Two closures were **blocked rather than merely major**, and that came from reading the failures rather
+than the titles: `#12` fails `npm ci` with `ERESOLVE` because `expo-router@58.0.16` needs
+`expo-constants@58` while the project resolves `~57.0.20` from `expo@57.0.26`; and the mobile
+minor/patch group `#19` fails **typecheck** with ~10 `TS2322` errors — `Type 'null' is not assignable to
+type 'Element | ComponentType<any> | undefined'` — which is the React 19 types no longer accepting
+`null` where `undefined` is expected. Both are recorded in **issue #32** with their evidence, so the
+next weekly mobile group is a known, tracked blocker instead of a surprise red PR.
+
+## Two workflows removed
+
+- **`main-guard.yml`** — flagged a push that reached `main` outside a merged pull request
+  (detection only, 8 s per push). Removed: `main` cannot be protected here anyway, and a direct push
+  is a legitimate solo workflow.
+- **`access-guard.yml`** — the daily visibility/fork/collaborator monitor added earlier the same day
+  (green in run `37894805284`). Removed on the owner's call for fewer moving parts.
+
+**Stated plainly, because it changes the risk picture:** nothing now watches repository visibility,
+the collaborator list, deploy keys or webhooks. An accidental flip to public, or a new collaborator,
+is noticed only when someone runs `node scripts/audit-access.mjs` — a habit, not a control. The
+three protections this plan lacks (branch protection, rulesets, secret scanning) are unchanged and
+unaffected by this removal; `scripts/audit-access.mjs` and `scripts/check-secrets.mjs` are kept.
+
+## `CLAUDE.md` split
+
+`CLAUDE.md` is loaded into **every** agent session, and it carried ~87 KB of phase prose. That text was
+moved **verbatim** to [`docs/PHASE_HISTORY.md`](PHASE_HISTORY.md) — verified byte-identical against the
+previous revision — leaving **143 KB → 57 KB** (1,686 → 717 lines). The one-line-per-phase index stays
+in `CLAUDE.md`, because an agent needs to know what already exists before proposing work. A
+**proportional-records rule** replaced the blanket obligation: security, architecture, authorization,
+schema, route, dependency-policy or phase-level changes get a dated record; a routine feature or fix is
+documented by its pull request, its tests and the code.
+
+## Left alone deliberately
+
+`wip/backup-working-tree` is **not** contained in `main` — it holds a unique commit (`e9616cf`,
+2026-09-28, "back up uncommitted working-tree work"), so it was **kept** despite being approved for
+deletion; the approval rested on a description that turned out to be wrong, and a private branch costs
+nothing. `ci.yml` and its three jobs, `scripts/check-secrets.mjs`, the pinned action SHAs and
+`scripts/audit-access.mjs` are all unchanged.
+
+---
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

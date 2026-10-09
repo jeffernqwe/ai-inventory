@@ -2021,6 +2021,23 @@ pull request would have been permanently unmergeable**, failing closed rather th
 this is recorded as a finding and not a footnote. Remedy applied: the required contexts are pinned to
 `server`/`mobile`, and the *strict* up-to-date rule plus the **0**-approval setting are both live.
 
+### Repository-level security surface (closed out 2026-10-09)
+
+Public visibility widened what a reader can see, so the repository settings were checked rather than
+assumed — and **two were found disabled**: `secret_scanning` and `secret_scanning_push_protection`, on a
+repository that had just been made public. Until then the only credential control was the **one-off
+history scan** run before the visibility change, which is an audit and not a standing control. Both are now
+enabled, verified by a fresh readback of `security_and_analysis`, alongside **Dependabot alerts** and
+**security updates**; `secret_scanning_non_provider_patterns` and `secret_scanning_validity_checks` remain
+**disabled** and are recorded rather than left silently off. Reporting now has a stated path —
+**`SECURITY.md`** pointing at GitHub **private vulnerability reporting**, enabled and verified, with no
+invented mailbox — and it discloses the open items above (`B1`, `B2`, `E3`, `OD-10`, `L-17`) so they are not
+re-reported as fresh. **`LICENSE`** is **proprietary, all rights reserved** (the owner's decision: public for
+hosting, not a grant of reuse rights), replacing an unstated default; **`.github/dependabot.yml`** covers
+version updates for both `server/` and `mobile/`, validated against the published `dependabot-2.0` schema,
+with security updates deliberately left ungrouped. None of this changes application behaviour: no server or
+mobile source file, route, model, permission or test was touched.
+
 ### What remains open, unchanged
 
 **L-17** (recovery-mail delivery never inspected end-to-end), **P-6 / P-3 / P-4** and **Gates 1/2** (iOS and

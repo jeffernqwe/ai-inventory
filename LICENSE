@@ -1,0 +1,45 @@
+Copyright (c) 2026 Jeffernzxc. All rights reserved.
+
+Inventory AI — proprietary software and documentation.
+
+This repository is made publicly visible so that its continuous integration,
+documentation and project tooling can operate on the services the project uses.
+Public visibility is not a grant of rights, and nothing in this file is an
+open-source licence.
+
+NO LICENCE IS GRANTED
+
+No licence, express or implied, is granted to any person to use, copy, modify,
+merge, publish, distribute, sublicense, sell, host, deploy or otherwise exploit
+this software, its documentation, or any part of either, in source or object
+form, for any purpose, without the prior written permission of the copyright
+holder.
+
+Without limiting the paragraph above, you may NOT:
+
+  1. use this software, or any derivative of it, in a commercial product or
+     service, including as a hosted or managed offering;
+  2. redistribute it, in whole or in part, in source or binary form;
+  3. create derivative works from it, except as permitted by applicable law.
+
+WHAT YOU MAY DO
+
+You may view this repository, clone it, and fork it on GitHub for the purposes
+of reading and evaluating the code and of contributing changes back to the
+copyright holder by pull request. Forking for any other purpose, and any use of
+a fork beyond reading and contributing, requires prior written permission.
+
+THIRD-PARTY COMPONENTS
+
+This software depends on third-party packages, each of which remains under its
+own licence as declared in the corresponding `package.json` and
+`package-lock.json` files. Nothing here alters those terms.
+
+NO WARRANTY
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHOR OR
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.

@@ -45,6 +45,16 @@ name: main-guard
 # from the compare API when that is available and from the payload when it is not; the
 # head commit is always checked. This is a compensating control for a paid feature,
 # not a replacement for it.
+#
+# AND ONE THING IT GOT WRONG, NOW FIXED (F-25)
+# The commit-to-PR association is *eventually consistent*, and this job's first run with
+# real work in it proved that the hard way: on the merge of PR #15 it started six seconds
+# after the merge and reported the OLDEST commit of the branch as having no merged pull
+# request, while its two siblings resolved to PR #15 in the same run. The identical query
+# a minute later resolved all three. A guard that goes red on a legitimate merge is worse
+# than no guard — it teaches its reader to ignore the colour — so an empty answer is now
+# retried with a backoff before it is called a bypass, and an API that never answers is
+# reported as a verification failure instead of an accusation.
 
 on:
   push:
@@ -82,23 +92,66 @@ jobs:
           if [ -z "${shas}" ]; then shas="${PAYLOAD_SHAS}"; fi
           if [ -z "${shas}" ]; then shas="${AFTER}"; fi
 
+          # The commit-to-PR association is eventually consistent, not immediate: on the
+          # merge of PR #15 this job ran six seconds after the merge, called the oldest
+          # commit of the branch unassociated while its siblings resolved, and the same
+          # query a minute later resolved all three (F-25). An empty answer is therefore
+          # retried with a backoff before it is treated as a bypass.
+          #   0 = a merged PR was found (KEYS holds its number(s))
+          #   1 = the API answered, and there is no merged PR for this commit
+          #   2 = the API never answered
+          MAX_ATTEMPTS=5
+          KEYS=""
+          verify_sha() {
+            local sha="$1" attempt=1 delay=5 out answer="absent"
+            KEYS=""
+            while [ "${attempt}" -le "${MAX_ATTEMPTS}" ]; do
+              if out="$(gh api "repos/${REPO}/commits/${sha}/pulls" \
+                  --jq '[.[] | select(.merged_at != null) | .number] | join(",")' 2>/dev/null)"; then
+                if [ -n "${out}" ]; then
+                  KEYS="${out}"
+                  return 0
+                fi
+                answer="absent"
+              else
+                answer="error"
+              fi
+              if [ "${attempt}" -lt "${MAX_ATTEMPTS}" ]; then
+                echo "note: no merged pull request for ${sha} on attempt ${attempt}/${MAX_ATTEMPTS}; the association can lag a merge, retrying in ${delay}s" >&2
+                sleep "${delay}"
+                delay=$((delay * 2))
+              fi
+              attempt=$((attempt + 1))
+            done
+            if [ "${answer}" = "error" ]; then return 2; fi
+            return 1
+          }
+
           failed=0
           for sha in ${shas}; do
-            prs="$(gh api "repos/${REPO}/commits/${sha}/pulls" \
-              --jq '[.[] | select(.merged_at != null) | .number] | join(",")')"
-            if [ -z "${prs}" ]; then
-              echo "::error::commit ${sha} reached main without a merged pull request"
-              failed=1
-            else
-              echo "OK: ${sha} arrived through PR ${prs}"
-            fi
+            status=0
+            verify_sha "${sha}" || status=$?
+            case "${status}" in
+              0)
+                echo "OK: ${sha} arrived through PR ${KEYS}"
+                ;;
+              2)
+                echo "::error::could not verify ${sha}: the GitHub API did not answer (${MAX_ATTEMPTS} attempts)"
+                failed=1
+                ;;
+              *)
+                echo "::error::commit ${sha} reached main without a merged pull request"
+                failed=1
+                ;;
+            esac
           done
 
           if [ "${failed}" -ne 0 ]; then
-            echo "FAIL: this push bypassed the pull-request flow." >&2
-            echo "Protection requires a pull request to reach main, so either it has been" >&2
-            echo "changed or it does not cover this actor; this job is the layer that does not" >&2
-            echo "depend on that setting. Re-land the work through a pull request. See the header." >&2
+            echo "FAIL: this push could not be shown to have arrived through the pull-request flow." >&2
+            echo "If the line above says the API did not answer, that is a verification failure" >&2
+            echo "and not a bypass — re-run this job. If it names a commit, that commit reached" >&2
+            echo "main outside a merged pull request: protection either was changed or does not" >&2
+            echo "cover the actor. Re-land the work through a pull request. See the header." >&2
             exit 1
           fi
 

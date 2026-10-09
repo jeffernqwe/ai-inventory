@@ -6482,6 +6482,33 @@ cannot clear. All nine are **transitive dependencies of the mobile build/tooling
 dependencies; that lowers the practical exposure of the critical and high entries but does not remove them,
 and none of them was found by reading code — they were invisible until the setting existed.
 
+## The guard's first false positive — F-25 (2026-10-09)
+
+With protection enforced, the guard had become the **second** layer — and on the merge of **PR #15** it went
+red on `main` for a merge that was entirely legitimate. The log is worth keeping as-is, because it reads like
+a real detection:
+
+```text
+##[error]commit a06c89bfa4ce4d8aa5f1e1f5f892c781cca7ab24 reached main without a merged pull request
+OK: 12603e3f648233dca8b0d8ee554699ed90c1cc22 arrived through PR 15
+OK: 6c897014a8b67314d2c4ed2847b52b0fdda58217 arrived through PR 15
+FAIL: this push bypassed the pull-request flow.
+```
+
+**One commit of the same push was accused while its two siblings resolved in the same run** — the tell — and
+the same API query a minute later resolved all three to PR #15. The cause is **eventual consistency**: the
+job started **six seconds** after the merge (05:05:59 against a 05:05:53 merge) and the commit-to-PR
+association for the branch's oldest commit had not propagated. The guard had been written assuming that
+association was immediate, which is false.
+
+**Why it was fixed rather than documented.** A guard that goes red on legitimate work is worse than no guard:
+it teaches its reader to ignore the colour, which is the exact failure mode the guard was added to prevent.
+The empty answer is now retried with a backoff, and — separately — a lookup that *never* answers is reported
+as `could not verify` rather than as a bypass, so a GitHub API outage cannot be presented as a security
+violation. All three paths were exercised locally against the live API before shipping: a commit from a
+**merged** PR (immediate `OK`, exit 0), a commit on an **open** PR (retry note, then the named bypass, exit 1),
+and an unanswerable lookup (`could not verify`, exit 1).
+
 ## The defect its first run caught — a missing test-owned variable
 
 The gate's first-ever execution, on **PR #7**, failed the `server` job with **118 failing tests**, every one

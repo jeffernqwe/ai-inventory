@@ -2021,6 +2021,22 @@ pull request would have been permanently unmergeable**, failing closed rather th
 this is recorded as a finding and not a footnote. Remedy applied: the required contexts are pinned to
 `server`/`mobile`, and the *strict* up-to-date rule plus the **0**-approval setting are both live.
 
+### Finding recorded — F-25 (the guard's first false positive)
+
+**F-25 — the commit-to-PR association is eventually consistent, and the guard assumed it was immediate.**
+On the merge of **PR #15** the guard ran **six seconds** after the merge and reported the branch's **oldest
+commit** as having no merged pull request, while **its two siblings resolved to PR #15 in the same run** — a
+red run on `main` describing a bypass that had not happened. The identical API query a minute later resolved
+all three commits to PR #15, which is what makes it a race rather than a real detection. **A guard that goes
+red on a legitimate merge is worse than no guard**, because it teaches its reader to ignore the colour — the
+precise failure mode this whole gate exists to prevent — so the behaviour was changed rather than documented
+away: an empty answer is now **retried five times with a 5/10/20/40-second backoff** (~75 s) before it is
+called a bypass, and an API that never answers is reported as **"could not verify"** instead of accusing a
+commit. All three paths were then **exercised locally against the live API** — a merged commit (immediate
+`OK`, exit 0), a commit on an **open** PR (retry note, named bypass, exit 1) and an unanswerable lookup
+(`could not verify`, exit 1) — rather than being assumed correct. No other workflow, no protection setting
+and no application code changed.
+
 ### Repository-level security surface (closed out 2026-10-09)
 
 Public visibility widened what a reader can see, so the repository settings were checked rather than

@@ -2055,7 +2055,9 @@ with security updates deliberately left ungrouped. Enabling the alerts produced 
 **9 open advisories, all in `mobile/package-lock.json`** (1 critical, 4 high, 3 moderate, 1 low) and
 **Dependabot opened three security-update pull requests on its own (`#12`–`#14`)** — the feature working,
 not merely enabled. Three of the nine (`braces`, `node-forge`, `sprintf-js`) have **no published fix** and
-are **open dependency debt**; all nine are transitive dependencies of the mobile build/tooling chain rather
+are **open dependency debt**, and a fourth (`uuid`) has a fix the graph **cannot reach** — Dependabot's own
+updater failed on it with *"A patched version exists for uuid, but the available update path still resolves
+it to 7.0.3"* (`jest-expo` → `xcode` → `uuid ^7.0.3`), so only an upstream release clears it; all nine are transitive dependencies of the mobile build/tooling chain rather
 than server runtime dependencies, which lowers but does not remove their exposure. None of this changes
 application behaviour: no server or
 mobile source file, route, model, permission or test was touched.

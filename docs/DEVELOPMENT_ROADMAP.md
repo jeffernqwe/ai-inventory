@@ -6478,7 +6478,10 @@ subject to the same required `server`/`mobile` checks as everyone else's — and
 1 low — and **Dependabot opened three security-update pull requests by itself** (`#12`–`#14`), which is the
 feature demonstrably working rather than merely enabled. Three of the nine (`braces`, `node-forge`,
 `sprintf-js`) have **no published fix**, so they are recorded here as dependency debt that a version bump
-cannot clear. All nine are **transitive dependencies of the mobile build/tooling chain**, not server runtime
+cannot clear. A fourth, `uuid`, has a published fix that the dependency graph **cannot reach** — Dependabot's
+updater failed on it and said so itself: *"A patched version exists for uuid, but the available update path
+still resolves it to 7.0.3"*, the chain being `jest-expo` → `xcode` → `uuid ^7.0.3`. Clearing that one needs
+an upstream release, not a config change. All nine are **transitive dependencies of the mobile build/tooling chain**, not server runtime
 dependencies; that lowers the practical exposure of the critical and high entries but does not remove them,
 and none of them was found by reading code — they were invisible until the setting existed.
 

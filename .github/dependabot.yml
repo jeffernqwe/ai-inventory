@@ -1,0 +1,44 @@
+version: 2
+
+# Version updates for both packages. Security updates are a separate repository
+# setting (already enabled) and deliberately left ungrouped by the `applies-to`
+# scope below, so a security bump always arrives as its own visible pull request
+# rather than folded into a routine minor/patch batch.
+#
+# These PRs land on a protected `main`, so they must pass the required `server`
+# and `mobile` checks like any other change.
+
+updates:
+  - package-ecosystem: npm
+    directory: /server
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+    groups:
+      server-minor-and-patch:
+        applies-to: version-updates
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: npm
+    directory: /mobile
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:15"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+    groups:
+      mobile-minor-and-patch:
+        applies-to: version-updates
+        update-types:
+          - minor
+          - patch

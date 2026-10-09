@@ -3,15 +3,16 @@
  * Access audit — checks that this repository is still private and owner-only.
  *
  * WHY THIS EXISTS
- * The intended policy is: `nreffjzxc/ai-inventory` stays **private**, the owner is
- * the **only human** with access, and no copy exists. The scheduled
- * `.github/workflows/access-guard.yml` can only watch the surface `GITHUB_TOKEN`
- * can read — visibility and forks. Everything else that grants access
- * (collaborators, invitations, deploy keys, webhooks) lives behind the
- * `Administration` repository permission, which `GITHUB_TOKEN` cannot hold, so it
- * answers 403 in CI. Those checks need the owner's credential, which is what this
- * script uses: your authenticated `gh` session. That makes the deep audit a
- * one-command, repeatable check instead of a set of remembered API calls.
+ * The intended policy is: this repository stays **private**, the owner is the
+ * **only human** with access, and no copy exists. Nothing enforces that policy on
+ * this plan — branch protection and rulesets answer `403`, secret scanning is a
+ * public-repository-only feature, and the daily `access-guard` workflow was removed
+ * on 2026-10-09 to keep the workflow minimal. So this script IS the access check:
+ * a credential that can read the `Administration`-level endpoints (collaborators,
+ * invitations, deploy keys, webhooks) is required, which is why it runs against the
+ * owner's own authenticated `gh` session instead of in CI, where `GITHUB_TOKEN`
+ * answers 403 for all of them. Run it by hand — ideally before and after anything
+ * that touches repository settings, and whenever access is on your mind.
  *
  * WHAT IT ASSERTS (exit 1 on any violation)
  *   * the repository is private
@@ -38,6 +39,9 @@
  * USAGE
  *   node scripts/audit-access.mjs            # audit the origin remote's repository
  *   node scripts/audit-access.mjs owner/repo # audit an explicit repository
+ *
+ * It is NOT wired into CI on purpose: in CI every administration-level endpoint answers
+ * 403, so it could only report "not verified", which is worse than an honest manual run.
  *
  * Exit codes: 0 clean, 1 violation, 2 could not run.
  */

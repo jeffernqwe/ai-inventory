@@ -1,15 +1,28 @@
 version: 2
 
-# Version updates for both packages. Security updates are a separate repository
-# setting (already enabled) and deliberately left ungrouped by the `applies-to`
-# scope below, so a security bump always arrives as its own visible pull request
-# rather than folded into a routine minor/patch batch.
+# POLICY (2026-10-09) — one grouped pull request per package, once a week, majors excluded.
 #
-# `main` is no longer protected at this plan level — branch protection and rulesets both
-# answer `403 Upgrade to GitHub Pro or make this repository public` on a private personal
-# repository (roadmap §27AF). The `server` and `mobile` checks still run on every one of
-# these PRs, but nothing forces them to pass, so a red Dependabot PR must not be merged by
-# hand, and `main-guard` still flags anything that reaches `main` outside a pull request.
+# WHY: the queue had reached 14 open pull requests, 8 of them major-version jumps (Expo SDK 58,
+# React 19 types, TypeScript 7, jest 30, actions/checkout 7, actions/setup-node 7). Five of those
+# were red, and none could be merged as-is — each needed code changes or a coordinated upgrade. The
+# one or two PRs that were genuinely safe to merge were lost in the noise. Majors are now taken
+# deliberately and tracked in issue #32, instead of standing open as permanently red PRs.
+#
+# WHAT THIS KEEPS: minor and patch updates, grouped per package, at most two open pull requests per
+# package, on the same weekly schedule — a queue that should normally be empty or trivially green.
+#
+# WHAT SECURITY UPDATES DO: they are unaffected. GitHub's reference states that security-update pull
+# requests are not subject to `open-pull-requests-limit` and do not count toward it, and that
+# `update-types` filters version updates. A vulnerability fix therefore still arrives as its own
+# pull request, immediately, regardless of the `ignore` rule below.
+#
+# TO TAKE A MAJOR DELIBERATELY: remove the `ignore` entry (or re-open the closed PR) for the upgrade
+# being planned. Issue #32 lists each one with the CI failure that made it blocked.
+#
+# REMINDER: `main` cannot be protected at this plan level — branch protection and rulesets both
+# answer `403 Upgrade to GitHub Pro or make this repository public` on a private repository
+# (docs/SOURCE_PROTECTION.md §4). Nothing forces these checks to pass, so a red dependency PR must
+# never be merged by hand.
 
 updates:
   - package-ecosystem: npm
@@ -19,7 +32,7 @@ updates:
       day: monday
       time: "06:00"
       timezone: Etc/UTC
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 2
     labels:
       - dependencies
     groups:
@@ -28,19 +41,10 @@ updates:
         update-types:
           - minor
           - patch
-
-  # The workflow actions are pinned to commit SHAs, so they need an updater of their own:
-  # without this entry a pinned action would sit at its current SHA forever instead of
-  # receiving the security fixes the pin exists to make safe to take.
-  - package-ecosystem: github-actions
-    directory: /
-    schedule:
-      interval: weekly
-      day: monday
-      time: "06:30"
-      timezone: Etc/UTC
-    labels:
-      - dependencies
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-major
 
   - package-ecosystem: npm
     directory: /mobile
@@ -49,7 +53,7 @@ updates:
       day: monday
       time: "06:15"
       timezone: Etc/UTC
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 2
     labels:
       - dependencies
     groups:
@@ -58,3 +62,32 @@ updates:
         update-types:
           - minor
           - patch
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-major
+
+  # The workflow actions are pinned to commit SHAs, so they need an updater of their own: without
+  # this entry a pinned action would sit at its current SHA forever instead of receiving the fixes
+  # the pin exists to make safe to take. Majors are excluded here too — the pins currently sit at
+  # v4.4.0, and re-pinning to a new major is a deliberate change (issue #32).
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:30"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 2
+    labels:
+      - dependencies
+    groups:
+      actions-minor-and-patch:
+        applies-to: version-updates
+        update-types:
+          - minor
+          - patch
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-major

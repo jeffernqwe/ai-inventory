@@ -28,6 +28,50 @@ live repository and GitHub API on **2026-10-09**; the raw evidence is kept in
 Three local files hold real credentials and are all **git-ignored and untracked**:
 `.env`, `server/.env`, `mobile/.env`. Nothing sensitive is tracked.
 
+### Owner-only access audit, 2026-10-09
+
+A second pass asked a narrower question: is the owner really the only human who can
+reach this source? Every line below was read from the live API, and anything that could
+not be read says so.
+
+| Surface | Finding |
+| --- | --- |
+| Collaborators | **Exactly one account** — the owner, with `admin` |
+| Pending invitations | **None** |
+| Deploy keys | **None** |
+| Webhooks | **None** |
+| Actions secrets | **None** — no credential exists inside GitHub at all |
+| Deployment environments | **None** |
+| Owned by an organization | **No** — a personal account, which is why some controls below are unavailable |
+| Actions shared with other repositories | **`none`** — this repository's actions are not consumable by any other repository |
+| Default `GITHUB_TOKEN` permissions | **`read`**, and workflows cannot create or approve pull requests |
+| Action references | **Pinned to full commit SHAs**, each equal to the commit the `v4` tag already resolved to (`v4.4.0`), so an upstream tag re-point cannot change what CI executes |
+| Public gists on the account | **None** — nothing was ever pasted out that way |
+| InventoryAI code found in public repositories | **None** — code search across the account for two distinctive identifiers returned zero |
+| Other repositories on the account | 4 private, 21 public (unrelated projects) |
+| Traffic, recorded window | 24 clones / 3 unique cloners and 244 views / 1 unique viewer, ending 2026-10-07 — consistent with the owner's own machines and CI runs |
+
+Two controls now watch the policy unattended, and their split is deliberate:
+
+- [`.github/workflows/access-guard.yml`](../.github/workflows/access-guard.yml) runs **daily** and
+  **hard-fails** if the repository is no longer private, if it has a fork or fork network, or if
+  any collaborator other than the owner appears. It also prints the HTTP status of the
+  administration-level endpoints it cannot read, so an unreadable check is visible as such and
+  never mistaken for a pass.
+- [`scripts/audit-access.mjs`](../scripts/audit-access.mjs) is the deep audit, and it needs a
+  credential that *can* read those endpoints — the owner's own `gh` session. One dependency-free
+  command, non-zero exit on any violation, names only (never a secret value):
+
+  ```bash
+  node scripts/audit-access.mjs        # PASS/FAIL/INFO against the live API
+  ```
+
+**The one gap neither tool closes:** which **GitHub Apps** are installed with access to this
+repository cannot be read from the CLI — `GET /user/installations` requires a token authorised to
+an App, and `GET /repos/…/installation` requires an App JWT (both answered `403`/`401`). A hosting
+or CI app with this repository selected is a live path to the source, so that list has to be read
+in the UI. Nothing in this audit revoked, narrowed or otherwise touched any app installation.
+
 ### What could not be verified from here
 
 Two controls are owner-side, because the API will not answer for a user token. **Check
@@ -86,6 +130,9 @@ business fact, not a code fact** — nothing in this repository can undo it.
 | **Proprietary licence** | Grants no rights; makes copying a licence breach and a copyright issue rather than a grey area | **Legal**, not technical |
 | **Business/tenant isolation, RBAC on the server** | A stolen client cannot read another business's data | **High** |
 | **`scripts/check-secrets.mjs` in CI** | Fails a change that introduces a credential-shaped string; replaces GitHub's scanner, which is unavailable on a private repo at this plan level | **Medium** — pattern matching, not proof |
+| **`access-guard` (daily)** | Fails if the repository stops being private, gains a fork, or gains a collaborator other than the owner; reports the endpoints it cannot read | **Medium-High** — unattended, but a day late and partial by permission |
+| **`scripts/audit-access.mjs`** | The full access audit on demand, with the admin rights CI lacks | **Medium** — manual, so only as current as its last run |
+| **Pinned action SHAs** | An upstream tag re-point cannot change what CI executes | **Medium** — supply chain only |
 | **`main-guard`** | Fails when a commit reached `main` without a pull request | **Detective** only |
 
 ### What was deliberately **not** done
@@ -118,8 +165,16 @@ business fact, not a code fact** — nothing in this repository can undo it.
 7. **On this plan, enforcement is missing:** branch protection is unavailable on a private
    repo without GitHub Pro, so the CI checks *report* rather than *gate*, and
    `main-guard` catches a bypass only afterwards. No secret scanning either.
-8. **Forking cannot be switched off** on a personal private repo (GitHub: `422 … only on
-   org-owned private repositories`). Nobody outside can fork it; a collaborator could.
+8. **Forking cannot be switched off** on a personal private repo — the attempt answers
+   `422 Allow forks setting can only be changed on org-owned private repositories`, so a
+   personal account cannot close it at all. Nobody outside can fork it (a fork of a private
+   repository requires read access, and only the owner has it), but a future collaborator
+   could. This is one of the reasons an organization is recommended in §5.
+9. **GitHub Apps are outside every automated check here.** A deployment or CI app with
+   repository access holds its own credential, cannot be enumerated from the CLI (§1), and
+   is not a collaborator — so `access-guard` cannot see it. Reviewing that list is a manual,
+   recurring task, and the single most likely way access is granted without this audit
+   noticing.
 
 ---
 
@@ -170,8 +225,10 @@ business fact, not a code fact** — nothing in this repository can undo it.
     live in the same repository for that reason.
 14. **Adopt GitHub Secret Protection ($19/active committer/month) when a team exists** —
     native scanning across the organization, with push protection.
-15. **Review access quarterly:** collaborators, apps, deploy keys, tokens, and the
-    Dependabot queue. Access granted for a task tends to outlive the task.
+15. **Review access quarterly** with `node scripts/audit-access.mjs`, plus the two things it
+    cannot read: **GitHub Apps** and the account's own tokens and SSH keys. Access granted
+    for a task tends to outlive the task, and the Dependabot queue is part of the same
+    review.
 16. **Assume compromise, design for recovery:** rotate on a schedule, monitor the audit
     trail, and be able to rebuild from backups without the original account.
 

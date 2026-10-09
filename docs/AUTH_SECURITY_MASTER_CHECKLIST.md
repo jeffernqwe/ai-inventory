@@ -1984,7 +1984,22 @@ otherwise. It is **detection, not prevention**, and it does not re-check that th
 merge time — the primary `ci` run on the same push covers that. The rule was proven against real data
 before shipping (`5acaf44` → PR #8, `3e5d2aa` → PR #7, `0c54613` → PR #8, non-PR `e9616cf` → none).
 **If hard enforcement is wanted later, it needs a plan upgrade; making the repository public would also
-unlock it and is not recommended.**
+unlock it and is not recommended.** *(At the time this was written. **Later the same day the owner took the
+other path** — see the update below; this paragraph is kept as history.)*
+
+**UPDATE 2026-10-09 — the repository is PUBLIC and the checks are now REQUIRED.** The owner chose public
+visibility over a plan upgrade, which unlocks protection on the free tier. Before the change, the **entire
+reachable history was scanned for credentials** (48.7 MB of blobs across every ref) and came back clean:
+no `.env`, keystore, `.pem`, `.p12`, `google-services.json` or plist was ever added; zero matches for
+Google/AWS/OpenAI/Resend/Brevo/SendGrid/GitHub/Render token patterns or a credentialed `mongodb+srv://`
+URI; the "PRIVATE KEY" hits are dummy bodies in `phase32b-firebase-admin.test.mjs` and the JWT-shaped
+strings are fixtures. **Branch protection is applied and verified by API readback:** required checks
+`ci / server` and `ci / mobile`, strict up-to-date enforcement, pull request required (**0** approvals — no
+self-approval deadlock), stale reviews dismissed, force-push and deletion blocked, `enforce_admins: false`
+so the owner retains an escape hatch. `.github/workflows/main-guard.yml` is **retained** as a second layer
+for the routes protection does not cover. **The exposure trade-off is the owner's decision**, recorded
+with the scan results: a public repository exposes the full source, history and documentation, and
+switching back to private does not un-expose what has already been cloned, forked or indexed.
 
 ### What remains open, unchanged
 

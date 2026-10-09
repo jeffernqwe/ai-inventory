@@ -6377,6 +6377,41 @@ merge time; the primary `ci` run on the same push covers that. It is a compensat
 feature, and the limitation is recorded here so no later reader mistakes the green checkmarks for
 enforcement.
 
+## Resolution, later the same day (2026-10-09) — the repository was made public and protection applied
+
+*(Update to the record above, which is kept as history.)* The owner chose to make the repository **public**
+rather than upgrade the plan, which unlocks protection on the free tier. Before the visibility change the
+**entire reachable history was scanned for credentials** — 48.7 MB of blobs across every ref — and came
+back clean:
+
+- **No sensitive file was ever added** — no `.env`, keystore, `.pem`, `.p12`, `google-services.json` or
+  `GoogleService-Info.plist`. Only `.env.example` (names, never values) is tracked.
+- **Zero matches** for Google API keys, `sk-`/`sk-ant-`/`sk-proj-`, Resend `re_`, Brevo `xkeysib-`,
+  SendGrid `SG.`, GitHub `ghp_`/`gho_`, AWS `AKIA`, Render `rnd_`, `Bearer`-style tokens, or a
+  credentialed `mongodb+srv://` URI.
+- The 18 "PRIVATE KEY" hits are **dummy bodies** (`abc`, `ignored`, `MIIabc`) in
+  `phase32b-firebase-admin.test.mjs`; the JWT-shaped strings are **fixtures** (`{"sub":"1234567890"}`,
+  `{"sub":"1"}`, `{"sub":"u1"}`). No real key or token exists anywhere in history.
+
+**Branch protection is now APPLIED and verified by API readback (2026-10-09):** required checks
+**`ci / server`** and **`ci / mobile`** with **strict** up-to-date enforcement, a pull request required
+(**0** approvals — a single-maintainer repository must not deadlock on self-approval), stale reviews
+dismissed on push, force-pushes and branch deletion blocked, and **`enforce_admins: false`** so the owner
+keeps an explicit escape hatch rather than being locked out.
+
+**`main-guard` is retained** as a second layer rather than removed: it still catches a push that reaches
+`main` by a route protection does not cover — an owner bypass, or a future configuration change — and it
+records the pull-request rule in the repository itself instead of only in a setting. **The trade-off is
+recorded as the owner's decision**, taken with the scan results above in hand: a public repository exposes
+the full source, history and documentation, and switching back to private does not un-expose content that
+has already been cloned, forked or indexed.
+
+> **Verifying this rather than assuming it.** The required-check context names were unproven when
+> protection was first attempted (the API reports the check runs as `server` and `mobile`, while the UI
+> and the protection API use `ci / server` and `ci / mobile`). They are confirmed by the pull request that
+> carries this record: if the contexts did not match, that PR would sit blocked on an "Expected" check
+> that never reports.
+
 ## The defect its first run caught — a missing test-owned variable
 
 The gate's first-ever execution, on **PR #7**, failed the `server` job with **118 failing tests**, every one

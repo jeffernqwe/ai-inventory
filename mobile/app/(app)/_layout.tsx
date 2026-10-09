@@ -66,7 +66,7 @@ export default function AppLayout() {
       <Stack.Screen name="ai/[id]" options={{ title: 'AI Assistant' }} />
       <Stack.Screen name="profile" options={{ title: 'Profile' }} />
       <Stack.Screen name="sessions" options={{ title: 'Active Sessions' }} />
-      <Stack.Screen name="disconnect-firebase" options={{ title: 'Change password' }} />
+      <Stack.Screen name="disconnect-firebase" options={{ title: 'Change sign-in password' }} />
     </Stack>
   );
 }

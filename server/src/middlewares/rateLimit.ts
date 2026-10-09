@@ -29,9 +29,10 @@
  * (e.g. Redis) — out of scope for V1, documented in the wiki of this library.
  */
 
-import type { Request, Response } from 'express';
+import type { NextFunction, Request, Response } from 'express';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 
+import { EMAIL_VERIFICATION_RATE_LIMITED } from '../constants/emailVerification.ts';
 import { normalizeEmail } from '../utils/validate.ts';
 
 /**
@@ -56,6 +57,12 @@ export type AuthRateConfig = {
   firebaseExchangeMax: number;
   firebaseRegisterWindowMs: number;
   firebaseRegisterMax: number;
+  renewWindowMs: number;
+  renewMax: number;
+  emailVerificationRequestWindowMs: number;
+  emailVerificationRequestMax: number;
+  emailVerificationConfirmWindowMs: number;
+  emailVerificationConfirmMax: number;
 };
 
 function positiveInt(raw: string | undefined, fallback: number): number {
@@ -123,6 +130,49 @@ export function authRateConfig(overrides: Partial<AuthRateConfig> = {}): AuthRat
       60 * 60 * 1000
     ),
     firebaseRegisterMax: positiveInt(process.env.AUTH_FIREBASE_REGISTER_RATE_LIMIT_MAX, 30),
+    // AUTH-03 — session renewal (per IP, 120 / 15 min by default). The window
+    // matches login's and the cap is DELIBERATELY GENEROUS (120 vs login's 60):
+    // renewal is a routine, proactive operation a legitimate client performs about
+    // once per JWT lifetime, and several devices behind one office NAT share the
+    // single per-IP bucket, so a tight cap would throttle honest users. It is
+    // still bounded well below what makes an endpoint that costs a Firebase
+    // `checkRevoked` verification worth abusing.
+    renewWindowMs: positiveInt(
+      process.env.AUTH_SESSION_RENEW_RATE_LIMIT_WINDOW_MS,
+      15 * 60 * 1000
+    ),
+    renewMax: positiveInt(process.env.AUTH_SESSION_RENEW_RATE_LIMIT_MAX, 120),
+    // AUTH-04 — the email-verification code flow (design §14C.10, AD-19). Both routes
+    // are pre-session and Firebase-authenticated, and both are limited PER IP ONLY.
+    // No stable pre-verification identity exists to key on — the identity is only
+    // known AFTER verification, and the one key a caller supplies before that is the
+    // Firebase ID token, which rotates — so an identity-keyed bucket is impossible
+    // here rather than merely omitted. The single-identity control is the 60-second
+    // per-UID resend cooldown enforced in the B3 service's write predicate: a
+    // different control with a different budget, deliberately NOT duplicated as a
+    // limiter (and, on the confirm route, absent altogether).
+    //
+    // `skipSuccessfulRequests` is OMITTED on both, like every non-login limiter: a
+    // successful request is a 2xx, so skipping successes would exempt precisely the
+    // traffic these exist to bound. Each accepted request costs a Firebase signature
+    // verification, and the request route additionally costs a database write plus one
+    // outbound email — which is why the cap is not merely about CPU.
+    emailVerificationRequestWindowMs: positiveInt(
+      process.env.AUTH_EMAIL_VERIFICATION_REQUEST_RATE_LIMIT_WINDOW_MS,
+      15 * 60 * 1000
+    ),
+    emailVerificationRequestMax: positiveInt(
+      process.env.AUTH_EMAIL_VERIFICATION_REQUEST_RATE_LIMIT_MAX,
+      30
+    ),
+    emailVerificationConfirmWindowMs: positiveInt(
+      process.env.AUTH_EMAIL_VERIFICATION_CONFIRM_RATE_LIMIT_WINDOW_MS,
+      15 * 60 * 1000
+    ),
+    emailVerificationConfirmMax: positiveInt(
+      process.env.AUTH_EMAIL_VERIFICATION_CONFIRM_RATE_LIMIT_MAX,
+      30
+    ),
     ...overrides,
   };
 }
@@ -140,6 +190,21 @@ function limitResponse(code: string, message: string) {
 }
 
 /**
+ * The exact bucket key createLoginAccountLimiter counts against: the client
+ * address (IPv6 masked to /56 so one host cannot fan out 2^64 keys) joined with
+ * the NORMALIZED email — normalization identical to auth.service's login, so
+ * case and surrounding whitespace cannot address a second bucket.
+ *
+ * Exported so the successful-login reset below addresses the SAME bucket rather
+ * than re-deriving the key and drifting from it.
+ */
+export function loginAccountKey(request: Request): string {
+  const ip = ipKeyGenerator(clientIp(request));
+  const email = normalizeEmail(request.body?.email);
+  return `${ip}|${email || '(no-email)'}`;
+}
+
+/**
  * Login limiter #1 — per IP + normalized email (strict). Only non-2xx
  * responses count, so failed password attempts accumulate and lock the
  * ip+account until the window elapses, while correct logins pass through.
@@ -150,19 +215,49 @@ export function createLoginAccountLimiter(overrides: Partial<AuthRateConfig> = {
     windowMs: loginWindowMs,
     limit: loginMax,
     skipSuccessfulRequests: true,
-    // ipKeyGenerator masks IPv6 down to /56 so one host can't fan out 2^64
-    // keys; the email half (normalized exactly like auth.service login) scopes
-    // the budget to a single account.
-    keyGenerator(request) {
-      const ip = ipKeyGenerator(clientIp(request));
-      const email = normalizeEmail(request.body?.email);
-      return `${ip}|${email || '(no-email)'}`;
-    },
+    keyGenerator: loginAccountKey,
     ...limitResponse(
       'LOGIN_RATE_LIMITED',
       'Too many login attempts. Please wait a moment and try again.'
     ),
   });
+}
+
+/**
+ * Clears the per-IP+email login bucket once the request finishes 2xx.
+ *
+ * WHY THIS IS SEPARATE FROM `skipSuccessfulRequests`. That option only undoes
+ * the SUCCESSFUL request's own increment — deliberately, so a legitimate user is
+ * never locked out by their own correct password. It does NOT clear failures the
+ * same account had already accumulated, so a person who mistypes a few times and
+ * then gets in still starts their next attempt part-way to the lock. This
+ * middleware closes that gap for the ACCOUNT bucket only: a proven-correct
+ * sign-in is evidence the account's owner is present, so the failures are spent.
+ *
+ * IT MUST NOT BE MOUNTED FOR THE IP BUCKET. The IP bucket defends against one
+ * SOURCE spraying many ACCOUNTS, and one account's correct password is no
+ * evidence about the source — resetting it would let an attacker accumulate
+ * per-account bucket budget for free by logging into an account they own
+ * between sprays. Only the account bucket is cleared; the IP bucket keeps
+ * `skipSuccessfulRequests` and nothing more.
+ *
+ * Registered on `res.on('finish')` rather than as a call the controller makes,
+ * because the decision depends on the OUTCOME and every route answer here is
+ * produced by the controller. It is mounted after the account limiter (so it can
+ * address that limiter) and before the controller, and it can only ever DELETE a
+ * bucket — it grants no request an outcome it would not otherwise have had.
+ */
+export function resetLoginAccountBucketOnSuccess(accountLimiter: {
+  resetKey: (key: string) => void;
+}) {
+  return (request: Request, response: Response, next: NextFunction): void => {
+    response.on('finish', () => {
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        accountLimiter.resetKey(loginAccountKey(request));
+      }
+    });
+    next();
+  };
 }
 
 /**
@@ -383,6 +478,111 @@ export function createFirebaseRegisterLimiter(overrides: Partial<AuthRateConfig>
   });
 }
 
+// AUTH-03 — session renewal. A STABLE, route-specific code rather than a shared
+// FIREBASE_* one: unlike those, this rate limit is not about a credential being
+// guessed, it is the server declining to spend more Firebase verification work on
+// this address for now, and the client must treat it as TRANSIENT (preserve the
+// still-valid session, honor Retry-After, back off) rather than as session loss.
+// The `Retry-After` header is emitted by `limitResponse`'s draft-7 standard
+// headers, exactly as for every other auth limiter.
+const SESSION_RENEW_RATE_LIMITED = 'SESSION_RENEW_RATE_LIMITED';
+const SESSION_RENEW_RATE_LIMITED_MESSAGE =
+  'Too many renewal attempts. Please wait a moment and try again.';
+
+/**
+ * Renewal limiter — per IP, counting every attempt.
+ *
+ * `skipSuccessfulRequests` is OMITTED, as on every other count-every-attempt
+ * limiter here: a renewal is cheap to count and a burst of successful ones is
+ * precisely the load this guards (each accepted request costs a Firebase
+ * `checkRevoked` verification). Keyed on `request.ip` with the same explicit
+ * `ipKeyGenerator` rationale as the other per-IP limiters — never the library
+ * default, which would turn a spoofed X-Forwarded-For into a 500 until the
+ * operator sets TRUST_PROXY.
+ */
+export function createSessionRenewLimiter(overrides: Partial<AuthRateConfig> = {}) {
+  const { renewWindowMs, renewMax } = authRateConfig(overrides);
+  return rateLimit({
+    windowMs: renewWindowMs,
+    limit: renewMax,
+    keyGenerator(request) {
+      return ipKeyGenerator(clientIp(request));
+    },
+    ...limitResponse(SESSION_RENEW_RATE_LIMITED, SESSION_RENEW_RATE_LIMITED_MESSAGE),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Email verification (AUTH-04, AD-19)
+// ---------------------------------------------------------------------------
+//
+// Two factories, one per endpoint, because the two endpoints spend different things
+// and must have independent budgets: `request` mints a challenge, writes it and sends
+// an email; `confirm` reserves an attempt, compares a digest and may perform an Admin
+// write. Sharing one bucket would let a burst of confirmations exhaust the budget that
+// bounds outbound mail — the resource abuse of this surface actually costs.
+//
+// SHARED CODE: both answer `EMAIL_VERIFICATION_RATE_LIMITED`, the way
+// `LOGIN_RATE_LIMITED` already spans the two login limiters and
+// `PASSWORD_RESET_RATE_LIMITED` spans the three recovery ones. A client needs to know
+// "you are being throttled on verification", not which bucket caught it.
+//
+// THE CODE IS IMPORTED, NOT RE-DECLARED. The other limiter codes in this file are local
+// string constants, but `EMAIL_VERIFICATION_RATE_LIMITED` already exists in
+// `constants/emailVerification.ts` (declared there in AUTH-04-A, before these endpoints
+// existed). Typing it a second time here would create a second source of truth for a
+// client-facing code, which is exactly the drift the Phase 23 client error-code contract
+// exists to catch.
+
+/**
+ * Request limiter — per IP.
+ *
+ * Bounds how often ONE ADDRESS can make this server mint challenges, write rows and
+ * send mail. Same explicit `request.ip` keying rationale as `createLoginIpLimiter`:
+ * never the library default, which turns a spoofed X-Forwarded-For into a 500 until the
+ * operator sets TRUST_PROXY.
+ */
+export function createEmailVerificationRequestLimiter(overrides: Partial<AuthRateConfig> = {}) {
+  const { emailVerificationRequestWindowMs, emailVerificationRequestMax } =
+    authRateConfig(overrides);
+  return rateLimit({
+    windowMs: emailVerificationRequestWindowMs,
+    limit: emailVerificationRequestMax,
+    keyGenerator(request) {
+      return ipKeyGenerator(clientIp(request));
+    },
+    ...limitResponse(
+      EMAIL_VERIFICATION_RATE_LIMITED,
+      'Too many verification requests. Please wait a moment and try again.'
+    ),
+  });
+}
+
+/**
+ * Confirmation limiter — per IP.
+ *
+ * Bounds code guessing from one address. Each accepted attempt costs a conditional
+ * reservation, an HMAC comparison and possibly a Firebase Admin write, and the code
+ * space is only 10^6 — so this is the backstop that keeps an unauthenticated caller
+ * from spending that budget at machine speed. Keyed on `request.ip` with the same
+ * explicit `ipKeyGenerator` rationale as the other per-IP limiters.
+ */
+export function createEmailVerificationConfirmLimiter(overrides: Partial<AuthRateConfig> = {}) {
+  const { emailVerificationConfirmWindowMs, emailVerificationConfirmMax } =
+    authRateConfig(overrides);
+  return rateLimit({
+    windowMs: emailVerificationConfirmWindowMs,
+    limit: emailVerificationConfirmMax,
+    keyGenerator(request) {
+      return ipKeyGenerator(clientIp(request));
+    },
+    ...limitResponse(
+      EMAIL_VERIFICATION_RATE_LIMITED,
+      'Too many verification attempts. Please wait a moment and try again.'
+    ),
+  });
+}
+
 export default {
   authRateConfig,
   createLoginAccountLimiter,
@@ -393,4 +593,7 @@ export default {
   createPasswordResetConfirmLimiter,
   createFirebaseExchangeLimiter,
   createFirebaseRegisterLimiter,
+  createSessionRenewLimiter,
+  createEmailVerificationRequestLimiter,
+  createEmailVerificationConfirmLimiter,
 };

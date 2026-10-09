@@ -865,9 +865,24 @@ const RESET_MISCONFIGURED_MESSAGE =
  * indistinguishable from an unknown one. Reporting any of those as a failure would
  * reintroduce through the client exactly the oracle the server was built to avoid, so
  * they are all reported as sent and the screen's copy stays uniform.
+ *
+ * `auth/email-not-found` IS THE SAME FACT UNDER A SECOND SPELLING, and omitting it was
+ * a real defect. The Identity Toolkit answers `EMAIL_NOT_FOUND` for an address with no
+ * account; the JavaScript SDK normalises that onto `auth/user-not-found`, so the list
+ * above used to be complete for that SDK. The NATIVE SDK DOES NOT NORMALISE IT: its
+ * Android error mapping lowercases and de-hyphenates whatever code it has
+ * (`EMAIL_NOT_FOUND` -> `email-not-found`) and only rewrites the codes it names
+ * explicitly, which `EMAIL_NOT_FOUND` is not. A client that lists one spelling and not
+ * the other therefore fails on the one platform it ships, and the failure is not
+ * cosmetic — it rebuilds exactly the enumeration oracle this list exists to close, and it
+ * does so for precisely the population the app is trying to help, since an address with
+ * no Firebase account is an ordinary state here (see the module comment on legacy
+ * accounts). Both spellings are therefore listed, and any future re-check of this list
+ * must ask the native mapping rather than the JavaScript one.
  */
 const INDISTINGUISHABLE_CODES: readonly string[] = [
   'auth/disabled-user',
+  'auth/email-not-found',
   'auth/user-disabled',
   'auth/user-not-found',
 ];
@@ -881,8 +896,17 @@ const INDISTINGUISHABLE_CODES: readonly string[] = [
  * being sent and the link being opened. The middle one is the only case where the
  * person did nothing wrong, and it still needs a new link, which is why it shares the
  * state.
+ *
+ * `auth/email-not-found` is listed for the same reason it is listed above: it is the
+ * native SDK's own spelling of "no account for this address" and is not normalised onto
+ * `user-not-found`. It belongs in THIS list as well as in the request's, and the two
+ * steps must agree — a code that is "nobody's account" when a link is requested is
+ * "this link is spent" when the same link is opened, and a state that reads as `sent` at
+ * one step and as an unclassified failure at the next would send the person to a
+ * generic error for a link that simply needs replacing.
  */
 const INVALID_ACTION_CODE_CODES: readonly string[] = [
+  'auth/email-not-found',
   'auth/expired-action-code',
   'auth/invalid-action-code',
   'auth/user-not-found',

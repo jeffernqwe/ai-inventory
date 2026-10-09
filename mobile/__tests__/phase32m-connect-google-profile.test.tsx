@@ -1,5 +1,5 @@
 /**
- * Phase 32M — the Profile screen's Connect Google entry point, and the gate that
+ * Phase 32M — the Profile screen's Add Google sign-in entry point, and the gate that
  * decides whether it exists at all.
  *
  * THE SCREEN IS NOT THE SECURITY BOUNDARY, and nothing here pretends otherwise. A
@@ -39,7 +39,7 @@ jest.mock('../lib/auth', () => ({
 
 const mockedUseSession = useSession as jest.Mock;
 
-const CONNECT = 'Connect Google';
+const CONNECT = 'Add Google sign-in';
 // Phase A (F-1): the entry point no longer detaches anything — it changes the
 // password. The label stays provider-neutral (the screen must not name the identity
 // implementation) and distinct from the local 'Change password' control, which is why
@@ -86,7 +86,7 @@ describe('Profile — connecting Google is offered only where it applies', () =>
     const view = await mount();
 
     expect(view.getByRole('button', { name: CONNECT })).toBeTruthy();
-    // The rest of the Security card is untouched: only this action is gated.
+    // The rest of the Sign-in methods card is untouched: only this action is gated.
     expect(view.getByText(CHANGE_PASSWORD)).toBeTruthy();
     expect(view.queryByText(CHANGE_SIGNIN_PASSWORD)).toBeNull();
   });
@@ -141,7 +141,7 @@ describe('Profile — connecting Google is offered only where it applies', () =>
     await waitFor(() => expect(connectFirebase).toHaveBeenCalledTimes(1));
     // The credential and the request are the session layer's; the screen passes nothing.
     expect(connectFirebase).toHaveBeenCalledWith();
-    await waitFor(() => expect(view.getByText(/Google is now connected/i)).toBeTruthy());
+    await waitFor(() => expect(view.getByText(/Google sign-in connected/i)).toBeTruthy());
   });
 
   it('shows nothing at all when the person cancels the Google step', async () => {

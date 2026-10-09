@@ -2,7 +2,8 @@ import { Router } from 'express';
 
 import { register, login, me, changePassword, updateMe, logout, listSessions, revokeSession } from '../controllers/auth.controller.ts';
 import { forgotPassword, resetPassword as resetPasswordHandler } from '../controllers/passwordReset.controller.ts';
-import { firebaseExchange, firebaseRegister, firebaseLink, credentialsChanged } from '../controllers/firebaseAuth.controller.ts';
+import { firebaseExchange, firebaseRegister, firebaseLink, credentialsChanged, renew } from '../controllers/firebaseAuth.controller.ts';
+import { emailVerificationRequest, emailVerificationConfirm } from '../controllers/emailVerification.controller.ts';
 import requireAuth from '../middlewares/authenticate.ts';
 import {
   createLoginAccountLimiter,
@@ -13,6 +14,10 @@ import {
   createPasswordResetConfirmLimiter,
   createFirebaseExchangeLimiter,
   createFirebaseRegisterLimiter,
+  createSessionRenewLimiter,
+  createEmailVerificationRequestLimiter,
+  createEmailVerificationConfirmLimiter,
+  resetLoginAccountBucketOnSuccess,
 } from '../middlewares/rateLimit.ts';
 import type { AuthRateConfig } from '../middlewares/rateLimit.ts';
 
@@ -40,7 +45,21 @@ export function createAuthRouter({ limits }: AuthRouterOptions = {}) {
 
   // Public — protected from credential stuffing / mass registration (Phase 07B).
   router.post('/register', createRegisterLimiter(limits), register);
-  router.post('/login', createLoginAccountLimiter(limits), createLoginIpLimiter(limits), login);
+
+  // The two login limiters are built here rather than inline because the third
+  // handler needs a handle on the ACCOUNT limiter: it clears that bucket (and
+  // only that bucket) once a login has actually succeeded. See
+  // `resetLoginAccountBucketOnSuccess` for why the IP bucket is deliberately
+  // excluded, and why this is a fourth handler rather than a call the controller
+  // makes — the reset is decided by the response, not by the controller's body.
+  const loginAccountLimiter = createLoginAccountLimiter(limits);
+  router.post(
+    '/login',
+    loginAccountLimiter,
+    createLoginIpLimiter(limits),
+    resetLoginAccountBucketOnSuccess(loginAccountLimiter),
+    login
+  );
 
   // Public — password recovery (Phase 26B-3). NO requireAuth and no session: the
   // whole point of these two routes is that the caller cannot authenticate. The
@@ -76,6 +95,37 @@ export function createAuthRouter({ limits }: AuthRouterOptions = {}) {
   router.post('/firebase/exchange', createFirebaseExchangeLimiter(limits), firebaseExchange);
   router.post('/firebase/register', createFirebaseRegisterLimiter(limits), firebaseRegister);
 
+  // AUTH-04-C/D — the email-verification code flow (design §14C.10). PRE-SESSION and
+  // Firebase-AUTHENTICATED, which is why they carry no `requireAuth`: the caller holds
+  // a Firebase ID token and no Inventory AI session at all, because a session is only
+  // minted by the exchange above, and the whole point of this flow is that the identity
+  // is verified but has no tenant yet. Naming a permission is equally impossible — the
+  // caller has no role here, and the uid is read from the VERIFIED token inside the
+  // service, never from the body.
+  //
+  // Middleware order is limiter → controller, with the limiter FIRST so the budget is
+  // spent before any Firebase signature verification, database work or outbound email.
+  // Both are per-IP and neither sets skipSuccessfulRequests — see
+  // middlewares/rateLimit.ts for why, and for why no identity-keyed bucket is possible
+  // on this surface (the identity is unknown until after verification).
+  //
+  // The ID token travels in the POST body, never a URL, so — like every other Firebase
+  // route — it cannot reach the access log (httpLogger records req.path only) or a
+  // Referer header.
+  //
+  // NEITHER ROUTE CREATES A SESSION. Confirmation sets Firebase's `emailVerified` and
+  // nothing else; the Inventory AI session is still created only by the exchange above.
+  router.post(
+    '/email-verification/request',
+    createEmailVerificationRequestLimiter(limits),
+    emailVerificationRequest
+  );
+  router.post(
+    '/email-verification/confirm',
+    createEmailVerificationConfirmLimiter(limits),
+    emailVerificationConfirm
+  );
+
   // Protected
   router.get('/me', requireAuth, me);
   // Phase 15: self-service account security + profile.
@@ -87,6 +137,17 @@ export function createAuthRouter({ limits }: AuthRouterOptions = {}) {
   router.post('/logout', requireAuth, logout);
   router.get('/sessions', requireAuth, listSessions);
   router.delete('/sessions/:id', requireAuth, revokeSession);
+
+  // AUTH-03: session renewal. AUTHENTICATED — no permission, because a user
+  // manages nothing but their own session, and both the account (`req.user.id`) and
+  // the session (`req.auth.jti`) come from the token that authenticated the
+  // request, never from the body. Middleware order is requireAuth → limiter →
+  // controller: the limiter sits immediately before the handler that spends a
+  // Firebase `checkRevoked` verification, matching `ai.routes.ts`'s
+  // `requireAuth, requirePermission, aiRateLimiter, controller` ordering, so an
+  // unauthenticated caller is refused before consuming any budget. The ID token
+  // travels in the POST body, so it cannot reach the access log or a Referer.
+  router.post('/renew', requireAuth, createSessionRenewLimiter(limits), renew);
 
   // Phase 32H: identity linking. AUTHENTICATED, and the authentication IS the
   // operation's ownership proof (design §14A.4) rather than a convenience — the

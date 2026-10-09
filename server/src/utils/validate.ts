@@ -391,6 +391,122 @@ export function validateCredentialsChanged(body: Body) {
   return { problems, idToken: idToken.value };
 }
 
+/**
+ * AUTH-03 — the renewal payload. Reads `idToken` and NOTHING else, for the same
+ * reason `validateFirebaseLink` and `validateCredentialsChanged` are strict.
+ *
+ * The whole operation acts on the CALLER'S OWN session, so both facts must be
+ * server-derived and neither may be expressible by a caller:
+ *
+ *   - the ACCOUNT is `req.user.id`, put there by `requireAuth` from this
+ *     request's own session — so there is no `userId` field to forward;
+ *   - the SESSION being renewed is `req.auth.jti`, the jti of the token that
+ *     authenticated this request — so there is deliberately NO session, `jti`,
+ *     device or revision field, which would let a caller nominate a different
+ *     session to renew;
+ *   - the IDENTITY is the uid of the token `verifyFirebaseIdToken` returns, and
+ *     the service requires it to EQUAL the uid already on the account — so there
+ *     is no `firebaseUid` field either.
+ *
+ * `businessId`, `role`, `status` and `email` are not read on any path, so a body
+ * carrying them is inert rather than rejected: the returned object has no field
+ * to carry them and the handler has no variable holding a client-supplied
+ * identity, tenant or role.
+ */
+export function validateRenew(body: Body) {
+  const problems = [];
+  const idToken = requiredString(body?.idToken, 'idToken', MAX_ID_TOKEN);
+  problems.push(...idToken.problems);
+  return { problems, idToken: idToken.value };
+}
+
+// ---------------------------------------------------------------------------
+// AUTH-04 — the email-verification code flow's HTTP payloads
+// ---------------------------------------------------------------------------
+
+/**
+ * A generous ceiling on a SUBMITTED verification code, not a format check.
+ *
+ * `EMAIL_VERIFICATION_CODE_LENGTH` (6) is deliberately NOT used here. The code's
+ * six-digit shape is a POLICY the AUTH-04-B4 service owns: it hashes whatever
+ * non-blank value it is handed and answers one indistinguishable
+ * `INVALID_VERIFICATION_CODE` for a wrong code, an expired one and an exhausted
+ * challenge. A validator that refused a non-six-digit value as a shape problem
+ * would (a) invent a second, unapproved way to refuse a code, and (b) tell a caller
+ * "your format was wrong" where the locked contract says the answer must say
+ * nothing about the code's state. So `abc`, `12345` and `1234567` all travel to
+ * B4, where they become the same `INVALID_VERIFICATION_CODE` any other wrong value
+ * does — exactly as a malformed-but-present reset token reaches the recovery
+ * service rather than being refused as a shape error.
+ *
+ * What IS enforced is a transport bound, the same kind of ceiling `MAX_ID_TOKEN`
+ * and `RESET_TOKEN_MAX` apply: a caller must not be able to hand this endpoint an
+ * arbitrarily large string. 64 is roughly ten times the real code length, so no
+ * legitimate submission can reach it and no shape rule is implied.
+ *
+ * `CODE_MAX` (100) is deliberately NOT reused: it is the shared SKU/barcode cap,
+ * and giving one exported name two unrelated meanings is how a later reader ends up
+ * tightening a barcode limit to "fix" the code validator — or the reverse.
+ */
+const EMAIL_VERIFICATION_CODE_MAX = 64;
+
+/**
+ * AUTH-04-C — the request payload `{ idToken }`.
+ *
+ * Reads `idToken` and NOTHING else, like `validateFirebaseLink`,
+ * `validateCredentialsChanged` and `validateRenew`, and for the same reason: the
+ * identity is the uid of the token `verifyFirebaseIdToken` returns, so there is no
+ * `uid`/`firebaseUid` field to forward; the account does not exist yet (the caller
+ * is unverified and holds no Inventory AI session), so there is no `userId` or
+ * `businessId` field to forward; and `role`/`status` are assigned server-side, so
+ * there is nothing a body could say about them either. Those keys are therefore
+ * INERT rather than rejected — there is no variable in the returned object for a
+ * caller to steer anything through and no check that could later be deleted.
+ *
+ * `idToken` is bounded by the module-local `MAX_ID_TOKEN` and trimmed by
+ * `requiredString`, so this payload's shape is IDENTICAL to every other Firebase
+ * one — a missing, blank, non-string or oversized value is a `VALIDATION_ERROR` with
+ * an `idToken` field problem, before any verification is attempted.
+ */
+export function validateEmailVerificationRequest(body: Body) {
+  const problems = [];
+  const idToken = requiredString(body?.idToken, 'idToken', MAX_ID_TOKEN);
+  problems.push(...idToken.problems);
+  return { problems, idToken: idToken.value };
+}
+
+/**
+ * AUTH-04-C — the confirm payload `{ idToken, code }`.
+ *
+ * `idToken` is validated exactly as above. `code` is bounded by
+ * `EMAIL_VERIFICATION_CODE_MAX` and NOT otherwise inspected: see that constant for
+ * why the six-digit format is the service's policy rather than this layer's, and why
+ * a present-but-wrong value must reach AUTH-04-B4 to become
+ * `INVALID_VERIFICATION_CODE`.
+ *
+ * MISSING/blank is the one case this layer decides, and it decides it as a SHAPE
+ * problem (`"code is required"`, `VALIDATION_ERROR`) — the same split
+ * `validateResetPassword` applies to a missing token versus an invalid one. B4 keeps
+ * its own blank-code guard as defence in depth for direct service callers; via HTTP
+ * the validator refuses an absent code first, and the two answers cannot disagree
+ * about what "no code was submitted" means.
+ *
+ * The returned `code` is TRIMMED by `requiredString`, and B4 trims again — so a code
+ * surrounded by stray whitespace works, and B4 remains the final owner of the code's
+ * semantics rather than this layer quietly pre-judging it.
+ */
+export function validateEmailVerificationConfirm(body: Body) {
+  const problems = [];
+
+  const idToken = requiredString(body?.idToken, 'idToken', MAX_ID_TOKEN);
+  problems.push(...idToken.problems);
+
+  const code = requiredString(body?.code, 'code', EMAIL_VERIFICATION_CODE_MAX);
+  problems.push(...code.problems);
+
+  return { problems, idToken: idToken.value, code: code.value };
+}
+
 // ---------------------------------------------------------------------------
 // User management (Phase 14A)
 // ---------------------------------------------------------------------------

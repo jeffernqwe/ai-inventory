@@ -23,6 +23,7 @@ import {
 } from '../services/session.service.ts';
 import ApiError from '../utils/ApiError.ts';
 import env from '../config/env.ts';
+import { accessTokenExpiresAt } from '../config/jwt.ts';
 
 /**
  * The request context this controller reads, following `users.controller.ts`,
@@ -90,16 +91,24 @@ export async function login(req: AuthenticatedRequest, res: Response) {
     throw err;
   }
 
-  const { token, user } = await loginWithPassword({
+  const { token, user, session } = await loginWithPassword({
     email: body.email,
     password: body.password,
     deviceLabel: body.deviceLabel,
   });
 
+  // AUTH-03: `expiresIn` is retained, and two ABSOLUTE instants are added so the
+  // client can compute its authentication horizon as
+  // `min(tokenExpiresAt, sessionExpiresAt)`. They are the earlier boundary wins:
+  // the JWT lives ~1h, but the session's 14-day cap can end BEFORE it does. Adding
+  // them is purely additive — no existing consumer reads a response it can no
+  // longer parse.
   return res.status(200).json({
     token,
     tokenType: 'Bearer',
     expiresIn: env.jwtExpiresIn,
+    tokenExpiresAt: accessTokenExpiresAt(token),
+    sessionExpiresAt: session.expiresAt,
     user: toPublicUser(user),
   });
 }

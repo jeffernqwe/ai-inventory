@@ -179,13 +179,14 @@ default and needs no dashboard entry. Verify the current values in the Render da
 | --- | --- | --- |
 | `MONGODB_URI` | **required** | startup exits when missing |
 | `JWT_SECRET` | **required** | at least 32 characters |
-| `JWT_EXPIRES_IN` | optional | default `7d`; an unparseable value fails fast |
+| `JWT_EXPIRES_IN` | optional | default `1h` (AUTH-02: the Inventory AI access token is short-lived); an unparseable value fails fast. Session longevity is bounded **separately** by the 14-day absolute session cap, so this value never changes how long a session lasts |
+| `JWT_ISSUER`, `JWT_AUDIENCE` | optional | defaults `inventory-ai` / `inventory-ai-api` (AUTH-02); non-secret, non-environment-specific labels minted and validated on every request. A token minted before AUTH-02 carries neither claim and is rejected, so every existing user signs in once more |
 | `AI_PROVIDER` | optional | empty = AI disabled; when set, that provider's own keys become required |
 | `OPENROUTER_API_KEY`, `OPENROUTER_BASE_URL`, `AI_MODEL_OPENROUTER` | **required when `AI_PROVIDER=openrouter`** | the model has no default |
 | `FIREBASE_SERVICE_ACCOUNT_JSON` — or the three-variable form | **all-or-nothing** | a partially supplied service account fails fast; none at all = Firebase disabled |
 | `TRUST_PROXY` | **effectively required behind Render** | set to `1`; see below |
-| `MAIL_PROVIDER`, `MAIL_FROM`, `RESEND_API_KEY`, `PASSWORD_RESET_URL` | optional | missing any of them **disables password recovery only** (`forgot-password` answers 503) — the server still starts and serves every other feature. Resend remains the implemented transport; no Firebase reset flow is implemented |
-| `AUTH_*_RATE_LIMIT_*` — **sixteen** variables (eight window/limit pairs) | optional | the documented defaults are the production values; the count is taken from code, not estimated. `TRUST_PROXY` and `JWT_SECRET` / `JWT_EXPIRES_IN` are listed separately above and are **not** `AUTH_*` variables |
+| `MAIL_PROVIDER`, `MAIL_FROM`, `RESEND_API_KEY`, `BREVO_API_KEY`, `PASSWORD_RESET_URL` | optional | `MAIL_PROVIDER` selects the transport (`resend` or `brevo`, each with its own key). Missing configuration **disables password recovery only** (`forgot-password` answers 503) — the server still starts and serves every other feature. The mail layer is provider-agnostic and both Brevo and Resend are supported (Brevo was used for the AUTH-04-G live acceptance); no Firebase reset flow is implemented |
+| `AUTH_*_RATE_LIMIT_*` — **twenty-two** variables (eleven window/limit pairs) | optional | the documented defaults are the production values; the count is taken from code, not estimated. AUTH-03 added the per-IP session-renewal pair (`AUTH_SESSION_RENEW_RATE_LIMIT_WINDOW_MS` / `AUTH_SESSION_RENEW_RATE_LIMIT_MAX`, default 15 min / 120) and AUTH-04 the two per-IP email-verification pairs (`AUTH_EMAIL_VERIFICATION_REQUEST_*` / `AUTH_EMAIL_VERIFICATION_CONFIRM_*`, both 15 min / 30). `TRUST_PROXY` and `JWT_SECRET` / `JWT_EXPIRES_IN` / `JWT_ISSUER` / `JWT_AUDIENCE` are listed separately above and are **not** `AUTH_*` variables |
 | `CORS_ORIGINS`, `JSON_BODY_LIMIT`, `SHUTDOWN_TIMEOUT_MS`, `LOG_REQUESTS` | optional | the documented defaults are the production values |
 
 **`TRUST_PROXY=1`.** Render terminates TLS at a proxy, so without this setting `req.ip` is the proxy's
@@ -1045,6 +1046,16 @@ sentence's second clause: it was the reset flow, not `change-password`, that rep
   (`0c3f87d`), and both are contained in `main` (`dbdf673`). **This entry is the documentation close-out,
   not an implementation.**
 
+  > **Superseded in part — 2026-10-01 (`Phase A / F-1 — 6e2252f4c63a7bd98e1d63a4703f21ab236c93a9`).** The
+  > unlink capability this entry documents as shipped was **REMOVED**, not deprecated: the route
+  > `POST /api/auth/firebase/unlink`, its service and its two audit actions no longer exist in the committed
+  > tree, and the operation was re-scoped into a **credential change**. **Everything below — the route
+  > description, the Policy B mechanics, the refuted-assumption measurements and the two audit actions — is
+  > the Phase 32L record and remains valid as history**; it is annotated here rather than rewritten. The
+  > Policy B measurements stay valid historical facts. What is no longer true is only this: the capability
+  > itself is gone, and no reachable path clears `firebaseUid`. See the Phase F-1 correction in `CLAUDE.md`
+  > and `docs/AUTH_SECURITY_MASTER_CHECKLIST.md` §8.
+
   **The server boundary is ONE route:** `POST /api/auth/firebase/unlink` — `requireAuth` + controller,
   **no permission** (it acts only on the caller's own account), and no rate limiter, matching the
   existing `firebase/link` precedent — every attempt first needs a live session, a verified Firebase
@@ -1204,6 +1215,21 @@ gate stays open and **iOS is entirely unverified**. **Nothing
   designed and not implemented). See `docs/DEVELOPMENT_ROADMAP.md` **§27U** and
   `docs/superpowers/specs/2026-09-18-firebase-auth-design.md` **§14C.4.2**.
 
+> **AUTH-04 supersession (2026-10-02; status updated 2026-10-04).** The entry below chose a **Firebase
+> verification link + native resend** mechanism. That mechanism is **superseded**: email verification is a
+> **custom 6-digit Inventory AI code delivered through the provider-agnostic mail boundary** (Brevo is a
+> supported provider and was used for the live acceptance; Resend remains supported), and Firebase's
+> `email_verified` state is set through the Admin SDK after a successful confirmation. The registration
+> ordering gate, the Firebase-UID-only join, MongoDB authority and the unmodified `requireAuth` are
+> preserved, and the server-side `EMAIL_NOT_VERIFIED` enforcement remains. This entry is preserved as the
+> historical record. See design `§14C.10`, checklist `§40`, roadmap `§27Y`.
+>
+> **AUTH-04 status (2026-10-04).** AUTH-04-A through AUTH-04-F are **shipped**; **AUTH-04-G PASSED its
+> live end-to-end acceptance gate on Brevo** (request HTTP 200 with the exact success envelope, Brevo
+> `sent` → `delivered`, confirmation HTTP 200 with `Email verified.`, Firebase `emailVerified` false →
+> true, Mongo challenge consumed, safe-log checks passed); **AUTH-04-H** is the documentation close-out.
+> The AUTH-04 request path also enforces a **60-second per-UID resend cooldown**.
+
 - **Phase 32O — Registration & Email-Verification Decisions (documentation only):** the **read-only
   registration/sign-up audit** is now written down and its open questions are **decided**, so N-5 no
   longer has to invent policy in code. The registration **order is the mechanism:** Firebase account →
@@ -1289,3 +1315,18 @@ gate stays open and **iOS is entirely unverified**. **Nothing
   test, schema, dependency, environment, EAS or Firebase Console change, and the bridge is still **not
   implemented**. Full record: `docs/superpowers/specs/2026-09-18-firebase-auth-design.md` **§14C.3.9**;
   `docs/DEVELOPMENT_ROADMAP.md` **§27X**; `docs/AUTH_SECURITY_MASTER_CHECKLIST.md` **§39**.
+
+- **Phase A / F-1 — Firebase Disconnect Re-scoped into a Credential Change (the unlink capability
+  removed):** the server-side Firebase unlink capability was **REMOVED, not deprecated** — `POST
+  /api/auth/firebase/unlink`, its service, controller handler, payload validator, both audit actions
+  (`FIREBASE_IDENTITY_UNLINKED`, `FIREBASE_IDENTITY_UNLINK_CONFLICT`) and the mobile `firebaseUnlink`
+  wrapper are gone from the committed tree, and the client disconnect surface was re-scoped. The
+  operation moved into **credential-change authority**: Firebase `updatePassword` → the shipped N-4
+  `credentials-changed` bridge → the session the sequence ends with, so **`firebaseUid` is never cleared
+  and no reachable path clears it**. What the removal closes is the old path's credential-authority dead
+  end — the OLD password stayed valid at Firebase while the server no longer knew the account, so the
+  sign-in resolved to `REGISTRATION_REQUIRED` and then met `EMAIL_IN_USE`. Exact commit
+  **`6e2252f4c63a7bd98e1d63a4703f21ab236c93a9`** (2026-10-01; **27 files, +1,347 / −3,372**); the formal
+  record is **`docs/DEVELOPMENT_ROADMAP.md` §27AA**, written retrospectively because the commit predates
+  §27Z. See also the Phase 32L entry above, `CLAUDE.md`, and
+  `docs/AUTH_SECURITY_MASTER_CHECKLIST.md` §8.

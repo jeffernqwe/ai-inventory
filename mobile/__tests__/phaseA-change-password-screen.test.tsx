@@ -79,7 +79,7 @@ const GOOGLE_OPTION = 'Confirm with Google';
 const PASSWORD_OPTION = 'Confirm with password';
 const STEP_ONE = 'Step 1 · Confirm your sign-in';
 const STEP_TWO = 'Step 2 · Choose a new password';
-const CHANGE = 'Change password';
+const CHANGE = 'Change sign-in password';
 const SUCCESS_HEADING = 'Password changed';
 const REAUTH_NOTICE =
   'For your security, please confirm your sign-in again, then choose a new password.';

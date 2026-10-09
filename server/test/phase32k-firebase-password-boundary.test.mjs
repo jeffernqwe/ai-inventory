@@ -455,10 +455,11 @@ dbSuite('Phase 32K — the Firebase password boundary against a real database', 
   });
 
   it('10. ★ change-password is refused for a Firebase-linked account and leaves the hash alone', async () => {
-    // The retained hash is deliberately NOT deleted (Phase 32H's unlink/last-method
-    // disposition is still open), so the property here is that it is INERT rather
-    // than gone: the original password still verifies against it, and the password
-    // this call tried to set does not.
+    // The retained hash is deliberately NOT deleted — the unlink capability that would
+    // have used it is CLOSED/REMOVED by Phase A / F-1 — so the property here is that it
+    // is INERT rather than gone, an inert/closed boundary rather than an open future
+    // implementation: the original password still verifies against it, and the
+    // password this call tried to set does not.
     const user = await makeUser({ linked: true, hasHash: true });
     const token = await issueToken(user);
     const before = await credentialState(user._id);

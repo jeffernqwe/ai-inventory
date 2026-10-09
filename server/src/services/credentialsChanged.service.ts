@@ -102,14 +102,13 @@ type CredentialsChangedInput = {
  * is reused from Phase 32H rather than redeclared, so a client that already branches
  * on it needs no new branch and the two endpoints cannot drift apart.
  *
- * The coalescing is deliberate and differs from `unlinkFirebaseIdentity` (removed in
- * Phase A), which kept
- * `FIREBASE_IDENTITY_NOT_LINKED` distinct from its conflict because there "you have
- * no provider connected" is the outcome of a valid operation. Here it is not an
+ * The coalescing is deliberate: the retired Firebase-unlink refusal (removed with
+ * Phase A / F-1) kept its "you have no provider connected" case distinct from a
+ * conflict, because there it was the outcome of a valid operation. Here it is not an
  * outcome at all: an account with no `firebaseUid` cannot have had a credential
- * change that this server should record, so it is the same refusal as a mismatch and
- * reporting it as a separate code would only describe which of two dead ends the
- * caller reached.
+ * change that this server should record, so it is the same
+ * `FIREBASE_IDENTITY_CONFLICT` refusal as a mismatch, and reporting it as a separate
+ * code would only describe which of two dead ends the caller reached.
  */
 const FIREBASE_IDENTITY_CONFLICT_MESSAGE =
   'This sign-in does not match the one connected to this account. Please contact an administrator.';

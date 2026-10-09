@@ -1,0 +1,196 @@
+name: ci
+
+# Phase 0 — CI gate. One workflow, two jobs, identical on every trigger.
+#
+# Design constraints, all verified against the repository before implementation:
+#   * Node version comes from .nvmrc (repo root) — never hardcoded. setup-node's
+#     `node-version-file` resolves from the workspace root, so the job-level
+#     `defaults.run.working-directory` does not affect it.
+#   * ZERO GitHub secrets. Firebase, the AI provider and the mail provider are all
+#     faked through their real production seams by the suites; MONGODB_URI below
+#     is a throwaway URI for an ephemeral container, not a credential.
+#   * `npm test` (full mode) is used rather than `test:unit` + `test:db`: the
+#     runner's unit mode is PURE_UNIT + MIXED and its db mode is PURE_DB + MIXED,
+#     so running both would load every MIXED file twice, each time exercising only
+#     half of it. Full mode runs every file exactly once.
+#   * The full suite runs on pull requests too, not only on main. Unit mode leaves
+#     33 DB-backed suites deliberately skipped, so deferring DB coverage to main
+#     would leave the majority of the suite unprotected until after merge.
+#   * NODE_ENV is never `production`: config/env.ts refuses a test run flagged as
+#     production, and startup.ts would then demand the full production secret set.
+#     `NODE_ENV=test` additionally pins the process to the inventoryai_test_db
+#     database, so even the boot smoke cannot reach development or production data.
+#   * No path filters: the whole pipeline is a few minutes, and a filtered required
+#     check is the classic way to block merges with a check that never reports.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  server:
+    runs-on: ubuntu-latest
+    # Standalone MongoDB is sufficient: no suite opens a transaction or a change
+    # stream, and the only references to `startSession`/`withTransaction` in the
+    # test tree are negative assertions proving those constructs are absent.
+    # A health check makes the job wait for the server to accept connections,
+    # so "database not ready yet" cannot surface as a transient failure.
+    services:
+      mongo:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ ping: 1 }).ok'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Check module graph (extensions)
+        run: npm run check:extensions
+
+      - name: Check module graph (specifiers)
+        run: npm run check:specifiers
+
+      - name: Test (full suite — DB-backed suites must actually run)
+        env:
+          MONGODB_URI: mongodb://127.0.0.1:27017
+          TEST_DB_MAX_ATTEMPTS: '30'
+          TEST_DB_RETRY_MS: '2000'
+          # A FIXED, NON-SECRET TEST VALUE — not a credential, and not a repository
+          # secret. Locally the suites read the git-ignored `server/.env` (every
+          # suite starts with `import 'dotenv/config'`); a CI checkout has no such
+          # file, so the first `signAccessToken` throws `AUTH_NOT_CONFIGURED` and
+          # every auth-dependent suite fails — 118 failing tests on the first run
+          # of this workflow. It must stay at least 32 characters, the length the
+          # production validator enforces.
+          #
+          # JWT_ISSUER / JWT_AUDIENCE / JWT_EXPIRES_IN are deliberately NOT set
+          # here: their shipped defaults are the contract, and suites assert it.
+          # Overriding them in the ambient environment would mask a regression in
+          # those defaults instead of catching it.
+          JWT_SECRET: 'ci-only-test-secret-not-a-real-credential-0123456789'
+        run: npm test
+
+      # Boot smoke. Asserts the readiness gate really opens, that liveness is
+      # dependency-free, and that the process terminates within a bounded window
+      # after SIGTERM. It deliberately does NOT assert a specific exit code: the
+      # requirement is "terminates within the window", not "exits 0" — only a
+      # process that had to be force-killed (status 137) is a failure.
+      - name: Boot smoke (/ready, /live, SIGTERM)
+        env:
+          NODE_ENV: test
+          PORT: '4000'
+          MONGODB_URI: mongodb://127.0.0.1:27017
+          TEST_DB_MAX_ATTEMPTS: '30'
+          TEST_DB_RETRY_MS: '2000'
+        run: |
+          node src/index.ts > boot.log 2>&1 &
+          APP_PID=$!
+
+          cleanup() {
+            if kill -0 "$APP_PID" 2>/dev/null; then
+              kill -TERM "$APP_PID" 2>/dev/null || true
+              sleep 2
+              kill -KILL "$APP_PID" 2>/dev/null || true
+            fi
+          }
+          trap cleanup EXIT
+
+          # 1/2. Bounded poll for readiness.
+          ready=000
+          for _ in $(seq 1 60); do
+            ready=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4000/api/health/ready || true)
+            if [ "$ready" = "200" ]; then break; fi
+            sleep 1
+          done
+          if [ "$ready" != "200" ]; then
+            echo "FAIL: /api/health/ready never returned 200 within 60s (last status: $ready)"
+            cat boot.log
+            exit 1
+          fi
+          echo "OK: /api/health/ready = 200"
+
+          # 3. Liveness must stay dependency-free.
+          live=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4000/api/health/live || true)
+          if [ "$live" != "200" ]; then
+            echo "FAIL: /api/health/live returned $live"
+            cat boot.log
+            exit 1
+          fi
+          echo "OK: /api/health/live = 200"
+
+          # 4/5. SIGTERM, then a watchdog that force-kills if the bounded window
+          # elapses. `wait` is guarded because it reports the signalled status
+          # (e.g. 143), which `bash -e` would otherwise treat as a step failure.
+          kill -TERM "$APP_PID"
+          ( sleep 15; kill -KILL "$APP_PID" 2>/dev/null ) &
+          WATCHDOG_PID=$!
+
+          set +e
+          wait "$APP_PID"
+          APP_STATUS=$?
+          set -e
+
+          kill "$WATCHDOG_PID" 2>/dev/null || true
+
+          if [ "$APP_STATUS" -eq 137 ]; then
+            echo "FAIL: process had to be force-killed — it did not terminate within the 15s window"
+            cat boot.log
+            exit 1
+          fi
+
+          echo "OK: terminated within the shutdown window (status $APP_STATUS, not asserted)"
+          echo "boot smoke passed"
+
+  mobile:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Test
+        run: npx jest .

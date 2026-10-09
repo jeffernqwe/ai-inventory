@@ -189,7 +189,16 @@ describe('N-4 — the classification layer decides what a code’s answer means'
   it('★ answers an unusable code as ORDINARY, with no message and no failure', async () => {
     mockIsFirebaseConfigured.mockReturnValue(true);
 
-    for (const code of ['auth/invalid-action-code', 'auth/expired-action-code', 'auth/user-not-found']) {
+    for (const code of [
+      'auth/invalid-action-code',
+      'auth/expired-action-code',
+      'auth/user-not-found',
+      // The native spelling of the same fact. See the N-3 suite's dedicated case: the
+      // native mapping does not normalise `EMAIL_NOT_FOUND` onto `user-not-found`, so a
+      // table listing only the JS SDK's spelling would fail on the platform this app
+      // ships — here with an unclassified failure for a link that simply needs replacing.
+      'auth/email-not-found',
+    ]) {
       mockNative.verifyError = nativeError(code);
       const outcome = await classification().verifyFirebasePasswordResetCode(OOB_CODE);
       expect(outcome).toEqual({ kind: 'invalid-code' });

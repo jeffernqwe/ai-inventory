@@ -2062,6 +2062,33 @@ than server runtime dependencies, which lowers but does not remove their exposur
 application behaviour: no server or
 mobile source file, route, model, permission or test was touched.
 
+### Source protection — visibility reversed to PRIVATE (2026-10-09)
+
+The public visibility above was **reversed the same day**, ~90 minutes later, on the owner's decision that
+the source must not be cloneable. **What going private cost, read from the API and not inferred:**
+branch protection and rulesets now answer `403 Upgrade to GitHub Pro or make this repository public`, and
+`security_and_analysis` is `null` — **secret scanning and push protection are gone** with the feature that
+provided them on a public repository. **What survived:** Dependabot (`vulnerability-alerts` → `204`, the 9
+advisories still readable) and all three CI jobs, with Actions minutes still free at this scale. **What
+replaced the scanner:** `scripts/check-secrets.mjs` as the third CI job — dependency-free, pattern-based,
+private key blocks judged by **body length** so the dummy PEM fixtures pass, and a per-line
+`secret-guard:allow` waiver for the **six** deliberate fixtures, so a real credential in a test file still
+fails the build. It is **not proof a commit is clean**, and says so. **Enforcement is now detection:**
+`main-guard` and the CI checks report, they do not gate.
+
+**The public window, measured:** `forks: 0` and `network_count: 0` — nobody forked it — while the traffic
+API records 24 clones / 3 unique cloners / 244 views, all consistent with the owner's machines and CI. Its
+last recorded day is **2026-10-07**, because traffic data **lags ~2 days**, so it does **not** cover the
+window: **it cannot be established that no copy was taken**, and a clone leaves no record the way a fork
+does. **Access audit:** one collaborator (owner/admin), no deploy keys, no webhooks, no Actions secrets;
+`.env`, `server/.env`, `mobile/.env` and `.freebuff` present and **git-ignored**. **Two owner-side gaps
+recorded as not done:** account **2FA** could not be confirmed (`two_factor_authentication: null`) and the
+**GitHub Apps with repository access** could not be listed (`403`, needs an App JWT) — both must be checked
+in the UI. **Forking is not disableable on a personal private repo** (`422 … org-owned`). Three
+`SECURITY.md` claims went stale once private (private vulnerability reporting `404`, secret scanning, the
+protected branch) and were **corrected**, not left standing. Full posture, limitations and growth plan:
+`docs/SOURCE_PROTECTION.md`.
+
 ### What remains open, unchanged
 
 **L-17** (recovery-mail delivery never inspected end-to-end), **P-6 / P-3 / P-4** and **Gates 1/2** (iOS and

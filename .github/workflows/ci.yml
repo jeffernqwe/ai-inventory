@@ -1,6 +1,6 @@
 name: ci
 
-# Phase 0 — CI gate. One workflow, two jobs, identical on every trigger.
+# Phase 0 — CI gate. One workflow, three jobs, identical on every trigger.
 #
 # Design constraints, all verified against the repository before implementation:
 #   * Node version comes from .nvmrc (repo root) — never hardcoded. setup-node's
@@ -22,6 +22,11 @@ name: ci
 #     database, so even the boot smoke cannot reach development or production data.
 #   * No path filters: the whole pipeline is a few minutes, and a filtered required
 #     check is the classic way to block merges with a check that never reports.
+#   * The third job, `secret-guard`, exists because GitHub's secret scanning and push
+#     protection are free only on PUBLIC repositories and this repository is private
+#     (roadmap §27AE). `scripts/check-secrets.mjs` is dependency-free, so the job needs
+#     no install step and finishes in seconds. It is a net for the common shapes of a
+#     leaked credential, not a proof a commit is clean — see docs/SOURCE_PROTECTION.md.
 
 on:
   pull_request:
@@ -171,6 +176,20 @@ jobs:
 
           echo "OK: terminated within the shutdown window (status $APP_STATUS, not asserted)"
           echo "boot smoke passed"
+
+  secret-guard:
+    runs-on: ubuntu-latest
+    # No `defaults.run.working-directory`: this job runs from the repository root, and
+    # needs no `npm ci` — the script imports only Node built-ins.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: Scan tracked files for credential-shaped content
+        run: node scripts/check-secrets.mjs
 
   mobile:
     runs-on: ubuntu-latest

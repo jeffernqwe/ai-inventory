@@ -60,7 +60,7 @@ import {
 
 const RESET_TOKEN = 'Kq7Qw3vT9xR2mB6nP1sL4dH8jF5gZ0cY';
 const RESET_URL = `https://app.inventory-ai.test/reset-password?token=${RESET_TOKEN}`;
-const API_KEY = 're_phase26b_test_key_000111222333';
+const API_KEY = 're_phase26b_test_key_000111222333'; // secret-guard:allow (deliberate fixture)
 const MAIL_FROM = 'Inventory AI <no-reply@inventory-ai.test>';
 const RECIPIENT = 'owner@inventory-ai.test';
 const RESEND_ENDPOINT = 'https://api.resend.com/emails';

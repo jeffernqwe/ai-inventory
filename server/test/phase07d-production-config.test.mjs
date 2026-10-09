@@ -163,7 +163,7 @@ describe('H7 production config validation (Phase 07D)', () => {
       MONGODB_URI: undefined,
       JWT_SECRET: 'planted-very-secret-jwt-value-0123456789',
       AI_PROVIDER: 'claude',
-      ANTHROPIC_API_KEY: 'sk-planted-anthropic-secret',
+      ANTHROPIC_API_KEY: 'sk-planted-anthropic-secret', // secret-guard:allow (deliberate fixture)
       GEMINI_API_KEY: 'planted-gemini-secret',
     };
     await withEnv(planted, () => {

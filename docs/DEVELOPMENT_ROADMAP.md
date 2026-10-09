@@ -6398,11 +6398,27 @@ back clean:
 `ci / server` / `ci / mobile` form the pull-request UI displays (see the correction below) — with
 **strict** up-to-date enforcement, a pull request required
 (**0** approvals — a single-maintainer repository must not deadlock on self-approval), stale reviews
-dismissed on push, force-pushes and branch deletion blocked, and **`enforce_admins: false`** so the owner
-keeps an explicit escape hatch rather than being locked out.
+dismissed on push, and force-pushes and branch deletion blocked. **`enforce_admins: true`**, set the same
+day after the setting below was shown to bind nobody.
+
+**Why `enforce_admins` was turned on, and the proof it bites.** The first configuration left it `false`,
+which is GitHub's default and looks harmless: "the owner keeps an escape hatch". On a repository whose
+only collaborator **is** the owner-admin, it meant the required checks were **advisory for every actor
+that exists** — the gate was decoration. Enforcement was then verified rather than assumed, in both
+directions. With the required checks **pending**, a merge attempt was refused:
+
+```text
+X Pull request #10 is not mergeable: the base branch policy prohibits the merge. (exit 1)
+```
+
+and the pull request stayed `OPEN` / `BLOCKED`. Once the checks were green, the *same* merge
+**succeeded** — which is the half that matters most, because a gate that also blocks a green pull
+request would be a deadlock rather than a gate. The escape hatch still exists, but it is now an explicit
+settings change rather than a silently absent rule.
 
 **`main-guard` is retained** as a second layer rather than removed: it still catches a push that reaches
-`main` by a route protection does not cover — an owner bypass, or a future configuration change — and it
+`main` by a route protection does not cover — a protection setting that is later relaxed, or a future
+actor added without admin enforcement — and it
 records the pull-request rule in the repository itself instead of only in a setting. **The trade-off is
 recorded as the owner's decision**, taken with the scan results above in hand: a public repository exposes
 the full source, history and documentation, and switching back to private does not un-expose content that

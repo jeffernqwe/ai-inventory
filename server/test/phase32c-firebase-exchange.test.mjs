@@ -45,6 +45,7 @@ import { createApp } from '../src/app.ts';
 import { createAuthRouter } from '../src/routes/auth.routes.ts';
 import requireAuth from '../src/middlewares/authenticate.ts';
 import { decodeAccessToken } from '../src/config/jwt.ts';
+import { SESSION_ABSOLUTE_CAP_MS } from '../src/services/session.service.ts';
 import env from '../src/config/env.ts';
 import Business from '../src/models/business.model.ts';
 import User from '../src/models/user.model.ts';
@@ -488,13 +489,23 @@ dbSuite('Phase 32C — Firebase exchange and registration over HTTP and a real d
     const res = await exchange({ idToken: ID_TOKEN, deviceLabel: 'Pixel 7' });
 
     assert.equal(res.status, 200);
+    // AUTH-03 added two ABSOLUTE instants to the envelope (login/exchange/renew).
+    // `expiresIn` is retained, so this is purely additive.
     assert.deepEqual(
       Object.keys(res.json).sort(),
-      ['expiresIn', 'token', 'tokenType', 'user'],
+      ['expiresIn', 'sessionExpiresAt', 'token', 'tokenExpiresAt', 'tokenType', 'user'],
       'the login envelope, exactly'
     );
     assert.equal(res.json.tokenType, 'Bearer');
     assert.equal(res.json.expiresIn, env.jwtExpiresIn);
+    // `tokenExpiresAt` is the exact exp of the token just signed; `sessionExpiresAt`
+    // is the session's 14-day cap (the authoritative one, unmoved by the exchange).
+    const claims = decodeAccessToken(res.json.token);
+    assert.equal(res.json.tokenExpiresAt, new Date(claims.exp * 1000).toISOString());
+    assert.equal(
+      new Date(res.json.sessionExpiresAt).toISOString(),
+      (await Session.findOne({ jti: claims.jti })).expiresAt.toISOString()
+    );
     assert.equal(res.json.user.id, String(user._id));
     assert.equal(res.json.user.businessId, String(business._id));
     assert.equal(res.json.user.role, 'OWNER');
@@ -518,14 +529,23 @@ dbSuite('Phase 32C — Firebase exchange and registration over HTTP and a real d
     assert.equal(claims.sub, String(user._id), 'sub is the MongoDB user');
     assert.ok(claims.jti, 'jti is mandatory (Phase 26A)');
     assert.ok(claims.exp > Math.floor(Date.now() / 1000), 'not already expired');
+    // AUTH-02: the token names its issuer/audience.
+    assert.equal(claims.iss, env.jwtIssuer);
+    assert.equal(claims.aud, env.jwtAudience);
 
-    // The row exists, is open, and expires when the token does.
+    // The row exists, is open, and carries the SESSION's own 14-day absolute cap
+    // (AUTH-02) — NOT the token's ~1-hour `exp`.
     const row = await Session.findOne({ jti: claims.jti });
     assert.ok(row, 'the token must name a session row');
     assert.equal(String(row.userId), String(user._id));
     assert.equal(row.deviceLabel, 'Work laptop', 'the label is stored, normalized');
     assert.equal(row.revokedAt, null);
-    assert.equal(row.expiresAt.getTime(), claims.exp * 1000, 'row and token expire together');
+    const capMs = row.expiresAt.getTime() - row.createdAt.getTime();
+    assert.ok(
+      Math.abs(capMs - SESSION_ABSOLUTE_CAP_MS) < 60_000,
+      `the session carries a ~14-day cap, was ${capMs}ms`
+    );
+    assert.notEqual(row.expiresAt.getTime(), claims.exp * 1000, 'the session outlives its JWT');
     assert.equal(await activeSessionsOf(user._id), before + 1, 'exactly one session was opened');
   });
 

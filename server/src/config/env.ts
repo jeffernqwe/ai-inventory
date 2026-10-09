@@ -173,8 +173,17 @@ const env = {
   mongodbDbName: resolveDatabaseName(databaseNameInputs()),
   // JWT signing secret. Never log, commit, or expose this value.
   jwtSecret: process.env.JWT_SECRET || '',
-  // Access-token lifetime (jsonwebtoken format, e.g. "7d", "15m").
-  jwtExpiresIn: process.env.JWT_EXPIRES_IN || '7d',
+  // Access-token lifetime (jsonwebtoken format, e.g. "1h", "15m").
+  // AUTH-02: the Inventory AI access token is short-lived (~1 hour). Session
+  // longevity is bounded SEPARATELY by the 14-day absolute session cap — never
+  // by this value — so lowering it cannot shorten a session's usable life.
+  jwtExpiresIn: process.env.JWT_EXPIRES_IN || '1h',
+  // AUTH-02: application access-token issuer/audience. Stable, non-secret labels
+  // that jsonwebtoken both mints and validates. They are deliberately NOT
+  // environment-specific (no host, port, NODE_ENV or project id). The defaults
+  // match the app's existing 'inventory-ai' identity (FIREBASE_APP_NAME).
+  jwtIssuer: process.env.JWT_ISSUER || 'inventory-ai',
+  jwtAudience: process.env.JWT_AUDIENCE || 'inventory-ai-api',
   // Reverse-proxy hops in front of this server (0 = none). See parseTrustProxy.
   trustProxy: parseTrustProxy(),
   // Explicit browser CORS allow-list. See parseCorsOrigins.

@@ -34,6 +34,30 @@ import { useTheme } from '../lib/theme-context';
 const REQUEST_ACCEPTED =
   'If an account exists for that email, a password reset link has been sent.';
 
+/**
+ * The developer-only failure diagnostic, and the one thing this screen adds for it.
+ *
+ * WHY IT EXISTS. Every failure this screen can report is deliberately reduced to SAFE
+ * copy — the request path's own sentence, or the phrase the classification layer chose —
+ * and the SDK's code is dropped at exactly the moment it becomes the only thing worth
+ * knowing. That is correct for a user and useless for an operator: a send that fails on
+ * a real device arrives here as one sentence, and there is no way to tell an expired
+ * action code from an unnormalised native code from a code-less native throw, because
+ * all three render identically. That is not hypothetical — it is what made the
+ * `auth/email-not-found` gap invisible until the platform's own error mapping was read
+ * by hand.
+ *
+ * SO THE CODE IS SHOWN AGAIN, BEHIND `__DEV__`. The guilding rule is that the user's
+ * sentence may not change and nothing may be shown to a person who is not developing the
+ * app, so this is a second element rather than an appended clause: `__DEV__` is false in
+ * every release bundle, the copy above it is byte-identical with and without it, and the
+ * code it prints is a Firebase error name — no token, no address, no credential and no
+ * SDK message. It names the SOURCE too, because which side failed is the first thing to
+ * know and the two are otherwise indistinguishable: `firebase:` is the SDK, `server:` is
+ * the custom 26B endpoint.
+ */
+const DEV_DIAGNOSTIC_PREFIX = 'Diagnostic (dev only) — ';
+
 const createStyles = (colors: Palette) =>
   StyleSheet.create({
     footerText: {
@@ -48,6 +72,13 @@ const createStyles = (colors: Palette) =>
       color: colors.textSecondary,
       alignSelf: 'stretch',
       marginBottom: spacing.lg,
+    },
+    // Developer-only, so it is styled to read as a note rather than as app copy.
+    diagnostic: {
+      ...type.bodySmall,
+      color: colors.textMuted,
+      alignSelf: 'stretch',
+      marginBottom: spacing.sm,
     },
   });
 
@@ -84,6 +115,8 @@ export default function ForgotPasswordScreen() {
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
+  // Set on every failure, rendered only under `__DEV__`. See DEV_DIAGNOSTIC_PREFIX.
+  const [diagnostic, setDiagnostic] = useState<string | null>(null);
 
   async function submit(): Promise<void> {
     const value = email.trim();
@@ -97,6 +130,7 @@ export default function ForgotPasswordScreen() {
     setBusy(true);
     setFormError(null);
     setFieldErrors({});
+    setDiagnostic(null);
     try {
       // FIREBASE FIRST (N-3). `legacyFallback` is the one state that licenses the custom
       // endpoint, and it means this build has no Firebase configuration at all — it is
@@ -105,6 +139,10 @@ export default function ForgotPasswordScreen() {
       if (outcome.kind === 'legacyFallback') {
         await forgotPassword(value);
       } else if (outcome.kind === 'failure') {
+        // The code the classification layer decided from — kept for the developer and
+        // shown to nobody else. A `null` code is itself the answer: the failure was not
+        // a Firebase rejection at all, which is what a native or module error looks like.
+        setDiagnostic(`firebase: ${outcome.code ?? '(no code)'}`);
         // A malformed address belongs on the input; everything else is a statement
         // about the request and goes above the form.
         if (outcome.field === 'email') setFieldErrors({ email: outcome.message });
@@ -113,6 +151,10 @@ export default function ForgotPasswordScreen() {
       }
       setDone(true);
     } catch (err) {
+      // The other source: the custom 26B endpoint, reached only on an unconfigured
+      // build. Its `code` is the server's own — `MAIL_NOT_CONFIGURED` is the one that
+      // means no mail transport is set up on the deployment.
+      setDiagnostic(`server: ${(err as { code?: string | null } | null)?.code ?? '(no code)'}`);
       const fields = fieldMap(err);
       if (Object.keys(fields).length) setFieldErrors(fields);
       else setFormError((err as { message?: string } | null)?.message || 'Unable to send the reset link. Please try again.');
@@ -159,6 +201,12 @@ export default function ForgotPasswordScreen() {
       }
     >
       <Banner type="error" text={formError} />
+      {__DEV__ && diagnostic ? (
+        <Text style={styles.diagnostic} selectable>
+          {DEV_DIAGNOSTIC_PREFIX}
+          {diagnostic}
+        </Text>
+      ) : null}
       <Input
         name="email"
         label="Email"

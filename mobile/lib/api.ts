@@ -225,6 +225,71 @@ export function firebaseRegister({ idToken, businessName, name }: FirebaseRegist
   });
 }
 
+/**
+ * AUTH-04-F — the custom 6-digit email-verification code flow. Both endpoints are
+ * PRE-SESSION and Firebase-AUTHENTICATED, so neither sends an Inventory AI token:
+ * the caller holds a Firebase ID token and no session at all, precisely because the
+ * identity is not verified yet. `lib/client.ts` reports session loss only for a
+ * request that CARRIED a token, so neither route here can be mistaken for a dead
+ * session — the same reasoning `firebaseExchange`/`firebaseRegister` already carry.
+ *
+ * The Firebase ID token is consumed once, server-side, and is never stored.
+ */
+export interface EmailVerificationRequestPayload {
+  /** A Firebase ID token from `lib/firebase-auth`. Consumed once, never stored. */
+  idToken: string;
+}
+
+/**
+ * POST /api/auth/email-verification/request -> { message } (200). PUBLIC — no session.
+ *
+ * Mints a six-digit code for the identity the token proves and emails it. Answers the
+ * SAME `{ message }` for an already-verified identity (a no-op) — the caller never
+ * learns which happened.
+ *
+ * 429 `EMAIL_VERIFICATION_RATE_LIMITED` carries a `Retry-After` header, which is both
+ * the 60-second resend cooldown and the AD-19 per-IP limiter; 503
+ * `EMAIL_VERIFICATION_NOT_CONFIGURED` / `EMAIL_VERIFICATION_MAIL_FAILED`; 400
+ * `FIREBASE_TOKEN_INVALID` (a bad provider credential, deliberately NOT a 401).
+ */
+export function requestEmailVerification({
+  idToken,
+}: EmailVerificationRequestPayload): Promise<ApiResponse> {
+  return apiFetch('/api/auth/email-verification/request', {
+    method: 'POST',
+    body: { idToken },
+  });
+}
+
+export interface EmailVerificationConfirmPayload {
+  /** A Firebase ID token from `lib/firebase-auth`. Consumed once, never stored. */
+  idToken: string;
+  /** The six-digit code the person was emailed. Never persisted by this app. */
+  code: string;
+}
+
+/**
+ * POST /api/auth/email-verification/confirm -> { message } (200). PUBLIC — no session.
+ *
+ * Verifies a submitted code and, only on success, sets Firebase's `emailVerified`
+ * through the Admin bridge. A wrong, expired, exhausted, absent or already-used code
+ * answers ONE indistinguishable 400 `INVALID_VERIFICATION_CODE`.
+ *
+ * 429 `EMAIL_VERIFICATION_RATE_LIMITED`; 503 `EMAIL_VERIFICATION_NOT_CONFIGURED`; 400
+ * `VALIDATION_ERROR` with a `code` field problem for a missing/oversized value; 400
+ * `FIREBASE_TOKEN_INVALID` for a bad provider credential. It issues NO session — the
+ * Inventory AI JWT is still minted only by `firebaseExchange`.
+ */
+export function confirmEmailVerification({
+  idToken,
+  code,
+}: EmailVerificationConfirmPayload): Promise<ApiResponse> {
+  return apiFetch('/api/auth/email-verification/confirm', {
+    method: 'POST',
+    body: { idToken, code },
+  });
+}
+
 export interface FirebaseLinkPayload {
   /** A Firebase ID token from `lib/firebase-auth`. Consumed once, never stored. */
   idToken: string;
@@ -327,6 +392,54 @@ export function credentialsChanged(
   return apiFetch('/api/auth/credentials-changed', {
     token,
     method: 'POST',
+    temporarySession: true,
+    body: { idToken },
+  });
+}
+
+/**
+ * POST /api/auth/renew -> { token, tokenType, expiresIn, tokenExpiresAt,
+ * sessionExpiresAt, user } (200, AUTH-03). AUTHENTICATED — the caller's own
+ * session token is required.
+ *
+ * Re-issues an access token for the CALLER'S OWN existing session: the server
+ * keeps the same `jti`, reuses the same session row, and NEVER extends its 14-day
+ * cap. The body carries only `{ idToken }`; the account is the session and the
+ * identity is the verified token's uid, so no id, uid, businessId or role is sent
+ * and none is read. The response restates login's shape plus the two absolute
+ * instants, whose MINIMUM is the client's true authentication horizon.
+ *
+ * `temporarySession: true` — see the note on the call itself. It is NOT the N-4
+ * "not the app's own session" case (this request DOES carry the app's own token); the
+ * flag is set because the renewal must not run the transport's own renewal/recovery
+ * hooks, and because `performRenewal` already applies this response's classification.
+ * The refusals below are therefore handled by the caller, not by the generic path.
+ * The server answers a rejected
+ * Firebase credential as 400 (a bad request field), a uid mismatch as 409
+ * `FIREBASE_IDENTITY_CONFLICT`, an unverified identity as 400 `EMAIL_NOT_VERIFIED`,
+ * a spent/revoked session as 401 `SESSION_REVOKED`, and a throttled caller as 429
+ * `SESSION_RENEW_RATE_LIMITED` — the last of which is TRANSIENT and must preserve
+ * the still-valid session rather than be read as session loss.
+ */
+export function renew(token: string, { idToken }: FirebaseLinkPayload): Promise<ApiResponse> {
+  return apiFetch('/api/auth/renew', {
+    token,
+    method: 'POST',
+    // AUTH-03 FIX — `temporarySession: true`, FOR THE OPPOSITE REASON TO THE N-4
+    // OPT-OUT ABOVE. The renewal request is ISSUED BY `performRenewal`, which is
+    // itself the implementation of the transport's proactive/recovery hooks. Those
+    // hooks are `await`ed before EVERY request that carries a token, so without this
+    // flag the renewal would re-enter them, `renewIfDue` would resolve to the SAME
+    // in-flight promise `performRenewal` is already awaiting, and the two would wait
+    // on each other forever — a self-deadlock that settled nothing, threw nothing and
+    // never cleared `renewalPromiseRef`, wedging every later request too.
+    //
+    // Suppressing the hooks here is correct on its own terms as well, not just to
+    // break the cycle: `performRenewal` already classifies this response itself
+    // (terminal codes end the session through `clearSession`; a 429 or a transient
+    // failure preserves it and backs off). Letting the generic path ALSO act on it
+    // would apply that decision twice, and its session-loss report would clear the
+    // very session the recovery branch exists to preserve.
     temporarySession: true,
     body: { idToken },
   });
@@ -659,7 +772,10 @@ export default {
   forgotPassword,
   resetPassword,
   firebaseExchange,
+  renew,
   firebaseRegister,
+  requestEmailVerification,
+  confirmEmailVerification,
   firebaseLink,
   updateMe,
   logout,

@@ -52,10 +52,10 @@ These are non-negotiable. Future work must not break any of them.
 | I-10 | **A Firebase-linked user has no second password door** — legacy login refuses with 403 `FIREBASE_SIGN_IN_REQUIRED`. | `[✓]` | Phase 32E/32K. |
 | I-11 | **Session revocation rules** — a token with no/invalid/revoked/expired `jti` is refused. | `[✓]` | Phase 26A; `middlewares/authenticate.ts`. |
 | I-12 | **Password/session invalidation** — `passwordChangedAt` rejects earlier tokens (`SESSION_INVALIDATED`). | `[✓]` | Phase 15; unchanged vs `SESSION_REVOKED`. |
-| I-13 | **Re-authentication required** for the Firebase unlink sensitive operation (signed `auth_time`, 300 s, fail-closed). | `[✓]` | `constants/firebase.ts`; `firebaseUnlink.service.ts`. |
+| I-13 | **Re-authentication required** for the Firebase unlink sensitive operation (signed `auth_time`, 300 s, fail-closed). *(The unlink operation was removed by Phase A / F-1; the same requirement now guards the credential-change bridge — see §8.)* | `[✓]` | `constants/firebase.ts`. *(`firebaseUnlink.service.ts` was removed by Phase A / F-1 — see §8.)* |
 | I-14 | **Account linking rules** — authenticated, own-account only, email never a join key, conflicts refused with one 409. | `[✓]` | Phase 32H. |
-| I-15 | **Account unlinking rules** — Policy B: a new local password must be established in the same transition; no zero-method account. | `[✓]` | Phase 32L-A; design §27Q. |
-| I-16 | **No cross-business account movement** — a link/unlink writes only `firebaseUid`/`emailVerified`/`passwordHash`; `businessId` is never assigned. | `[✓]` | `firebaseLink.service.ts`, `firebaseUnlink.service.ts`. |
+| I-15 | **Account unlinking rules** — Policy B: a new local password must be established in the same transition; no zero-method account. *(The unlink operation itself was removed by Phase A / F-1 — see §8.)* | `[✓]` | Phase 32L-A — **removed by Phase A / F-1** (see §8); design §27Q. |
+| I-16 | **No cross-business account movement** — a link/unlink writes only `firebaseUid`/`emailVerified`/`passwordHash`; `businessId` is never assigned. *(The invariant holds for linking; the unlink half was removed by Phase A / F-1 — see §8.)* | `[✓]` | `firebaseLink.service.ts`. *(`firebaseUnlink.service.ts` was removed by Phase A / F-1 — see §8.)* |
 | I-17 | **No sensitive credential/token/hash logging** — no password, Firebase token, JWT, `jti`, reset token, or secret is logged. | `[✓]` | `mail/*` discards provider message; audit rows omit `jti` and uid. |
 | I-18 | **Disabled users cannot authenticate or use protected APIs.** | `[✓]` | `authenticate.ts` ACTIVE check; Phase 14A disable-revokes-login. |
 | I-19 | **Business suspension/archive** blocks authentication and protected use. | `[✓]` | `assertActiveBusiness` (live); `ACCOUNT_DISABLED` / business-status refusal. |
@@ -122,7 +122,7 @@ Repository implementation is separated from Firebase Console / external setup.
 | --- | --- | --- | --- | --- |
 | `[✓]` | **Firebase Admin SDK boundary** | `services/firebase/{adminApp,tokenVerifier,firebaseErrors,index}`; lazy app init | live project for E2E | Phase 32B |
 | `[✓]` | **Firebase UID verification** | Narrowed to `{uid,email,emailVerified,signInProvider,authTime}` | — | `tokenVerifier.ts` |
-| `[✓]` | **Firebase ID token verification** | `checkRevoked:false` (documented) | revocation sync — §23 | `adminApp.ts` |
+| `[✓]` | **Firebase ID token verification** | `checkRevoked:true` (**AUTH-01**; supersedes the §14C.5/L-19 recommendation) | revocation sync — §23 | `tokenVerifier.ts` |
 | `[✓]` | **Exchange endpoint** | `POST /api/auth/firebase/exchange` (PUBLIC, rate-limited) | E2E unverified | Phase 32C |
 | `[✓]` | **UID-authoritative lookup** | Resolves by `firebaseUid` **only, never email** | — | `firebaseAuth.service.ts` |
 | `[✓]` | **Unknown UID handling** | 403 `REGISTRATION_REQUIRED` | — | Phase 32C |
@@ -132,7 +132,7 @@ Repository implementation is separated from Firebase Console / external setup.
 | `[✓]` | **Firebase logout** | `signOutOfFirebase()` total; outcome consumed via `firebaseSignOutPending` marker | device-time | design §14A.8 (D-E1) |
 | `[✓]` | **Firebase session behaviour** | Durable native persistence (P2), Inventory split | device-time (P-4) | `2026-09-24-rnfirebase-p2-...md` |
 | `[✓]` | **Firebase token freshness** | `auth_time` checked for sensitive ops; fail-closed | — | `constants/firebase.ts` |
-| `[~]` | **Firebase revocation handling** | `checkRevoked:false`; no revocation sync | §23 future | design §16 |
+| `[~]` | **Firebase revocation handling** | `checkRevoked:true` (**AUTH-01**); revocation is consulted at every verification — **no Mongo→Firebase disable sync** | §23 future | design §16 |
 | `[ ]` | **Firebase account disable synchronisation** | Not implemented | §23 future | — |
 | `[✓]` | **Firebase config/secrets** | Server-side only; `.env.example` names only; production fail-fast | live creds (P-5) | `config/firebase.ts` |
 
@@ -166,7 +166,7 @@ Repository implementation is separated from Firebase Console / external setup.
 | `[~]` | **Firebase sign-out** | Yes (pending marker) | device-time | D-E1 |
 | `[~]` | **Reauthentication** | `auth_time` freshness implemented | live-project needed | `constants/firebase.ts` |
 | `[✓]` | **Linking (native provider side)** | Client-SDK operation | **not server-observable** | §7 |
-| `[✓]` | **Unlinking (server side)** | Policy B | code + test | Phase 32L-A |
+| `[✓]` | **Unlinking (server side)** | Policy B | code + test | Phase 32L-A — **removed by Phase A / F-1** (see §8) |
 | `[✓]` | **Android build** | EAS build `f3038fa1…` | FINISHED | §27P |
 | `[✓]` | **Android runtime** | `emulator-5554`, 0 fatals | verified | §27P |
 | `[⛔]` | **iOS build** | Not possible on host | P-6 | design §14A.11 |
@@ -267,7 +267,7 @@ verified. It is **not** recorded as deferred work.
 | `[ ]` | **Account creation** | Future. |
 | `[ ]` | **Existing-account conflict** | Policy fixed (no auto-link); flow future. |
 | `[ ]` | **Linking** | Via the 32H boundary (future convergence). |
-| `[ ]` | **Unlinking** | Future. |
+| `[ ]` | **Unlinking** | Future. *(Obsolete — the server-side unlink capability was **removed and re-scoped** into a credential change by `Phase A / F-1 — 6e2252f4c63a7bd98e1d63a4703f21ab236c93a9`; see roadmap §27AA and §8 of this checklist.)* |
 | `[ ]` | **Security implications** | R-10 recorded. |
 
 ### 6b. Apple
@@ -307,6 +307,20 @@ verified. It is **not** recorded as deferred work.
 
 ## 8. ACCOUNT UNLINKING (Phase 32L-A / 32L-B, Policy B)
 
+> **⛔ SUPERSEDED 2026-10-01 (Phase A / F-1).** `POST /api/auth/firebase/unlink` **does not exist**. Phase
+> F-1 (`6e2252f`) **removed it rather than deprecating it**: the route, the controller handler, the payload
+> validator, `server/src/services/firebaseUnlink.service.ts` (402 lines), both audit actions
+> (`FIREBASE_IDENTITY_UNLINKED` and `FIREBASE_IDENTITY_UNLINK_CONFLICT` — no longer declared in
+> `server/src/constants/audit.ts`), the mobile API wrapper and `server/test/phase32l-firebase-unlink.test.mjs`
+> are all gone. The operation was re-scoped into a **credential change** — Firebase `updatePassword`, then
+> the credentials-changed bridge, then the session the sequence ends with — so `firebaseUid` is **never
+> cleared** and no reachable path clears it. **The table below is the historical Phase 32L record and is not
+> rewritten:** its `[✓]` rows describe a capability that shipped and was later removed, and none of them
+> describes the current state. The removal is recorded in `CLAUDE.md`'s committed **Phase F-1 correction**
+> and in commit `6e2252f` itself; design authority **§14B.6**. **The roadmap has no section recording this
+> removal** — that history gap is noted here rather than papered over. *(**Resolved 2026-10-07 (C4-5):** the gap is closed — the roadmap now records it as **§27AA**, a
+> retrospective `# 27AA.` section appended after §27Z without renumbering anything.)*
+
 | Status | Item | Detail |
 | --- | --- | --- |
 | `[✓]` | **Authenticated unlink** | `POST /api/auth/firebase/unlink`. |
@@ -335,10 +349,18 @@ verified. It is **not** recorded as deferred work.
 
 ## 9. EMAIL VERIFICATION
 
+> **⛔ SUPERSEDED 2026-10-02 (AUTH-04).** The table below describes the **Firebase verification-link**
+> flow. Email verification is now a **custom 6-digit Inventory AI code delivered through the
+> provider-agnostic mail boundary (Brevo / Resend)**, with
+> Firebase Admin `updateUser(uid, { emailVerified: true })` setting the final Firebase state. See **§40**
+> and design authority **§14C.10**. The table is preserved as the historical record and is not rewritten.
+> The "whether verification is enforced" question is answered by the shipped code (it **is** enforced at
+> register/exchange/renew) — see §40.
+
 | Status | Item | Detail |
 | --- | --- | --- |
 | `[✓]` | **Firebase email verification state** | `email_verified` read from the verified token. |
-| `[✓]` | **Mongo `emailVerified` persistence** | Written on exchange/link/unlink (`models/user.model.ts`). |
+| `[✓]` | **Mongo `emailVerified` persistence** | Written on exchange/link/unlink (`models/user.model.ts`). *(The unlink part was removed by Phase A / F-1 — see §8.)* |
 | `[—]` | **Whether verification is currently enforced** | **NOT enforced.** No authorization decision reads `emailVerified` (verified: write-only sites). |
 | `[—]` | **Authorization gates** | None. |
 | `[—]` | **Login restrictions** | None. |
@@ -346,7 +368,7 @@ verified. It is **not** recorded as deferred work.
 | `[✓]` | **Registration behaviour** | `emailVerified` persisted from claim. |
 | `[✓]` | **Linking behaviour** | `emailVerified` moves with `firebaseUid` (CASE C). |
 | `[✓]` | **Unlinking behaviour** | Reset to `false`. |
-| `[ ]` | **Resend verification** | Not implemented. |
+| `[ ]` | **Resend verification** | Superseded — see §40: resend is a server-side **60-second per-UID cooldown** on `POST /api/auth/email-verification/request`. |
 | `[ ]` | **Verification deep links** | Not implemented. |
 | `[!]` | **Security implications** | Whether provider-asserted addresses are trusted is O-3. |
 | `[!]` | **O-3 decision** | OPEN — whether `emailVerified` is enforced. |
@@ -385,7 +407,7 @@ verified. It is **not** recorded as deferred work.
 
 | Status | Item | Detail |
 | --- | --- | --- |
-| `[✓]` | **Password creation** | Register / reset / unlink establish a bcrypt hash. |
+| `[✓]` | **Password creation** | Register / reset / unlink establish a bcrypt hash. *(The unlink part was removed by Phase A / F-1 — see §8.)* |
 | `[✓]` | **Password hashing** | bcrypt cost 10; `select:false`. |
 | `[✓]` | **Password login** | See §2. |
 | `[✓]` | **Password change** | `POST /api/auth/change-password`; policy min 8. |
@@ -435,7 +457,7 @@ verified. It is **not** recorded as deferred work.
 | `[✓]` | **Revoked sessions** | Kept until TTL; cannot be silently re-created. |
 | `[✓]` | **Password-change invalidation** | `SESSION_INVALIDATED` (distinct from `SESSION_REVOKED`). |
 | `[✓]` | **Password-reset invalidation** | `passwordChangedAt` + `revokeAllSessions`. |
-| `[✓]` | **Firebase unlink invalidation** | All sessions revoked. |
+| `[✓]` | **Firebase unlink invalidation** | All sessions revoked. *(Removed by Phase A / F-1 — see §8.)* |
 | `[✓]` | **Disabled-user behaviour** | ACTIVE check each request. |
 | `[✓]` | **Business suspension/archive behaviour** | `assertActiveBusiness`. |
 | `[✓]` | **Role reload** | Per request from Mongo. |
@@ -453,12 +475,12 @@ verified. It is **not** recorded as deferred work.
 
 | Status | Item | Detail |
 | --- | --- | --- |
-| `[✓]` | **Firebase reauth** | Required for unlink. |
+| `[✓]` | **Firebase reauth** | Required for unlink. *(Re-scoped: Phase A / F-1 removed unlink; the same freshness now guards the credential-change bridge — see §8.)* |
 | `[✓]` | **Signed `auth_time`** | Read from verified claim. |
 | `[✓]` | **300-second freshness window** | Frozen (Option D). |
 | `[✓]` | **Fail-closed handling** | Cannot be chosen by a client. |
-| `[✓]` | **Unlink protection** | The one implemented step-up point. |
-| `[ ]` | **Future sensitive-operation step-up** | Not implemented beyond unlink. |
+| `[✓]` | **Unlink protection** | The one implemented step-up point. *(Removed by Phase A / F-1 — see §8.)* |
+| `[ ]` | **Future sensitive-operation step-up** | Not implemented beyond unlink. *(Unlink no longer exists — Phase A / F-1; see §8.)* |
 | `[ ]` | **Password-change step-up** | Not implemented. |
 | `[ ]` | **Email-change step-up** | Not applicable yet (§10). |
 | `[ ]` | **MFA step-up** | Future (§21). |
@@ -506,7 +528,7 @@ verified. It is **not** recorded as deferred work.
 | `[✓]` | **Subscription/billing ownership** | **Business/tenant**, never a Firebase identity (V4 direction recorded). |
 | `[✓]` | **Firebase identity separation from tenant authority** | Structure. |
 | `[✓]` | **Account linking across businesses** | Impossible — no `businessId` write. |
-| `[✓]` | **Account unlinking across businesses** | Impossible — same. |
+| `[✓]` | **Account unlinking across businesses** | Impossible — same. *(Removed by Phase A / F-1 — see §8.)* |
 
 ---
 
@@ -519,13 +541,13 @@ verified. It is **not** recorded as deferred work.
 | `[✓]` | **Firebase-linked** | `firebaseUid` set; password door refused. |
 | `[✓]` | **Password-authenticated** | Legacy path. |
 | `[✓]` | **Provider-linked** | Provider recorded on the Firebase identity. |
-| `[✓]` | **Unlinked** | Policy B; new local password. |
+| `[✓]` | **Unlinked** | Policy B; new local password. *(Removed by Phase A / F-1 — see §8.)* |
 | `[✓]` | **Password changed** | Stamps `passwordChangedAt`. |
 | `[✓]` | **Password reset** | Full flow. |
-| `[✓]` | **Sessions revoked** | On change/reset/unlink/logout. |
+| `[✓]` | **Sessions revoked** | On change/reset/unlink/logout. *(The unlink part was removed by Phase A / F-1 — see §8.)* |
 | `[ ]` | **Account recovery (broader)** | Beyond password reset — missing (§22). |
 | `[ ]` | **Future deletion/deactivation rules** | Undefined; products are archive-only; user hard-delete not specified. |
-| `[✓]` | **Audit implications** | Status/role/link/unlink/session events recorded (§17). |
+| `[✓]` | **Audit implications** | Status/role/link/unlink/session events recorded (§17). *(The unlink part was removed by Phase A / F-1 — see §8.)* |
 
 ---
 
@@ -541,7 +563,7 @@ verified. It is **not** recorded as deferred work.
 | `[✓]` | **Password reset** | `PASSWORD_RESET_REQUESTED` / `_COMPLETED` (no metadata). |
 | `[✓]` | **Password change** | `USER_UPDATED` path. |
 | `[✓]` | **Linking** | `FIREBASE_IDENTITY_LINKED` / `_CONFLICT` (uid omitted). |
-| `[✓]` | **Unlinking** | `FIREBASE_IDENTITY_UNLINKED` / `_CONFLICT`. |
+| `[✓]` | **Unlinking** | `FIREBASE_IDENTITY_UNLINKED` / `_CONFLICT`. *(Both actions were removed by Phase A / F-1 — see §8.)* |
 | `[✓]` | **Role changes** | `USER_UPDATED`. |
 | `[✓]` | **User status changes** | `USER_UPDATED`. |
 | `[~]` | **Business lifecycle changes** | No dedicated business-status audit action observed. |
@@ -589,7 +611,7 @@ Connects existing controls to future controls **without** claiming missing featu
 | `[✓]` | **Session revocation** | Immediate, server-side. |
 | `[✓]` | **Sign-out-everywhere** | Implemented. |
 | `[✓]` | **Firebase identity authority** | UID-authoritative; no email join. |
-| `[✓]` | **Reauthentication** | 300 s freshness for unlink. |
+| `[✓]` | **Reauthentication** | 300 s freshness for unlink. *(Re-scoped: Phase A / F-1 removed unlink — see §8.)* |
 | `[!]` | **Email verification** | Not enforced (O-3) — a real gap for provider-asserted addresses. |
 | `[ ]` | **Email change protection** | Capability absent (§10). |
 | `[ ]` | **MFA** | Future (§21). |
@@ -597,9 +619,9 @@ Connects existing controls to future controls **without** claiming missing featu
 | `[ ]` | **Failed-login detection** | Only rate limiting. |
 | `[ ]` | **Suspicious-login detection** | Not implemented. |
 | `[✓]` | **Provider linking protection** | Own-account, conflict-refused, no email auto-link. |
-| `[✓]` | **Provider unlink protection** | Policy B + freshness + sessions revoked. |
+| `[✓]` | **Provider unlink protection** | Policy B + freshness + sessions revoked. *(Removed by Phase A / F-1 — see §8.)* |
 | `[ ]` | **Break-glass recovery** | Not implemented (§22). |
-| `[~]` | **Firebase revocation** | `checkRevoked:false`; no disable sync (§23). |
+| `[~]` | **Firebase revocation** | `checkRevoked:true` (**AUTH-01**); no disable sync (§23). |
 | `[~]` | **Account containment** | Disable-user revokes access immediately; no compromise playbook. |
 
 ---
@@ -673,7 +695,7 @@ are missing.
 | `[✓]` | **Mongo disabled state** | `User.status` ACTIVE/DISABLED. |
 | `[ ]` | **Firebase state** | No propagation from Mongo to Firebase. |
 | `[ ]` | **Firebase token revocation** | Not implemented. |
-| `[~]` | **`checkRevoked` behaviour** | `false` — **REVIEWED 2026-09-29 (§39 / design §14C.5, L-19): recommended to REMAIN `false`**, with the availability-vs-authority tradeoff recorded. MongoDB `status` stays the revocation authority. |
+| `[✓]` | **`checkRevoked` behaviour** | `true` — **AUTH-01**, per the approved target architecture §9/§10 ("Firebase revocation checking is a security boundary"). **Supersedes the 2026-09-29 L-19 recommendation to remain `false`** (§39 / design §14C.5), retained below as the historical review. MongoDB `status` remains the revocation authority for *Inventory AI sessions*. |
 | `[ ]` | **Provider disable** | Not implemented. |
 | `[ ]` | **Compromised Firebase account** | No containment flow. |
 | `[✓]` | **Server exchange refusal** | DISABLED user / inactive business refused at exchange. |
@@ -758,7 +780,7 @@ are missing.
 
 | # | Decision | State | Evidence | Dependency / impact | Next owner action |
 | --- | --- | --- | --- | --- | --- |
-| **O-1** | Unlink policy + last-authentication-method protection | **Policy B RESOLVED**; residual (Firebase's own provider set) recorded, **NOT closed** | design §14A.5; §27Q | Affects any unlink/provider work | Accept residual or scope a follow-up |
+| **O-1** | Unlink policy + last-authentication-method protection | **Policy B RESOLVED**; residual (Firebase's own provider set) recorded, **NOT closed** | design §14A.5; §27Q | Affects any unlink/provider work | Accept residual or scope a follow-up **Annotated 2026-10-01 (`Phase A / F-1 — 6e2252f4c63a7bd98e1d63a4703f21ab236c93a9`):** the 32L-A server unlink capability is **REMOVED**, not deprecated, and the operation was re-scoped into a credential change — no reachable path clears `firebaseUid`; the residual above stays **NOT closed**. See `CLAUDE.md` and §8 of this checklist. |
 | **O-2** | Linked-account disposition of `change-password` / reset | **CLOSED / decided in Phase 32K** | README 32K entry | Inert-hash behaviour recorded | No further action (residual O-8/O-9) |
 | **O-3** | Whether `emailVerified` is enforced | **RESOLVED 2026-09-29** — direction (§39, L-6/L-7) **and** mechanics (§39 / design §14C.9, RG-1…RG-15) | design §14A.5; §14C.9 | Gate is the registration **ordering** + a client verify screen; `requireAuth` deliberately unmodified; unverified Google refused; resend native | None — implement in N-5 (still gated by N-4 and B-2/L-17) |
 | **O-4** | M1 vs M2 | **RESOLVED** — M1 (RNFirebase) + P2 durable persistence | P2 decision §8.1 | Forfeits Expo Go (O-11) | None |
@@ -826,8 +848,8 @@ Chronological. **History is not rewritten.**
 | **32H** | Server-side linking boundary | `[✓]` | 25/25 | `d8b693a` |
 | **32J** | Mobile registration onboarding | `[~]` | targeted | `0c3f87d` |
 | **32K** | Firebase password authority boundary | `[✓]` | 12-case suite | `8af1d49` |
-| **32L-A** | Server unlink (Policy B) | `[✓]` | code + tests | `01ae73f` |
-| **32L-B** | Mobile unlink | `[~]` | not runtime-verified | `0c3f87d` |
+| **32L-A** | Server unlink (Policy B) *(removed by Phase A / F-1 — see §8.)* | `[✓]` | code + tests | `01ae73f` |
+| **32L-B** | Mobile unlink *(client surface re-scoped by Phase A / F-1 — see §8.)* | `[~]` | not runtime-verified | `0c3f87d` |
 | **RNFirebase foundation** | Native packages + plugins | `[✓]` | — | `c5d07f5` |
 | **B** | Native Firebase auth migration | `[✓]` | Android runtime | `0c3f87d` |
 | **C** | Native Google Sign-In | `[~]` | not E2E-verified | `ea52c2c` |
@@ -944,7 +966,7 @@ uncommitted protected entries.
 ### Completed
 Email/password register + login; Firebase Admin verify boundary; Firebase exchange + register;
 sessions/JWT with `jti` (revocation, logout, sign-out-everywhere, per-device list); password change;
-**password reset (26B/27/28)**; account linking (32H) and server unlink under Policy B (32L-A);
+**password reset (26B/27/28)**; account linking (32H) and server unlink under Policy B (32L-A) *(`Phase A / F-1 — 6e2252f4c63a7bd98e1d63a4703f21ab236c93a9`, 2026-10-01: the 32L-A capability is **REMOVED**, not deprecated, and the operation was re-scoped into a credential change — no reachable path clears `firebaseUid`; see `CLAUDE.md` and §8 of this checklist)*;
 password-authority guard (32K); RBAC (4 roles / 21 keys) and tenant isolation; rate limiting; audit
 trail + viewer; sensitive-logging protections; native RNFirebase migration B–E; JS-SDK/browser OAuth
 retirement F1/F2; Android runtime verification F2.9; **Android Google existing-account E2E verification (§5a)**.
@@ -966,7 +988,10 @@ blocked — §5a/§25.)
 **O-11** (Expo Go policy), plus the Firebase-only register **OD-1, OD-2, OD-4…OD-8, OD-10** (design
 §14C.7):
 the bridge's name/shape, unlink's fate, the invitation model, the 26B/27 artefact disposition, whether
-`/firebase/link` survives, and whether `/register` is removed outright.
+`/firebase/link` survives, and whether `/register` is removed outright. *(**OD-2 disposition 2026-10-07 (matching design §14C.7):** "unlink's fate" is **partly answered** — the
+server-side ability was **removed outright** by `Phase A / F-1 — 6e2252f4c63a7bd98e1d63a4703f21ab236c93a9`
+and re-scoped into a credential change (roadmap §27AA) — so this is **not** an instruction to re-implement
+the removed route; only the Firebase-side provider unlink the server cannot observe remains open.)*
 *(**D2 is resolved in design §14C.3.8 and its trigger **OD-9 is now LOCKED in §14C.3.9** (2026-09-29,
 Phase 32Q — M-1…M-10); **Option E** is a separate deferred owner decision — **OD-10** — and **D2 retains the
 cross-device residue F-19**.)*
@@ -1011,7 +1036,9 @@ Firebase = identity provider; **MongoDB/Inventory AI = application authority**; 
 them; tenant isolation is server-side; **email is never an automatic linking key**; `firebaseUid` is
 authoritative and unique (sparse); Firebase-linked users have no second password door; sessions are
 revocable via `jti`; `passwordChangedAt` invalidates older tokens; unlink requires a fresh Firebase
-auth and a new local password; no cross-business movement; no credential/token/hash logging; disabled
+auth and a new local password *(**Corrected 2026-10-07:** there is **no unlink operation** — the server-side capability was **removed
+and re-scoped** by `Phase A / F-1 — 6e2252f4c63a7bd98e1d63a4703f21ab236c93a9` (roadmap §27AA); the same
+300-second freshness rule now governs the **credential change** that replaced it.)*; no cross-business movement; no credential/token/hash logging; disabled
 users and suspended businesses cannot authenticate or use protected APIs.
 
 ### Current Project Position
@@ -1019,7 +1046,9 @@ Inventory AI has a **complete, backend-authoritative authentication architecture
 identity provider, MongoDB remains the source of truth for accounts, roles, tenancy and sessions, and
 the Inventory AI JWT/session is the API bearer. The Firebase/RNFirebase migration is **code-complete
 and Android-runtime verified**, and the server-side linking/unlinking boundaries, password recovery
-and session hardening have all shipped. What remains is **not new architecture but validation and
+and session hardening have all shipped. *(**Corrected 2026-10-07:** the server-side **unlinking** boundary did **not** survive — it was **removed
+and re-scoped** by `Phase A / F-1 — 6e2252f4c63a7bd98e1d63a4703f21ab236c93a9` (roadmap §27AA; §8 of this
+checklist); the linking boundary, password recovery and session hardening are unaffected.)* What remains is **not new architecture but validation and
 decision**: the project is gated on an iOS build environment, the environment-blocked new-identity
 path (§5b), and a set of open owner decisions — the live Firebase project now exists, the server-side
 Admin config is verified live, and the Android existing-account provider path is E2E-verified (§5a) —
@@ -1053,7 +1082,9 @@ Recorded rather than silently resolved.
 1. **Design doc §14A.7 vs shipped work.** §14A.7 still reads "Account linking: NOT implemented.
    Account unlinking: NOT implemented", with a supersession note for linking only. Unlinking shipped
    in Phase 32L and is recorded in §27Q / spec §29, but §14A.7 carries **no supersession note for
-   unlink**.
+   unlink**. **Resolved in substance 2026-10-07:** design **§14A.7** now carries the unlink supersession note (added
+   by the C4-4 documentation pass — see the annotation on that bullet), so this discrepancy is **closed**;
+   the record above is preserved as the conflict as it stood.
 2. **Design doc §21 "No phase beyond 32F is authorised"** is stale in effect — 32G, 32H, 32J, 32K,
    32L and F1/F2/F2.9 shipped after it. It is a plan, not a schedule, and is marked reconciled.
 3. **CLAUDE.md phase index lags.** The numbered phase list ends at Phase 32H; 32J, 32K, 32L, F1, F2,
@@ -1216,11 +1247,13 @@ from a repository config file is not evidence that it is unset.** No secret valu
 
 ### Auth / rate-limit configuration audit (code-derived)
 
-All **sixteen** `AUTH_*` variables — eight window/limit pairs — are **optional** and read lazily at
+All **twenty-two** `AUTH_*` variables — eleven window/limit pairs — are **optional** and read lazily at
 limiter-creation time (`server/src/middlewares/rateLimit.ts`, `authRateConfig`), each with a documented
 default; none is in the production fail-fast set (`server/src/config/validateConfig.ts`).
 **Render needs no override.** The count is exact and code-derived
-(`grep -rhoE 'process\.env\.AUTH_[A-Z0-9_]+' server/src | sort -u` → 16), **not** an estimate.
+(`grep -rhoE 'process\.env\.AUTH_[A-Z0-9_]+' server/src | sort -u` → 22), **not** an estimate.
+**AUTH-03 added the session-renewal pair and AUTH-04 the two email-verification pairs**; the earlier
+count of sixteen predates both.
 `TRUST_PROXY` and `JWT_SECRET` / `JWT_EXPIRES_IN` appear in the table below but are **not** `AUTH_*`
 variables and are counted separately.
 
@@ -1234,6 +1267,9 @@ variables and are counted separately.
 | `AUTH_PASSWORD_RESET_CONFIRM_RATE_LIMIT_WINDOW_MS` / `_MAX` | 900000 / 20 | `createPasswordResetConfirmLimiter` (`reset-password`) |
 | `AUTH_FIREBASE_EXCHANGE_RATE_LIMIT_WINDOW_MS` / `_MAX` | 900000 / 30 | `createFirebaseExchangeLimiter` (`POST /api/auth/firebase/exchange`) |
 | `AUTH_FIREBASE_REGISTER_RATE_LIMIT_WINDOW_MS` / `_MAX` | 3600000 / 30 | `createFirebaseRegisterLimiter` (`POST /api/auth/firebase/register`) |
+| `AUTH_SESSION_RENEW_RATE_LIMIT_WINDOW_MS` / `_MAX` | 900000 / 120 | `createSessionRenewLimiter` (`POST /api/auth/renew`, AUTH-03) |
+| `AUTH_EMAIL_VERIFICATION_REQUEST_RATE_LIMIT_WINDOW_MS` / `_MAX` | 900000 / 30 | `createEmailVerificationRequestLimiter` (`POST /api/auth/email-verification/request`, AUTH-04) |
+| `AUTH_EMAIL_VERIFICATION_CONFIRM_RATE_LIMIT_WINDOW_MS` / `_MAX` | 900000 / 30 | `createEmailVerificationConfirmLimiter` (`POST /api/auth/email-verification/confirm`, AUTH-04) |
 | `TRUST_PROXY` | **0** (trust no proxy) | `server/src/config/env.ts` → `app.set('trust proxy', …)` in `server/src/app.ts`; decides what `req.ip` — and therefore every per-IP limiter — resolves to |
 | `JWT_SECRET` / `JWT_EXPIRES_IN` | — / `7d` | production fail-fast (≥ 32 chars, parseable timespan) |
 
@@ -1359,6 +1395,13 @@ recorded** anywhere in this section.
 
 ## 39. FIREBASE-ONLY AUTHENTICATION — LOCKED DECISIONS, THE SESSION-REVOCATION BRIDGE, THE REGISTRATION / EMAIL-VERIFICATION DECISIONS, THE N-4 D2 RESOLUTION & THE OD-9 RECOVERY MARKER (2026-09-29)
 
+> **⛔ SUPERSEDED IN PART 2026-10-02 (AUTH-04).** The **registration / email-verification decisions
+> (RG-9/RG-12/RG-13 and their OD-3 resolution)** in this section selected the native Firebase
+> verification link/email and native resend. That *mechanism* is superseded by **§40** (custom 6-digit
+> Inventory AI code + Resend, design authority **§14C.10**). The rest of §39 (the credential-change
+> bridge, D2, the OD-9 recovery marker) is unchanged. The text below is the historical record and is not
+> rewritten.
+
 **Documentation only.** No code, test, schema, dependency, environment variable, Firebase Console
 setting, EAS configuration or deployment change was made for this section. The authoritative record is
 `docs/superpowers/specs/2026-09-18-firebase-auth-design.md` **§14C**; the shipped-record counterpart is
@@ -1384,7 +1427,8 @@ and resolve OD-3 — see *Registration & email verification — OD-3 RESOLVED* b
 ### The security substance — the credential-change revocation bridge (L-14, L-15, L-16)
 
 **The defect it closes.** `passwordChangedAt` is the **only** mechanism that invalidates existing
-Inventory AI sessions on a credential change, and `checkRevoked` is `false`, so Firebase cannot
+Inventory AI sessions on a credential change, and, at the time of this record, `checkRevoked` was
+`false` (superseded — **AUTH-01** sets it `true`), so Firebase could not
 invalidate them either. A Firebase-native reset/change therefore **revokes nothing** — every session
 that existed before the change, including an attacker's, survives it. Today's 26B/27 flow does not
 have that hole because the server stamps the field; a client-side reset never reaches the server.
@@ -1434,7 +1478,24 @@ therefore stays signed in, and the bridge composes with sign-out-everywhere inst
 no phase authorises); doing nothing (impossible — Firebase cannot revoke an Inventory AI session); and
 simply accepting long-lived sessions (contradicts L-14).
 
-### `checkRevoked` review (L-19) — recommendation: **REMAIN `false`**
+### `checkRevoked` review (L-19) — recommendation: **REMAIN `false`** — **SUPERSEDED BY AUTH-01: the shipped behaviour is `true` (see the block below)**
+
+> **SUPERSEDED BY AUTH-01 (recorded 2026-10-07). The shipped behaviour is `checkRevoked: true`.**
+> `server/src/services/firebase/tokenVerifier.ts` calls
+> `auth.verifyIdToken(idToken, /* checkRevoked */ true)`, which is what the **approved target
+> architecture §9/§10** requires: *"Firebase revocation checking is a security boundary."* The
+> recommendation below — and the identical one at design §14C.5 — is retained **unrewritten** as the
+> historical review L-19 asked for, and it is **not current policy**.
+>
+> **What is now true, and what is not.** A Firebase-side disable/delete **is** consulted at every
+> verification (exchange, renewal and the AUTH-04 pre-session routes). It **still does not end a live
+> Inventory AI session**, because the Firebase ID token is never the API bearer credential — MongoDB
+> `status`, `passwordChangedAt` and the `sessions` row remain the enforcement points, exactly as L-9
+> says. The availability cost this review names is real and is the accepted trade-off of that change:
+> a Firebase outage now refuses verification rather than being ignored, and the failure is classified
+> as transient (`FIREBASE_UNAVAILABLE` → `503` on authenticated routes), pinned by
+> `phaseAUTH01-firebase-verification.test.mjs`. **The availability trade-off itself has no separate
+> owner decision record — flagged for the architect.**
 
 Recorded in full at design §14C.5. In security terms: **MongoDB `status` is checked per request by
 `requireAuth` and is the revocation authority (L-9).** Setting `checkRevoked: true` would add a network
@@ -1480,7 +1541,7 @@ main app (**RG-1…RG-4**); **no JWT, no session, no `User` and no `Business` ex
 and lifecycle (**RG-6**); **`requireAuth` is NOT modified** for this gate (**RG-7**), so the Phase 23/24
 authorization order and status-code contract are untouched; an unverified Google identity is
 **refused** by Firebase's signed `email_verified` claim rather than by the provider name (**RG-11**);
-resend is **native Firebase Auth** with no custom verification-token or mail system (**RG-12**) — which is also why **no server-side resend limiter is owed**, since the resend never reaches this backend;
+resend is **native Firebase Auth** with no custom verification-token or mail system (**RG-12**) — a statement **superseded by §40 (AUTH-04)**, whose custom 6-digit flow **does** reach this backend and therefore **does** carry a server-side limiter: a **60-second per-UID resend cooldown** enforced in the challenge write predicate, plus the AD-19 per-IP request/confirm limiters;
 `User.emailVerified` is persisted after verified registration and **the server does not call Firebase
 on ordinary API requests** (**RG-10**); the legacy `/api/auth/register` path stays **transitional**
 until N-6 and is not weakened for this (**RG-14**); and **no** custom claims, Firestore, tenant-less
@@ -1563,7 +1624,7 @@ Function / Admin-SDK trigger** is introduced (§14C.3.6's rejection **stands**).
 
 | # | Finding |
 | --- | --- |
-| **F-17** | **The reset flow's bridge call is bounded by the 300 s freshness window, and it must not be widened for recovery.** If the user takes longer than `FIREBASE_REAUTH_WINDOW_SECONDS` between signing in again and calling the bridge, the bridge answers `409 FIREBASE_REAUTHENTICATION_REQUIRED`; the correct response is to sign in again. Separately, if the bridge's response is lost the retry arrives with the stale pre-bridge token and is answered `401 SESSION_INVALIDATED`, which is **success-equivalent** and must proceed to the re-exchange — the §14C.3.5 rule, now covering recovery too, still **to be pinned by a test**. |
+| **F-17** | **The reset flow's bridge call is bounded by the 300 s freshness window, and it must not be widened for recovery.** If the user takes longer than `FIREBASE_REAUTH_WINDOW_SECONDS` between signing in again and calling the bridge, the bridge answers `409 FIREBASE_REAUTHENTICATION_REQUIRED`; the correct response is to sign in again. Separately, if the bridge's response is lost the retry arrives with the stale pre-bridge token and is answered `401 SESSION_INVALIDATED`, which is **success-equivalent** and must proceed to the re-exchange — the §14C.3.5 rule, now covering recovery too, still **to be pinned by a test**. *(**Pinned 2026-10-07 (C4-11):** the second half of this finding is no longer owed — the pin now exists as `mobile/__tests__/phaseN4-recovery-handoff.test.tsx`, the case "treats a 401 SESSION_INVALIDATED as SUCCESS-EQUIVALENT and clears the marker", which asserts the marker is cleared, the flow proceeds to the re-exchange and the final session is applied.)* |
 | **F-18** | **D2's remaining piece is the trigger, and it is recorded as OD-9 rather than chosen silently.** How the client knows, at the post-reset sign-in, that it must run the bridge is **not** settled. Any solution must **not** be a public/unauthenticated route, must **not** let a client-supplied value steer a bridge call against an account (the account is always `req.user.id`), must **not** mint a session outside `POST /api/auth/firebase/exchange`, must **not** add a field to `sessions`/`User` without a separately-approved phase, and must make skipping the bridge **impossible or detectable**. *(**Superseded 2026-09-29 (Phase 32Q, §14C.3.9):** the trigger is now **LOCKED** — the durable, non-secret recovery marker, **M-1…M-10** — and it satisfies each constraint listed here.)* |
 
 **What this decision does NOT authorise.** No implementation; **N-4 remains unauthorised**. No change to
@@ -1571,6 +1632,48 @@ Function / Admin-SDK trigger** is introduced (§14C.3.6's rejection **stands**).
 the error envelope or any client-facing code. No new route, session type, field, dependency or
 configuration. No Firebase Console change. **D2's closure is architectural (reachability) only** —
 nothing was built, and **L-17 remains OPEN**.
+
+### Recovery-request failure investigation (2026-09-29) — one real defect fixed, one legacy limit documented
+
+**The report.** `jeffern123@owner.com` appeared to complete a recovery request; every other address,
+including a working Gmail, answered the single generic sentence `Unable to send the reset link. Please
+try again.` The underlying worry was that legacy MongoDB accounts cannot use Firebase recovery. The
+authoritative record is design **§14C.4.3**; **only two mobile files changed** — no server file, route,
+permission, schema, dependency, environment variable, Firebase Console setting or EAS configuration.
+
+**Measured, not assumed.** The served development bundle inlines the Firebase project id, so a
+configured build takes the **Firebase** path and the 26B endpoint is unreachable in it. The project's
+own `accounts:sendOobCode` answers **HTTP 200 for an address with no account** when called with the
+app's exact parameters (and `400 INVALID_EMAIL` for a malformed one), which means **email-enumeration
+protection is ON** for this project. The deployed 26B endpoint answers **503 `MAIL_NOT_CONFIGURED` for
+every address** — that check runs before the account lookup — so the fallback cannot send mail in
+production either, and it would surface the server's own sentence rather than the generic one.
+
+| # | Finding |
+| --- | --- |
+| **F-17** | **`auth/email-not-found` was unclassified. FIXED.** The Identity Toolkit answers `EMAIL_NOT_FOUND` for an address with no account; the **JavaScript** SDK normalises that onto `auth/user-not-found`, but the **native** Android mapping does not — it lowercases and de-hyphenates the code and rewrites only the codes it names explicitly. So `INDISTINGUISHABLE_CODES` was complete for an SDK this app no longer ships and incomplete for the one it does. The effect was a wrong message **and a rebuilt enumeration oracle** — only addresses that exist reached the success state — for exactly the population the flow is meant to help. Now listed in `INDISTINGUISHABLE_CODES` and in `INVALID_ACTION_CODE_CODES`, so requesting a link and redeeming it cannot disagree. Nothing is weakened: the code is answered *sent*, the same answer Firebase's own protection gives that address. |
+| **F-18** | **The client discarded the failure code. FIXED.** Every failure was reduced to safe copy while the decided code was dropped, so four causes rendered identically on a device and this investigation had to be done by reading the platform's error mapping by hand. `app/forgot-password.tsx` now renders a second, **`__DEV__`-only** element naming the source and the code (`firebase: …` / `server: …`, or `(no code)` when the failure was not a Firebase rejection). The person's sentence is byte-identical with and without it, it does not exist in a release bundle, and it can carry no address, token, password or SDK message. Guarded by `phaseN3-recovery-screens.test.tsx` and pinned in source by the N-3 suite. |
+| **F-19** | **A Mongo-only account has no password authority to exercise, and this is a design limit rather than a bug.** With enumeration protection ON the request answers `200` and **nothing is sent**; the screen shows the fixed sentence, and there is neither an error nor an email. No code is changed for it: **no auto-linking on an email match** (§14A.3/R-7), **no migration**, no restoration of the 26B/27 reset path, and Firebase **remains the password authority**. The remedy is the invitation path (**L-12 / N-9**). Separately and more sharply: an account that acquires a Firebase identity still carries no `firebaseUid`, so the exchange answers `REGISTRATION_REQUIRED` and legacy login is refused `FIREBASE_SIGN_IN_REQUIRED` — **unreachable until an operator gives it an identity.** |
+
+**Environment finding from the same session, and it is NOT a Firebase matter.** *(Corrected 2026-10-07:
+this passage previously said `MONGODB_DB_NAME` was empty and that development therefore resolved to
+`inventoryai_dev_db`. The working tree says otherwise, and the correction is the more important
+statement — see the operational consequence at the end of this note.)* `server/.env` sets
+`NODE_ENV=development` **with `MONGODB_DB_NAME=inventoryai_test_db` set explicitly**, so the development
+server resolves to the **test** database. The resolver's rule is exactly this: *a test run always uses
+the test database; otherwise an explicit `MONGODB_DB_NAME` wins; otherwise `NODE_ENV` decides* — and here
+the value is explicit, so `inventoryai_dev_db` has **never** been used. That is why a read-only listing
+of the cluster shows `inventoryai_prod_db` and `inventoryai_test_db` — the two environments something has
+written to — and **no `inventoryai_dev_db` and no legacy `inventory_ai`**. MongoDB creates a database on
+first write, so an environment that has never been used is **absent, not broken**; **no configuration was
+changed to make it appear or disappear**, and no credential or URI value is recorded here.
+
+**Operational consequence (the reason this correction matters).** Local development and
+`npm run test:db` currently resolve to the **same** database, so a running development server and a
+DB-backed test run write to the same collections. Run `npm run test:db` with the development server
+stopped, and give development its own `MONGODB_DB_NAME` if that sharing is not wanted. This is a
+configuration observation, not a defect: the test run is still fail-closed by name — a test process
+refuses to connect anywhere except `inventoryai_test_db`.
 
 ### OD-9 LOCKED — the automatic recovery marker (2026-09-29, Phase 32Q)
 
@@ -1699,6 +1802,118 @@ and **no secret value is recorded**.
 > `docs/SYSTEM_SPECIFICATION.md` §29, `CLAUDE.md` §2 and `README.md`. The text above this note is the
 > Phase 32N/32O/32P record and is **not** rewritten; **no production, test, schema, dependency,
 > Console, EAS or deployment change was made**, and **no secret value is recorded**.
+
+---
+
+## 40. AUTH-04 — CUSTOM 6-DIGIT EMAIL VERIFICATION CODE (SUPERSEDES THE FIREBASE VERIFICATION-LINK FLOW) — 2026-10-02
+
+**Documentation only.** No application, mobile or server source, test, dependency, schema, index,
+environment variable, Firebase Console setting, EAS configuration or deployment change was made for this
+record, and no secret value is recorded. It is the checklist counterpart of the design authority's
+**§14C.10**.
+
+**What is superseded.** §39's registration/email-verification record (RG-9 / RG-12 / RG-13 and its OD-3
+resolution) selected the **native Firebase verification email/link and native resend**. That mechanism is
+**superseded**: email verification is a **custom 6-digit Inventory AI code delivered through Resend**,
+with Firebase Admin `updateUser(uid, { emailVerified: true })` setting the final Firebase verification
+state. **Do not** re-derive the link flow from §39; it is preserved there as the historical record only.
+
+**Preserved (unchanged).** Firebase is the identity provider; MongoDB/backend is the application
+authority; `firebaseUid` is the only Firebase→MongoDB join key and email is never one; the Inventory
+JWT/session is separate from the Firebase ID token; **`requireAuth` is not modified**; verification is
+decided from the signed claim, never the provider name; no custom claims, Cloud Function or custom
+long-lived refresh token.
+
+**Recorded design (design authority §14C.10, AD-1…AD-19).** CSPRNG 6-digit code · HMAC-SHA256 with domain
+separation (`codeHmac`/`emailHmac`) · required `EMAIL_VERIFICATION_CODE_PEPPER` (503
+`EMAIL_VERIFICATION_NOT_CONFIGURED`, no unkeyed fallback, production fail-fast) · 10-minute expiry ·
+5 attempts · 60-second resend cooldown · one active challenge per uid in `email_verification_challenges`
+· unique `{uid}` index + TTL `{expiresAt}` index (cleanup only) · atomic supersession and atomic attempt
+reservation · write-first/consume-second with `usedAt` never unset · concurrency-safe confirmation ·
+already-verified idempotency · no plaintext code/email/pepper at rest or in logs · allowlisted structured
+logging.
+
+**API contract.** Two **pre-session Firebase-authenticated** (not public) endpoints:
+`POST /api/auth/email-verification/request { idToken }` and
+`POST /api/auth/email-verification/confirm { idToken, code }`. No `requireAuth`, no Inventory session, no
+client-controlled uid/email/userId/businessId/role; confirmation creates no session. Error codes: 400
+`FIREBASE_TOKEN_INVALID` · 503 `FIREBASE_NOT_CONFIGURED` · 503 `FIREBASE_UNAVAILABLE` · 400
+`FIREBASE_TOKEN_INVALID` (Admin user-not-found/disabled) · 503 `FIREBASE_NOT_CONFIGURED` (Admin
+invalid-credential) · 503 `FIREBASE_UNAVAILABLE` (other Admin write failure) · 400
+`INVALID_VERIFICATION_CODE` · 503 `EMAIL_VERIFICATION_NOT_CONFIGURED` · 429
+`EMAIL_VERIFICATION_RATE_LIMITED` · 503 `EMAIL_VERIFICATION_MAIL_FAILED`.
+
+**Mail.** Delivered by Inventory AI through the existing provider-agnostic mail boundary
+(`services/mail/`), extended with a template and `sendEmailVerificationEmail`. **Brevo is a supported
+provider and was the provider used for the AUTH-04-G live acceptance; Resend remains a supported
+provider.** Configuration failure fails **before** minting a code (existing challenge untouched); a
+delivery failure after creation leaves the new challenge current, does not restore the old one, applies
+no rollback, and keeps the cooldown.
+
+**Status (AUTH-04-H close-out, 2026-10-04).** **SHIPPED.** AUTH-04-A (challenge primitives), AUTH-04-B
+(Firebase Admin bridge + challenge-domain lifecycle), AUTH-04-C (HTTP surface), AUTH-04-D (rate
+limiting), AUTH-04-E (server hardening close-out) and AUTH-04-F (mobile verification flow) are shipped;
+**AUTH-04-G PASSED its live end-to-end acceptance gate (2026-10-04, Brevo)** — request HTTP 200 with the
+exact success envelope, Brevo `sent` → `delivered`, confirmation HTTP 200 with `Email verified.`, Firebase
+`emailVerified` false → true, the Mongo challenge consumed, and safe-log checks passed. **AUTH-04-H**
+(this close-out) reconciles the status statements. The route, model, indexes, tests and `.env.example`
+names all exist.
+
+**Resolved decision — restart while unverified (AUTH-04-F, shipped).** The earlier open question is
+**closed by the shipped AUTH-04-F behaviour**: on restart, when no Inventory AI session token exists, the
+native Firebase identity is probed **read-only**; an **unverified** identity **resumes the verification
+screen**, a **verified** identity goes to **Login** for a user-driven exchange, and a **probe failure**
+produces the unreachable verification state. The probe performs **no automatic sign-in, exchange or
+session restoration**.
+
+---
+
+## 41. C3 — MOBILE SIGN-IN VOCABULARY STANDARD & THE WIDENED LOCAL-PASSWORD GATE (2026-10-07)
+
+**Mobile presentation and gating only.** No server file, route, permission, role grant, session, schema,
+index, environment variable, dependency, EAS configuration or deployment setting changed, and **no new
+authentication capability was added**. The server remains the security boundary; this section records the
+words the app uses and the condition under which it offers a local password action. Shipped record:
+`docs/DEVELOPMENT_ROADMAP.md` **§27Z**.
+
+**The vocabulary standard.** The Profile identity area is a **"Sign-in methods"** section ("Manage the ways
+you can sign in to your Inventory AI account.") that names methods in user terms: **"Email & Password"**
+with the existing **"Change password"** action; **"Google sign-in"** ("Use your Google account to sign in
+to Inventory AI.") with the action **"Add Google sign-in"**; and **"Change sign-in password"**, the title of
+the provider-held branch and of the `disconnect-firebase` screen. A separate **"Security"** card holds the
+device-storage statement and **"Active sessions"**. The retired wording is pinned out: **no** "Connect
+Google" as the app-facing action, **no** "Disconnect Firebase", and no `disconnect` substring on the
+Profile surface at all.
+
+**Rule — no provider is named where the provider is not known.** `authMethods` publishes a capability, not
+the identity behind it, so a provider-held credential could be Google **or** a Firebase email/password
+identity and the app cannot tell them apart. For `{ password: false, firebase: true }` the rendered surface
+must contain neither `google` nor `firebase`.
+
+**The widened gate.** The shipped condition is exactly
+`user?.authMethods?.password === false || user?.authMethods?.firebase === true`. The first half is Phase
+32K's; the second is defensive and is the point of the pass: `{ password: true, firebase: true }` is a
+legacy password account that later attached a Firebase identity, whose retained `passwordHash` is **inert**
+— `loginWithPassword` refuses it with 403 `FIREBASE_SIGN_IN_REQUIRED` (Phase 32E) and `/change-password`
+answers 409 `PASSWORD_NOT_APPLICABLE` (Phase 32K) **before** any hash comparison — so it has no local
+password to manage. **Capability is not credential existence:** a Firebase-linked account still retains its
+legacy hash, and `password: false` does not mean "no credential exists".
+
+**Authority and guards — unchanged by C3.** `authMethodsFor`
+(`server/src/services/auth.service.ts:230`) derives `{ password: !firebaseUid, firebase: Boolean(firebaseUid) }`,
+so the current server produces only the two complementary shapes and the widened branch covers a shape it
+does not produce. Mongo-only accounts keep the local bcrypt/password authority; Firebase-linked and
+Firebase-native accounts have Firebase as password authority. The server guards and their meanings are
+preserved exactly as Phases 32E/32K pin them.
+
+**Verification (mobile only).** `auth-terminology-standard` (new, 182 lines, 5 cases),
+`phase32k-password-capability-gating`, `phase32m-connect-google-profile` and `phaseA-change-password-screen`
+— **4 suites / 29 tests, 0 fail**; full `npx jest` — **47 suites / 644 tests, 0 fail**; `tsc --noEmit` and
+`eslint .` clean. **No server suite was run for this pass**, because no server file changed. Commit
+`ca0d4ae` — `refactor: standardise the mobile sign-in vocabulary and gate local password actions` — 7 files,
++312/−59.
+
+session restoration**.
 
 ---
 

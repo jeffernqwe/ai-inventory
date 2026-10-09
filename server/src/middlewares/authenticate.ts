@@ -3,7 +3,7 @@ import mongoose from 'mongoose';
 
 import User from '../models/user.model.ts';
 import ApiError from '../utils/ApiError.ts';
-import { verifyAccessToken } from '../config/jwt.ts';
+import { verifyAccessToken, verifyAccessTokenIgnoringExpiry, isTokenExpiredError } from '../config/jwt.ts';
 import { assertActiveBusiness } from '../services/business.service.ts';
 import { authMethodsFor } from '../services/auth.service.ts';
 import {
@@ -11,6 +11,8 @@ import {
   touchSession,
   SESSION_REVOKED_CODE,
   SESSION_REVOKED_MESSAGE,
+  SESSION_EXPIRED_CODE,
+  SESSION_EXPIRED_MESSAGE,
 } from '../services/session.service.ts';
 
 /**
@@ -41,6 +43,24 @@ import {
  *        revoked/expired/unknown session, or user no longer exists
  * 403 -> user is DISABLED, or the user's business is missing / not ACTIVE
  *        (SUSPENDED or ARCHIVED revoke existing JWTs immediately — Phase 07B)
+ *
+ * AUTH-02 — the 401s are distinguishable, because the client must treat a
+ * recoverable expiry differently from a terminal invalidation:
+ *
+ *   AUTH_REQUIRED       no/malformed Authorization header
+ *   INVALID_TOKEN       forged / malformed / wrong-algorithm / wrong-or-missing
+ *                       issuer / wrong-or-missing audience / invalid exp
+ *   SESSION_EXPIRED     EXPIRED token whose session is still live (recoverable:
+ *                       the Firebase identity is untouched)
+ *   SESSION_REVOKED     live or expired token naming a missing/revoked/expired
+ *                       session (terminal)
+ *   SESSION_INVALIDATED a live token older than passwordChangedAt (Phase 15)
+ *
+ * The expiry classification is deliberately precise and never over-claims:
+ * `TokenExpiredError` is asked about FIRST (it is a subclass of
+ * `JsonWebTokenError`), and even then a second, expiry-ignoring — but still
+ * cryptographically complete, issuer/audience-validating — verification must
+ * succeed before a session is consulted. Anything else is INVALID_TOKEN.
  */
 
 /**
@@ -67,6 +87,43 @@ type AuthenticatedRequest = Request & {
   auth?: { sessionId: string; jti: string };
 };
 
+/**
+ * AUTH-02 — decides which 401 an EXPIRED-but-genuine token deserves.
+ *
+ * Reached only from the `TokenExpiredError` branch above. The second
+ * verification ignores ONLY the expiration: it still verifies the signature and
+ * validates algorithm/issuer/audience, so a token that fails any of those
+ * (including a legacy pre-AUTH-02 token that carries no `iss`/`aud`) is refused
+ * as INVALID_TOKEN here rather than being reported as an expiry. `ignoreExpiration`
+ * is the sole relaxation, and the result is used ONLY to pick a rejection code —
+ * it never authorizes the request.
+ *
+ * A usable `jti` is required before any session is consulted: a token with no
+ * session id (the pre-26A shape) can never name a session, so it stays
+ * INVALID_TOKEN. When a session IS found it must be live (exists, not revoked,
+ * not past its 14-day cap) — that is SESSION_EXPIRED, the recoverable case. A
+ * missing or revoked/expired session is the terminal SESSION_REVOKED.
+ */
+async function expiredTokenRejection(token: string): Promise<ApiError> {
+  let claims;
+  try {
+    claims = verifyAccessTokenIgnoringExpiry(token);
+  } catch {
+    // A wrong/missing issuer or audience, or any other failure, is not an
+    // expiry — never classify it as one.
+    return new ApiError(401, 'Invalid or expired token', 'INVALID_TOKEN');
+  }
+  const jti = claims?.jti;
+  if (typeof jti !== 'string' || jti.length === 0) {
+    return new ApiError(401, 'Invalid or expired token', 'INVALID_TOKEN');
+  }
+  const session = await findActiveSessionByJti(jti);
+  if (!session) {
+    return new ApiError(401, SESSION_REVOKED_MESSAGE, SESSION_REVOKED_CODE);
+  }
+  return new ApiError(401, SESSION_EXPIRED_MESSAGE, SESSION_EXPIRED_CODE);
+}
+
 export async function requireAuth(req: AuthenticatedRequest, res: Response, next: NextFunction) {
   try {
     const header = req.headers.authorization || '';
@@ -78,7 +135,15 @@ export async function requireAuth(req: AuthenticatedRequest, res: Response, next
     let payload;
     try {
       payload = verifyAccessToken(token);
-    } catch {
+    } catch (err) {
+      // AUTH-02: ask about EXPIRY FIRST. `TokenExpiredError` extends
+      // `JsonWebTokenError`, so a generic check would swallow it — and an
+      // expired token is the one failure the client may recover from. Reaching
+      // here means jsonwebtoken already verified the signature and algorithm,
+      // so the token is genuine; only its `exp` is past.
+      if (isTokenExpiredError(err)) {
+        throw await expiredTokenRejection(token);
+      }
       throw new ApiError(401, 'Invalid or expired token', 'INVALID_TOKEN');
     }
 

@@ -52,8 +52,11 @@ const sessionSchema = new Schema(
       type: Date,
       default: null,
     },
-    // Mirrors the token's own `exp` claim, so a session can never outlive the
-    // JWT that names it (see session.service.js createSessionForToken).
+    // AUTH-02: the session's own ABSOLUTE cap — 14 days from creation — and NOT
+    // the JWT's `exp`. The access token is short-lived (~1 hour) and many tokens
+    // may reference this one row; the row is the long-lived record. The cap is
+    // set once at creation and never moved, so renewing a token can never make a
+    // session immortal (see session.service.js createSessionForToken).
     expiresAt: {
       type: Date,
       required: [true, 'expiresAt is required'],
@@ -65,10 +68,12 @@ const sessionSchema = new Schema(
 // The list/liveness query: this user's sessions that are still open.
 sessionSchema.index({ userId: 1, revokedAt: 1 });
 
-// Once the token naming this row can no longer be presented, the row is
-// garbage. expireAfterSeconds: 0 removes it at expiresAt (MongoDB's TTL monitor
-// sweeps roughly every 60s, so deletion is eventual — the liveness query filters
-// on expiresAt anyway and never depends on the sweep having run).
+// Once the session's 14-day absolute cap passes, the row is garbage.
+// expireAfterSeconds: 0 removes it at expiresAt (MongoDB's TTL monitor sweeps
+// roughly every 60s, so deletion is eventual — the liveness query filters on
+// expiresAt anyway and never depends on the sweep having run). AUTH-02: this is
+// the SESSION cap, not the token lifetime; the two are now independent, so a
+// token expiring does not make its session row collectable.
 sessionSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 const Session = mongoose.model('Session', sessionSchema);

@@ -94,6 +94,13 @@ jest.mock('../lib/client', () => ({
     // that is not `mock`-prefixed or a language global.
     mockSessionLostHandler.current = handler as never;
   },
+  // AUTH-03 — the provider registers these two hooks on mount, so the mock must
+  // expose them. The classification is reproduced faithfully (code-based) because
+  // `isSessionError` in the real client-facing module depends on it.
+  isRecoverableAuthError: (err: { code?: string | null } | null | undefined) =>
+    err?.code === 'SESSION_EXPIRED',
+  setSessionRenewalHandler: jest.fn(),
+  setSessionRecoveryHandler: jest.fn(),
 }));
 
 const mockMe = jest.fn();

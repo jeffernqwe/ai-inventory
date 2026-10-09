@@ -17,7 +17,12 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "check:extensions": "node scripts/check-module-graph.mjs extensions",
-    "check:specifiers": "node scripts/check-module-graph.mjs specifiers"
+    "check:specifiers": "node scripts/check-module-graph.mjs specifiers",
+    "cleanup:test-mongodb": "node scripts/cleanup-mongodb.mjs --target=test --command=cleanup:test-mongodb",
+    "cleanup:dev-mongodb": "node scripts/cleanup-mongodb.mjs --target=dev --command=cleanup:dev-mongodb",
+    "cleanup:prod-mongodb": "node scripts/cleanup-mongodb.mjs --target=prod --command=cleanup:prod-mongodb",
+    "cleanup:all-mongodb": "node scripts/cleanup-mongodb.mjs --target=all --command=cleanup:all-mongodb",
+    "cleanup:test-firebase": "node scripts/cleanup-test-firebase.mjs"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

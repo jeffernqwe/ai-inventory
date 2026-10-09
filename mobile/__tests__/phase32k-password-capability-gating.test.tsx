@@ -61,7 +61,7 @@ const MANAGED_NOTE = /managed by your sign-in provider/i;
  * `undefined` omits the field entirely, which is the case an older server's
  * response produces — the one that must not change the UI.
  */
-function signInAs(authMethods?: { password: boolean }): void {
+function signInAs(authMethods?: { password: boolean; firebase?: boolean }): void {
   mockedUseSession.mockReturnValue({
     user: {
       id: 'u1',
@@ -119,6 +119,26 @@ describe('Profile — local password management is offered only where it applies
 
     expect(getByText(CHANGE_PASSWORD)).toBeTruthy();
     expect(queryByText(MANAGED_NOTE)).toBeNull();
+  });
+
+  it('keeps the note, not the local action, when a local password AND an identity are both reported', async () => {
+    // ADDED BY THIS PASS. A shape the current server does not produce — `authMethodsFor`
+    // derives the two capabilities as exact complements of `firebaseUid`, so an account is
+    // either `{ true, false }` or `{ false, true }` — but which Phase 32M already pins
+    // as reachable "however the capability block is eventually derived".
+    //
+    // IF IT APPEARS, THE LOCAL ACTION IS A DEAD END: the retained hash no longer
+    // authenticates anyone (`loginWithPassword` refuses a `firebaseUid` account with 403
+    // `FIREBASE_SIGN_IN_REQUIRED`), so `/change-password` answers 409
+    // `PASSWORD_NOT_APPLICABLE` every time. The provider note is the honest answer,
+    // and the Firebase-managed action below it is the one that works.
+    signInAs({ password: true, firebase: true });
+    const { queryByText, getByText } = await mount();
+
+    expect(queryByText(CHANGE_PASSWORD)).toBeNull();
+    expect(getByText(MANAGED_NOTE)).toBeTruthy();
+    // Only the local control is withdrawn; the rest of the screen is untouched.
+    expect(getByText(ACTIVE_SESSIONS)).toBeTruthy();
   });
 
   it('names no sign-in provider on the screen', async () => {

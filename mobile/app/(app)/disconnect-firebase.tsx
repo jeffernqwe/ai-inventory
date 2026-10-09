@@ -190,7 +190,7 @@ export default function ChangeFirebasePasswordScreen() {
    * publishes to say this account authenticates through a Firebase identity. When it
    * is not true there is nothing to disconnect, so the screen is not merely hidden —
    * it is unreachable. Nothing here is a security control; the server would refuse an
-   * unlinked account with 409 `FIREBASE_IDENTITY_NOT_LINKED` regardless.
+   * unlinked account with 409 `FIREBASE_IDENTITY_CONFLICT` regardless.
    *
    * The check is `!== true`, so a user object without the field (an older server, or
    * a response that predates Phase 32K) does not open a flow it cannot finish.
@@ -350,7 +350,7 @@ export default function ChangeFirebasePasswordScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: 'Change password' }} />
+      <Stack.Screen options={{ title: 'Change sign-in password' }} />
       <Screen scroll contentStyle={styles.content}>
         <Banner type="error" text={formError} />
         {info ? <Banner type="info" text={info} /> : null}
@@ -441,8 +441,8 @@ export default function ChangeFirebasePasswordScreen() {
             <SectionHeader title="Step 2 · Choose a new password" />
             <Card>
               <Text style={styles.help}>
-                This account will sign in with this password from now on. Your Firebase sign-in stays
-                connected — this replaces the password, it does not remove the account&apos;s sign-in.
+                This account will sign in with this password from now on. Changing your password does
+                not remove the account&apos;s sign-in — it replaces the password only.
               </Text>
               <Input
                 name="newPassword"
@@ -466,7 +466,12 @@ export default function ChangeFirebasePasswordScreen() {
                 required
                 autoCapitalize="none"
               />
-              <Button title="Change password" loading={busy} style={styles.spaced} onPress={submit} />
+              <Button
+                title="Change sign-in password"
+                loading={busy}
+                style={styles.spaced}
+                onPress={submit}
+              />
               <Button
                 title="Back"
                 variant="secondary"

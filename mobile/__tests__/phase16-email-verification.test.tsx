@@ -6,8 +6,11 @@
  * phase exists for: a Firebase identity Firebase has authenticated whose address it
  * reports as NOT verified.
  *
- * THE CLAIMS THAT MATTER, each chosen because the wrong implementation would still look
- * right under a weaker test:
+ * AUTH-04-F — the verification UX is now the custom SIX-DIGIT CODE flow, so the members
+ * under test are `requestVerificationCode` (mints and mails a code server-side) and
+ * `confirmVerificationCode(code)` (confirms the code, then reloads, force-refreshes and
+ * completes the journey). The claims below are unchanged in spirit and re-pinned on the
+ * new shape:
  *
  *   1. NOTHING IS WRITTEN BEFORE VERIFICATION (RG-1/RG-2/RG-3). No tenant, no User, no
  *      session and no exchange — asserted as NEGATIVES, because a positive-only test
@@ -17,8 +20,11 @@
  *      provider name.
  *   3. THE POST-VERIFICATION TOKEN IS FORCED-REFRESH (RG-9). A cached token can still
  *      carry `email_verified: false`, so `getIdToken(true)` — and only that — may be
- *      presented to the server.
- *   4. A FAILURE TO READ THE STATE IS NOT AN ANSWER. A native fault must throw, never
+ *      presented to register/exchange. The cached token is used ONLY as the confirm
+ *      credential.
+ *   4. A FAILED CONFIRM CHANGES NOTHING. A wrong, expired or exhausted code propagates
+ *      the server's one refusal and never reloads, mints or exchanges.
+ *   5. A FAILURE TO READ THE STATE IS NOT AN ANSWER. A native fault must throw, never
  *      collapse to "not verified", or a network blip would send a verified person down
  *      the verification road.
  *
@@ -69,13 +75,14 @@ jest.mock('../lib/firebase-auth', () => ({
 
 // The native boundary is mocked with MOCK-PREFIXED bindings so each case can drive the
 // verification state directly. That is the whole point of the file: the answer under test
-// is derived from these three, not from the network.
-const mockNativeSendEmailVerification = jest.fn();
+// is derived from THIS identity — whether one exists, what Firebase says about it, and what
+// a forced refresh returns — not from the network.
+const mockNativeHasCurrentUser = jest.fn();
 const mockNativeReloadUser = jest.fn();
 const mockNativeForceIdToken = jest.fn();
 
 jest.mock('../lib/firebase-native', () => ({
-  nativeSendEmailVerification: (...args: unknown[]) => mockNativeSendEmailVerification(...args),
+  nativeHasCurrentUser: (...args: unknown[]) => mockNativeHasCurrentUser(...args),
   nativeReloadUser: (...args: unknown[]) => mockNativeReloadUser(...args),
   nativeForceIdToken: (...args: unknown[]) => mockNativeForceIdToken(...args),
 }));
@@ -94,6 +101,8 @@ const mockLogout = jest.fn();
 const mockMe = jest.fn();
 const mockCredentialsChanged = jest.fn();
 const mockFirebaseLink = jest.fn();
+const mockRequestEmailVerification = jest.fn();
+const mockConfirmEmailVerification = jest.fn();
 
 jest.mock('../lib/api', () => ({
   login: (...args: unknown[]) => mockLogin(...args),
@@ -104,6 +113,8 @@ jest.mock('../lib/api', () => ({
   me: (...args: unknown[]) => mockMe(...args),
   credentialsChanged: (...args: unknown[]) => mockCredentialsChanged(...args),
   firebaseLink: (...args: unknown[]) => mockFirebaseLink(...args),
+  requestEmailVerification: (...args: unknown[]) => mockRequestEmailVerification(...args),
+  confirmEmailVerification: (...args: unknown[]) => mockConfirmEmailVerification(...args),
 }));
 
 jest.mock('expo-secure-store', () => ({
@@ -123,6 +134,7 @@ const NAME = 'Ada';
 const ID_TOKEN = 'fake.id.token';
 const FORCED_TOKEN = 'forced.refreshed.id.token';
 const APP_TOKEN = 'inventory-ai.jwt';
+const CODE = '123456';
 
 const USER = { id: 'u1', name: NAME, email: EMAIL, role: 'OWNER' as const };
 const SESSION = { token: APP_TOKEN, tokenType: 'Bearer', expiresIn: '1d', user: USER };
@@ -132,9 +144,8 @@ const FIREBASE_VERIFICATION_REQUIRED = 'firebase/verification-required';
 const VERIFY_EMAIL_MESSAGE = 'Verify your email address to continue.';
 const VERIFY_CHECK_FAILED_MESSAGE =
   'Unable to check your email verification status. Please try again.';
-const RESEND_VERIFICATION_FAILED_MESSAGE =
-  'Unable to send the verification email. Please try again.';
 const NO_FIREBASE_TOKEN_MESSAGE = 'Your sign-in could not be refreshed. Please sign in again.';
+const NO_FIREBASE_IDENTITY = 'firebase/no-current-user';
 
 const wrapper = ({ children }: { children: ReactNode }) => <AuthProvider>{children}</AuthProvider>;
 
@@ -165,7 +176,12 @@ beforeEach(() => {
   mockLogin.mockResolvedValue(SESSION);
   mockLogout.mockResolvedValue({ message: 'Signed out' });
   mockSignOutOfFirebase.mockResolvedValue(undefined);
-  mockNativeSendEmailVerification.mockResolvedValue(undefined);
+  mockRequestEmailVerification.mockResolvedValue({ message: 'sent' });
+  mockConfirmEmailVerification.mockResolvedValue({ message: 'Email verified.' });
+  // The restart/resume probe runs on every signed-out boot. With no persisted identity it
+  // is a no-op that never reloads, so it cannot disturb the cases below; the probe's own
+  // four-state behaviour is pinned in its own suite.
+  mockNativeHasCurrentUser.mockReturnValue(false);
   mockNativeReloadUser.mockResolvedValue(true);
   mockNativeForceIdToken.mockResolvedValue(FORCED_TOKEN);
 });
@@ -175,7 +191,7 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('signUp — the identity is created, and nothing else', () => {
-  it('sends the verification email, and creates NO tenant and NO session', async () => {
+  it('requests the verification code, and creates NO tenant and NO session', async () => {
     mockEnsureFirebaseAccount.mockResolvedValue({ idToken: ID_TOKEN });
 
     const view = await mountSignedOut();
@@ -189,12 +205,14 @@ describe('signUp — the identity is created, and nothing else', () => {
       });
     });
 
-    // The Firebase identity is created FIRST, and the verification email is sent from
-    // it — asserted by call order, not merely by both having been called.
+    // The Firebase identity is created FIRST, and the AUTH-04 server mints and mails the
+    // code from the token it returns — asserted by call order, not merely by both having
+    // been called. The plaintext code never reaches this app.
     expect(mockEnsureFirebaseAccount).toHaveBeenCalledTimes(1);
-    expect(mockNativeSendEmailVerification).toHaveBeenCalledTimes(1);
+    expect(mockRequestEmailVerification).toHaveBeenCalledTimes(1);
+    expect(mockRequestEmailVerification).toHaveBeenCalledWith({ idToken: ID_TOKEN });
     expect(mockEnsureFirebaseAccount.mock.invocationCallOrder[0]).toBeLessThan(
-      mockNativeSendEmailVerification.mock.invocationCallOrder[0]!
+      mockRequestEmailVerification.mock.invocationCallOrder[0]!
     );
 
     // RG-1/RG-2/RG-3 — asserted as NEGATIVES. This is the claim the phase rests on: an
@@ -232,7 +250,7 @@ describe('signUp — the identity is created, and nothing else', () => {
     });
   });
 
-  it('sends NO verification email when the identity could not be created', async () => {
+  it('requests NO verification code when the identity could not be created', async () => {
     mockEnsureFirebaseAccount.mockRejectedValue(
       new FirebaseAuthError(
         'auth/email-already-in-use',
@@ -250,7 +268,7 @@ describe('signUp — the identity is created, and nothing else', () => {
       })
     );
 
-    expect(mockNativeSendEmailVerification).not.toHaveBeenCalled();
+    expect(mockRequestEmailVerification).not.toHaveBeenCalled();
     expect(view.result.current.firebaseOnboarding).toBe('none');
     expect(view.result.current.pendingRegistration).toBeNull();
   });
@@ -371,50 +389,73 @@ async function armVerification(view: Awaited<ReturnType<typeof mountSignedOut>>)
   expect(view.result.current.firebaseOnboarding).toBe('verify-email');
 }
 
-describe('resendVerificationEmail', () => {
-  it('asks Firebase to send the message again', async () => {
+describe('requestVerificationCode', () => {
+  it('asks the AUTH-04 server for a fresh code, reading the identity at the moment of use', async () => {
     const view = await mountSignedOut();
     await armVerification(view);
-    mockNativeSendEmailVerification.mockClear();
+    mockRequestEmailVerification.mockClear();
+    mockCurrentFirebaseIdToken.mockResolvedValue(ID_TOKEN);
 
     await act(async () => {
-      await view.result.current.resendVerificationEmail();
+      await view.result.current.requestVerificationCode();
     });
 
-    expect(mockNativeSendEmailVerification).toHaveBeenCalledTimes(1);
-    // The journey is unchanged: a resend does not verify anything and does not move
-    // the state machine.
+    // The identity is read HERE, not handed in by a screen, so no screen holds a token.
+    expect(mockCurrentFirebaseIdToken).toHaveBeenCalledTimes(1);
+    expect(mockRequestEmailVerification).toHaveBeenCalledTimes(1);
+    expect(mockRequestEmailVerification).toHaveBeenCalledWith({ idToken: ID_TOKEN });
+    // A request does not verify anything and does not move the state machine.
     expect(view.result.current.firebaseOnboarding).toBe('verify-email');
     expect(mockFirebaseExchange).not.toHaveBeenCalled();
   });
 
-  it('★ maps a native fault to a safe message, with no native text', async () => {
+  it('★ throws a FirebaseAuthError when no Firebase identity is present', async () => {
     const view = await mountSignedOut();
     await armVerification(view);
-    mockNativeSendEmailVerification.mockRejectedValue(
-      new Error('auth/too-many-requests: 500 attempts exceeded')
-    );
+    mockRequestEmailVerification.mockClear();
+    mockCurrentFirebaseIdToken.mockResolvedValue(null);
 
-    const caught = await capture(view.result.current.resendVerificationEmail());
+    const caught = await capture(view.result.current.requestVerificationCode());
 
     expect(caught).toBeInstanceOf(FirebaseAuthError);
-    expect((caught as Error).message).toBe(RESEND_VERIFICATION_FAILED_MESSAGE);
-    expect((caught as Error).message).not.toContain('too-many-requests');
+    expect((caught as FirebaseAuthError).code).toBe(NO_FIREBASE_IDENTITY);
+    // Nothing was sent with a null token.
+    expect(mockRequestEmailVerification).not.toHaveBeenCalled();
+  });
+
+  it('★ propagates the server refusal unchanged, so the screen can read Retry-After', async () => {
+    const view = await mountSignedOut();
+    await armVerification(view);
+    mockRequestEmailVerification.mockClear();
+    mockCurrentFirebaseIdToken.mockResolvedValue(ID_TOKEN);
+    const limited = new ApiError(429, 'EMAIL_VERIFICATION_RATE_LIMITED', 'Too many requests');
+    mockRequestEmailVerification.mockRejectedValue(limited);
+
+    const caught = await capture(view.result.current.requestVerificationCode());
+
+    // The screen renders the cooldown from the server's own number, so this must arrive
+    // as the ApiError it is rather than being collapsed to a generic message.
+    expect(caught).toBe(limited);
+    expect((caught as ApiError).status).toBe(429);
+    expect((caught as ApiError).code).toBe('EMAIL_VERIFICATION_RATE_LIMITED');
     expect(view.result.current.firebaseOnboarding).toBe('verify-email');
   });
 });
 
-describe('completeEmailVerification', () => {
-  it('reloads, and stays on the verify screen while the address is unverified', async () => {
+describe('confirmVerificationCode', () => {
+  it('confirms the code, and stays on the verify screen while the address is unverified', async () => {
     const view = await mountSignedOut();
     await armVerification(view);
+    mockCurrentFirebaseIdToken.mockResolvedValue(ID_TOKEN);
     mockNativeReloadUser.mockResolvedValue(false);
 
     let result: unknown = 'unset';
     await act(async () => {
-      result = await view.result.current.completeEmailVerification();
+      result = await view.result.current.confirmVerificationCode(CODE);
     });
 
+    expect(mockConfirmEmailVerification).toHaveBeenCalledTimes(1);
+    expect(mockConfirmEmailVerification).toHaveBeenCalledWith({ idToken: ID_TOKEN, code: CODE });
     expect(mockNativeReloadUser).toHaveBeenCalledTimes(1);
     expect(result).toBeNull();
     // Still-unverified is an ORDINARY state, not an error: nothing is written and the
@@ -426,21 +467,47 @@ describe('completeEmailVerification', () => {
     expect(view.result.current.status).toBe('signedOut');
   });
 
-  it('★ mints a FORCED-refresh token, never the cached one (RG-9)', async () => {
+  it('★ a rejected code changes nothing — no reload, no mint, no exchange', async () => {
     const view = await mountSignedOut();
     await armVerification(view);
+    mockCurrentFirebaseIdToken.mockResolvedValue(ID_TOKEN);
+    // The server answers ONE indistinguishable refusal for wrong, expired, exhausted,
+    // absent and already-used codes.
+    const invalid = new ApiError(400, 'INVALID_VERIFICATION_CODE', 'That code is not valid.');
+    mockConfirmEmailVerification.mockRejectedValue(invalid);
+
+    const caught = await capture(view.result.current.confirmVerificationCode('000000'));
+
+    expect(caught).toBe(invalid);
+    expect((caught as ApiError).code).toBe('INVALID_VERIFICATION_CODE');
+    // The confirm failed, so nothing downstream may have run.
+    expect(mockNativeReloadUser).not.toHaveBeenCalled();
+    expect(mockNativeForceIdToken).not.toHaveBeenCalled();
+    expect(mockFirebaseRegister).not.toHaveBeenCalled();
+    expect(mockFirebaseExchange).not.toHaveBeenCalled();
+    expect(view.result.current.firebaseOnboarding).toBe('verify-email');
+  });
+
+  it('★ mints a FORCED-refresh token for register/exchange, never the cached one (RG-9)', async () => {
+    const view = await mountSignedOut();
+    await armVerification(view);
+    mockCurrentFirebaseIdToken.mockResolvedValue(ID_TOKEN);
     mockNativeReloadUser.mockResolvedValue(true);
 
     await act(async () => {
-      await view.result.current.completeEmailVerification();
+      await view.result.current.confirmVerificationCode(CODE);
     });
 
+    // The CACHED token is only ever the CONFIRM credential; the FORCED token is what the
+    // server sees for everything after the address is verified.
+    expect(mockConfirmEmailVerification.mock.calls[0]![0].idToken).toBe(ID_TOKEN);
     expect(mockNativeForceIdToken).toHaveBeenCalledTimes(1);
-    // The cached accessor is not used ANYWHERE on this road. A cached token can still
-    // carry `email_verified: false`, so presenting it would have the server refuse the
-    // very registration this step exists to complete.
-    expect(mockCurrentFirebaseIdToken).not.toHaveBeenCalled();
-    // And the FORCED token is what both server calls actually receive.
+    expect(mockNativeForceIdToken.mock.invocationCallOrder[0]).toBeGreaterThan(
+      mockConfirmEmailVerification.mock.invocationCallOrder[0]!
+    );
+    // The cached accessor is not used for the exchange. A cached token can still carry
+    // `email_verified: false`, so presenting it would have the server refuse the very
+    // registration this step exists to complete.
     expect(mockFirebaseExchange.mock.calls[0]![0].idToken).toBe(FORCED_TOKEN);
     expect(mockFirebaseExchange.mock.calls[0]![0].idToken).not.toBe(ID_TOKEN);
   });
@@ -448,9 +515,10 @@ describe('completeEmailVerification', () => {
   it('registers the pending tenant, exchanges, and applies the session in order', async () => {
     const view = await mountSignedOut();
     await armVerification(view);
+    mockCurrentFirebaseIdToken.mockResolvedValue(ID_TOKEN);
 
     await act(async () => {
-      await view.result.current.completeEmailVerification();
+      await view.result.current.confirmVerificationCode(CODE);
     });
 
     expect(mockFirebaseRegister).toHaveBeenCalledTimes(1);
@@ -482,9 +550,10 @@ describe('completeEmailVerification', () => {
     await capture(view.result.current.signIn({ email: EMAIL, password: PASSWORD }));
     expect(view.result.current.pendingRegistration).toBeNull();
 
+    mockCurrentFirebaseIdToken.mockResolvedValue(ID_TOKEN);
     mockNativeReloadUser.mockResolvedValue(true);
     await act(async () => {
-      await view.result.current.completeEmailVerification();
+      await view.result.current.confirmVerificationCode(CODE);
     });
 
     expect(mockFirebaseRegister).not.toHaveBeenCalled();
@@ -492,12 +561,13 @@ describe('completeEmailVerification', () => {
     expect(view.result.current.status).toBe('signedIn');
   });
 
-  it('★ a reload fault leaves the person on the verify screen', async () => {
+  it('★ a reload fault after a successful confirm leaves the person on the verify screen', async () => {
     const view = await mountSignedOut();
     await armVerification(view);
+    mockCurrentFirebaseIdToken.mockResolvedValue(ID_TOKEN);
     mockNativeReloadUser.mockRejectedValue(new Error('auth/network-request-failed'));
 
-    const caught = await capture(view.result.current.completeEmailVerification());
+    const caught = await capture(view.result.current.confirmVerificationCode(CODE));
 
     expect(caught).toBeInstanceOf(FirebaseAuthError);
     expect((caught as Error).message).toBe(VERIFY_CHECK_FAILED_MESSAGE);
@@ -509,10 +579,11 @@ describe('completeEmailVerification', () => {
   it('fails safely when no refreshed token can be minted', async () => {
     const view = await mountSignedOut();
     await armVerification(view);
+    mockCurrentFirebaseIdToken.mockResolvedValue(ID_TOKEN);
     mockNativeReloadUser.mockResolvedValue(true);
     mockNativeForceIdToken.mockResolvedValue(null);
 
-    const caught = await capture(view.result.current.completeEmailVerification());
+    const caught = await capture(view.result.current.confirmVerificationCode(CODE));
 
     expect(caught).toBeInstanceOf(FirebaseAuthError);
     expect((caught as Error).message).toBe(NO_FIREBASE_TOKEN_MESSAGE);
@@ -534,9 +605,10 @@ describe('completeEmailVerification', () => {
     mockFirebaseExchange.mockRejectedValue(
       new ApiError(403, 'REGISTRATION_REQUIRED', 'No account exists for this identity')
     );
+    mockCurrentFirebaseIdToken.mockResolvedValue(ID_TOKEN);
     mockNativeReloadUser.mockResolvedValue(true);
 
-    await capture(view.result.current.completeEmailVerification());
+    await capture(view.result.current.confirmVerificationCode(CODE));
     expect(view.result.current.firebaseOnboarding).toBe('register');
     expect(view.result.current.firebaseRegistrationRequired).toBe(true);
   });
@@ -582,7 +654,9 @@ describe('the onboarding state is never persisted', () => {
     const first = await mountSignedOut();
     await armVerification(first);
 
-    // The state belongs to the provider instance and to nothing durable.
+    // The state belongs to the provider instance and to nothing durable. (With no
+    // persisted Firebase identity — `nativeHasCurrentUser` false — the boot probe answers
+    // `none`, so a fresh provider is genuinely at rest.)
     const second = await mountSignedOut();
     expect(second.result.current.firebaseOnboarding).toBe('none');
     expect(second.result.current.pendingRegistration).toBeNull();
@@ -603,7 +677,7 @@ describe('the frozen modules stayed frozen', () => {
 
   it('★ lib/firebase-auth.ts is byte-identical', () => {
     // THE FROZEN MODULE, and the reason the boundary grew instead. The verification
-    // journey lives in `lib/auth.tsx` and the three native calls live in
+    // journey lives in `lib/auth.tsx` and the native calls live in
     // `lib/firebase-native.ts`, so nothing here had to change. Its CACHED-token
     // accessor is exactly why RG-9 needs a separate forced-refresh call rather than an
     // edit to this file.
@@ -616,8 +690,9 @@ describe('the frozen modules stayed frozen', () => {
     const source = read('app/verify-email.tsx');
 
     // The identity is read from the Firebase layer inside `lib/auth.tsx` at the moment
-    // of use; the profile text comes from the in-memory onboarding state. A screen that
-    // accepted a token through navigation would put a credential in a route.
+    // of use; the profile text comes from the in-memory onboarding state; the code leaves
+    // only in the confirm request body. A screen that accepted a token through navigation
+    // would put a credential in a route.
     expect(source).not.toMatch(/useLocalSearchParams/);
     expect(source).not.toMatch(/idToken/);
     expect(source).not.toMatch(/firebaseUid/);

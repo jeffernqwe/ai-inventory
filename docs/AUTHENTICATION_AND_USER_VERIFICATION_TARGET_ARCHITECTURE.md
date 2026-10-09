@@ -989,11 +989,20 @@ Implementation should proceed approximately in this dependency order. These impl
 
 ### AUTH-00 — Architecture Baseline
 
+> **DONE — this document, committed `7679291` (2026-10-02).** The current-vs-target gap audit it calls for
+> was performed and is recorded in `docs/AUTH_SECURITY_MASTER_CHECKLIST.md` §39–§42.
+
 * establish this document as the target source of truth
 * reconcile implementation documentation
 * identify current-vs-target gaps
 
 ### AUTH-01 — Firebase Verification Foundation
+
+> **SHIPPED — 2026-10-02, commit `b3f1146` (roadmap §27AB).** Every bullet below is in the committed tree:
+> the Admin SDK verification runs with `checkRevoked: true`, a failure is classified into terminal /
+> transient / not-configured, the UID match is the only identity join, the email-verification gate is
+> enforced at issuance and renewal, and the error contract is the three disjoint codes. A guard pins the
+> `firebase-admin` version the classification is derived from.
 
 * Firebase token verification
 * revocation checking
@@ -1004,6 +1013,11 @@ Implementation should proceed approximately in this dependency order. These impl
 
 ### AUTH-02 — Session/JWT Foundation
 
+> **SHIPPED — 2026-10-02, commit `6a0f41b` (roadmap §27AC).** `JWT_EXPIRES_IN` defaults to `1h`; `iss`/`aud`
+> are minted and validated by `jsonwebtoken` on every request; the 14-day absolute cap lives in code
+> (`SESSION_ABSOLUTE_CAP_DAYS`, with `expiresAt` anchored at creation); `requireAuth` classifies the
+> recoverable `SESSION_EXPIRED` apart from the other 401s.
+
 * 1-hour JWT
 * session model
 * 14-day absolute cap
@@ -1011,6 +1025,13 @@ Implementation should proceed approximately in this dependency order. These impl
 * JWT claim hardening
 
 ### AUTH-03 — Session Renewal
+
+> **SHIPPED — 2026-10-02, commits `3085e3f` and `5da0692` (roadmap §27AD).** Every bullet below is
+> implemented: `POST /api/auth/renew` re-issues a token for the same `jti` without creating a session or
+> moving `expiresAt`, the client renews proactively and single-flight with an epoch guard, failures are
+> classified by application error code, and the per-IP limiter answers `429 SESSION_RENEW_RATE_LIMITED`.
+> The **controlled fallback exchange** is the existing public `POST /api/auth/firebase/exchange`, reached
+> only when renewal cannot recover the session.
 
 * proactive renewal
 * same-jti renewal

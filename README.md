@@ -1315,6 +1315,12 @@ gate stays open and **iOS is entirely unverified**. **Nothing
   test, schema, dependency, environment, EAS or Firebase Console change, and the bridge is still **not
   implemented**. Full record: `docs/superpowers/specs/2026-09-18-firebase-auth-design.md` **§14C.3.9**;
   `docs/DEVELOPMENT_ROADMAP.md` **§27X**; `docs/AUTH_SECURITY_MASTER_CHECKLIST.md` **§39**.
+  *(**Annotated 2026-10-09:** the bridge shipped on the same day as this record, in **`703a9da`** —
+  `server/src/services/credentialsChanged.service.ts` and the authenticated
+  `POST /api/auth/credentials-changed`, exercised by `phaseN4-credentials-changed.test.mjs` and the
+  `phaseN4-*` mobile suites — so the "not implemented" clause above is superseded on the implementation
+  question only. **L-17 and the deferred OD-10 remain OPEN** exactly as recorded. See the annotation in
+  `docs/DEVELOPMENT_ROADMAP.md` §27W.)*
 
 - **Phase A / F-1 — Firebase Disconnect Re-scoped into a Credential Change (the unlink capability
   removed):** the server-side Firebase unlink capability was **REMOVED, not deprecated** — `POST
@@ -1330,3 +1336,52 @@ gate stays open and **iOS is entirely unverified**. **Nothing
   record is **`docs/DEVELOPMENT_ROADMAP.md` §27AA**, written retrospectively because the commit predates
   §27Z. See also the Phase 32L entry above, `CLAUDE.md`, and
   `docs/AUTH_SECURITY_MASTER_CHECKLIST.md` §8.
+
+- **AUTH-01 — Firebase Revocation Checking & Verification-Failure Classification:** implemented, verified,
+  and committed (`b3f1146`, 2026-10-02) — the Admin SDK ID-token verification now runs with
+  **`checkRevoked: true`**, and a verification failure is classified into **three disjoint outcomes**:
+  a **terminal rejected credential** (`FirebaseTokenError`), a **transient inability to verify**
+  (`FIREBASE_UNAVAILABLE` → **503**), and the **operator configuration fault**
+  (`FIREBASE_NOT_CONFIGURED`). The terminal allowlist is the four unambiguous SDK codes; **everything
+  else — including the overloaded `auth/argument-error` — is transient**, so an outage can never be
+  presented as a bad credential or destroy a valid session. A structural JWT pre-check and an `aud`/`iss`
+  assertion were added as defence-in-depth on the real Admin SDK path only; a guard fails if the installed
+  `firebase-admin` version changes, because the classification is derived from 14.5.0's error codes. No
+  route, schema, session/JWT or mobile behaviour changed, and **no `revokeRefreshTokens()` was introduced**.
+  Verified by `server/test/phaseAUTH01-firebase-verification.test.mjs`. See `docs/DEVELOPMENT_ROADMAP.md`
+  §27AB.
+- **AUTH-02 — Short-Lived JWT, Enforced Issuer/Audience & the 14-Day Absolute Session Cap:** implemented,
+  verified, and committed (`6a0f41b`, 2026-10-02) — the access token now lives about an hour
+  (`JWT_EXPIRES_IN`, default `1h`), carries **`iss`/`aud`** which `jsonwebtoken` enforces on every request
+  (`JWT_ISSUER` default `inventory-ai`, `JWT_AUDIENCE` default `inventory-ai-api`), and a session's life is
+  bounded **separately and in code** at **14 days** (`SESSION_ABSOLUTE_CAP_DAYS`, with `expiresAt` anchored
+  at creation), so changing the JWT lifetime can neither lengthen nor shorten a session. `requireAuth`
+  distinguishes the recoverable **`SESSION_EXPIRED`** from the other 401s. A token minted before this
+  change carries neither claim and is rejected, so **every existing user signs in once more** — accepted
+  deliberately as a one-time re-login. Verified by `server/test/phaseAUTH02-session-jwt.test.mjs`.
+  See `docs/DEVELOPMENT_ROADMAP.md` §27AC.
+- **AUTH-03 — Inventory Session Renewal (server boundary + mobile client):** implemented, verified, and
+  committed (`3085e3f`, plus the `5da0692` re-entrancy fix, 2026-10-02) — **`POST /api/auth/renew`** is an
+  **authenticated** route (`requireAuth → limiter → controller`) that takes the account from
+  `req.user.id` and the session from `req.auth.jti`, so a client can never name another user, business or
+  session. It **re-issues a token for the same session**: the `jti` is unchanged, **no session row is
+  created**, **`expiresAt` is never written** and **no audit row is written**, so the 14-day cap cannot be
+  extended by renewing. A uid that does not match the account is `409 FIREBASE_IDENTITY_CONFLICT`; an
+  unverified identity is `400 EMAIL_NOT_VERIFIED` (400 on purpose, so it cannot trip the client's
+  session-loss rule); the per-IP limiter answers `429 SESSION_RENEW_RATE_LIMITED`. The client renews
+  **proactively** when `min(tokenExpiresAt, sessionExpiresAt)` enters a 10-minute window or on foreground,
+  **single-flight** with an authentication epoch, and classifies failures **by application error code, never
+  by HTTP status** — a recoverable `SESSION_EXPIRED` retries once, terminal codes never renew, transient
+  failures preserve the session. Verified by `server/test/phaseAUTH03-session-renewal.test.mjs` and the two
+  `phaseAUTH03-*` mobile suites. See `docs/DEVELOPMENT_ROADMAP.md` §27AD and `docs/SYSTEM_SPECIFICATION.md`
+  §"Session Renewal".
+- **CI quality gate (`ci / server`, `ci / mobile`):** implemented, verified, and committed (`9f4c5c1`,
+  2026-10-07; corrected by `d415335`, 2026-10-09) — `.github/workflows/ci.yml` runs **typecheck, lint, both
+  module-graph checks, the full backend suite and a boot smoke** (`/ready`, `/live`, `SIGTERM`) against a
+  `mongo:7` container, plus **typecheck and jest** for mobile, on **every pull request** and on pushes to
+  `main`. Node comes from `.nvmrc`; there are **no GitHub secrets**. The gate's **first-ever run, on PR #7,
+  caught a real defect**: the tests need `JWT_SECRET`, which every suite gets locally from the git-ignored
+  `server/.env` and which the workflow never supplied — 118 failing tests, all cascading from
+  `AUTH_NOT_CONFIGURED`. That was **reproduced off-CI** (a clone with no `.env`), fixed with one fixed,
+  non-secret test value, and **PR #7 then passed both jobs**; the merge commit is `3e5d2aa`. See
+  `docs/DEVELOPMENT_ROADMAP.md` §27AE.

@@ -213,6 +213,18 @@ Mobile Sign-in Vocabulary Standard & Widened Local-Password Gate (presentation o
         ↓
 Phase A / F-1
 Removal and Re-scope of the Firebase Unlink Capability (retrospective record; §27AA)
+        ↓
+AUTH-01
+Firebase Revocation Checking & Verification-Failure Classification (2026-10-02; §27AB)
+        ↓
+AUTH-02
+Short-Lived JWT, Enforced Issuer/Audience & the 14-Day Absolute Session Cap (2026-10-02; §27AC)
+        ↓
+AUTH-03
+Inventory Session Renewal — Server Boundary & Mobile Client (2026-10-02; §27AD)
+        ↓
+CI quality gate
+Server + Mobile GitHub Actions Gate (2026-10-07; §27AE)
 ```
 
 ---
@@ -5898,6 +5910,16 @@ is introduced; and **no Cloud Function / Admin-SDK trigger** is introduced — b
 **OD-1**; the recovery trigger is **OD-9** *(**LOCKED 2026-09-29 — Phase 32Q, §27X**: a durable non-secret recovery marker; this sentence is the Phase 32P record and is not rewritten)*; **L-17 remains OPEN** and unchanged. **No phase was started,
 and none is authorised by this record.**
 
+> **Annotated 2026-10-09 — the bridge that this record describes as "still not implemented" now exists.**
+> The record above was accurate when written: its commit `025ce11` is timestamped **2026-09-29 21:19**, and
+> the bridge landed **30 minutes later** in **`703a9da`** ("feat: add server-side credential-change bridge",
+> **2026-09-29 21:49**) — `server/src/services/credentialsChanged.service.ts` and the authenticated
+> **`POST /api/auth/credentials-changed`**, exercised by `server/test/phaseN4-credentials-changed.test.mjs`
+> and the `phaseN4-*` mobile suites. The sentences above are the historical Phase 32P record and are **not
+> rewritten**; they should be read as superseded on the implementation question only. **L-17 and OD-10
+> remain OPEN** exactly as recorded here, and "N-4 remains unauthorised" is likewise unchanged — the bridge
+> shipped, the *authorisation* question this record answers is a separate one.
+
 ## Files reconciled
 
 - `docs/superpowers/specs/2026-09-18-firebase-auth-design.md` — **new §14C.3.8**; the **§14C.3.1** annotation; the **§14C.6 N-4** row annotated; **OD-9** added to §14C.7.
@@ -5984,7 +6006,7 @@ this record.**
 - `docs/AUTH_SECURITY_MASTER_CHECKLIST.md` — **§39** gains the OD-9 subsection and findings **F-19…F-22**, with the title, **G-5** and **Decision Required** register mentions reconciled.
 - `docs/SYSTEM_SPECIFICATION.md` **§29** — the bridge paragraph now states the locked marker and its limits.
 - `CLAUDE.md` §2 and `README.md` — the phase entries gain this record.
-- **No historical record, snapshot, test-count figure or phase section was rewritten**, and **no file was deleted**. `requireAuth`, the session model/service, the bridge's design, the recovery screen and every existing route are **unchanged** — and the bridge itself is still **not implemented**.
+- **No historical record, snapshot, test-count figure or phase section was rewritten**, and **no file was deleted**. `requireAuth`, the session model/service, the bridge's design, the recovery screen and every existing route are **unchanged** — and the bridge itself is still **not implemented**. *(**Annotated 2026-10-09:** this was true when written; the bridge shipped the same day in `703a9da`. See the §27W annotation and §27AE.)*
 
 ---
 
@@ -6201,6 +6223,155 @@ the account's password**, and **`firebaseUid` is never cleared — no reachable 
 **Documentation only.** This section adds no test run and makes **no runtime-verification claim**: the
 artifact list and the figures above are the removal commit's own evidence, and the Phase 32L **Policy B**
 measurements remain valid **history** (see §27Q and `docs/AUTH_SECURITY_MASTER_CHECKLIST.md` §8).
+
+---
+
+# 27AB. AUTH-01 — Firebase revocation checking and verification-failure classification
+
+**Implementation record.** Shipped **2026-10-02** in commit **`b3f1146`** ("feat: enable Firebase
+revocation checking and classify verification failures (AUTH-01)") — 7 files, **+774 / −20**. No §27x
+section had recorded it, so it takes the next free lettered slot here rather than being back-dated.
+
+## What shipped
+
+- **`checkRevoked: true`** on the Admin SDK ID-token verification, so a credential revoked at Firebase is
+  refused by the server instead of being accepted until its own `exp`.
+- **A verification failure is classified into three disjoint outcomes**, so an outage can never be presented
+  as a bad credential: a **terminal rejected credential** (`FirebaseTokenError`), a **transient inability to
+  verify** (`FirebaseUnavailableError` → `FIREBASE_UNAVAILABLE` → **HTTP 503**), and the **operator
+  configuration fault** (`FIREBASE_NOT_CONFIGURED`).
+- The terminal allowlist is the **four unambiguous SDK codes**; **everything else — including the overloaded
+  `auth/argument-error`, which `firebase-admin` 14.5.0 also emits for a JWKS fetch failure — is transient**,
+  so a provider outage cannot destroy a valid session.
+- A **structural JWT pre-check** and an **`aud`/`iss` environment assertion** were added as
+  defence-in-depth on the real Admin SDK path only, leaving the test seam and its fixtures untouched.
+- **Authenticated Firebase routes keep answering 503** for an unavailable Firebase rather than their 400
+  token mapping.
+- A **guard fails if the installed `firebase-admin` version changes**, because the classification is derived
+  from 14.5.0's error codes rather than from a general contract.
+
+## Verification note
+
+Exercised by `server/test/phaseAUTH01-firebase-verification.test.mjs` (494 lines at introduction) with the
+edited `phase32b-firebase-admin.test.mjs`. No route, schema, session/JWT, mobile or legacy-auth behaviour
+changed, and **no `revokeRefreshTokens()` was introduced**.
+
+---
+
+# 27AC. AUTH-02 — short-lived JWT, enforced issuer/audience, and the 14-day absolute session cap
+
+**Implementation record.** Shipped **2026-10-02** in commit **`6a0f41b`** ("feat: shorten JWT lifetime to
+1h, enforce issuer/audience, and cap sessions at 14 days (AUTH-02)") — 15 files, **+993 / −70**.
+
+## What shipped
+
+- **The access token lives about an hour.** `JWT_EXPIRES_IN` defaults to `1h`, and in production a value
+  `jsonwebtoken` cannot parse fails fast at startup rather than becoming a first-login 500.
+- **Issuer and audience are minted and enforced.** `JWT_ISSUER` defaults to `inventory-ai` and
+  `JWT_AUDIENCE` to `inventory-ai-api` (`server/src/config/env.ts`). They are stable, non-secret labels —
+  deliberately **not** environment-specific — and `jsonwebtoken` itself validates them on every request
+  rather than any claim being compared by hand.
+- **Session longevity is bounded separately, in code and not in config**: `SESSION_ABSOLUTE_CAP_DAYS = 14`
+  (`server/src/services/session.service.ts`), with a session's `expiresAt` anchored at creation. A session's
+  usable life therefore never depends on the JWT lifetime — changing `JWT_EXPIRES_IN` can neither lengthen
+  nor shorten it.
+- **Expiry is classified rather than generic.** `requireAuth` distinguishes **`SESSION_EXPIRED`** — an
+  expired token whose session is still live, and therefore **recoverable** — from the other 401s, using an
+  expiry-ignoring re-verification that still performs a full signature, algorithm, issuer and audience check.
+- **A one-time re-login was accepted deliberately**: a token minted before this change carries neither
+  `iss` nor `aud`, so it is rejected and every existing user signs in once more.
+
+## Verification note
+
+Exercised by `server/test/phaseAUTH02-session-jwt.test.mjs` (695 lines at introduction) with the edited
+`phase26a-session-lifecycle.test.mjs`, `phase32c-firebase-exchange.test.mjs` and `phase07d-*` suites. No
+mobile change and no new dependency.
+
+---
+
+# 27AD. AUTH-03 — inventory session renewal (server boundary and mobile client)
+
+**Implementation record.** Shipped **2026-10-02** in commits **`3085e3f`** ("feat: implement inventory
+session renewal (AUTH-03)", 24 files, +2,322/−67) and **`5da0692`** ("fix: prevent AUTH-03 renewal request
+from re-entering the renewal hooks", 2 files, +76/−3). The behaviour is specified in
+`docs/SYSTEM_SPECIFICATION.md` **§"Session Renewal (AUTH-03)"**.
+
+## What shipped — the server boundary
+
+- **`POST /api/auth/renew`**, **authenticated**: `requireAuth` is the first handler, so the account is
+  `req.user.id` and the session is `req.auth.jti`, both taken from the token that authenticated the request;
+  the body carries only `{ idToken }`.
+- **A renewed token names the SAME session**: the `jti` is passed through unchanged, **no session row is
+  created**, **`expiresAt` is never written**, and **no audit row is written** per renewal — the 14-day
+  absolute cap therefore cannot be extended by renewal.
+- **Two refusals in a load-bearing order**: a verified uid that differs from the account's `firebaseUid`
+  (or an account with none) is **`409 FIREBASE_IDENTITY_CONFLICT`**; an unverified identity is
+  **`400 EMAIL_NOT_VERIFIED`** — 400 rather than 401/403 precisely so it cannot trip the client's
+  session-loss rule and retroactively kill a live session.
+- **Per-IP rate limited** (`AUTH_SESSION_RENEW_RATE_LIMIT_*`, default 120 per 15 minutes), answering
+  **`429 SESSION_RENEW_RATE_LIMITED`** with a `Retry-After` header; middleware order is
+  **`requireAuth → limiter → controller`**.
+- **Firebase verification runs through the AUTH-01 boundary** (`checkRevoked: true`).
+
+## What shipped — the mobile client
+
+- **Proactive renewal** when the authentication horizon — `min(tokenExpiresAt, sessionExpiresAt)`, the
+  earlier boundary winning — falls inside a **10-minute window**, and when the app returns to the foreground.
+- **Single-flight**, guarded by an **authentication epoch** so a response belonging to an epoch that has
+  since ended (a sign-out or a fresh sign-in) is discarded rather than applied.
+- **Failures are classified by application error code, never by HTTP status**: a recoverable
+  `SESSION_EXPIRED` retries the original request **exactly once**, terminal codes never renew, and a
+  transient failure — the 429 included — degrades gracefully without ending the session.
+
+## Verification note
+
+`server/test/phaseAUTH03-session-renewal.test.mjs` (538 lines at introduction) and the two mobile suites
+(`phaseAUTH03-auth-renewal.test.tsx`, `phaseAUTH03-client-renewal.test.ts`);
+`phase23-authorization-contract.test.mjs` gained the route's `AUTHENTICATED`-bucket declaration. No new
+permission, no new dependency and no new durable auth state.
+
+---
+
+# 27AE. CI quality gate — `.github/workflows/ci.yml` (and the defect its first run caught)
+
+**Implementation record.** Shipped **2026-10-07** in commit **`9f4c5c1`** ("ci: add production quality
+gates", 1 file, +183) and corrected **2026-10-09** in **`d415335`** ("ci: provide the test JWT_SECRET the
+server suite requires", 1 file, +13).
+
+## What the gate is
+
+Two jobs, identical on every trigger, with **Node taken from `.nvmrc` and never hardcoded**:
+
+- **`server`** — `npm ci`, typecheck, lint, both module-graph checks, **`npm test` in full mode** (the mode
+  that makes DB-backed suites fail loudly rather than skip), then a boot smoke asserting `/ready` 200,
+  `/live` 200 and termination within the shutdown window after `SIGTERM`, against a **`mongo:7` service
+  container** with a health check.
+- **`mobile`** — `npm ci`, typecheck, `jest`.
+
+It runs on **every pull request** and on **pushes to `main`**, with **no path filters** — a filtered
+required check is the classic way to block a merge with a check that never reports — and **no GitHub
+secrets**.
+
+## The defect its first run caught — a missing test-owned variable
+
+The gate's first-ever execution, on **PR #7**, failed the `server` job with **118 failing tests**, every one
+a cascade from **`JWT_SECRET is not configured`**. Every server suite begins with `import 'dotenv/config'`,
+so locally the **git-ignored `server/.env`** supplies that value; a CI checkout has no such file, so the
+first `signAccessToken` threw `AUTH_NOT_CONFIGURED`, login answered 500 and everything auth-dependent died.
+The `mobile` job passed on the same run.
+
+**`d415335` adds one fixed, non-secret `JWT_SECRET` to the test step** and changes nothing else.
+`JWT_ISSUER` / `JWT_AUDIENCE` / `JWT_EXPIRES_IN` are deliberately **not** set: their shipped defaults are the
+contract and the suites assert it, so overriding them in the ambient environment would mask a regression
+instead of catching one.
+
+## Verification note
+
+The diagnosis was **reproduced off-CI rather than inferred**: a clone with no `.env` and only the workflow's
+variables produced the same 118 failures, and the full suite went green once the variable was supplied (185
+suites / 1312 tests, 0 failures). **PR #7's checks then passed on GitHub** — `ci / server` and `ci / mobile`
+— and the merge commit is **`3e5d2aa`**. The local reproduction used Atlas while CI uses `mongo:7`, so the
+container was not literally the same database; the green run — not the simulation — is the authority for CI.
 
 ---
 

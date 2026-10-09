@@ -860,23 +860,31 @@ Chronological. **History is not rewritten.**
 | **F2.9** | EAS build + Android runtime verification | `[✓]` | EAS `f3038fa1…`, emulator | (no commit) |
 | **32L close-out** | Docs close-out | `[✓]` | docs-only | `48c7f11`, `46254c6` |
 | **Auth E2E verification (unnumbered)** | Android Google existing-account E2E + Render Firebase Admin config + CLI credential rotation + Firebase PII investigation | `[✓]` | Android E2E verified; docs-only | — |
+| **AUTH-01** | Firebase revocation checking (`checkRevoked: true`) + verification-failure classification | `[✓]` | `phaseAUTH01-firebase-verification.test.mjs` | `b3f1146` |
+| **AUTH-02** | 1-hour JWT, enforced issuer/audience, 14-day absolute session cap, `SESSION_EXPIRED` classification | `[✓]` | `phaseAUTH02-session-jwt.test.mjs` | `6a0f41b` |
+| **AUTH-03** | Inventory session renewal — server boundary + mobile client | `[✓]` | `phaseAUTH03-session-renewal.test.mjs`; `phaseAUTH03-*` mobile suites | `3085e3f`, `5da0692` |
+| **AUTH-04** | Custom 6-digit email-verification code (A…H; G passed live on Brevo 2026-10-04) | `[✓]` | §40; live acceptance reported there | `56a3f84` … `0972948` |
+| **CI quality gates** | `.github/workflows/ci.yml` — `server` + `mobile` jobs on every PR and on `main` | `[✓]` | first green run on PR #7 | `9f4c5c1`, `d415335` |
 
 ---
 
 ## 30. CURRENT WORK TRACKER
 
-**NO AUTHORISED IMPLEMENTATION PHASE CURRENTLY ACTIVE.**
+**NO NEW IMPLEMENTATION PHASE IS AUTHORISED.** *(Updated 2026-10-09 — see §42. The heading above
+previously read "NO AUTHORISED IMPLEMENTATION PHASE CURRENTLY ACTIVE", which had become false: AUTH-01,
+AUTH-02, AUTH-03 and the CI quality gate were implemented, merged and are now on `main`. The old wording
+is corrected here rather than left to imply those increments never happened.)*
 
 | Field | Value |
 | --- | --- |
-| Current authorised phase | **None.** Design doc §21: "No phase beyond 32F is authorised." |
-| Current task | None in progress; repo is in a documentation/cleanup tail (latest: auth E2E verification documented). |
+| Current authorised phase | **None new.** The last authorised increments — **AUTH-01, AUTH-02, AUTH-03** and the **CI quality gate** — are **implemented and merged** (§29, §42); no further phase has been authorised. |
+| Current task | None in progress. This revision is the **2026-10-09 documentation reconciliation** (§42). |
 | Files/work area | — |
 | Dependencies | — |
 | Blockers | iOS build host (P-6); new-identity path ENVIRONMENT-BLOCKED (§5b); P-3/P-4 and Gates 1/2; owner decisions (§27). |
 | Acceptance criteria | — |
-| Verification state | Android Google existing-account E2E VERIFIED (§5a); Render Firebase Admin config verified live; dependency-level PII finding open (§24/§28). |
-| Git/branch state | branch `main` @ `934b15a`; `origin/main` @ `934b15a`; **0 ahead / 0 behind**; PRs **#1–#6 merged** (#4 `924f8bc`, #5 `14de2af`, #6 `e97497b`); **0 open PRs**. Phases **1–3 pushed** (`48969e0`, `d340735`, `934b15a`). |
+| Verification state | Server full suite **185 suites / 1312 tests, 0 failures**; mobile **47 suites / 644 tests, 0 failures**; CI `server` + `mobile` **both green on PR #7**. Android Google existing-account E2E VERIFIED (§5a); Render Firebase Admin config verified live; dependency-level PII finding open (§24/§28). |
+| Git/branch state | branch `main` @ `3e5d2aa`; `origin/main` @ `3e5d2aa`; **0 ahead / 0 behind**; **PR #7 merged** (`3e5d2aa`, base `6e2252f`, merged head `d415335`); PRs **#1–#6 merged**; **0 open PRs**. |
 
 ---
 
@@ -886,19 +894,21 @@ Before Freebuff starts coding any authentication/security work, **all** must be 
 
 | # | Gate | Current |
 | --- | --- | --- |
-| G-1 | An authorised phase exists? | **No** |
-| G-2 | Is it numbered? | **No** |
-| G-3 | Is scope documented? | **No** |
-| G-4 | Are prerequisites satisfied? | **No** (external gates open) |
+| G-1 | An authorised phase exists? | **No — for new work.** The last authorised increments (AUTH-01…03, CI) are shipped and merged (§42); nothing new is authorised. |
+| G-2 | Is it numbered? | **No** (for new work; AUTH-01…03 are numbered and shipped) |
+| G-3 | Is scope documented? | **No** (for new work; AUTH-01…03 have roadmap records §27AB–§27AD) |
+| G-4 | Are prerequisites satisfied? | **No** (external gates open — unchanged) |
 | G-5 | Required owner decisions resolved? | **Partially — the Firebase-only DIRECTION is locked 2026-09-29 (§39): O-8 and O-9 resolved, O-3 now fully RESOLVED (direction *and* mechanics, design §14C.9), O-10 direction locked.**Still blocking implementation: **OD-1, OD-2, OD-4…OD-8** (design §14C.7 — **OD-3 resolved**, **N-4's D2 resolved in §14C.3.8**, and its trigger **OD-9 LOCKED in §14C.3.9**) and **O-5, O-6, O-11**. |
 | G-6 | External blockers resolved? | **No** (§25) |
-| G-7 | Git working tree understood? | **Yes** |
+| G-7 | Git working tree understood? | **Yes** — `main` @ `3e5d2aa`, working tree clean, local `main` equal to `origin/main` (2026-10-09). |
 | G-8 | Protected files preserved? | **Yes** — no protected file was modified. There are now **zero uncommitted protected entries**: all five are committed and equal to `HEAD` (Phase 3 committed the last one, `mobile/eas.json`). The two older SHA-256 mismatches (`http.ts`, `phase06-ai-wire.test.mjs`) were **CRLF-normalisation differences, not content changes** (§32). |
 | G-9 | Acceptance criteria defined? | **No** |
 | G-10 | Owner explicitly approved implementation? | **No** |
 
 > **If any required gate is false, Freebuff must STOP and report what is missing.** Currently G-1,
-> G-2, G-3, G-4, G-5, G-6, G-9, G-10 are false.
+> G-2, G-3, G-4, G-5, G-6, G-9, G-10 are false — **for new work only** *(annotated 2026-10-09: the
+> shipped AUTH-01…03 and CI increments are recorded in §29 and §42, and this gate governs what has
+> not been authorised yet, not what has already landed)*.
 
 ---
 
@@ -972,10 +982,12 @@ trail + viewer; sensitive-logging protections; native RNFirebase migration B–E
 retirement F1/F2; Android runtime verification F2.9; **Android Google existing-account E2E verification (§5a)**.
 
 ### Current
-**NO AUTHORISED IMPLEMENTATION PHASE CURRENTLY ACTIVE.** The repository is in a
-documentation/cleanup tail. Git state: branch `main` @ `934b15a`; `origin/main` @ `934b15a`;
-**0 ahead / 0 behind**; PRs **#1–#6 merged**; **0 open PRs**; Phases **1–3 pushed**; the working
-tree holds only `?? .freebuff/`.
+**NO NEW IMPLEMENTATION PHASE IS AUTHORISED.** *(Corrected 2026-10-09 — see §42. This block previously read
+"NO AUTHORISED IMPLEMENTATION PHASE CURRENTLY ACTIVE" and quoted a git state of `934b15a`; the increments
+authorised after that baseline — **AUTH-01, AUTH-02, AUTH-03** and the **CI quality gate** — are now
+implemented and merged.)* Git state: branch `main` @ `3e5d2aa`; `origin/main` @ `3e5d2aa`; **0 ahead /
+0 behind**; **PR #7 merged** (base `6e2252f`, merged head `d415335`); PRs **#1–#6 merged**; **0 open PRs**;
+working tree clean.
 
 ### Blocked
 iOS provider build/runtime (no iOS build host, P-6); the **new-identity → `REGISTRATION_REQUIRED`**
@@ -1631,7 +1643,9 @@ Function / Admin-SDK trigger** is introduced (§14C.3.6's rejection **stands**).
 `requireAuth`, the session model/service, `constants/roles.ts`, the mobile RBAC mirror, `config/jwt.ts`,
 the error envelope or any client-facing code. No new route, session type, field, dependency or
 configuration. No Firebase Console change. **D2's closure is architectural (reachability) only** —
-nothing was built, and **L-17 remains OPEN**.
+nothing was built, and **L-17 remains OPEN**. *(**Annotated 2026-10-09:** the bridge was built the same
+day, in `703a9da` — see §42 — so "nothing was built" is superseded on the implementation question only.
+**L-17 and OD-10 remain OPEN** exactly as recorded.)*
 
 ### Recovery-request failure investigation (2026-09-29) — one real defect fixed, one legacy limit documented
 
@@ -1914,6 +1928,55 @@ preserved exactly as Phases 32E/32K pin them.
 +312/−59.
 
 session restoration**.
+
+---
+
+## 42. AUTH-01 … AUTH-03, THE CI QUALITY GATE & THE 2026-10-09 RECONCILIATION
+
+**Recorded 2026-10-09.** Four increments shipped after §41 and **none of them had been recorded in this
+checklist's tracker**: §30 still read *"NO AUTHORISED IMPLEMENTATION PHASE CURRENTLY ACTIVE"* and quoted a
+git state two weeks old, and §31's gate read as though nothing had shipped. This section is the
+reconciliation.** §29–§41 are not rewritten**; §29 gained rows, and §30/§31 carry dated corrections in place.
+
+| Increment | Status | Evidence | Commit(s) |
+| --- | --- | --- | --- |
+| **AUTH-01** — revocation checking + verification-failure classification | `[✓]` SHIPPED | `phaseAUTH01-firebase-verification.test.mjs` | `b3f1146` |
+| **AUTH-02** — 1-hour JWT, enforced `iss`/`aud`, 14-day absolute cap | `[✓]` SHIPPED | `phaseAUTH02-session-jwt.test.mjs` | `6a0f41b` |
+| **AUTH-03** — inventory session renewal (server + mobile) | `[✓]` SHIPPED | `phaseAUTH03-session-renewal.test.mjs`; two `phaseAUTH03-*` mobile suites | `3085e3f`, `5da0692` |
+| **AUTH-04** — custom 6-digit email verification (A…H) | `[✓]` SHIPPED; **G passed live** | §40 live acceptance (Brevo, 2026-10-04) | `56a3f84` … `0972948` |
+| **CI quality gate** | `[✓]` SHIPPED and green | `.github/workflows/ci.yml`; PR #7 both jobs green | `9f4c5c1`, `d415335` |
+| **Integration** | `[✓]` MERGED | PR #7 → `3e5d2aa` (base `6e2252f`, merged head `d415335`) | — |
+
+### Verification state at this revision
+
+- Server: **185 suites / 1312 tests, 0 failures** (`npm test`, full mode — DB-backed suites executed).
+- Mobile: **47 suites / 644 tests, 0 failures** (`jest`).
+- Server `tsc`, `eslint` and both module-graph checks: clean. Mobile `tsc` and `eslint`: clean.
+- `expo export --platform android`: succeeds. `expo-doctor`: **20/21** (4 Expo packages patch-behind — P3).
+- CI: `ci / server` and `ci / mobile` **both green on PR #7** — the gate's first green run.
+
+### Finding recorded — F-23 (the CI gate's first run)
+
+**F-23 — the workflow was written without the test environment the suites actually require.** Every server
+suite begins with `import 'dotenv/config'`, so `JWT_SECRET` reaches the tests only from the **git-ignored
+`server/.env`**; a CI checkout has no such file. The gate's first-ever run therefore failed `server` with
+**118 failing tests**, all cascading from **`AUTH_NOT_CONFIGURED`** (`signAccessToken` → `login` → HTTP
+500). It was **reproduced off-CI rather than inferred** — a clone with no `.env` and only the workflow's
+variables produces the same 118 failures, and the full suite goes green once the variable is supplied — and
+**fixed in `d415335`** by adding one fixed, non-secret `JWT_SECRET` to the test step.
+`JWT_ISSUER` / `JWT_AUDIENCE` / `JWT_EXPIRES_IN` are deliberately **not** set, because the suites assert those
+shipped defaults and an ambient override would mask a regression instead of catching one.
+
+**Robustness note (open, not a finding):** a **fresh clone** still cannot run `npm test` without
+hand-copying `.env.example` to `.env`. A test-only bootstrap default is the candidate remedy and is **not
+implemented**.
+
+### What remains open, unchanged
+
+**L-17** (recovery-mail delivery never inspected end-to-end), **P-6 / P-3 / P-4** and **Gates 1/2** (iOS and
+RNFirebase build gates), the new-identity `REGISTRATION_REQUIRED` path (environment-blocked), the
+dependency-level **PII logging** finding (§24/§28), **B1**'s residual timing term, **B2 / E3 / OD-10**
+(deferred), and owner decisions **O-5 / O-6 / O-10 / O-11**. Nothing here is closed by this record.
 
 ---
 

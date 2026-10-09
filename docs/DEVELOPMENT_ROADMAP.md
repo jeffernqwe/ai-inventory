@@ -6473,6 +6473,15 @@ following weekly run. Those pull requests land on a **protected `main`**, so Dep
 subject to the same required `server`/`mobile` checks as everyone else's — and grouping is scoped with
 `applies-to: version-updates` so a **security** update is never folded into a routine minor/patch batch.
 
+**The alerts turned into evidence within minutes.** Switching Dependabot on immediately surfaced
+**9 open advisories, every one of them in `mobile/package-lock.json`** — 1 critical, 4 high, 3 moderate,
+1 low — and **Dependabot opened three security-update pull requests by itself** (`#12`–`#14`), which is the
+feature demonstrably working rather than merely enabled. Three of the nine (`braces`, `node-forge`,
+`sprintf-js`) have **no published fix**, so they are recorded here as dependency debt that a version bump
+cannot clear. All nine are **transitive dependencies of the mobile build/tooling chain**, not server runtime
+dependencies; that lowers the practical exposure of the critical and high entries but does not remove them,
+and none of them was found by reading code — they were invisible until the setting existed.
+
 ## The defect its first run caught — a missing test-owned variable
 
 The gate's first-ever execution, on **PR #7**, failed the `server` job with **118 failing tests**, every one

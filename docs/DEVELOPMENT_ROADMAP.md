@@ -6436,6 +6436,43 @@ has already been cloned, forked or indexed.
 > precisely the failure the probe existed to catch, and the reason the required-check names are pinned
 > here as `server`/`mobile` rather than as they appear in the interface.
 
+## Public-repository hardening (2026-10-09)
+
+Making the repository public to unlock protection also made it **readable by anyone**, so the
+repository-level security surface was closed out the same day. Three artifacts were added and four
+settings enabled, each verified by API readback or against a published schema rather than assumed.
+
+| Change | Why | Verified |
+| --- | --- | --- |
+| **`SECURITY.md`** | a public repository needs a stated reporting path | links resolve; the five findings it discloses (`B1`, `B2`, `E3`, `OD-10`, `L-17`) are each really recorded in the checklist |
+| **`LICENSE`** (proprietary, all rights reserved) | neither package declared a `license` field, so the terms were unstated | contains no open-source licence name; holder, no-warranty and third-party carve-outs present |
+| **`.github/dependabot.yml`** | dependency bumps for **both** packages | validates against the **published `dependabot-2.0` schema** (fetched from schemastore, validated with `jsonschema`); both target directories exist with `lockfileVersion: 3`; the one label it uses exists in the repository |
+
+**The reporting channel is GitHub private vulnerability reporting, not an email address** — enabling it
+was verified (`GET /repos/…/private-vulnerability-reporting` → `{"enabled":true}`), and inventing a mailbox
+nobody reads would have been worse than stating nothing. The security policy also discloses the already
+recorded open items up front, so a researcher is not thanked for re-reporting `B1`'s accepted residual
+term.
+
+**The licence is a deliberate owner decision and not an open-source one:** the repository became public
+for **hosting** (free-tier protection, CI minutes and private vulnerability reporting), not to grant reuse
+rights, so the file reserves all rights and permits viewing, cloning and contributing by pull request
+only. GitHub will label a non-standard licence as *View license* rather than naming it — expected, not a
+configuration error.
+
+**Two settings were found DISABLED on a repository that had just become public**, which is the part worth
+keeping: `secret_scanning` and `secret_scanning_push_protection` were both `disabled`, so the only
+credential control in place was the **one-off history scan** performed before the visibility change —
+an audit, not a standing control. Both are now `enabled`, verified by a fresh `GET` of `security_and_analysis`,
+together with **Dependabot alerts** and **security updates**. `secret_scanning_non_provider_patterns` and
+`secret_scanning_validity_checks` remain **disabled**, recorded here as such rather than left silently off.
+
+**Limits stated rather than glossed.** `dependabot.yml` is only read from the default branch, so it
+takes effect when this lands, not when it is written; the first version-update pull requests appear on the
+following weekly run. Those pull requests land on a **protected `main`**, so Dependabot's own changes are
+subject to the same required `server`/`mobile` checks as everyone else's — and grouping is scoped with
+`applies-to: version-updates` so a **security** update is never folded into a routine minor/patch batch.
+
 ## The defect its first run caught — a missing test-owned variable
 
 The gate's first-ever execution, on **PR #7**, failed the `server` job with **118 failing tests**, every one

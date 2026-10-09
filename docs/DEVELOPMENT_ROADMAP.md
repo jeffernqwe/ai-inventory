@@ -6485,6 +6485,55 @@ an upstream release, not a config change. All nine are **transitive dependencies
 dependencies; that lowers the practical exposure of the critical and high entries but does not remove them,
 and none of them was found by reading code — they were invisible until the setting existed.
 
+## Source protection — the repository is private again (2026-10-09)
+
+The public visibility that unlocked free protection was **reversed the same day**, roughly 90 minutes
+later, on the owner's decision that the source must not be cloneable. The trade was **measured** this time
+rather than predicted:
+
+| Lost by going private | Still working |
+| --- | --- |
+| **Branch protection** — `GET …/branches/main/protection` → `403 Upgrade to GitHub Pro or make this repository public` | **Dependabot** — `vulnerability-alerts` → `204`, and the 9 open advisories remain readable |
+| **Rulesets** — the same `403` | **The workflows** — `server`, `mobile` and the new `secret-guard` job run unchanged, with Actions minutes still free at this scale (2,000/month on the Free plan) |
+| **Secret scanning and push protection** — `security_and_analysis` is now `null`, the feature needing GitHub Secret Protection on a private repository | **`main-guard`** — detection of a bypass after the fact |
+
+**What replaced the lost protections.** GitHub's scanner is gone, so its job moved into the repository:
+**`scripts/check-secrets.mjs`** runs as the third CI job and fails a change that introduces
+credential-shaped content — private-key blocks judged by **body length** so dummy fixtures pass, provider
+token shapes, credentialed Mongo URIs, and a tracked `.env`. It is **pattern matching, not proof**, and says
+so in its own header. The **six** deliberate test fixtures it legitimately matched were waived **on their own
+lines** with `secret-guard:allow` rather than by weakening a rule or excluding the test tree from scanning,
+so a real credential pasted into a test file still fails the build.
+
+**Writing it found a bug in the guard itself**, which is why it was run against the real tree instead of
+assumed: the first version advanced its line offsets by `line.length + 1`, which drifts byte-by-byte on a
+**CRLF** file and made the private-key body test read from the wrong offset — reporting a
+`-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----` fixture as a real key. Fixed by locating
+each line by search, then all six paths re-exercised (clean tree, planted provider key, real-length key,
+dummy key, `.env` file, waived line).
+
+**The exposure window, measured rather than dismissed.** The repository was public for ~90 minutes.
+`forks: 0` and `network_count: 0` — **nobody forked it**. The traffic API shows 24 clones / 3 unique
+cloners / 244 views, all consistent with the owner's own machines and CI — but its **last recorded day is
+2026-10-07** because traffic data **lags about two days**, so it does **not** cover the public window.
+**A clone leaves no permanent record, so it cannot be established that no copy was taken.** The limitation,
+the re-check commands and the growth plan are in `docs/SOURCE_PROTECTION.md`.
+
+**Access surface, audited rather than assumed:** exactly **one collaborator** (the owner, admin), **no
+deploy keys**, **no webhooks**, **no Actions secrets**; `.env`, `server/.env`, `mobile/.env` and `.freebuff`
+are all **present and git-ignored**, and nothing sensitive is tracked. Two controls could not be verified
+from the CLI and are recorded as **owner-side, not done**: **account 2FA** (`GET /user` returns
+`two_factor_authentication: null`) and **which GitHub Apps can reach the repository**
+(`GET /user/installations` → `403`, that endpoint requiring a GitHub App JWT), so the hosting integration's
+repository scope must be reviewed in the UI. **Forking cannot be switched off on a personal private
+repository** — GitHub answers `422 Allow forks setting can only be changed on org-owned private
+repositories`: nobody outside can fork it, a collaborator could, and moving to an organization is the fix.
+
+**Three `SECURITY.md` claims went stale within the hour and were corrected rather than left** — private
+vulnerability reporting (`404` once private, so the channel is now an issue in this private repository),
+the "secret scanning enabled" line, and the protected branch. That is the argument for the habit this
+record follows: state the setting **and its evidence**, then re-read it when the state changes.
+
 ## The guard's first false positive — F-25 (2026-10-09)
 
 With protection enforced, the guard had become the **second** layer — and on the merge of **PR #15** it went

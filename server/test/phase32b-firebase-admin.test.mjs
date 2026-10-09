@@ -287,7 +287,7 @@ unitSuite('Phase 32B — Firebase error contract', () => {
     // A real Firebase ID token. This is the property the error layer rests on,
     // asserted with the real shape rather than a stand-in.
     const jwt =
-      'eyJhbGciOiJSUzI1NiIsImtpZCI6ImFiYyJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dBjftJeZ4CVPmB92K27uhbUJU1p1r_wW1gFWFOEjXk';
+      'eyJhbGciOiJSUzI1NiIsImtpZCI6ImFiYyJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dBjftJeZ4CVPmB92K27uhbUJU1p1r_wW1gFWFOEjXk'; // secret-guard:allow (deliberate fixture)
     assert.equal(safeTokenReason(jwt), 'unknown', 'a whole token can never survive');
 
     // The LENGTH bound is a second, independent barrier: strip the dots — the

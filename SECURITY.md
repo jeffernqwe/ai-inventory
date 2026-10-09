@@ -16,17 +16,23 @@ will be answered by checking whether that behaviour still exists on `main`.
 
 ## Reporting a vulnerability
 
-**Use GitHub's private vulnerability reporting.** It keeps the report private
-until a fix is available:
+**Open an issue in this repository.** The repository is **private**, so its issues are
+visible only to people who already have access to the code — a report filed there is
+not public disclosure. That is the reporting channel, and the code is shared with the
+people expected to use it.
 
-> **https://github.com/nreffejzxc/ai-inventory/security/advisories/new**
+**If you do not have access to the repository**, contact the maintainer at the address
+recorded in this repository's commit metadata, or through whatever channel you were
+already contacted by.
 
-This channel is **enabled on this repository** (verified by API readback, not
-assumed). It is the only reporting channel offered.
+> **Why this replaced GitHub's private vulnerability reporting.** That feature was
+> available and enabled while this repository was public. On a **private** repository it
+> is not available on this plan — the endpoint answers `404` — so the instruction was
+> rewritten rather than left pointing at a page that no longer exists. Recorded in
+> `docs/DEVELOPMENT_ROADMAP.md` §27AE.
 
-**Do not open a public issue, discussion or pull request describing a
-vulnerability**, and do not post exploit details anywhere public before a fix is
-released.
+**Do not disclose a vulnerability publicly** — no public fork, gist, blog post, social
+post or package — before a fix has shipped.
 
 ### What a useful report contains
 
@@ -129,9 +135,28 @@ Credit in the advisory is offered if you want it, and withheld if you prefer.
 
 These are verifiable settings on this repository, not claims:
 
-- `main` is **protected**: the `server` and `mobile` checks are required, the
-  branch must be up to date, pull requests are mandatory, force-pushes and branch
-  deletion are blocked, and enforcement includes administrators.
-- **Secret scanning and push protection** are enabled.
-- **Dependabot alerts and security updates** are enabled, with a version-update
+- The repository is **private**.
+- **Pull requests are the only route to `main`** in practice: the `ci` workflow runs the
+  `server`, `mobile` and `secret-guard` jobs on every pull request and every push to
+  `main`, and `.github/workflows/main-guard.yml` fails a push that reached `main` outside
+  a merged pull request.
+- **Dependabot alerts and security updates** are enabled, with version-update
   configuration in [`.github/dependabot.yml`](.github/dependabot.yml).
+- **`scripts/check-secrets.mjs`** scans every tracked file for credential-shaped content
+  on each CI run, replacing the GitHub-side scanner (see below).
+
+**Three protections this repository does NOT have, stated plainly:**
+
+1. **Branch protection is unavailable on this plan for a private repository** — the API
+   answers `403 Upgrade to GitHub Pro`. The checks therefore **report** rather than
+   **gate**, and `main-guard` is **detection after the fact, not prevention**. Making the
+   repository public or upgrading the plan restores enforcement (roadmap §27AE).
+2. **GitHub secret scanning and push protection are unavailable here** for the same
+   reason; `scripts/check-secrets.mjs` is the replacement. It is pattern matching over
+   tracked files, so it cannot see a credential that is split, encoded or assembled at
+   runtime.
+3. **Forking cannot be switched off** on a personal (non-organization) private
+   repository — GitHub answers `422 Allow forks setting can only be changed on org-owned
+   private repositories`. Nobody outside the repository can fork it, but anyone granted
+   access could. Moving the work into a GitHub Organization is the fix, and it is
+   recommended in [`docs/SOURCE_PROTECTION.md`](docs/SOURCE_PROTECTION.md).

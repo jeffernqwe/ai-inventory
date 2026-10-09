@@ -27,6 +27,11 @@ name: ci
 #     (roadmap §27AE). `scripts/check-secrets.mjs` is dependency-free, so the job needs
 #     no install step and finishes in seconds. It is a net for the common shapes of a
 #     leaked credential, not a proof a commit is clean — see docs/SOURCE_PROTECTION.md.
+#   * Both actions are pinned to a full-length commit SHA, not to a moving `v4` tag, so
+#     an upstream tag re-point cannot change what this pipeline executes. Each pin was
+#     checked to be the exact commit `v4` already resolved to at the time of the change
+#     (v4.4.0 of both), so this altered no behaviour; `.github/dependabot.yml` keeps the
+#     pins current.
 
 on:
   pull_request:
@@ -63,9 +68,9 @@ jobs:
       run:
         working-directory: server
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -182,9 +187,9 @@ jobs:
     # No `defaults.run.working-directory`: this job runs from the repository root, and
     # needs no `npm ci` — the script imports only Node built-ins.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: .nvmrc
 
@@ -197,9 +202,9 @@ jobs:
       run:
         working-directory: mobile
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: .nvmrc
           cache: npm

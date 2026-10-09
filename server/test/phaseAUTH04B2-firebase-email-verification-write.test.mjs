@@ -55,7 +55,7 @@ import {
 } from './fakes/firebaseUserUpdater.mjs';
 
 const UID = 'firebase-uid-abc123';
-const TOKEN = 'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJhYmMxMjMifQ.c2lnbmF0dXJl';
+const TOKEN = 'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJhYmMxMjMifQ.c2lnbmF0dXJl'; // secret-guard:allow (deliberate fixture)
 const ADDRESS = 'owner@inventory-ai.test';
 
 const FIREBASE_ENV_KEYS = [

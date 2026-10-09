@@ -78,7 +78,7 @@ const LINK = '/api/auth/firebase/link';
 const ME = '/api/auth/me';
 
 /** A JWT-SHAPED placeholder. Never a real token; the seam replaces verification. */
-const ID_TOKEN = 'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJhdXRoLTAxIn0.c2lnbmF0dXJl';
+const ID_TOKEN = 'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJhdXRoLTAxIn0.c2lnbmF0dXJl'; // secret-guard:allow (deliberate fixture)
 
 /** The version the classifier was derived from; a bump must re-derive it. */
 const VERIFIED_FIREBASE_ADMIN_VERSION = '14.5.0';

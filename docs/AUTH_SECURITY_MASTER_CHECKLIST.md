@@ -2126,6 +2126,22 @@ not a collaborator, so **no automated check here can see one**, and Render reach
 exactly such an installation rather than a webhook. Nothing was revoked, narrowed or disabled. **A private
 repository is not an uncopyable one.** Roadmap §27AF; posture and growth plan in `docs/SOURCE_PROTECTION.md`.
 
+### Workflow simplification — both monitors removed by owner decision (2026-10-09, later the same day)
+
+The owner judged the GitHub setup more complex than the project needs and asked for the plain flow
+back: branch → commit → push → pull request → review → merge. Two workflows described above were
+**removed** on that decision — **`main-guard.yml`** (detection of a push to `main` outside a pull
+request) and **`access-guard.yml`** (the daily visibility/fork/collaborator monitor, green in run
+`37894805284`). **The security consequence is recorded rather than glossed:** nothing now watches
+repository visibility, the collaborator list, deploy keys or webhooks, so a visibility change or a new
+collaborator is discovered only when someone runs `node scripts/audit-access.mjs`. That is a **habit,
+not a control**, and the statement above that owner-only membership is "asserted unattended" is
+**superseded**. `ci.yml` (with `secret-guard`), `scripts/check-secrets.mjs` and the pinned action SHAs
+remain. Separately, **`CLAUDE.md` was reduced from 143 KB to 57 KB** by moving its phase prose verbatim
+to `docs/PHASE_HISTORY.md`, and the record-keeping obligation became proportional to the change. The
+nine open dependency advisories are unchanged and the mobile-side ones are tracked in issue #32.
+Roadmap §27AG.
+
 ### What remains open, unchanged
 
 **L-17** (recovery-mail delivery never inspected end-to-end), **P-6 / P-3 / P-4** and **Gates 1/2** (iOS and

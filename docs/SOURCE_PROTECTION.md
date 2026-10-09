@@ -51,16 +51,16 @@ not be read says so.
 | Other repositories on the account | 4 private, 21 public (unrelated projects) |
 | Traffic, recorded window | 24 clones / 3 unique cloners and 244 views / 1 unique viewer, ending 2026-10-07 — consistent with the owner's own machines and CI runs |
 
-Two controls now watch the policy unattended, and their split is deliberate:
+**The check is manual, by the owner's decision.** A daily monitor (`access-guard.yml`) was written
+and ran green, then was **removed on 2026-10-09** along with `main-guard` to keep the workflow
+minimal: on a plan where protection, rulesets and secret scanning are all unavailable, the owner
+chose fewer moving parts over unattended detection. The consequence is stated plainly in §4.9 —
+nothing watches visibility or the access list now.
 
-- [`.github/workflows/access-guard.yml`](../.github/workflows/access-guard.yml) runs **daily** and
-  **hard-fails** if the repository is no longer private, if it has a fork or fork network, or if
-  any collaborator other than the owner appears. It also prints the HTTP status of the
-  administration-level endpoints it cannot read, so an unreadable check is visible as such and
-  never mistaken for a pass.
-- [`scripts/audit-access.mjs`](../scripts/audit-access.mjs) is the deep audit, and it needs a
-  credential that *can* read those endpoints — the owner's own `gh` session. One dependency-free
-  command, non-zero exit on any violation, names only (never a secret value):
+What remains is [`scripts/audit-access.mjs`](../scripts/audit-access.mjs), the deep audit, which
+needs a credential that *can* read the administration-level endpoints — the owner's own `gh`
+session. One dependency-free command, non-zero exit on any violation, names only (never a secret
+value), and it lists the unavailable settings so their absence stays visible:
 
   ```bash
   node scripts/audit-access.mjs        # PASS/FAIL/INFO against the live API
@@ -130,10 +130,8 @@ business fact, not a code fact** — nothing in this repository can undo it.
 | **Proprietary licence** | Grants no rights; makes copying a licence breach and a copyright issue rather than a grey area | **Legal**, not technical |
 | **Business/tenant isolation, RBAC on the server** | A stolen client cannot read another business's data | **High** |
 | **`scripts/check-secrets.mjs` in CI** | Fails a change that introduces a credential-shaped string; replaces GitHub's scanner, which is unavailable on a private repo at this plan level | **Medium** — pattern matching, not proof |
-| **`access-guard` (daily)** | Fails if the repository stops being private, gains a fork, or gains a collaborator other than the owner; reports the endpoints it cannot read | **Medium-High** — unattended, but a day late and partial by permission |
-| **`scripts/audit-access.mjs`** | The full access audit on demand, with the admin rights CI lacks | **Medium** — manual, so only as current as its last run |
+| **`scripts/audit-access.mjs`** | The full access audit on demand — visibility, collaborators, invitations, deploy keys, webhooks, forks — with the admin rights CI lacks | **Medium** — manual, so only as current as its last run. This is now the *only* check on the access surface, after `access-guard` and `main-guard` were removed on 2026-10-09 |
 | **Pinned action SHAs** | An upstream tag re-point cannot change what CI executes | **Medium** — supply chain only |
-| **`main-guard`** | Fails when a commit reached `main` without a pull request | **Detective** only |
 
 ### What was deliberately **not** done
 
@@ -163,18 +161,21 @@ business fact, not a code fact** — nothing in this repository can undo it.
 6. **No technical measure enforces a licence.** Detecting and acting on a copy is a legal
    process with real cost.
 7. **On this plan, enforcement is missing:** branch protection is unavailable on a private
-   repo without GitHub Pro, so the CI checks *report* rather than *gate*, and
-   `main-guard` catches a bypass only afterwards. No secret scanning either.
+   repo without GitHub Pro, so the CI checks *report* rather than *gate*, and a direct push
+   to `main` is neither prevented nor flagged. No secret scanning either.
 8. **Forking cannot be switched off** on a personal private repo — the attempt answers
    `422 Allow forks setting can only be changed on org-owned private repositories`, so a
    personal account cannot close it at all. Nobody outside can fork it (a fork of a private
    repository requires read access, and only the owner has it), but a future collaborator
    could. This is one of the reasons an organization is recommended in §5.
-9. **GitHub Apps are outside every automated check here.** A deployment or CI app with
-   repository access holds its own credential, cannot be enumerated from the CLI (§1), and
-   is not a collaborator — so `access-guard` cannot see it. Reviewing that list is a manual,
-   recurring task, and the single most likely way access is granted without this audit
-   noticing.
+9. **Nothing here notices on its own.** With `access-guard` removed, an accidental change of
+   visibility, a new collaborator, a new deploy key or a new webhook is discovered only when
+   someone runs `node scripts/audit-access.mjs`. Nothing schedules it, so *when* it runs is a
+   habit, not a control.
+10. **GitHub Apps are outside every check, automated or manual-from-the-CLI.** A deployment or
+    CI app with repository access holds its own credential, cannot be enumerated from the CLI
+    (§1), and is not a collaborator. Reviewing that list is a manual task in the UI, and the
+    single most likely way access is granted without this audit noticing.
 
 ---
 

@@ -6394,7 +6394,9 @@ back clean:
   `{"sub":"1"}`, `{"sub":"u1"}`). No real key or token exists anywhere in history.
 
 **Branch protection is now APPLIED and verified by API readback (2026-10-09):** required checks
-**`ci / server`** and **`ci / mobile`** with **strict** up-to-date enforcement, a pull request required
+**`server`** and **`mobile`** — the check-run names GitHub actually reports, **not** the
+`ci / server` / `ci / mobile` form the pull-request UI displays (see the correction below) — with
+**strict** up-to-date enforcement, a pull request required
 (**0** approvals — a single-maintainer repository must not deadlock on self-approval), stale reviews
 dismissed on push, force-pushes and branch deletion blocked, and **`enforce_admins: false`** so the owner
 keeps an explicit escape hatch rather than being locked out.
@@ -6406,11 +6408,17 @@ recorded as the owner's decision**, taken with the scan results above in hand: a
 the full source, history and documentation, and switching back to private does not un-expose content that
 has already been cloned, forked or indexed.
 
-> **Verifying this rather than assuming it.** The required-check context names were unproven when
-> protection was first attempted (the API reports the check runs as `server` and `mobile`, while the UI
-> and the protection API use `ci / server` and `ci / mobile`). They are confirmed by the pull request that
-> carries this record: if the contexts did not match, that PR would sit blocked on an "Expected" check
-> that never reports.
+> **Verifying this rather than assuming it — and being corrected by it.** The probe pull request that
+> carries this record existed to prove the required-check context names, and it **caught the wrong
+> ones**: configured as `ci / server` / `ci / mobile` (the form the pull-request UI shows), **both checks
+> passed** — `server: SUCCESS`, `mobile: SUCCESS`, `mergeable: MERGEABLE` — while the pull request sat
+> at **`mergeStateStatus: BLOCKED`**, waiting on an "Expected" status that can never report. Protection
+> matches the **check-run names the REST API returns**, `server` and `mobile`, not the UI's
+> `<workflow> / <job>` display form. Corrected to those two, the **same** pull request flipped
+> **`BLOCKED` → `CLEAN` with no re-run and no new commit**, which is what proves the match rather than
+> assuming it. Shipped unverified, this would have made **every future pull request unmergeable** —
+> precisely the failure the probe existed to catch, and the reason the required-check names are pinned
+> here as `server`/`mobile` rather than as they appear in the interface.
 
 ## The defect its first run caught — a missing test-owned variable
 

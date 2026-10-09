@@ -1994,12 +1994,27 @@ no `.env`, keystore, `.pem`, `.p12`, `google-services.json` or plist was ever ad
 Google/AWS/OpenAI/Resend/Brevo/SendGrid/GitHub/Render token patterns or a credentialed `mongodb+srv://`
 URI; the "PRIVATE KEY" hits are dummy bodies in `phase32b-firebase-admin.test.mjs` and the JWT-shaped
 strings are fixtures. **Branch protection is applied and verified by API readback:** required checks
-`ci / server` and `ci / mobile`, strict up-to-date enforcement, pull request required (**0** approvals — no
+`server` and `mobile` (**check-run names, not the UI's `ci / server` display form** — F-24), strict
+up-to-date enforcement, pull request required (**0** approvals — no
 self-approval deadlock), stale reviews dismissed, force-push and deletion blocked, `enforce_admins: false`
 so the owner retains an escape hatch. `.github/workflows/main-guard.yml` is **retained** as a second layer
 for the routes protection does not cover. **The exposure trade-off is the owner's decision**, recorded
 with the scan results: a public repository exposes the full source, history and documentation, and
 switching back to private does not un-expose what has already been cloned, forked or indexed.
+
+### Finding recorded — F-24 (required-check context names)
+
+**F-24 — a required status check must name the check run, not the name the UI displays.** Protection was
+first configured with `ci / server` and `ci / mobile`, the `<workflow> / <job>` form the pull-request page
+shows. The two checks then both reported **SUCCESS** and the pull request stayed
+**`mergeStateStatus: BLOCKED`** — protection was waiting on statuses with those exact names, and no check
+run carries them (the REST API returns `server` and `mobile`, i.e. the job names, while the workflow name
+is only a display prefix). Corrected to `server` and `mobile`, the **same** pull request went
+**`BLOCKED` → `CLEAN` without re-running either check and without a new commit**, which is the proof that
+the match — not the setting — was what changed. **The consequence had it shipped unverified: every future
+pull request would have been permanently unmergeable**, failing closed rather than open, which is why
+this is recorded as a finding and not a footnote. Remedy applied: the required contexts are pinned to
+`server`/`mobile`, and the *strict* up-to-date rule plus the **0**-approval setting are both live.
 
 ### What remains open, unchanged
 

@@ -47,5 +47,8 @@
     "jest-expo": "~57.0.5",
     "patch-package": "^8.0.1",
     "typescript": "~6.0.3"
+  },
+  "overrides": {
+    "@grpc/grpc-js": "^1.13.7"
   }
 }

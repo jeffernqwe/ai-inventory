@@ -2218,6 +2218,21 @@ with reasons in §44).
 
 ---
 
+## 46. THE SECRET GUARD'S RULES ARE NOW PROVEN, NOT ASSUMED (2026-10-11)
+
+`scripts/check-secrets.mjs` is this repository's only credential control (GitHub's scanner is unavailable on
+a private repository at this plan level — §42). Its rules were never exercised: the deliberate fixtures in the
+test tree are waived on their own lines, so a run over the tree finds nothing whether or not the rules still
+match. It now carries **22 controls — 16 must-fire (one per rule) and 6 must-not-fire** — run **before** the
+scan on every invocation, so a failed control stops the scan instead of passing it; `--self-test` runs the
+controls alone. Proven by two deliberate breaks, both reverted: a rule that stops matching and a rule that
+becomes over-broad each exit 1 naming the case. The guard also flagged its own two canary literals on the
+first run, fixed with the documented per-line waiver rather than by hiding the strings. Roadmap §27AR.
+**Still pattern matching, not proof** — the controls prove the rules fire, not that every credential shape is
+covered.
+
+---
+
 > **MAINTENANCE.** This is a living navigation document. On any authentication/security change:
 > reconcile against evidence, update only evidence-supported statuses, record newly completed and
 > remaining work, preserve unresolved decisions and deferred items, update external-verification

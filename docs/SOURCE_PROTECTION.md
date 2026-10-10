@@ -129,7 +129,7 @@ business fact, not a code fact** — nothing in this repository can undo it.
 | **Server-side secrets only** | The AI provider keys, Mongo credentials, mail keys and Firebase admin credentials never reach a client; the mobile app talks only to the API | **High** — enforced by architecture, not policy |
 | **Proprietary licence** | Grants no rights; makes copying a licence breach and a copyright issue rather than a grey area | **Legal**, not technical |
 | **Business/tenant isolation, RBAC on the server** | A stolen client cannot read another business's data | **High** |
-| **`scripts/check-secrets.mjs` in CI** | Fails a change that introduces a credential-shaped string; replaces GitHub's scanner, which is unavailable on a private repo at this plan level | **Medium** — pattern matching, not proof |
+| **`scripts/check-secrets.mjs` in CI** | Fails a change that introduces a credential-shaped string; replaces GitHub's scanner, which is unavailable on a private repo at this plan level. **Every rule carries a canary** — 22 controls run before each scan, so a rule that has stopped matching fails the job instead of passing silently (roadmap §27AR) | **Medium** — pattern matching, not proof; the controls prove the *rules* fire, not that every credential shape is covered |
 | **`scripts/audit-access.mjs`** | The full access audit on demand — visibility, collaborators, invitations, deploy keys, webhooks, forks — with the admin rights CI lacks | **Medium** — manual, so only as current as its last run. This is now the *only* check on the access surface, after `access-guard` and `main-guard` were removed on 2026-10-09 |
 | **Pinned action SHAs** | An upstream tag re-point cannot change what CI executes | **Medium** — supply chain only |
 

@@ -373,7 +373,7 @@ unattended; the access check is now the manual `node scripts/audit-access.mjs`. 
 **Dependency policy:** Dependabot queues **minor and patch updates only**, grouped per package,
 at most two open PRs per package, weekly — major versions are taken deliberately and are tracked
 in issue #32 rather than as standing red PRs. Security updates are exempt from all of that and
-still arrive on their own.
+still arrive on their own. Expo SDK-pinned core packages in `mobile/` — `react`, `react-dom`, `react-native`, `react-native-safe-area-context`, `react-native-screens` — are additionally excluded from version updates: Dependabot cannot know the SDK's pinned versions, so these move only with an Expo SDK upgrade via `npx expo install --fix` (roadmap §27AH, ISS-16).
 
 **Records are proportional:** a security, architecture, authorization, schema, route,
 dependency-policy or phase-level change gets a dated record; a routine feature or fix is

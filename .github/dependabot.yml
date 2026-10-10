@@ -17,7 +17,9 @@ version: 2
 # pull request, immediately, regardless of the `ignore` rule below.
 #
 # TO TAKE A MAJOR DELIBERATELY: remove the `ignore` entry (or re-open the closed PR) for the upgrade
-# being planned. Issue #32 lists each one with the CI failure that made it blocked.
+# being planned. Issue #32 lists each one with the CI failure that made it blocked. The same applies to
+# any Expo SDK-pinned package in `mobile/`: it is taken with the SDK upgrade, not on its own — see the
+# block comment beside that list.
 #
 # REMINDER: `main` cannot be protected at this plan level — branch protection and rulesets both
 # answer `403 Upgrade to GitHub Pro or make this repository public` on a private repository
@@ -66,12 +68,44 @@ updates:
       - dependency-name: "*"
         update-types:
           - version-update:semver-major
-      # Expo SDK-pinned core packages: Dependabot cannot know the SDK's pinned versions, so every
-      # version update for these is refused here — PR #34 showed why (react-native 0.87.1, react
-      # 19.3.0, safe-area-context ~5.10.1, screens ~4.28.0 outside SDK 57's set). CI cannot detect
-      # the mismatch; it only surfaces in a native build. These move only with an Expo SDK upgrade
-      # via `npx expo install --fix` (issue #32; roadmap §27AH, ISS-16). Security updates remain
-      # unaffected (see the header).
+      # EVERY Expo SDK-pinned package is refused here, not only the React/RN core. The rule is
+      # mechanical rather than a judgement call: if the package is a key in the installed SDK's
+      # `expo/bundledNativeModules.json`, Expo owns its version and Dependabot cannot know it.
+      #
+      # WHY THE SCOPE GREW (2026-10-11). The carve-out originally covered five packages, which made
+      # Dependabot free to propose the other twelve — derived by reading `bundledNativeModules.json`,
+      # 17 of the 21 mobile dependencies are SDK-pinned. That is exactly where the two failures came
+      # from: PR #34 moved react-native/react/safe-area-context/screens outside SDK 57 (ISS-16), and
+      # PR #38 proposed the SDK 57 patch rollup that cannot install at all — it nests
+      # `expo-modules-core` where root-level `jest-expo` cannot resolve it, and declaring it directly
+      # is an `ERESOLVE` against the `react-native-worklets` that `expo-router` forces (ISS-17,
+      # roadmap §27AK). CI cannot see either failure class; the second one only appears at install
+      # and the first only in a native build.
+      #
+      # HOW THEY MOVE INSTEAD: with an Expo SDK upgrade, deliberately, through
+      # `npx expo install --fix` — the command that reads exactly these pins — under the runbook in
+      # roadmap §27AI. Every entry below is measured against the installed SDK, so this list is
+      # re-derived when the SDK moves rather than guessed.
+      #
+      # THE FOUR THAT STAY OPEN: `@react-native-firebase/app`, `@react-native-firebase/auth`,
+      # `@react-native-google-signin/google-signin` and `expo` itself are not pinned this way — the
+      # first three are version choices this project makes and Dependabot may still propose them.
+      # (`expo` IS listed below: the SDK package carries the upgrade, so it is taken deliberately.)
+      #
+      # Security updates remain unaffected by every rule in this list (see the header).
+      - dependency-name: "@expo/vector-icons"
+      - dependency-name: expo
+      - dependency-name: expo-camera
+      - dependency-name: expo-constants
+      - dependency-name: expo-dev-client
+      - dependency-name: expo-font
+      - dependency-name: expo-linking
+      - dependency-name: expo-print
+      - dependency-name: expo-router
+      - dependency-name: expo-secure-store
+      - dependency-name: expo-sharing
+      - dependency-name: expo-status-bar
+      - dependency-name: expo-system-ui
       - dependency-name: react
       - dependency-name: react-dom
       - dependency-name: react-native

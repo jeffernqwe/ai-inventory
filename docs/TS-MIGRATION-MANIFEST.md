@@ -135,7 +135,7 @@ close.
 | --- | --- | --- |
 | Typecheck | `npm run typecheck` (`tsc --noEmit`) | **0 errors** |
 | Lint | `npm run lint` (`eslint .`) | **0 problems** |
-| Unit baseline | `npm run test:unit` | **259 tests / 74 suites — 239 pass, 0 fail, 20 skipped** |
+| Unit baseline | `npm run test:unit` | **259 tests / 74 suites — 239 pass, 0 fail, 20 skipped** *(Annotated 2026-10-11: a **close-out snapshot**, not a current count. **CI is the single source of truth** — at that date the server suite was **185 suites / 1312 tests, 0 failures**. See roadmap §27AH, ISS-15.)* |
 | Module graph — duplicates | `npm run check:extensions` | **240 modules scanned, 0 duplicate module stems** |
 | Module graph — specifiers | `npm run check:specifiers` | **240 files scanned, 1206 relative specifiers resolved (540 literal, 666 by candidate extension), 0 stale, 0 unresolved** |
 | Runtime startup gate (Gate 6) | out-of-repo harness | **30 / 30** |

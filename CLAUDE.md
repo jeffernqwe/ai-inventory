@@ -373,7 +373,13 @@ unattended; the access check is now the manual `node scripts/audit-access.mjs`. 
 **Dependency policy:** Dependabot queues **minor and patch updates only**, grouped per package,
 at most two open PRs per package, weekly — major versions are taken deliberately and are tracked
 in issue #32 rather than as standing red PRs. Security updates are exempt from all of that and
-still arrive on their own. Expo SDK-pinned core packages in `mobile/` — `react`, `react-dom`, `react-native`, `react-native-safe-area-context`, `react-native-screens` — are additionally excluded from version updates: Dependabot cannot know the SDK's pinned versions, so these move only with an Expo SDK upgrade via `npx expo install --fix` (roadmap §27AH, ISS-16).
+still arrive on their own. **Every package the installed Expo SDK pins** is additionally excluded from
+version updates — the rule is mechanical: if it is a key in `expo/bundledNativeModules.json`, Expo owns
+its version and Dependabot cannot know it (17 of the 21 mobile dependencies on 2026-10-11, up from the
+five React/RN core packages the carve-out originally named). These move only with an Expo SDK upgrade via
+`npx expo install --fix` (roadmap §27AH/§27AL; ISS-16, ISS-17). The four that stay open are
+`@react-native-firebase/app`, `@react-native-firebase/auth`, `@react-native-google-signin/google-signin`
+and `expo` itself, whose versions this project chooses deliberately.
 
 **Records are proportional:** a security, architecture, authorization, schema, route,
 dependency-policy or phase-level change gets a dated record; a routine feature or fix is

@@ -6755,7 +6755,7 @@ nothing. `ci.yml` and its three jobs, `scripts/check-secrets.mjs`, the pinned ac
 ## Why this section exists
 
 To stop re-auditing the repository to remember where the project is. Everything here is a **working view**,
-verified on 2026-10-10 against `main` @ `e00ba97`; it adds no phase status and changes none. The phase records
+verified on 2026-10-10 and re-checked after the P0 merges (`f2f6731`, `aadab04`, `bf0c915`); it adds no phase status and changes none. The phase records
 above remain authoritative for what shipped, and `docs/AUTH_SECURITY_MASTER_CHECKLIST.md` for anything
 security-relevant. **A task is complete only with evidence** — a commit, a CI run or a measured command output.
 Published figures drift (advisory counts especially); re-read a number at the moment you quote it.
@@ -6768,12 +6768,12 @@ update its tracking boxes, status rows and heading date at the end of a session 
 
 | Dimension | Verified state |
 | --- | --- |
-| Repository | `main` = `origin/main` = `e00ba97`; no tags, no stashes; the 2026-10-10 corrections are committed on `docs/2026-10-10-corrections` (**PR #35**); one untracked guide still awaits its decision (P3-3) |
+| Repository | `main` = `origin/main`, post-P0 (`bf0c915`); no tags, no stashes; the device guide is committed (P3-3 resolved) |
 | CI | `.github/workflows/ci.yml` only — jobs **server / mobile / secret-guard**; last `main` run green (3 m 13 s, 2026-10-09) |
 | Backend | **117** `.ts` modules + one deferred `.js` (`server/src/services/entitlement.service.js`); **0** open advisories |
 | Mobile | **129** `.ts`/`.tsx` sources and **0** `.js`/`.jsx` in `app/ components/ lib/ __tests__/`; Expo 57 / RN 0.86.3 |
 | Tests | **68** server test files, **47** mobile test files (file counts; CI is the current source of truth) |
-| Open on GitHub | **PR #35** (docs corrections), **PR #36** (ISS-01 fix, verified locally), **PR #37** (Dependabot Expo-pin ignores); **PR #34 closed** as not mergeable (ISS-16); **issue #32** open |
+| Open on GitHub | Nothing open but **issue #32** (deferred majors); #35/#36/#37 merged 2026-10-10 and #34 closed (ISS-16) |
 | Open advisories | **7** — 3 high, 3 medium, 1 low, 0 critical (all mobile) |
 | Production | Render auto-deploy from `main`; `https://ai-inventory-l1mi.onrender.com` reachable and serving the AUTH-04 endpoints |
 
@@ -6797,11 +6797,9 @@ Facebook Login and Apple Sign-In remain unimplemented.
 
 ## In progress
 
-There is **no in-flight feature work**. The P0 items were executed on 2026-10-10 (session 2): the corrections are on
-**PR #35**, the ISS-01 fix on **PR #36** (verified locally — `npx tsc --noEmit`, `npx eslint .`, `npx jest`: 47 suites /
-644 tests), the Dependabot carve-out on **PR #37**, and **PR #34 is closed** (its versions are outside SDK 57 — ISS-16;
-they arrive with the SDK 58 upgrade). The untracked `docs/DEVELOPING_ON_A_PHYSICAL_DEVICE.md` still needs a
-commit-or-discard decision (P3-3).
+There is **no in-flight feature work**. P0 closed on 2026-10-10: #35/#36/#37 merged (`f2f6731`, `aadab04`,
+`bf0c915`), #34 closed (ISS-16), and the device guide committed (P3-3 resolved). SDK 58 execution is deferred by its
+recorded Gate 0 decision (§27AI). Next: **ISS-02** (RNFirebase PII remediation), the advisories disposition, then P3-1.
 
 ## Known issues and required fixes
 
@@ -6830,11 +6828,11 @@ P-6 + Gate 1 + iOS app registration (environment-blocked), and the new-identity 
 
 ## Pending
 
-**Fixes:** ISS-01 (the React 19.3 type migration) · ISS-16 (dispose of PR #34; decide the Dependabot carve-out) · ISS-02 (decision then remediation) · ISS-13 (once its home is decided).
-**Upgrades, in issue #32's order:** Expo SDK 58 via `npx expo install --fix` — the only safe vehicle for the RN/React versions PR #34 proposed (ISS-16; runbook: **§27AI**, whose verified pins differ from PR #34's set — RN 0.88 family, not 0.87.1) → the React 19 type fixes (ISS-01 is the first of them) → TypeScript 7 →
+**Fixes:** ISS-02 (next — remediation) · ISS-13 (once its home is decided). *(ISS-01 fixed in #36; ISS-16 disposed in #37 — both merged 2026-10-10.)*
+**Upgrades, in issue #32's order:** Expo SDK 58 — **deferred by Gate 0 until Expo promotes it to `latest`** (§27AI records the decision and the runbook; the pins differ from PR #34's set — RN 0.88 family, not 0.87.1) → the React 19 type fixes (ISS-01 is the first of them) → TypeScript 7 →
 jest 30 → the `actions/*` v7 re-pin (also clears ISS-12) → `dotenv` 18 and `@types/bcryptjs` 3.
 **Testing:** the L-17 mail leg, owner-assisted; and a dated test baseline for this section.
-**Documentation:** the corrections listed at the end of this section; Phase 30B; the device guide; `docs/freebuff/*`.
+**Documentation:** Phase 30B (P3-1) and `docs/freebuff/*` (P3-2); the corrections and the device guide are done.
 **Deliberately not scheduled:** Facebook Login, Apple Sign-In, and everything in §35 V2/V3/V4. No new feature work
 before P0–P2 are clear.
 
@@ -6860,9 +6858,9 @@ test-count source. *Why:* phase discipline is unenforceable while a "phase" has 
 
 ## Immediate next actions
 
-1. **Review and merge PRs #35 → #36 → #37** (docs → type migration → dependency policy), then delete the three merged branches — all P0 work is executed; only review and merge remain.
-2. **Then decide P3-1** (Phase 30B): once the fix and corrections are in, the remaining ambiguity is scope, not code.
-3. **Then execute §27AI** (Expo SDK 58) — Gate 0 first: SDK 58 is still on the `next` dist-tag with an RN release candidate pinned, so either wait for its promotion or record an explicit owner decision to proceed.
+1. **ISS-02 next** — the RNFirebase PII finding: scope the exposure, choose the remediation and implement it (P2-1).
+2. **Then dispose of the 7 open advisories** — a fix-or-accept note per advisory; several are not version-fixable.
+3. **Decision: P3-1** (Phase 30B) — define it or remove its references; and keep the SDK 58 Gate 0 watch (`npm view expo dist-tags`).
 
 **Do not:** start any V2/V3/V4 feature, write to production, or push directly to `main`. PR #34 is closed (ISS-16); its versions arrive only with the SDK 58 upgrade.
 
@@ -6891,15 +6889,15 @@ test-count source. *Why:* phase discipline is unenforceable while a "phase" has 
 
 ## Tracking
 
-- [x] **P0-1** ISS-01 four `null`-typed prop values fixed — **PR #36**, verified locally (tsc/eslint/jest: 644 tests)
-- [x] **P0-2** ISS-16 **PR #34 closed**; Dependabot carve-out proposed in **PR #37**
+- [x] **P0-1** ISS-01 four `null`-typed prop values fixed — **merged (#36, `aadab04`)**, tsc/eslint/jest 644 tests
+- [x] **P0-2** ISS-16 **PR #34 closed**; Dependabot carve-out **merged (#37, `bf0c915`)**
 - [x] **P1** ISS-03 / ISS-04 / ISS-05 / ISS-08 / ISS-09 / ISS-10 / ISS-11 corrections *(done 2026-10-10)*
-- [ ] **P2-1** ISS-02 RNFirebase PII remediation — decision needed
+- [ ] **P2-1** ISS-02 RNFirebase PII remediation — **in progress (2026-10-10)**
 - [ ] **P2-2** ISS-06 P-3 SDK alignment
 - [ ] **P2-3** issue #32 upgrade train
 - [ ] **P3-1** Phase 30B defined or its references removed (ISS-07, ISS-13) — decision needed
 - [ ] **P3-2** `docs/freebuff/*` fate — decision needed
-- [ ] **P3-3** device guide committed or discarded — decision needed
+- [x] **P3-3** device guide **committed** (2026-10-10; `docs/DEVELOPING_ON_A_PHYSICAL_DEVICE.md`)
 - [ ] **P3-4** stale WIP branch disposed of (ISS-14) — decision needed
 - [ ] **P3-5** single test-count source declared (ISS-15)
 - [ ] **P4** deferred debt — no action (B1, B2, E3, OD-10, L-17, O-5/O-6/O-10/O-11, iOS gates)
@@ -6923,8 +6921,8 @@ versions must arrive through `npx expo install --fix` rather than a raw Dependab
 PR #34). This section is the **runbook**: the ordered steps, the checks, the device acceptance pass
 and the rollback, so the upgrade can be executed without re-deriving any of it.
 
-**Approval:** merging the PR that adds this section constitutes approval of the procedure.
-**Execution has not started** and must not begin before Gate 0 and the prerequisites below.
+**Approval:** approved by merge `f2f6731` (PR #35, 2026-10-10). **Execution has not started** — the Gate 0
+decision below currently defers it until SDK 58 reaches `latest`.
 
 ## Gate 0 — release status (re-check at execution)
 
@@ -6935,6 +6933,12 @@ Read on 2026-10-10 with `npm view expo dist-tags`: `latest = 57.0.27`, **`next =
 - **Preferred:** wait until Expo promotes SDK 58 to `latest` (the pins are then final), then execute.
 - **Alternative:** execute on the pre-release SDK **only by an explicit owner decision**, recorded in
   the executing PR. Re-run `npm view expo dist-tags` at execution — never trust this line.
+
+**Decision (2026-10-10, made under the owner's standing delegation): wait for promotion — do not execute on the
+pre-release.** A native SDK move on a pinned release candidate is exactly the class of change JS-only CI cannot
+validate (ISS-16's lesson), and majors are taken deliberately. **Watch:** run `npm view expo dist-tags` at the start
+of any session that considers executing; begin when `latest` is a 58.x release. If the pre-release path is chosen
+later, replace this paragraph with that decision, its date and its rationale.
 
 ## Verified target set (read from the package, not guessed)
 

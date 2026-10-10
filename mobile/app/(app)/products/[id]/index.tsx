@@ -158,12 +158,20 @@ export default function ProductDetailScreen() {
     return barcodeLabelHtml(product.barcode, { productName: product.name, sku: product.sku });
   }
 
-  /** Open the OS print dialog with a plain label page (no printer config). */
+  /**
+   * Open the OS print dialog with the label as its own page (no printer config).
+   *
+   * The page geometry comes from the same `barcodeLabelHtml` result the PDF path
+   * uses, so printing and sharing produce **one** layout instead of two. Passing
+   * only `html` would page the label at `expo-print`'s default (US Letter, 612×792),
+   * which is a different document from the 595×340 label the share sheet offers.
+   */
   async function onPrintLabel(): Promise<void> {
     if (busyLabel) return;
     setBusyLabel(true);
     try {
-      await printAsync({ html: labelHtml().html });
+      const { html, width, height } = labelHtml();
+      await printAsync({ html, width, height });
     } catch (err) {
       Alert.alert('Could not print the label', errorText(err));
     } finally {

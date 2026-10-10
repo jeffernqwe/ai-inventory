@@ -6799,14 +6799,14 @@ Facebook Login and Apple Sign-In remain unimplemented.
 
 There is **no in-flight feature work**. P0 closed on 2026-10-10: #35/#36/#37 merged (`f2f6731`, `aadab04`,
 `bf0c915`), #34 closed (ISS-16), and the device guide committed (P3-3 resolved). SDK 58 execution is deferred by its
-recorded Gate 0 decision (§27AI). Next: **ISS-02** (RNFirebase PII remediation), the advisories disposition, then P3-1.
+recorded Gate 0 decision (§27AI). **ISS-02 closed out on 2026-10-10** (remediated — §27AJ, PR #40). Next: the **advisories disposition**, then P3-1.
 
 ## Known issues and required fixes
 
 | ID | Sev | Issue | Evidence | Fix |
 | --- | --- | --- | --- | --- |
 | **ISS-01** | High | PR #34 fails the `mobile` job with four `TS2322`: `Type 'null' is not assignable to type 'Element \| ComponentType<any> \| undefined'` at `components/ListScreen.tsx(102,10)` and `(109,8)`, `components/RefManage.tsx(265,9)`, `components/SelectField.tsx(147,13)` | CI run `37899073322` (reproduced twice) | Fix the `null`-typed prop values — `ListScreen.tsx:86` (`?? null`), `RefManage.tsx:266` and `SelectField.tsx:150` (`: null`) → `undefined`. **Done, verified locally — PR #36** (`npx tsc --noEmit`, `npx eslint .`, `npx jest`: 47 suites / 644 tests); **not** a check to relax |
-| **ISS-02** | High | **RNFirebase PII logging reaches release builds**: `@react-native-firebase/auth` 26.4.0 logs the Firebase user object via `Log.d`, **not build-gated**; logcat only; uid/email/displayName/provider metadata, no credentials; no supported toggle; **no remediation implemented** | Checklist §24/§28; dependency confirmed at 26.4.0 | Owner decision on scope, then implement; interacts with the SDK 58 train |
+| **ISS-02** | High → **`[~]`** | **RNFirebase PII logging reaches release builds**: `@react-native-firebase/auth` 26.4.0 logs the Firebase user object via `Log.d`, **not build-gated**; logcat only; uid/email/displayName/provider metadata, no credentials; no supported toggle | Checklist §24/§28; source re-read 2026-10-10 (one line; the id-token listener logs nothing; iOS side logs nothing) | **Remediated 2026-10-10 — `patch-package` patch + `postinstall --error-on-fail`, §27AJ.** Artifact-level verified (patch content, end-to-end reinstall applies it, 8-case guard, mobile 48/652, LF-pinned by `.gitattributes`). **Not closed:** no native build yet — §27AI step 9 re-checks logcat |
 | **ISS-03** | Medium | Documents claim **9 open advisories** (1 critical, 4 high, 3 moderate, 1 low) | CLAUDE.md, checklist §42, this file's §27AE, issue #32 | Live value is **7** (3 high, 3 medium, 1 low, 0 critical) — corrected in place on 2026-10-10 |
 | **ISS-04** | Medium | `README.md` calls the mobile app "written in **JavaScript**" and starts it with **Expo Go** | README:379, README:391 | It is 129 `.ts`/`.tsx` / 0 `.js`, and it needs a **development build** (RNFirebase + dev client). Corrected 2026-10-10 |
 | **ISS-05** | Medium | §35 stated Google Sign-In was "approved, not implemented" with "no provider SDK installed" and the first dev build still a prerequisite | §35 | Corrected 2026-10-10 (see §35) |
@@ -6828,7 +6828,7 @@ P-6 + Gate 1 + iOS app registration (environment-blocked), and the new-identity 
 
 ## Pending
 
-**Fixes:** ISS-02 (next — remediation) · ISS-13 (once its home is decided). *(ISS-01 fixed in #36; ISS-16 disposed in #37 — both merged 2026-10-10.)*
+**Fixes:** ISS-13 (once its home is decided) · ISS-06 (with the SDK 58 train). *(ISS-01 fixed in #36; ISS-16 disposed in #37; ISS-02 remediated — §27AJ; all 2026-10-10.)*
 **Upgrades, in issue #32's order:** Expo SDK 58 — **deferred by Gate 0 until Expo promotes it to `latest`** (§27AI records the decision and the runbook; the pins differ from PR #34's set — RN 0.88 family, not 0.87.1) → the React 19 type fixes (ISS-01 is the first of them) → TypeScript 7 →
 jest 30 → the `actions/*` v7 re-pin (also clears ISS-12) → `dotenv` 18 and `@types/bcryptjs` 3.
 **Testing:** the L-17 mail leg, owner-assisted; and a dated test baseline for this section.
@@ -6845,9 +6845,9 @@ before P0–P2 are clear.
 **P1 — correct the documented facts that mislead.** ISS-03, ISS-09, ISS-10, ISS-11 (done 2026-10-10); ISS-04, ISS-05,
 ISS-08 (done 2026-10-10). *Exit:* every corrected figure re-read from its source at edit time.
 
-**P2 — the security-relevant native layer, before the next native build.** ISS-02 (decide, then implement), ISS-06,
-then issue #32's upgrade train. *Exit:* CI green at each step; one device build launched and used per native change.
-*Dependency:* P2 needs ISS-01's fix pattern established, and ISS-02 needs its decision first.
+**P2 — the security-relevant native layer, before the next native build.** ~~ISS-02~~ (**remediated 2026-10-10, §27AJ** — its
+native-build confirmation rides with the SDK 58 device pass), then ISS-06 and issue #32's upgrade train. *Exit:* CI green at
+each step; one device build launched and used per native change. *Dependency:* P2's ISS-01 pattern is established (#36).
 
 **P3 — decisions and housekeeping (owner input required).** Define or remove **Phase 30B** and assign ISS-13 to it;
 decide `docs/freebuff/*`; commit or discard the device guide; dispose of the stale WIP branch; declare CI the single
@@ -6858,8 +6858,8 @@ test-count source. *Why:* phase discipline is unenforceable while a "phase" has 
 
 ## Immediate next actions
 
-1. **ISS-02 next** — the RNFirebase PII finding: scope the exposure, choose the remediation and implement it (P2-1).
-2. **Then dispose of the 7 open advisories** — a fix-or-accept note per advisory; several are not version-fixable.
+1. **Dispose of the 7 open advisories** — a fix-or-accept note per advisory; several are not version-fixable.
+2. **Then P2-2** — ISS-06, the RNFirebase `compileSdk`/`targetSdk` alignment, with the next native build.
 3. **Decision: P3-1** (Phase 30B) — define it or remove its references; and keep the SDK 58 Gate 0 watch (`npm view expo dist-tags`).
 
 **Do not:** start any V2/V3/V4 feature, write to production, or push directly to `main`. PR #34 is closed (ISS-16); its versions arrive only with the SDK 58 upgrade.
@@ -6884,15 +6884,16 @@ test-count source. *Why:* phase discipline is unenforceable while a "phase" has 
   with `--clear`. A `preview`/`production` APK cannot load your edits: an EAS **`development`** build is required.
   Known environment limit: ColorOS refuses the shell `WRITE_SECURE_SETTINGS`, so scrcpy's `-w` (stay-awake) is
   declined — raise the phone's screen timeout instead. Full procedure: `docs/DEVELOPING_ON_A_PHYSICAL_DEVICE.md`.
-- **Baseline.** Run the suites and record the date and counts here when P1 completes; until then CI is the only
-  current source of truth (ISS-15).
+- **Baseline.** CI is the **single source of truth** (ISS-15); dated local counts are kept here only as
+  snapshots. Latest: **2026-10-10 — mobile 48 suites / 652 tests, 0 failures**; server at that date **185
+  suites / 1312 tests, 0 failures**. Re-read the numbers at execution; never quote a stale figure.
 
 ## Tracking
 
 - [x] **P0-1** ISS-01 four `null`-typed prop values fixed — **merged (#36, `aadab04`)**, tsc/eslint/jest 644 tests
 - [x] **P0-2** ISS-16 **PR #34 closed**; Dependabot carve-out **merged (#37, `bf0c915`)**
 - [x] **P1** ISS-03 / ISS-04 / ISS-05 / ISS-08 / ISS-09 / ISS-10 / ISS-11 corrections *(done 2026-10-10)*
-- [ ] **P2-1** ISS-02 RNFirebase PII remediation — **in progress (2026-10-10)**
+- [x] **P2-1** ISS-02 RNFirebase PII remediation — **implemented and artifact-verified (2026-10-10, §27AJ)**; device re-check rides with the SDK 58 pass
 - [ ] **P2-2** ISS-06 P-3 SDK alignment
 - [ ] **P2-3** issue #32 upgrade train
 - [ ] **P3-1** Phase 30B defined or its references removed (ISS-07, ISS-13) — decision needed
@@ -6997,8 +6998,9 @@ five** (RN and safe-area). Everything else the SDK pins follows `expo install --
      check `EXPO_PUBLIC_API_URL` (must be reachable from the phone) before touching the SDK.
    - Smoke journeys: Firebase sign-in and the AUTH-03 renewal path; the three list surfaces touched by
      #36 (empty / loading / error / footer states); the email-verification screen; one stock-in and one
-     stock-out; one transfer. In logcat, compare the RNFirebase PII note (ISS-02) against its recorded
-     disposition — it must not quietly widen.
+     stock-out; one transfer. In logcat, confirm the remediated RNFirebase PII line (ISS-02, §27AJ) is
+     **absent** — a `Log.d` line for `addAuthStateListener:eventBody` must not appear — and that the
+     patch still applies at this version.
    - Device limit to expect: ColorOS refuses `WRITE_SECURE_SETTINGS`, so raise the screen timeout
      manually (see `docs/DEVELOPING_ON_A_PHYSICAL_DEVICE.md`).
 10. **Merge criteria.** All of: CI green; `expo install --check` clean; doctor findings resolved or
@@ -7019,7 +7021,7 @@ Record the reason and reopen issue #32's entry.
 - **First real RN 0.88 native build** — JS CI cannot prove it; only step 9 can.
 - **Pre-release pins** — the RN RC is exactly what Gate 0 exists for.
 - **`compileSdk` (P-3 / ISS-06)** — the upgrade is where it must be fixed.
-- **ISS-02 PII** — validate against its disposition; if remediation lands first, this pass re-tests it.
+- **ISS-02 PII** — remediated at the artifact level (§27AJ); this pass is where the fix is finally observed on a device.
 - **Advisories drift** — re-read the count at execution (7 on 2026-10-10); some may change with the
   new dependency graph.
 - **iOS** — unverifiable on this host; export-only until a macOS host exists.
@@ -7030,6 +7032,103 @@ Branch + PR number; CI run URL; `expo install --check` and `expo-doctor` outputs
 device-pass notes (signals + journeys); new test counts; updated §27AH rows; closed issue #32 entry.
 
 ---
+
+# 27AJ. ISS-02 — the RNFirebase Auth PII log, remediated (2026-10-10, PR #40)
+
+## The finding, re-read at source
+
+`@react-native-firebase/auth` **26.4.0** — the pinned and current version — logs the Firebase user
+object from `NativeRNFBTurboAuth.java`. Read line by line on 2026-10-10, the site is **exactly one
+line**, `addAuthStateListener:eventBody`, whose payload is `firebaseUserToMap(user)`: **uid, email,
+display name, provider metadata**. The call is **not** wrapped in a `BuildConfig.DEBUG` guard, so it
+is reachable in a release build, and it lands in **device logcat** only — the app never transmits it,
+and **no credential is in it** (no ID token, no password, no hash). The exposure is an `adb logcat`
+reader on an unlocked, USB-debugged device; a device with logging restricted, or a released build on
+a locked device, is not exposed.
+
+Two adjacent claims were re-checked rather than assumed:
+
+- The **id-token listener logs nothing**, so the earlier "no token" statement is true at the source.
+- The **iOS side of the same package contains zero `Log` calls** — this is Android-only and needs no
+  iOS counterpart.
+
+Our own code is clean: `mobile/lib`, `mobile/app` and `mobile/components` contain **zero**
+`console.*` calls (the single grep hit is a comment).
+
+## Decision — patch it out, and keep the patch honest
+
+| Option | Outcome |
+| --- | --- |
+| Do nothing | **Rejected** — release-reachable account-identity PII, and the cost of removing it is one line |
+| R8/ProGuard `Log.d` stripping | **Not implemented** — a build-wide change with its own diagnostic risk, verifiable only with a release build on the EAS-managed Android path. Kept in reserve for the SDK 58 train |
+| `patch-package` patch removing that single call | **Chosen** — dependency-local, reviewable as a 9-line artifact, applied automatically on every install, `Log.e` diagnostics preserved |
+
+**There is no version to bump into:** 26.4.0 **is** the latest published `@react-native-firebase/auth`,
+so the remediation cannot be a dependency update. An upstream report is recommended and recorded as a
+follow-up — this change does not file one.
+
+## Mechanism, as implemented
+
+- `mobile/package.json` — `patch-package` as a **devDependency** plus
+  `"postinstall": "patch-package --error-on-fail"`, so a fresh clone, CI's `npm ci` and an EAS build
+  all apply the patch before anything compiles **and a failed apply stops the install** (why the flag
+  is not optional: measured below).
+- `.gitattributes` — `*.patch text eol=lf`, so the patch is byte-identical in a Windows working copy
+  and on a Linux runner rather than LF in the repository and CRLF on this host.
+- `mobile/patches/@react-native-firebase+auth+26.4.0.patch` — **one removed line, zero added**; no other
+  `Log.d` call in the package is touched, and neither is the data emission or the event send.
+- The patch name is **derived from the pinned version**. When the dependency is bumped the patch stops
+  applying, `postinstall` fails loudly, and the guard below fails first saying why. A silently lost
+  patch is the failure mode worth preventing, not a build that limps on unpatched.
+
+## Verification — what was run, and what it does not cover
+
+| Check | Result |
+| --- | --- |
+| Patch content re-read | one removed line, correct hunk, `Log.e` + `firebaseUserToMap` untouched |
+| End-to-end apply | package directory deleted, `npm install` run → **`postinstall` re-applied the patch and the PII line was absent** in the reinstalled package (the fresh-clone / CI / EAS path) |
+| Guard suite | `mobile/__tests__/iss-02-rnfirebase-auth-pii-patch.test.ts` — **8 cases, passing** |
+| Full mobile suite | **48 suites / 652 tests, 0 failures** (baseline 47 / 644 → **+1 suite / +8 tests**) |
+| Fresh Windows checkout | patch restored from the blob with `.gitattributes` in place: **933 bytes, LF, zero carriage returns** (asserted by the suite) |
+| Mobile `tsc` / `eslint` | clean (exit 0) |
+| Lockfile | **purely additive** (`+173`), no transitive churn, no audit delta |
+
+The guard sits at the artifact layer because that is what can be asserted here: the native code is not
+compiled on this host, and `node_modules` is neither committed nor guaranteed present. It pins the
+patch name to the pinned version, the `postinstall` hook, the exact target file, the single removed
+line, and — when the package *is* installed — that the installed source no longer contains the call.
+A version bump therefore fails the suite with a regenerate-the-patch message rather than passing quietly.
+
+## Limits — recorded, not glossed
+
+- **No native Android build of the patched source has been run, and the log has not been observed
+  absent on a device.** That is the remaining acceptance step; §27AI's device pass now names it.
+- The device guide's logcat check is a **check**, not a measurement.
+- **Disposition: `[!]` → `[~]`.** Remediated and verified at the artifact level; **not closed** until a
+  development build confirms the line is gone from logcat.
+
+## Two things measured while hardening this
+
+**A failed apply is silent locally, and lethal on CI.** Patch-package 8.0.1 exits **0** on a genuine
+apply failure unless `--error-on-fail` is passed — the flag is **on by default only when `CI` is set**.
+Measured three ways against a deliberately inapplicable patch: default flags → exit **0** with the
+error printed (a Windows install would carry on unpatched); `--error-on-fail` → exit **1**; `CI=true` →
+exit **1**. Hence the explicit flag in `postinstall`, and the guard suite pins it. A stale patch after a
+dependency bump now stops the install everywhere, not only on the runner.
+
+**CRLF is not the hazard it looks like.** Git warned it would rewrite the patch's line endings on this
+host, so it was tested rather than assumed: with a pristine source file, **both an LF and a CRLF copy of
+the patch applied correctly and removed the line** (`@react-native-firebase/auth@26.4.0 ✔`, exit 0).
+The `.gitattributes` rule is therefore **determinism, not a workaround** — and an earlier apparent
+failure was this author's own mangled test fixture, which is recorded here so the next person does not
+re-derive a wrong cause from it.
+
+**And one environment note, for whoever regenerates the patch:** `npx patch-package` **cannot generate**
+a patch here — `npx` injects an `--allow-scripts` config into the child npm process, which npm 11.19.1
+rejects (`EALLOWSCRIPTS: --allow-scripts is not allowed in project-scoped installs`), and patch-package
+swallows npm's output (`stdio: "ignore"`), surfacing only an opaque spawn error. Invoking its CLI
+directly through `node` generates the patch normally. **The apply path never shells out to npm**, so
+`postinstall` is unaffected.
 
 # 28. Phase Gate System
 

@@ -172,7 +172,7 @@ Repository implementation is separated from Firebase Console / external setup.
 | `[⛔]` | **iOS build** | Not possible on host | P-6 | design §14A.11 |
 | `[⛔]` | **iOS runtime** | Never occurred | P-6 | `[EXTERNAL VERIFICATION REQUIRED]` |
 | `[⛔]` | **Keychain persistence / reinstall behaviour** | Unknown | P-4 device-time | decision §8.2 |
-| `[⛔]` | **compileSdk/targetSdk alignment** | RNFirebase declares 34; project targets higher | P-3 build-time | decision §8.2 |
+| `[~]` | **compileSdk/targetSdk alignment** | RNFirebase declares 34; project targets higher. **Re-read at source 2026-10-10:** 34 is RNFirebase's **own** `sdkVersions.android` library value, not a hardcode; the app's levels come from the version catalog via `ExpoRootProjectPlugin` (fallback 35). AGP needs the app's compileSdk ≥ its dependencies', which holds, and a library's `targetSdk` has no runtime effect — so this is **expected-benign and unverified**, not a proven blocker | P-3 build-time | decision §8.2; roadmap §27AH ISS-06 |
 | `[~]` | **Expo SDK 57 compatibility** | Compatibility PASS per decision | build-time confirm | decision §8.2 |
 | `[~]` | **Config-plugin verification** | Auto-discovery confirmed | build-time | §32F/§27P |
 | `[~]` | **Firebase Console configuration** | Google provider + Android app + SHA-1/SHA-256 registered; iOS open (P-6) | owner | §3b |
@@ -730,7 +730,7 @@ are missing.
 | --- | --- | --- | --- | --- | --- | --- |
 | **P-1** | `google-services.json` / `GoogleService-Info.plist` storage | `[✓]` FROZEN | decision §8.1 — EAS build-time injection, not committed | — | — | Repo-side |
 | **P-2** | Google Sign-In library | `[✓]` FROZEN | `@react-native-google-signin/google-signin@16.1.5` | build/runtime verify | confirm at build | partly |
-| **P-3** | RNFirebase compileSdk/targetSdk alignment | `[⛔]` | RNFirebase declares 34; project targets higher | build-time | build | no |
+| **P-3** | RNFirebase compileSdk/targetSdk alignment | `[~]` | RNFirebase declares 34 as its **library** value (its own `package.json`); the app's values are set by `ExpoRootProjectPlugin` from the version catalog. Expected-benign — the app's must merely be ≥ its dependencies' — but **unverified**, since nothing has been built since | build-time | read the generated values + Gradle output at the next build | no |
 | **P-4** | `setPersistence` reachability / Keychain survival on reinstall | `[⛔]` | decision §8.2 | device-time | device | no |
 | **P-5** | Firebase Console state (providers, apps, fingerprints) | `[~]` Android satisfied | Google provider enabled, Android app `com.inventoryai.app` registered, SHA-1/SHA-256 registered; **iOS app registration open** (P-6) | — | register iOS app | partly |
 | **P-6** | iOS build capability | `[⛔]` OPEN | no iOS build on host | environment | owner | no |
@@ -883,7 +883,7 @@ is corrected here rather than left to imply those increments never happened.)*
 | Current task | None in progress. This revision is the **2026-10-09 documentation reconciliation** (§42). |
 | Files/work area | — |
 | Dependencies | — |
-| Blockers | iOS build host (P-6); new-identity path ENVIRONMENT-BLOCKED (§5b); P-3/P-4 and Gates 1/2; owner decisions (§27). |
+| Blockers | iOS build host (P-6); new-identity path ENVIRONMENT-BLOCKED (§5b); P-4 and Gates 1/2; **P-3 is expected-benign and unverified (§25)**; owner decisions (§27). |
 | Acceptance criteria | — |
 | Verification state | Server full suite **185 suites / 1312 tests, 0 failures**; mobile **48 suites / 652 tests, 0 failures** (2026-10-10, after the ISS-02 guard suite); CI runs `server` + `mobile` + `secret-guard`. Android Google existing-account E2E VERIFIED (§5a); Render Firebase Admin config verified live; dependency-level PII finding **remediated, device confirmation owed** (§24/§28/§43). |
 | Git/branch state | branch `main` @ `3e5d2aa`; `origin/main` @ `3e5d2aa`; **0 ahead / 0 behind**; **PR #7 merged** (`3e5d2aa`, base `6e2252f`, merged head `d415335`); PRs **#1–#6 merged**; **0 open PRs**. |
@@ -2195,7 +2195,10 @@ root-level `jest-expo` cannot resolve it (48/48 suites fail), and declaring it d
 dropping the package from the lockfile — it is **closed**, not merged. Accepted consequence, recorded rather than
 hidden: `expo install --check` reports outdated dependencies until the SDK 58 upgrade.
 
-No finding here is dismissed without a reason, and none is claimed fixed that was not measured.
+No finding here is dismissed without a reason, and none is claimed fixed that was not measured. **Re-read
+against the alerts API after the merge:** both `@grpc/grpc-js` alerts report `state: fixed`
+(`fixed_at 2026-10-10T17:10:12Z`) and the open count is **5** — the five accepted rows above. The count
+drifts; re-read it before quoting.
 
 ---
 

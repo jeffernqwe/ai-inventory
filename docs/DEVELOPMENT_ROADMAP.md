@@ -6768,12 +6768,12 @@ update its tracking boxes, status rows and heading date at the end of a session 
 
 | Dimension | Verified state |
 | --- | --- |
-| Repository | `main` = `origin/main` = `e00ba97`; no tags, no stashes; five modified documents await their commit and one untracked guide awaits its decision (see In progress) |
+| Repository | `main` = `origin/main` = `e00ba97`; no tags, no stashes; the 2026-10-10 corrections are committed on `docs/2026-10-10-corrections` (**PR #35**); one untracked guide still awaits its decision (P3-3) |
 | CI | `.github/workflows/ci.yml` only — jobs **server / mobile / secret-guard**; last `main` run green (3 m 13 s, 2026-10-09) |
 | Backend | **117** `.ts` modules + one deferred `.js` (`server/src/services/entitlement.service.js`); **0** open advisories |
 | Mobile | **129** `.ts`/`.tsx` sources and **0** `.js`/`.jsx` in `app/ components/ lib/ __tests__/`; Expo 57 / RN 0.86.3 |
 | Tests | **68** server test files, **47** mobile test files (file counts; CI is the current source of truth) |
-| Open on GitHub | **PR #34** (failing `mobile`, and not Expo-SDK-57-compatible as it stands — ISS-16) and **issue #32** (deferred majors); nothing else |
+| Open on GitHub | **PR #35** (docs corrections), **PR #36** (ISS-01 fix, verified locally), **PR #37** (Dependabot Expo-pin ignores); **PR #34 closed** as not mergeable (ISS-16); **issue #32** open |
 | Open advisories | **7** — 3 high, 3 medium, 1 low, 0 critical (all mobile) |
 | Production | Render auto-deploy from `main`; `https://ai-inventory-l1mi.onrender.com` reachable and serving the AUTH-04 endpoints |
 
@@ -6797,16 +6797,17 @@ Facebook Login and Apple Sign-In remain unimplemented.
 
 ## In progress
 
-There is **no in-flight feature work**. Two changes exist: **PR #34** (open, red — see ISS-01 and ISS-16, and it is P0) and the
-untracked `docs/DEVELOPING_ON_A_PHYSICAL_DEVICE.md`, which needs a commit-or-discard decision (P3-3). A third change sits uncommitted: the 2026-10-10 corrections
-(ISS-03/04/05/08/09/10/11) in five documents — **commit them as one reviewable change** so the corrected figures are
-not lost.
+There is **no in-flight feature work**. The P0 items were executed on 2026-10-10 (session 2): the corrections are on
+**PR #35**, the ISS-01 fix on **PR #36** (verified locally — `npx tsc --noEmit`, `npx eslint .`, `npx jest`: 47 suites /
+644 tests), the Dependabot carve-out on **PR #37**, and **PR #34 is closed** (its versions are outside SDK 57 — ISS-16;
+they arrive with the SDK 58 upgrade). The untracked `docs/DEVELOPING_ON_A_PHYSICAL_DEVICE.md` still needs a
+commit-or-discard decision (P3-3).
 
 ## Known issues and required fixes
 
 | ID | Sev | Issue | Evidence | Fix |
 | --- | --- | --- | --- | --- |
-| **ISS-01** | High | PR #34 fails the `mobile` job with four `TS2322`: `Type 'null' is not assignable to type 'Element \| ComponentType<any> \| undefined'` at `components/ListScreen.tsx(102,10)` and `(109,8)`, `components/RefManage.tsx(265,9)`, `components/SelectField.tsx(147,13)` | CI run `37899073322` (reproduced twice) | Fix the `null`-typed prop values — `ListScreen.tsx:85` (`?? null`), `RefManage.tsx:265` (`: null`), `SelectField.tsx:147` (`: null`) → `undefined`, on a branch from `main`; **not** a check to relax. Verify with `npx tsc --noEmit` + `npx jest` |
+| **ISS-01** | High | PR #34 fails the `mobile` job with four `TS2322`: `Type 'null' is not assignable to type 'Element \| ComponentType<any> \| undefined'` at `components/ListScreen.tsx(102,10)` and `(109,8)`, `components/RefManage.tsx(265,9)`, `components/SelectField.tsx(147,13)` | CI run `37899073322` (reproduced twice) | Fix the `null`-typed prop values — `ListScreen.tsx:86` (`?? null`), `RefManage.tsx:266` and `SelectField.tsx:150` (`: null`) → `undefined`. **Done, verified locally — PR #36** (`npx tsc --noEmit`, `npx eslint .`, `npx jest`: 47 suites / 644 tests); **not** a check to relax |
 | **ISS-02** | High | **RNFirebase PII logging reaches release builds**: `@react-native-firebase/auth` 26.4.0 logs the Firebase user object via `Log.d`, **not build-gated**; logcat only; uid/email/displayName/provider metadata, no credentials; no supported toggle; **no remediation implemented** | Checklist §24/§28; dependency confirmed at 26.4.0 | Owner decision on scope, then implement; interacts with the SDK 58 train |
 | **ISS-03** | Medium | Documents claim **9 open advisories** (1 critical, 4 high, 3 moderate, 1 low) | CLAUDE.md, checklist §42, this file's §27AE, issue #32 | Live value is **7** (3 high, 3 medium, 1 low, 0 critical) — corrected in place on 2026-10-10 |
 | **ISS-04** | Medium | `README.md` calls the mobile app "written in **JavaScript**" and starts it with **Expo Go** | README:379, README:391 | It is 129 `.ts`/`.tsx` / 0 `.js`, and it needs a **development build** (RNFirebase + dev client). Corrected 2026-10-10 |
@@ -6859,15 +6860,10 @@ test-count source. *Why:* phase discipline is unenforceable while a "phase" has 
 
 ## Immediate next actions
 
-1. **Commit the 2026-10-10 corrections** (five documents, one branch-sized change; nothing else in it) — they exist
-   only in the working tree until then.
-2. **P0-1** — fix the four `null`-typed prop values on a branch from `main` (sites in ISS-01); the errors were reproduced twice in CI (run `37899073322`). Then re-run
-   `cd mobile && npx tsc --noEmit && npx eslint . && npx jest` and open the PR. **Do not merge PR #34** — see P0-2.
-3. **P0-2** — close or hold **PR #34**: five Expo-pinned packages move outside SDK 57 (ISS-16), so the versions belong to the SDK 58 train (issue #32) rather than to a Dependabot merge — and decide whether Dependabot should ignore the Expo-pinned set so it is not re-opened. Owner decision. **Doing this before P0-1 lands is slightly better:** closing clears the red check now, and it stops a rebased #34 from turning green and inviting a merge that must not happen.
-4. **Then decide P3-1** (Phase 30B): once the fix and corrections are in, the remaining ambiguity is scope, not code.
+1. **Review and merge PRs #35 → #36 → #37** (docs → type migration → dependency policy), then delete the three merged branches — all P0 work is executed; only review and merge remain.
+2. **Then decide P3-1** (Phase 30B): once the fix and corrections are in, the remaining ambiguity is scope, not code.
 
-**Do not:** start any V2/V3/V4 feature, write to production, push directly to `main`, or merge PR #34 —
-its versions are outside Expo SDK 57 (ISS-16), so it must not merge as it stands.
+**Do not:** start any V2/V3/V4 feature, write to production, or push directly to `main`. PR #34 is closed (ISS-16); its versions arrive only with the SDK 58 upgrade.
 
 ## Verification requirements
 
@@ -6894,8 +6890,8 @@ its versions are outside Expo SDK 57 (ISS-16), so it must not merge as it stands
 
 ## Tracking
 
-- [ ] **P0-1** ISS-01 four `null`-typed prop values fixed in code, `main` green
-- [ ] **P0-2** ISS-16 PR #34 closed or held; Dependabot carve-out decided — owner decision
+- [x] **P0-1** ISS-01 four `null`-typed prop values fixed — **PR #36**, verified locally (tsc/eslint/jest: 644 tests)
+- [x] **P0-2** ISS-16 **PR #34 closed**; Dependabot carve-out proposed in **PR #37**
 - [x] **P1** ISS-03 / ISS-04 / ISS-05 / ISS-08 / ISS-09 / ISS-10 / ISS-11 corrections *(done 2026-10-10)*
 - [ ] **P2-1** ISS-02 RNFirebase PII remediation — decision needed
 - [ ] **P2-2** ISS-06 P-3 SDK alignment

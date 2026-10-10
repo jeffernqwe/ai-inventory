@@ -66,6 +66,17 @@ updates:
       - dependency-name: "*"
         update-types:
           - version-update:semver-major
+      # Expo SDK-pinned core packages: Dependabot cannot know the SDK's pinned versions, so every
+      # version update for these is refused here — PR #34 showed why (react-native 0.87.1, react
+      # 19.3.0, safe-area-context ~5.10.1, screens ~4.28.0 outside SDK 57's set). CI cannot detect
+      # the mismatch; it only surfaces in a native build. These move only with an Expo SDK upgrade
+      # via `npx expo install --fix` (issue #32; roadmap §27AH, ISS-16). Security updates remain
+      # unaffected (see the header).
+      - dependency-name: react
+      - dependency-name: react-dom
+      - dependency-name: react-native
+      - dependency-name: react-native-safe-area-context
+      - dependency-name: react-native-screens
 
   # The workflow actions are pinned to commit SHAs, so they need an updater of their own: without
   # this entry a pinned action would sit at its current SHA forever instead of receiving the fixes

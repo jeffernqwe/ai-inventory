@@ -147,7 +147,7 @@ export default function SelectField({
             ListHeaderComponent={
               searchable ? (
                 <TextInputInline value={query} onChangeText={setQuery} />
-              ) : null
+              ) : undefined
             }
             renderItem={({ item }) => {
               const isSel = item.value === value;

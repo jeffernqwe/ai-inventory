@@ -1,0 +1,5 @@
+# Patch files are applied by `patch-package` during every install (mobile/package.json postinstall).
+# They are diffs, not prose: keep them byte-identical on every platform and every checkout rather
+# than LF in the repository and CRLF in a Windows working copy. A CRLF copy was measured to apply
+# correctly, so this is determinism, not a workaround.
+*.patch text eol=lf

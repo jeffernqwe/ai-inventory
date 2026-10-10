@@ -6474,7 +6474,8 @@ subject to the same required `server`/`mobile` checks as everyone else's — and
 `applies-to: version-updates` so a **security** update is never folded into a routine minor/patch batch.
 
 **The alerts turned into evidence within minutes.** Switching Dependabot on immediately surfaced
-**9 open advisories, every one of them in `mobile/package-lock.json`** — 1 critical, 4 high, 3 moderate,
+**9 open advisories, every one of them in `mobile/package-lock.json`** *(as measured 2026-10-09 — **7** on
+2026-10-10, 3 high / 3 medium / 1 low, 0 critical; advisory counts drift, so re-read before quoting)* — 1 critical, 4 high, 3 moderate,
 1 low — and **Dependabot opened three security-update pull requests by itself** (`#12`–`#14`), which is the
 feature demonstrably working rather than merely enabled. Three of the nine (`braces`, `node-forge`,
 `sprintf-js`) have **no published fix**, so they are recorded here as dependency debt that a version bump
@@ -6493,7 +6494,7 @@ rather than predicted:
 
 | Lost by going private | Still working |
 | --- | --- |
-| **Branch protection** — `GET …/branches/main/protection` → `403 Upgrade to GitHub Pro or make this repository public` | **Dependabot** — `vulnerability-alerts` → `204`, and the 9 open advisories remain readable |
+| **Branch protection** — `GET …/branches/main/protection` → `403 Upgrade to GitHub Pro or make this repository public` | **Dependabot** — `vulnerability-alerts` → `204`, and the open advisories remain readable (nine at that time; **seven** on 2026-10-10) |
 | **Rulesets** — the same `403` | **The workflows** — `server`, `mobile` and the new `secret-guard` job run unchanged, with Actions minutes still free at this scale (2,000/month on the Free plan) |
 | **Secret scanning and push protection** — `security_and_analysis` is now `null`, the feature needing GitHub Secret Protection on a private repository | **`main-guard`** — detection of a bypass after the fact |
 
@@ -6749,6 +6750,283 @@ nothing. `ci.yml` and its three jobs, `scripts/check-secrets.mjs`, the pinned ac
 
 ---
 
+# 27AH. Current status, known issues and the next-step order (2026-10-10)
+
+## Why this section exists
+
+To stop re-auditing the repository to remember where the project is. Everything here is a **working view**,
+verified on 2026-10-10 against `main` @ `e00ba97`; it adds no phase status and changes none. The phase records
+above remain authoritative for what shipped, and `docs/AUTH_SECURITY_MASTER_CHECKLIST.md` for anything
+security-relevant. **A task is complete only with evidence** — a commit, a CI run or a measured command output.
+Published figures drift (advisory counts especially); re-read a number at the moment you quote it.
+
+**How a session starts from here.** When asked what to work on next, answer from the order below rather than re-auditing:
+re-verify only the volatile figures (HEAD, PR and CI state, open advisories), quote the rest from this section, and
+update its tracking boxes, status rows and heading date at the end of a session that lands work.
+
+## Status at a glance
+
+| Dimension | Verified state |
+| --- | --- |
+| Repository | `main` = `origin/main` = `e00ba97`; no tags, no stashes; the 2026-10-10 corrections are committed on `docs/2026-10-10-corrections` (**PR #35**); one untracked guide still awaits its decision (P3-3) |
+| CI | `.github/workflows/ci.yml` only — jobs **server / mobile / secret-guard**; last `main` run green (3 m 13 s, 2026-10-09) |
+| Backend | **117** `.ts` modules + one deferred `.js` (`server/src/services/entitlement.service.js`); **0** open advisories |
+| Mobile | **129** `.ts`/`.tsx` sources and **0** `.js`/`.jsx` in `app/ components/ lib/ __tests__/`; Expo 57 / RN 0.86.3 |
+| Tests | **68** server test files, **47** mobile test files (file counts; CI is the current source of truth) |
+| Open on GitHub | **PR #35** (docs corrections), **PR #36** (ISS-01 fix, verified locally), **PR #37** (Dependabot Expo-pin ignores); **PR #34 closed** as not mergeable (ISS-16); **issue #32** open |
+| Open advisories | **7** — 3 high, 3 medium, 1 low, 0 critical (all mobile) |
+| Production | Render auto-deploy from `main`; `https://ai-inventory-l1mi.onrender.com` reachable and serving the AUTH-04 endpoints |
+
+## Verified complete — with evidence
+
+Sessions named by a mandatory `jti` and real logout (26A) · password recovery server and mobile (26B/27) with the
+B1 timing hardening (28) · **AUTH-01** revocation checking and failure classification · **AUTH-02** short-lived JWT
+with enforced issuer/audience and the 14-day absolute cap · **AUTH-03** session renewal · **AUTH-04** the custom
+6-digit email-verification flow (A–G shipped, G passed live on Brevo, **H complete in `0972948`**; endpoints at
+`server/src/routes/auth.routes.ts:119` and `:124`) · the **N-4 credential-change bridge**
+(`server/src/services/credentialsChanged.service.ts`, `POST /api/auth/credentials-changed`, `auth.routes.ts:196`,
+commit `703a9da`, an ancestor of `main`) · **F1/F2** retirements · **Phase 31** AI wire diagnostics and the
+AgentRouter → OpenRouter migration (`31D.6` present) · the 2026-10-09 workflow simplification (`ci.yml` only,
+`scripts/audit-access.mjs`, `dependabot.yml` matching the recorded policy) · the physical-device dev loop
+(dev client + Metro + local backend + mirroring), written up in `docs/DEVELOPING_ON_A_PHYSICAL_DEVICE.md`.
+
+**Google Sign-In** is implemented: `@react-native-google-signin/google-signin@16.1.5`, wired in
+`mobile/app/login.tsx` (`handleGoogle`), `lib/firebase-auth.ts` and `lib/firebase-native.ts`; checklist §5a marks
+the Android E2E verified on 2026-09-26. (Roadmap §35 long said otherwise — corrected there on 2026-10-10.)
+Facebook Login and Apple Sign-In remain unimplemented.
+
+## In progress
+
+There is **no in-flight feature work**. The P0 items were executed on 2026-10-10 (session 2): the corrections are on
+**PR #35**, the ISS-01 fix on **PR #36** (verified locally — `npx tsc --noEmit`, `npx eslint .`, `npx jest`: 47 suites /
+644 tests), the Dependabot carve-out on **PR #37**, and **PR #34 is closed** (its versions are outside SDK 57 — ISS-16;
+they arrive with the SDK 58 upgrade). The untracked `docs/DEVELOPING_ON_A_PHYSICAL_DEVICE.md` still needs a
+commit-or-discard decision (P3-3).
+
+## Known issues and required fixes
+
+| ID | Sev | Issue | Evidence | Fix |
+| --- | --- | --- | --- | --- |
+| **ISS-01** | High | PR #34 fails the `mobile` job with four `TS2322`: `Type 'null' is not assignable to type 'Element \| ComponentType<any> \| undefined'` at `components/ListScreen.tsx(102,10)` and `(109,8)`, `components/RefManage.tsx(265,9)`, `components/SelectField.tsx(147,13)` | CI run `37899073322` (reproduced twice) | Fix the `null`-typed prop values — `ListScreen.tsx:86` (`?? null`), `RefManage.tsx:266` and `SelectField.tsx:150` (`: null`) → `undefined`. **Done, verified locally — PR #36** (`npx tsc --noEmit`, `npx eslint .`, `npx jest`: 47 suites / 644 tests); **not** a check to relax |
+| **ISS-02** | High | **RNFirebase PII logging reaches release builds**: `@react-native-firebase/auth` 26.4.0 logs the Firebase user object via `Log.d`, **not build-gated**; logcat only; uid/email/displayName/provider metadata, no credentials; no supported toggle; **no remediation implemented** | Checklist §24/§28; dependency confirmed at 26.4.0 | Owner decision on scope, then implement; interacts with the SDK 58 train |
+| **ISS-03** | Medium | Documents claim **9 open advisories** (1 critical, 4 high, 3 moderate, 1 low) | CLAUDE.md, checklist §42, this file's §27AE, issue #32 | Live value is **7** (3 high, 3 medium, 1 low, 0 critical) — corrected in place on 2026-10-10 |
+| **ISS-04** | Medium | `README.md` calls the mobile app "written in **JavaScript**" and starts it with **Expo Go** | README:379, README:391 | It is 129 `.ts`/`.tsx` / 0 `.js`, and it needs a **development build** (RNFirebase + dev client). Corrected 2026-10-10 |
+| **ISS-05** | Medium | §35 stated Google Sign-In was "approved, not implemented" with "no provider SDK installed" and the first dev build still a prerequisite | §35 | Corrected 2026-10-10 (see §35) |
+| **ISS-06** | Medium | **P-3**: RNFirebase declares `compileSdk`/`targetSdk` 34 while the project targets 36 | Checklist §25, P-3 `[⛔]` | Resolve before the next native build (part of the SDK 58 train) |
+| **ISS-07** | Medium | **Phase 30B is referenced but never defined** — "has not started" in four places with no objective, scope or DoD | CLAUDE.md, this file's 30A record, PHASE_HISTORY, README | Define it or remove the references — owner decision (P3-1) |
+| **ISS-08** | Medium | The CLAUDE.md main-guard / access-guard bullets read as if both monitors still exist | CLAUDE.md; `.github/workflows/` holds only `ci.yml` | Corrected 2026-10-10: marked as removed; "do not push to `main`" is a **convention with no automation** |
+| **ISS-09** | Low | Module count stale at 94 | CLAUDE.md:39, `docs/TS-MIGRATION-MANIFEST.md`:16 | Live: **117** `.ts`; corrected 2026-10-10 |
+| **ISS-10** | Low | AUTH-04-H read as pending | CLAUDE.md | Complete — `0972948`; corrected 2026-10-10 |
+| **ISS-11** | Low | Phase 30A's "no EAS build has been executed / statically validated only" is superseded but un-annotated | CLAUDE.md 30A record | Builds exist: development 2026-09-26/09-30/10-03, preview 2026-09-29 and 2026-10-10; annotated |
+| **ISS-12** | Low | CI warns the pinned `actions/*` SHAs target Node 20 (forced onto Node 24) | CI job logs | Resolves with the `actions/*` v7 re-pin in issue #32 |
+| **ISS-13** | Low | **F-1 (Phase 30A PDF-sharing finding) is still open and real** | `expo-print`/`expo-sharing` are dependencies; sharing code in `app/(app)/products/[id]/index.tsx` | Fix wherever 30B lands (P3-1) |
+| **ISS-14** | Low | `origin/wip/backup-working-tree` (2026-09-28) is stale and **fully superseded** — its checklist is smaller (1040 vs 2160 lines), `main` already has `31D.6`, the 18c/18e plan docs exist on `main`, its `eas.json` change is already on `main` | `git diff main...origin/wip/backup-working-tree` | Delete or leave with a recorded "no action" (P3-4) |
+| **ISS-15** | Info | Three test baselines from three dates, none current | TS manifest (259 unit) · `docs/freebuff/TEST_BASELINE.md` (server 838 / mobile 21 suites, frozen 2026-09-30) · CLAUDE.md N-3 (mobile 36 suites / 509) | Declare CI the source of truth and label the others as dated snapshots (P3-5) |
+| **ISS-16** | High | **PR #34 moves five Expo-pinned packages outside SDK 57** — `react-native` 0.86.3 → 0.87.1, `react` 19.2.3 → 19.3.0, `react-dom` 19.2.3 → 19.3.0, `react-native-safe-area-context` ~5.7.0 → ~5.10.1, `react-native-screens` ~4.26.0 → ~4.28.0, plus the matching `@types/react` ~19.3.0. Expo SDK 57 expects exactly the old values, and CI runs no `expo-doctor` / `expo install --check`, so a green typecheck cannot see the native incompatibility — it would surface in the next native build | `mobile/node_modules/expo/bundledNativeModules.json` vs `gh pr diff 34` (both read 2026-10-10); `mobile/package.json` | **Do not merge as-is.** Close or hold PR #34 and take these versions with the Expo SDK 58 train via `npx expo install --fix` (issue #32); decide whether Dependabot should ignore the Expo-pinned set (P0-2, owner decision) |
+
+**Correctly recorded as open or deferred — not issues:** L-17 (recovery-mail delivery never inspected end-to-end),
+B1's residual timing term, B2 / E3 / OD-10 (V4), owner decisions O-5 / O-6 / O-10 / O-11, P-4 (device-time),
+P-6 + Gate 1 + iOS app registration (environment-blocked), and the new-identity `REGISTRATION_REQUIRED` path.
+
+## Pending
+
+**Fixes:** ISS-01 (the React 19.3 type migration) · ISS-16 (dispose of PR #34; decide the Dependabot carve-out) · ISS-02 (decision then remediation) · ISS-13 (once its home is decided).
+**Upgrades, in issue #32's order:** Expo SDK 58 via `npx expo install --fix` — the only safe vehicle for the RN/React versions PR #34 proposed (ISS-16; runbook: **§27AI**, whose verified pins differ from PR #34's set — RN 0.88 family, not 0.87.1) → the React 19 type fixes (ISS-01 is the first of them) → TypeScript 7 →
+jest 30 → the `actions/*` v7 re-pin (also clears ISS-12) → `dotenv` 18 and `@types/bcryptjs` 3.
+**Testing:** the L-17 mail leg, owner-assisted; and a dated test baseline for this section.
+**Documentation:** the corrections listed at the end of this section; Phase 30B; the device guide; `docs/freebuff/*`.
+**Deliberately not scheduled:** Facebook Login, Apple Sign-In, and everything in §35 V2/V3/V4. No new feature work
+before P0–P2 are clear.
+
+## The order to work in
+
+**P0 — remove the only red check, correctly.** Fix ISS-01's four `null`-typed prop values in code, on a branch from `main` — they are the React 19.3 type migration the SDK 58 train needs. Then dispose of **PR #34** (ISS-16): it moves five Expo-pinned packages outside SDK 57, so it must not merge as it stands.
+*Exit:* `npx tsc --noEmit` and `npx jest` green in `mobile` on `main`; `server`/`secret-guard` stay green; PR #34 closed or held with the ISS-16 reason recorded.
+*Why:* it is the only red check in the repository, and a dependency queue is healthy only when every entry is either SDK-compatible or declined with a recorded reason — PR #34 is the second case.
+
+**P1 — correct the documented facts that mislead.** ISS-03, ISS-09, ISS-10, ISS-11 (done 2026-10-10); ISS-04, ISS-05,
+ISS-08 (done 2026-10-10). *Exit:* every corrected figure re-read from its source at edit time.
+
+**P2 — the security-relevant native layer, before the next native build.** ISS-02 (decide, then implement), ISS-06,
+then issue #32's upgrade train. *Exit:* CI green at each step; one device build launched and used per native change.
+*Dependency:* P2 needs ISS-01's fix pattern established, and ISS-02 needs its decision first.
+
+**P3 — decisions and housekeeping (owner input required).** Define or remove **Phase 30B** and assign ISS-13 to it;
+decide `docs/freebuff/*`; commit or discard the device guide; dispose of the stale WIP branch; declare CI the single
+test-count source. *Why:* phase discipline is unenforceable while a "phase" has no scope and three documents disagree.
+
+**P4 — deferred and accepted debt.** B1's residual, B2 / E3 / OD-10, L-17, O-5 / O-6 / O-10 / O-11, and the iOS gates
+(environment-blocked — no progress is possible on this host). Revisit only when P0–P3 are clear or a disposition changes.
+
+## Immediate next actions
+
+1. **Review and merge PRs #35 → #36 → #37** (docs → type migration → dependency policy), then delete the three merged branches — all P0 work is executed; only review and merge remain.
+2. **Then decide P3-1** (Phase 30B): once the fix and corrections are in, the remaining ambiguity is scope, not code.
+3. **Then execute §27AI** (Expo SDK 58) — Gate 0 first: SDK 58 is still on the `next` dist-tag with an RN release candidate pinned, so either wait for its promotion or record an explicit owner decision to proceed.
+
+**Do not:** start any V2/V3/V4 feature, write to production, or push directly to `main`. PR #34 is closed (ISS-16); its versions arrive only with the SDK 58 upgrade.
+
+## Verification requirements
+
+- **Authentication.** `cd server && npm run typecheck && npm run lint && npm test`; `cd mobile && npx tsc --noEmit &&
+  npx eslint . && npx jest`. Local smoke: `curl -s -o /dev/null -w "%{http_code}" http://localhost:4000/api/health/ready`
+  → 200. On device: a rejected session must surface the documented codes (`SESSION_EXPIRED`, `SESSION_INVALIDATED`),
+  never a generic error. Never verify auth changes against production with real accounts.
+- **Email verification (AUTH-04).** A missing payload must answer `400 VALIDATION_ERROR` from the validator, before
+  any service, DB or mail work. The request path enforces a 60-second per-UID cooldown. **L-17 remains open:** the
+  mail leg has never been inspected end-to-end and needs a mailbox (owner-assisted) — request, receive, confirm,
+  then check that Firebase `emailVerified` flips false → true and the Mongo challenge is consumed. Never against production users.
+- **Render backend.** Non-mutating probes only. A malformed identity answers `503 FIREBASE_UNAVAILABLE` **by design**
+  (`auth/argument-error` is classified transient so an upstream blip cannot destroy valid sessions) — that is not an
+  outage. Never run writes, registration or mail-sending probes against production to "check it works".
+- **React Native app on the device.** Three independent signals: Metro printing `Android Bundled … expo-router\entry.js`;
+  the app rendering (read it mechanically with `adb shell uiautomator dump`); and the **local** server logging
+  `{"type":"http",…}` lines as you use it. If the first two pass and the third stays silent, the app is pointing
+  elsewhere — check `EXPO_PUBLIC_API_URL` in `mobile/.env` (it must be reachable **from the phone**) and restart Metro
+  with `--clear`. A `preview`/`production` APK cannot load your edits: an EAS **`development`** build is required.
+  Known environment limit: ColorOS refuses the shell `WRITE_SECURE_SETTINGS`, so scrcpy's `-w` (stay-awake) is
+  declined — raise the phone's screen timeout instead. Full procedure: `docs/DEVELOPING_ON_A_PHYSICAL_DEVICE.md`.
+- **Baseline.** Run the suites and record the date and counts here when P1 completes; until then CI is the only
+  current source of truth (ISS-15).
+
+## Tracking
+
+- [x] **P0-1** ISS-01 four `null`-typed prop values fixed — **PR #36**, verified locally (tsc/eslint/jest: 644 tests)
+- [x] **P0-2** ISS-16 **PR #34 closed**; Dependabot carve-out proposed in **PR #37**
+- [x] **P1** ISS-03 / ISS-04 / ISS-05 / ISS-08 / ISS-09 / ISS-10 / ISS-11 corrections *(done 2026-10-10)*
+- [ ] **P2-1** ISS-02 RNFirebase PII remediation — decision needed
+- [ ] **P2-2** ISS-06 P-3 SDK alignment
+- [ ] **P2-3** issue #32 upgrade train
+- [ ] **P3-1** Phase 30B defined or its references removed (ISS-07, ISS-13) — decision needed
+- [ ] **P3-2** `docs/freebuff/*` fate — decision needed
+- [ ] **P3-3** device guide committed or discarded — decision needed
+- [ ] **P3-4** stale WIP branch disposed of (ISS-14) — decision needed
+- [ ] **P3-5** single test-count source declared (ISS-15)
+- [ ] **P4** deferred debt — no action (B1, B2, E3, OD-10, L-17, O-5/O-6/O-10/O-11, iOS gates)
+
+## Documents corrected on 2026-10-10
+
+`README.md` (module language and the Expo Go quick-start), `CLAUDE.md` (module count, the removed monitors,
+AUTH-04-H, the advisory count), `docs/AUTH_SECURITY_MASTER_CHECKLIST.md` (advisory count, and separating advisories
+from deferred majors), `docs/TS-MIGRATION-MANIFEST.md` (module count annotated), and §35 and §27AE of this file.
+Deliberately **not** changed: `docs/SOURCE_PROTECTION.md` and `SECURITY.md` were already correct for the private-repo
+state, and `docs/freebuff/*` awaits its decision (P3-2).
+
+---
+
+# 27AI. Expo SDK 58 upgrade — the approved procedure (2026-10-10)
+
+## Why this exists, and its status
+
+Issue #32 lists **Expo SDK 58** as the first deferred major, and §27AH's P2 train says the RN/React
+versions must arrive through `npx expo install --fix` rather than a raw Dependabot bump (ISS-16 —
+PR #34). This section is the **runbook**: the ordered steps, the checks, the device acceptance pass
+and the rollback, so the upgrade can be executed without re-deriving any of it.
+
+**Approval:** merging the PR that adds this section constitutes approval of the procedure.
+**Execution has not started** and must not begin before Gate 0 and the prerequisites below.
+
+## Gate 0 — release status (re-check at execution)
+
+Read on 2026-10-10 with `npm view expo dist-tags`: `latest = 57.0.27`, **`next = 58.0.7`**,
+`canary = 58.0.0-canary…`. SDK 58 is **not yet the stable channel**, and `expo@58.0.7` pins
+`react-native` **0.88.0-rc.4** — a release candidate. Therefore:
+
+- **Preferred:** wait until Expo promotes SDK 58 to `latest` (the pins are then final), then execute.
+- **Alternative:** execute on the pre-release SDK **only by an explicit owner decision**, recorded in
+  the executing PR. Re-run `npm view expo dist-tags` at execution — never trust this line.
+
+## Verified target set (read from the package, not guessed)
+
+`npm pack expo@58.0.7` → its `bundledNativeModules.json`, 2026-10-10:
+
+| Package | SDK 57 today | SDK 58 declares | PR #34 proposed |
+| --- | --- | --- | --- |
+| `react` | 19.2.3 | **19.3.0** | 19.3.0 |
+| `react-dom` | 19.2.3 | **19.3.0** | 19.3.0 |
+| `react-native` | 0.86.3 | **0.88.0-rc.4** | 0.87.1 |
+| `react-native-safe-area-context` | ~5.7.0 | **~5.9.1** | ~5.10.1 |
+| `react-native-screens` | ~4.26.0 | **~4.28.0** | ~4.28.0 |
+
+Two lessons held verbatim: the SDK — not Dependabot — decides, and **PR #34 was wrong on two of
+five** (RN and safe-area). Everything else the SDK pins follows `expo install --fix`;
+`@types/react` (dev-only, not in the map) must move alongside to ~19.3.x or `tsc` will say so.
+
+## Prerequisites (all must be true before step 1)
+
+- [ ] PRs #35 (docs), #36 (ISS-01 fixes) and #37 (Dependabot carve-out) merged; `main` green.
+- [ ] The Gate 0 decision recorded.
+- [ ] One development-build slot on the Android device — this plan ends with a device pass, not a CI result.
+- [ ] Issue #32's SDK 58 entry open and linked to the executing PR.
+
+## The procedure
+
+1. **Branch + baseline.** `git checkout -b chore/expo-sdk-58 main`. Record the green baseline:
+   `cd mobile && npx tsc --noEmit && npx eslint . && npx jest --ci` (2026-10-10: 47 suites / 644
+   tests) and `npx expo install --check` (clean on SDK 57 — if not, stop and record why).
+2. **Bump the SDK only.** `npx expo install expo@^58.0.0` (pin the exact released version if Gate 0
+   chose one). Do not hand-edit `package.json`.
+3. **Align every pinned dependency.** `npx expo install --fix`, then `npx expo install --check` →
+   **must report no mismatches**; paste both outputs into the PR. If `--fix` moves the five packages
+   PR #37 ignores, that is the sanctioned path — do not relax the ignore rules, and do not bump them
+   by hand.
+4. **Doctor.** `npx expo-doctor` → triage every finding. Expected guest: RNFirebase's
+   `compileSdk`/`targetSdk` 34 vs 36 (**ISS-06 / P-3** — resolve it here; it stops being deferrable).
+   Any warning left standing needs a dated record; none may be ignored silently.
+5. **Type pass.** `npx tsc --noEmit`. The four ISS-01 sites are already fixed (#36); **any new error
+   is new information** — fix it in code. `as any`, `@ts-ignore` and relaxed tsconfig are not options
+   (project rule).
+6. **Lint + tests.** `npx eslint .` and `npx jest --ci`; every failure is an SDK behavior change
+   until proven otherwise. No snapshot updates or weakened assertions without a recorded reason.
+7. **CNG sanity.** No `ios/` or `android/` directory may appear (Phase 30A rule); check `git status`
+   and `npx expo config --type public`.
+8. **CI.** Push the branch; the `mobile` job is the gate and `server`/`secret-guard` must stay green.
+   Do not merge red, and do not merge with `expo install --check` mismatched.
+9. **Development-build validation pass — the acceptance gate.** For a native SDK move, a JS-only
+   pass proves nothing:
+   - `eas build --profile development --platform android`; record the build ID. iOS stays export-only
+     (environment-blocked).
+   - Install, then `npx expo start --dev-client --clear`; open the app.
+   - Require the three independent signals (§27AH): Metro prints `Android Bundled … expo-router\entry.js`;
+     the app renders (read mechanically with `adb shell uiautomator dump`); the local server logs
+     `{"type":"http",…}` lines as the app is used. If the first two pass and the third stays silent,
+     check `EXPO_PUBLIC_API_URL` (must be reachable from the phone) before touching the SDK.
+   - Smoke journeys: Firebase sign-in and the AUTH-03 renewal path; the three list surfaces touched by
+     #36 (empty / loading / error / footer states); the email-verification screen; one stock-in and one
+     stock-out; one transfer. In logcat, compare the RNFirebase PII note (ISS-02) against its recorded
+     disposition — it must not quietly widen.
+   - Device limit to expect: ColorOS refuses `WRITE_SECURE_SETTINGS`, so raise the screen timeout
+     manually (see `docs/DEVELOPING_ON_A_PHYSICAL_DEVICE.md`).
+10. **Merge criteria.** All of: CI green; `expo install --check` clean; doctor findings resolved or
+    waived with a record; the device pass recorded (build ID, date, journeys); test counts re-read and
+    recorded in §27AH; no unrelated changes in the diff.
+11. **Land and close out.** Squash-merge; delete the branch; close issue #32's SDK 58 entry; update
+    §27AH's status rows and advisory count (re-read it); leave the #37 ignore rules in place — they are
+    per-SDK, and a future SDK moves the pins again.
+
+## Rollback
+
+Revert the single upgrade PR on `main`; reinstall the previous development build if the device build
+regressed. The Dependabot ignores and all policy stay untouched — a revert needs no config change.
+Record the reason and reopen issue #32's entry.
+
+## Risks (recorded, not glossed)
+
+- **First real RN 0.88 native build** — JS CI cannot prove it; only step 9 can.
+- **Pre-release pins** — the RN RC is exactly what Gate 0 exists for.
+- **`compileSdk` (P-3 / ISS-06)** — the upgrade is where it must be fixed.
+- **ISS-02 PII** — validate against its disposition; if remediation lands first, this pass re-tests it.
+- **Advisories drift** — re-read the count at execution (7 on 2026-10-10); some may change with the
+  new dependency graph.
+- **iOS** — unverifiable on this host; export-only until a macOS host exists.
+
+## Evidence to record when executed
+
+Branch + PR number; CI run URL; `expo install --check` and `expo-doctor` outputs; EAS build ID;
+device-pass notes (signals + journeys); new test counts; updated §27AH rows; closed issue #32 entry.
+
+---
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.
@@ -6951,14 +7229,19 @@ Potential V2:
 - Document upload
 - RAG
 - MongoDB Vector Search
-- Google Sign-In (Firebase provider) — **approved, not implemented**
+- ~~Google Sign-In (Firebase provider) — approved, not implemented~~ — **IMPLEMENTED** (corrected 2026-10-10; see below)
 - Facebook Login (Firebase provider) — **approved, not implemented**
 
 Firebase Authentication itself is **not** future work: it shipped as the identity provider in Phases
 32B–32E (§27H). The two provider entries are the approved-but-unimplemented part, each bound by the
 Phase 32F linking policy — **no automatic linking on an email match** — and by the open register in
-design document §14A.5. **Apple Sign-In remains future scope** and is not scheduled. No provider SDK
-is installed, and the first EAS development build remains a prerequisite (§27F).
+design document §14A.5. **Apple Sign-In remains future scope** and is not scheduled. *(**Correction, 2026-10-10:** of
+the two provider entries above, **Google Sign-In shipped** — `@react-native-google-signin/google-signin@16.1.5`,
+`mobile/app/login.tsx` → `handleGoogle`, checklist §5a `[✓]` 2026-09-26 — so only **Facebook** remains
+approved-but-unimplemented. A provider SDK **is** installed.)*
+*(Superseded 2026-10-10: the original sentence here read “no provider SDK is installed, and the first EAS
+development build remains a prerequisite (§27F)”. Both clauses are now false — a provider SDK is installed for
+Google, and development builds have existed since 2026-09-26 (preview build from `e00ba97`, 2026-10-10).)*
 
 Shipped since this list was written, and no longer future work: the barcode/QR scanner (Phase 12B–12D),
 supplier management (Phase 13A, Phase 17), and stock transfers (Phase 19) — see their sections above.

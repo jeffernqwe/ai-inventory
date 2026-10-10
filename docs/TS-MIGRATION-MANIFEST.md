@@ -13,7 +13,7 @@ plan, and nothing in it authorises further migration.
 
 ## 1. Final State
 
-`server/src` holds **94 `.ts` modules and exactly one `.js` module**.
+`server/src` holds **94 `.ts` modules and exactly one `.js` module**. *(Annotated 2026-10-10: `main` now holds **117** `.ts` modules; the single deferred `.js` module is unchanged. This figure is a close-out snapshot, not a current count.)*
 
 | Property | Value |
 | --- | --- |

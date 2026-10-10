@@ -6807,7 +6807,7 @@ recorded Gate 0 decision (§27AI). **ISS-02 closed out on 2026-10-10** (remediat
 | --- | --- | --- | --- | --- |
 | **ISS-01** | High | PR #34 fails the `mobile` job with four `TS2322`: `Type 'null' is not assignable to type 'Element \| ComponentType<any> \| undefined'` at `components/ListScreen.tsx(102,10)` and `(109,8)`, `components/RefManage.tsx(265,9)`, `components/SelectField.tsx(147,13)` | CI run `37899073322` (reproduced twice) | Fix the `null`-typed prop values — `ListScreen.tsx:86` (`?? null`), `RefManage.tsx:266` and `SelectField.tsx:150` (`: null`) → `undefined`. **Done, verified locally — PR #36** (`npx tsc --noEmit`, `npx eslint .`, `npx jest`: 47 suites / 644 tests); **not** a check to relax |
 | **ISS-02** | High → **`[~]`** | **RNFirebase PII logging reaches release builds**: `@react-native-firebase/auth` 26.4.0 logs the Firebase user object via `Log.d`, **not build-gated**; logcat only; uid/email/displayName/provider metadata, no credentials; no supported toggle | Checklist §24/§28; source re-read 2026-10-10 (one line; the id-token listener logs nothing; iOS side logs nothing) | **Remediated 2026-10-10 — `patch-package` patch + `postinstall --error-on-fail`, §27AJ.** Artifact-level verified (patch content, end-to-end reinstall applies it, 8-case guard, mobile 48/652, LF-pinned by `.gitattributes`). **Not closed:** no native build yet — §27AI step 9 re-checks logcat |
-| **ISS-03** | Medium | Documents claim **9 open advisories** (1 critical, 4 high, 3 moderate, 1 low) | CLAUDE.md, checklist §42, this file's §27AE, issue #32 | Live value is **7** (3 high, 3 medium, 1 low, 0 critical) — corrected in place on 2026-10-10 |
+| **ISS-03** | Medium | Documents claim **9 open advisories** (1 critical, 4 high, 3 moderate, 1 low) | CLAUDE.md, checklist §42, this file's §27AE, issue #32 | Live value was **7** (3 high, 3 medium, 1 low, 0 critical) — corrected in place on 2026-10-10; **5 remain open** after the per-alert disposition (§27AK) |
 | **ISS-04** | Medium | `README.md` calls the mobile app "written in **JavaScript**" and starts it with **Expo Go** | README:379, README:391 | It is 129 `.ts`/`.tsx` / 0 `.js`, and it needs a **development build** (RNFirebase + dev client). Corrected 2026-10-10 |
 | **ISS-05** | Medium | §35 stated Google Sign-In was "approved, not implemented" with "no provider SDK installed" and the first dev build still a prerequisite | §35 | Corrected 2026-10-10 (see §35) |
 | **ISS-06** | Medium | **P-3**: RNFirebase declares `compileSdk`/`targetSdk` 34 while the project targets 36 | Checklist §25, P-3 `[⛔]` | Resolve before the next native build (part of the SDK 58 train) |
@@ -6820,6 +6820,8 @@ recorded Gate 0 decision (§27AI). **ISS-02 closed out on 2026-10-10** (remediat
 | **ISS-13** | Low | **F-1 (Phase 30A PDF-sharing finding) is still open and real** | `expo-print`/`expo-sharing` are dependencies; sharing code in `app/(app)/products/[id]/index.tsx` | Fix wherever 30B lands (P3-1) |
 | **ISS-14** | Low | `origin/wip/backup-working-tree` (2026-09-28) is stale and **fully superseded** — its checklist is smaller (1040 vs 2160 lines), `main` already has `31D.6`, the 18c/18e plan docs exist on `main`, its `eas.json` change is already on `main` | `git diff main...origin/wip/backup-working-tree` | Delete or leave with a recorded "no action" (P3-4) |
 | **ISS-15** | Info | Three test baselines from three dates, none current | TS manifest (259 unit) · `docs/freebuff/TEST_BASELINE.md` (server 838 / mobile 21 suites, frozen 2026-09-30) · CLAUDE.md N-3 (mobile 36 suites / 509) | Declare CI the source of truth and label the others as dated snapshots (P3-5) |
+| **ISS-17** | Medium | **The SDK 57 patch rollup cannot be installed** — `expo install --check` asks for `expo ~57.0.27` / `expo-constants ~57.0.21` / `expo-linking ~57.0.12` / `expo-router ~57.0.25`, but taking it nests `expo-modules-core@57.0.21` under `node_modules/expo/` where root-level `jest-expo` cannot resolve it (48/48 suites fail), and declaring it directly is `ERESOLVE`: it wants `react-native-worklets ^0.7.4…^0.10.0` while `expo-router@57.0.25`'s `react-native-reanimated@4.7.0` forces `0.13.x` | Reproduced from `main` on 2026-10-10 by two routes; Dependabot PR **#38** failed identically and its lockfile dropped the package entirely | **Declined as a whole** and moved to the SDK 58 train (§27AI, §27AK); #38 **closed** with the evidence. Accepted consequence: `expo install --check` reports outdated until then — known, not unnoticed |
+| **ISS-18** | Medium | **`npx`-driven npm commands fail on this host** — npm 11.19.1 rejects the stray `allow-scripts=9router` line in `~/.npmrc` when it arrives **as a flag**, and `npx` forwards it; `npx patch-package` and `expo install` / `--fix` all fail, plain `npm install` works | Measured three ways 2026-10-10; full account in §27AK | Workaround in use: `npm_config_userconfig=<empty file>` for the command, or the equivalent plain `npm install <pkg>@<ver>`. **Owner-side:** the global `~/.npmrc` line was deliberately left alone. CI is unaffected |
 | **ISS-16** | High | **PR #34 moves five Expo-pinned packages outside SDK 57** — `react-native` 0.86.3 → 0.87.1, `react` 19.2.3 → 19.3.0, `react-dom` 19.2.3 → 19.3.0, `react-native-safe-area-context` ~5.7.0 → ~5.10.1, `react-native-screens` ~4.26.0 → ~4.28.0, plus the matching `@types/react` ~19.3.0. Expo SDK 57 expects exactly the old values, and CI runs no `expo-doctor` / `expo install --check`, so a green typecheck cannot see the native incompatibility — it would surface in the next native build | `mobile/node_modules/expo/bundledNativeModules.json` vs `gh pr diff 34` (both read 2026-10-10); `mobile/package.json` | **Do not merge as-is.** Close or hold PR #34 and take these versions with the Expo SDK 58 train via `npx expo install --fix` (issue #32); decide whether Dependabot should ignore the Expo-pinned set (P0-2, owner decision) |
 
 **Correctly recorded as open or deferred — not issues:** L-17 (recovery-mail delivery never inspected end-to-end),
@@ -6828,7 +6830,7 @@ P-6 + Gate 1 + iOS app registration (environment-blocked), and the new-identity 
 
 ## Pending
 
-**Fixes:** ISS-13 (once its home is decided) · ISS-06 (with the SDK 58 train). *(ISS-01 fixed in #36; ISS-16 disposed in #37; ISS-02 remediated — §27AJ; all 2026-10-10.)*
+**Fixes:** ISS-13 (once its home is decided) · ISS-06 (with the SDK 58 train) · ISS-17/ISS-18 (decided and recorded, no action pending). *(ISS-01 fixed in #36; ISS-16 disposed in #37; ISS-02 remediated — §27AJ; the 7 advisories dispositioned — §27AK; all 2026-10-10.)*
 **Upgrades, in issue #32's order:** Expo SDK 58 — **deferred by Gate 0 until Expo promotes it to `latest`** (§27AI records the decision and the runbook; the pins differ from PR #34's set — RN 0.88 family, not 0.87.1) → the React 19 type fixes (ISS-01 is the first of them) → TypeScript 7 →
 jest 30 → the `actions/*` v7 re-pin (also clears ISS-12) → `dotenv` 18 and `@types/bcryptjs` 3.
 **Testing:** the L-17 mail leg, owner-assisted; and a dated test baseline for this section.
@@ -6845,9 +6847,10 @@ before P0–P2 are clear.
 **P1 — correct the documented facts that mislead.** ISS-03, ISS-09, ISS-10, ISS-11 (done 2026-10-10); ISS-04, ISS-05,
 ISS-08 (done 2026-10-10). *Exit:* every corrected figure re-read from its source at edit time.
 
-**P2 — the security-relevant native layer, before the next native build.** ~~ISS-02~~ (**remediated 2026-10-10, §27AJ** — its
-native-build confirmation rides with the SDK 58 device pass), then ISS-06 and issue #32's upgrade train. *Exit:* CI green at
-each step; one device build launched and used per native change. *Dependency:* P2's ISS-01 pattern is established (#36).
+**P2 — the security-relevant native layer, before the next native build.** ~~ISS-02~~ (**remediated 2026-10-10, §27AJ** —
+native confirmation rides with the SDK 58 device pass) and ~~the advisory queue~~ (**dispositioned 2026-10-10, §27AK** —
+2 of 7 fixed, 5 accepted with reasons), then ISS-06 and issue #32's upgrade train. *Exit:* CI green at each step; one device
+build launched and used per native change. *Dependency:* P2's ISS-01 pattern is established (#36).
 
 **P3 — decisions and housekeeping (owner input required).** Define or remove **Phase 30B** and assign ISS-13 to it;
 decide `docs/freebuff/*`; commit or discard the device guide; dispose of the stale WIP branch; declare CI the single
@@ -6858,11 +6861,12 @@ test-count source. *Why:* phase discipline is unenforceable while a "phase" has 
 
 ## Immediate next actions
 
-1. **Dispose of the 7 open advisories** — a fix-or-accept note per advisory; several are not version-fixable.
-2. **Then P2-2** — ISS-06, the RNFirebase `compileSdk`/`targetSdk` alignment, with the next native build.
-3. **Decision: P3-1** (Phase 30B) — define it or remove its references; and keep the SDK 58 Gate 0 watch (`npm view expo dist-tags`).
+1. **P2-2 next** — ISS-06, the RNFirebase `compileSdk`/`targetSdk` alignment, with the next native build.
+2. **Decision: P3-1** (Phase 30B) — define it or remove its references; assign ISS-13 with it.
+3. **Re-check `expo install --check` when SDK 58 lands** — it reports outdated until then by the recorded decision (§27AK), not by accident. Keep the Gate 0 watch (`npm view expo dist-tags`).
 
-**Do not:** start any V2/V3/V4 feature, write to production, or push directly to `main`. PR #34 is closed (ISS-16); its versions arrive only with the SDK 58 upgrade.
+**Do not:** start any V2/V3/V4 feature, write to production, or push directly to `main`. PRs #34 (ISS-16) and #38 (ISS-17)
+are closed with their reasons; those versions arrive only with the SDK 58 upgrade.
 
 ## Verification requirements
 
@@ -6893,9 +6897,11 @@ test-count source. *Why:* phase discipline is unenforceable while a "phase" has 
 - [x] **P0-1** ISS-01 four `null`-typed prop values fixed — **merged (#36, `aadab04`)**, tsc/eslint/jest 644 tests
 - [x] **P0-2** ISS-16 **PR #34 closed**; Dependabot carve-out **merged (#37, `bf0c915`)**
 - [x] **P1** ISS-03 / ISS-04 / ISS-05 / ISS-08 / ISS-09 / ISS-10 / ISS-11 corrections *(done 2026-10-10)*
-- [x] **P2-1** ISS-02 RNFirebase PII remediation — **implemented and artifact-verified (2026-10-10, §27AJ)**; device re-check rides with the SDK 58 pass
+- [x] **P2-1** ISS-02 RNFirebase PII remediation — **implemented, artifact-verified and merged (#40, 2026-10-10, §27AJ)**; device re-check rides with the SDK 58 pass
+- [x] **P2-4** the 7 dependency advisories **dispositioned** — 2 fixed, 5 accepted with reasons, SDK 57 rollup declined (§27AK); Dependabot #38 closed
 - [ ] **P2-2** ISS-06 P-3 SDK alignment
 - [ ] **P2-3** issue #32 upgrade train
+- [ ] **P2-5** ISS-18: the `~/.npmrc` `allow-scripts` line — **owner-side**, workaround recorded (§27AK)
 - [ ] **P3-1** Phase 30B defined or its references removed (ISS-07, ISS-13) — decision needed
 - [ ] **P3-2** `docs/freebuff/*` fate — decision needed
 - [x] **P3-3** device guide **committed** (2026-10-10; `docs/DEVELOPING_ON_A_PHYSICAL_DEVICE.md`)
@@ -7129,6 +7135,110 @@ rejects (`EALLOWSCRIPTS: --allow-scripts is not allowed in project-scoped instal
 swallows npm's output (`stdio: "ignore"`), surfacing only an opaque spawn error. Invoking its CLI
 directly through `node` generates the patch normally. **The apply path never shells out to npm**, so
 `postinstall` is unaffected.
+
+# 27AK. Dependency advisories — the per-alert disposition (2026-10-10)
+
+Seven alerts were open on `mobile/package-lock.json`, all dependency-level, and §27AH's next action was a
+**fix-or-accept note per alert**. This is that note. Every row was measured on 2026-10-10: the chain from
+`npm ls`, the alert metadata from the Dependabot API, and for the one repair a full install plus the suites.
+
+## The queue, and what each alert actually is
+
+| Alert | Sev | Package | Chain | Ships in the app? | Patched | Disposition |
+| --- | --- | --- | --- | --- | --- | --- |
+| #4 | high | `@grpc/grpc-js` < 1.13.6 | `@react-native-firebase/app` → `firebase` → `@firebase/firestore` | **No** — the web SDK's Node gRPC transport; no app module imports the web SDK | 1.13.6 | **FIXED** — overridden to 1.14.6 |
+| #3 | low | `@grpc/grpc-js` < 1.13.6 | same | No | 1.13.6 | **FIXED** — same override |
+| #2 | medium | `decode-uri-component` ≤ 0.4.2 | `expo-router` → `query-string@7` | **Yes** — `expo-router`'s `getPathFromState` is bundled runtime code | 0.5.0 | **ACCEPTED** — no CJS-compatible fix exists |
+| #1 | medium | `uuid` < 11.1.1 | `expo-sharing` → `@expo/config-plugins` → `xcode` | No — build/config time only | 11.1.1 | **ACCEPTED** — the fix is a major in a build tool |
+| #5 | high | `node-forge` ≤ 1.4.0 | `expo` → `@expo/cli` | No — the CLI, not the bundle | **none** | **ACCEPTED** — unfixable |
+| #6 | high | `braces` ≤ 3.0.3 | `jest` → `@jest/core` → `micromatch` | No — test tooling | **none** | **ACCEPTED** — unfixable |
+| #8 | medium | `sprintf-js` ≤ 1.1.3 | `jest-expo` → `babel-jest` → `babel-plugin-istanbul` → `js-yaml@3` → `argparse@1` | No — coverage tooling | **none** | **ACCEPTED** — unfixable |
+
+## Fixed — `@grpc/grpc-js` (2 of the 7)
+
+An `overrides` entry raises it to **1.14.6**, above the 1.13.6 first patched version. It is the **Node**
+gRPC transport of the Firebase *web* SDK: our own code imports the web SDK nowhere (the one grep hit is a
+comment recording that the import was deliberately removed in Phase D) and `@react-native-firebase/app`
+does not require it either, so React Native never executes it. The lockfile change stays inside that
+package's own subtree — a nested `@grpc/proto-loader` and `@js-sdsl/ordered-map` — and **nothing else in the
+tree moves**: the expo family is unchanged, `expo-modules-core` stays hoisted at the root, and the ISS-02
+patch still applies. `npm ls` is clean of invalid, missing and extraneous entries; `tsc`, `eslint` and
+**48 suites / 652 tests** are green.
+
+## Accepted — and why, per alert
+
+- **`decode-uri-component`** is the only accepted alert whose package is in a **production bundle**, so it
+  gets the fullest reason. The patched version, **0.5.0, is ESM-only** — `"type": "module"` with an exports
+  map whose sole entry is an ESM default — while `query-string@7.1.3` is CommonJS and reaches it through
+  `require()`. Forcing the override would therefore break resolution in the exact place Expo Router uses it,
+  which is a worse outcome than the advisory. The correct fix is upstream: a `query-string` major that no
+  longer depends on it, shipped by Expo. **Impact, stated plainly:** the advisory is a malformed-`%`-sequence
+  DoS in the *device's own* URL parsing — a crash, with no data exposure and no server-side effect.
+  **Re-check at the SDK 58 train.**
+- **`uuid`** — `xcode` is used by Expo's config plugins at prebuild/config time and never in the bundle. The
+  patched version is a **major** (11.x, ESM-first) while `xcode@3` asks for `^7.0.3`, so the override trades
+  a real build-tool break for no runtime gain. Re-check when Expo moves `@expo/config-plugins`.
+- **`node-forge`, `braces`, `sprintf-js`** — **no patched version exists at all** (Dependabot reports no
+  `first_patched_version`), so neither a bump nor an override can clear them. They sit in `@expo/cli` and in
+  Jest's own tree, neither of which ships. They clear when Expo and Jest publish fixes, and the alerts are
+  the reminder.
+
+## Declined — the SDK 57 patch rollup, and why Dependabot PR #38 had to be closed
+
+`expo install --check` on `main` asks for four moves: `expo ~57.0.27`, `expo-constants ~57.0.21`,
+`expo-linking ~57.0.12`, `expo-router ~57.0.25`. Dependabot's weekly group PR proposed three of them plus
+`@expo/*` internals, and its `mobile` job failed with **all 48 suites** at `jest-expo`'s preset —
+`Cannot find module 'expo-modules-core'`. Its lockfile contains **no `expo-modules-core` entry at all**.
+
+It was reproduced from `main` by hand, through the sanctioned command, and the cause is upstream:
+
+1. With the move taken, the lockfile's `expo@57.0.27` **peer-depends** on `expo-modules-core`, and the
+   resolver places `expo-modules-core@57.0.21` **nested** at `node_modules/expo/node_modules/`, where
+   root-level `jest-expo` cannot resolve it — the identical 48-suite failure by a different route.
+   (Measured for contrast: on `main` the same package is hoisted at the root.)
+2. Declaring `expo-modules-core` directly — it **is** listed in `expo/bundledNativeModules.json` as
+   `~57.0.21`, so that is the sanctioned version — is **unsatisfiable**: npm answers `ERESOLVE`, because
+   `expo-modules-core@57.0.21` requires `react-native-worklets ^0.7.4 … ^0.10.0` while
+   `react-native-reanimated@4.7.0` (an optional peer of `@expo/ui` ← `expo-router@57.0.25`) requires
+   `react-native-worklets@0.13.x`. **The two cannot coexist** — which is precisely why #38's lockfile
+   dropped the package rather than failing loudly.
+
+**Disposition: declined as a whole, recorded, and moved to the SDK 58 train** (§27AI), where the tree moves
+together under the runbook and its device pass. Taking part of it would leave `expo install --check` failing
+for the remainder. `main` stays green and internally consistent on SDK 57.0.26, and **#38 is closed** with
+this evidence in its thread. The accepted consequence is stated rather than hidden: the project is
+**knowingly one patch behind what Expo's own check asks for** until the SDK 58 upgrade, so that check will
+keep reporting outdated dependencies — a known state, not an unnoticed one.
+
+## Environment finding — npm 11.19.1, `allow-scripts`, and every `npx`-driven npm spawn
+
+Found while trying to run those sanctioned commands. `~/.npmrc` on this host carries a stray
+`allow-scripts=9router` line, and npm 11.19.1 **rejects that key when it arrives as a flag** in a
+project-scoped install:
+
+```
+npm error code EALLOWSCRIPTS
+npm error --allow-scripts is not allowed in project-scoped installs.
+```
+
+Measured three ways: plain `npm install` and `npm install --dry-run` **succeed** (the value comes from
+config), an explicit `--allow-scripts=…` flag **fails**, and `npx`-driven tools **forward it** — so
+`npx patch-package` (patch generation) and `expo install` / `expo install --fix` (their npm sub-process) all
+fail on this machine.
+
+- **CI is unaffected:** it runs `npm ci` directly, and no runner carries this user config.
+- **Workaround used:** point npm at an empty user config for that one command —
+  `npm_config_userconfig=<empty file> ./node_modules/.bin/expo install --fix`. Where even that failed, the
+  equivalent plain `npm install <pkg>@<version>` finished the work without routing through npx.
+- **Owner-side, deliberately not touched:** the `~/.npmrc` line is global and unrelated to Inventory AI.
+  Removing it — if nothing else on this host needs it — would restore `npx`-driven npm tooling.
+
+## Where this leaves the queue
+
+**2 of 7 fixed** (`@grpc/grpc-js`, one high and one low), **5 accepted with a written reason** (one of which
+is in a production bundle and carries a re-check at the SDK 58 train), and the SDK 57 patch rollup declined
+with its upstream conflict documented. No alert is dismissed without a reason, and none is claimed fixed
+that is not measured.
 
 # 28. Phase Gate System
 

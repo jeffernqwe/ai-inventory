@@ -34,7 +34,7 @@
     "lint": "eslint .",
     "test": "jest",
     "test:watch": "jest --watch",
-    "postinstall": "patch-package"
+    "postinstall": "patch-package --error-on-fail"
   },
   "private": true,
   "devDependencies": {

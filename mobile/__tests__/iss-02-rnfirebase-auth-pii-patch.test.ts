@@ -62,8 +62,18 @@ describe('ISS-02 — the RNFirebase Auth PII log stays patched out', () => {
   });
 
   it('is applied by every install, so a fresh clone is never left unpatched', () => {
-    expect(packageJson.scripts?.postinstall).toBe('patch-package');
+    // `--error-on-fail` is not decoration: measured on 2026-10-10, patch-package exits 0 on a
+    // failed apply unless it is passed (or `CI` is set), so without the flag a Windows or macOS
+    // install would print the error and carry on unpatched. With it, the install fails.
+    expect(packageJson.scripts?.postinstall).toBe('patch-package --error-on-fail');
     expect(packageJson.devDependencies?.['patch-package']).toBeDefined();
+  });
+
+  it('is a byte-stable patch file — LF endings, no carriage returns', () => {
+    // Verification note: a CRLF copy of this patch was measured to apply correctly, so line
+    // endings are not a correctness risk. Pinning them keeps the file identical everywhere
+    // instead of silently different on a Windows checkout.
+    expect(patch).not.toMatch(/\r/);
   });
 
   it('targets the one native file that logs the user object', () => {

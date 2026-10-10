@@ -6799,7 +6799,10 @@ Facebook Login and Apple Sign-In remain unimplemented.
 
 There is **no in-flight feature work**. P0 closed on 2026-10-10: #35/#36/#37 merged (`f2f6731`, `aadab04`,
 `bf0c915`), #34 closed (ISS-16), and the device guide committed (P3-3 resolved). SDK 58 execution is deferred by its
-recorded Gate 0 decision (§27AI). **ISS-02 closed out on 2026-10-10** (remediated — §27AJ, PR #40). Next: the **advisories disposition**, then P3-1.
+recorded Gate 0 decision (§27AI). **ISS-02 closed out on 2026-10-10** (remediated — §27AJ, PR #40), the
+**advisories dispositioned** (§27AK, PR #41), and on 2026-10-11 the **Dependabot carve-out completed** with
+the last three P3 housekeeping items decided (§27AL). Next: **P3-1** — the one decision that still needs the
+owner.
 
 ## Known issues and required fixes
 
@@ -6818,8 +6821,8 @@ recorded Gate 0 decision (§27AI). **ISS-02 closed out on 2026-10-10** (remediat
 | **ISS-11** | Low | Phase 30A's "no EAS build has been executed / statically validated only" is superseded but un-annotated | CLAUDE.md 30A record | Builds exist: development 2026-09-26/09-30/10-03, preview 2026-09-29 and 2026-10-10; annotated |
 | **ISS-12** | Low | CI warns the pinned `actions/*` SHAs target Node 20 (forced onto Node 24) | CI job logs | Resolves with the `actions/*` v7 re-pin in issue #32 |
 | **ISS-13** | Low | **F-1 (Phase 30A PDF-sharing finding) is still open and real** | `expo-print`/`expo-sharing` are dependencies; sharing code in `app/(app)/products/[id]/index.tsx` | Fix wherever 30B lands (P3-1) |
-| **ISS-14** | Low | `origin/wip/backup-working-tree` (2026-09-28) is stale and **fully superseded** — its checklist is smaller (1040 vs 2160 lines), `main` already has `31D.6`, the 18c/18e plan docs exist on `main`, its `eas.json` change is already on `main` | `git diff main...origin/wip/backup-working-tree` | Delete or leave with a recorded "no action" (P3-4) |
-| **ISS-15** | Info | Three test baselines from three dates, none current | TS manifest (259 unit) · `docs/freebuff/TEST_BASELINE.md` (server 838 / mobile 21 suites, frozen 2026-09-30) · CLAUDE.md N-3 (mobile 36 suites / 509) | Declare CI the source of truth and label the others as dated snapshots (P3-5) |
+| **ISS-14** | Low → **`[~]`** | `origin/wip/backup-working-tree` (2026-09-28) is stale and **fully superseded** — measured again 2026-10-11: **1 commit ahead, 97 behind** `main`, its one unique commit being the backup itself. **Disposition: retained, no action** (§27AL) — its checklist is smaller (1040 vs 2160 lines), `main` already has `31D.6`, the 18c/18e plan docs exist on `main`, its `eas.json` change is already on `main` | `git diff main...origin/wip/backup-working-tree` | Delete or leave with a recorded "no action" (P3-4) |
+| **ISS-15** | Info → **`[✓]`** | Three test baselines from three dates, none current | TS manifest (259 unit) · `docs/freebuff/TEST_BASELINE.md` (server 838 / mobile 21 suites, frozen 2026-09-30) · CLAUDE.md N-3 (mobile 36 suites / 509) | **Done 2026-10-11:** CI declared the single source of truth, and both files annotated **in place** beside the figures they freeze (§27AL, §27AH *Verification requirements*) |
 | **ISS-17** | Medium | **The SDK 57 patch rollup cannot be installed** — `expo install --check` asks for `expo ~57.0.27` / `expo-constants ~57.0.21` / `expo-linking ~57.0.12` / `expo-router ~57.0.25`, but taking it nests `expo-modules-core@57.0.21` under `node_modules/expo/` where root-level `jest-expo` cannot resolve it (48/48 suites fail), and declaring it directly is `ERESOLVE`: it wants `react-native-worklets ^0.7.4…^0.10.0` while `expo-router@57.0.25`'s `react-native-reanimated@4.7.0` forces `0.13.x` | Reproduced from `main` on 2026-10-10 by two routes; Dependabot PR **#38** failed identically and its lockfile dropped the package entirely | **Declined as a whole** and moved to the SDK 58 train (§27AI, §27AK); #38 **closed** with the evidence. Accepted consequence: `expo install --check` reports outdated until then — known, not unnoticed |
 | **ISS-18** | Medium | **`npx`-driven npm commands fail on this host** — npm 11.19.1 rejects the stray `allow-scripts=9router` line in `~/.npmrc` when it arrives **as a flag**, and `npx` forwards it; `npx patch-package` and `expo install` / `--fix` all fail, plain `npm install` works | Measured three ways 2026-10-10; full account in §27AK | Workaround in use: `npm_config_userconfig=<empty file>` for the command, or the equivalent plain `npm install <pkg>@<ver>`. **Owner-side:** the global `~/.npmrc` line was deliberately left alone. CI is unaffected |
 | **ISS-16** | High | **PR #34 moves five Expo-pinned packages outside SDK 57** — `react-native` 0.86.3 → 0.87.1, `react` 19.2.3 → 19.3.0, `react-dom` 19.2.3 → 19.3.0, `react-native-safe-area-context` ~5.7.0 → ~5.10.1, `react-native-screens` ~4.26.0 → ~4.28.0, plus the matching `@types/react` ~19.3.0. Expo SDK 57 expects exactly the old values, and CI runs no `expo-doctor` / `expo install --check`, so a green typecheck cannot see the native incompatibility — it would surface in the next native build | `mobile/node_modules/expo/bundledNativeModules.json` vs `gh pr diff 34` (both read 2026-10-10); `mobile/package.json` | **Do not merge as-is.** Close or hold PR #34 and take these versions with the Expo SDK 58 train via `npx expo install --fix` (issue #32); decide whether Dependabot should ignore the Expo-pinned set (P0-2, owner decision) |
@@ -6834,7 +6837,7 @@ P-6 + Gate 1 + iOS app registration (environment-blocked), and the new-identity 
 **Upgrades, in issue #32's order:** Expo SDK 58 — **deferred by Gate 0 until Expo promotes it to `latest`** (§27AI records the decision and the runbook; the pins differ from PR #34's set — RN 0.88 family, not 0.87.1) → the React 19 type fixes (ISS-01 is the first of them) → TypeScript 7 →
 jest 30 → the `actions/*` v7 re-pin (also clears ISS-12) → `dotenv` 18 and `@types/bcryptjs` 3.
 **Testing:** the L-17 mail leg, owner-assisted; and a dated test baseline for this section.
-**Documentation:** Phase 30B (P3-1) and `docs/freebuff/*` (P3-2); the corrections and the device guide are done.
+**Documentation:** Phase 30B (P3-1) — **the only one left**; `docs/freebuff/*` is **decided (retained, §27AL)**, and the corrections and the device guide are done.
 **Deliberately not scheduled:** Facebook Login, Apple Sign-In, and everything in §35 V2/V3/V4. No new feature work
 before P0–P2 are clear.
 
@@ -6861,9 +6864,14 @@ test-count source. *Why:* phase discipline is unenforceable while a "phase" has 
 
 ## Immediate next actions
 
-1. **P2-2 next** — ISS-06, the RNFirebase `compileSdk`/`targetSdk` alignment, with the next native build.
-2. **Decision: P3-1** (Phase 30B) — define it or remove its references; assign ISS-13 with it. (P2-2's ISS-06 needs a native build to close, so it rides with the SDK 58 train.)
-3. **Re-check `expo install --check` when SDK 58 lands** — it reports outdated until then by the recorded decision (§27AK), not by accident. Keep the Gate 0 watch (`npm view expo dist-tags`).
+1. **Decision: P3-1 (Phase 30B)** — define it or remove its references, and say where ISS-13 (the F-1
+   PDF-sharing finding) belongs. **This is the only item left that cannot be settled from the repository**:
+   everything else in P0–P3 is now shipped, dispositioned, deferred with a record, or awaiting a build.
+2. **Keep the SDK 58 Gate 0 watch** — `npm view expo dist-tags`, re-read **2026-10-11**: `latest = 57.0.27`,
+   `next = 58.0.7`, so the upgrade train stays deferred. When `latest` moves to 58, execute §27AI.
+3. **Carry the two build-time confirmations into the next native build** — the remediated PII line absent
+   from logcat (ISS-02) and the generated `compileSdk`/`targetSdk` values read and recorded (ISS-06). Neither
+   can be closed without one, and neither is claimed as closed today.
 
 **Do not:** start any V2/V3/V4 feature, write to production, or push directly to `main`. PRs #34 (ISS-16) and #38 (ISS-17)
 are closed with their reasons; those versions arrive only with the SDK 58 upgrade.
@@ -6903,10 +6911,11 @@ are closed with their reasons; those versions arrive only with the SDK 58 upgrad
 - [ ] **P2-3** issue #32 upgrade train
 - [ ] **P2-5** ISS-18: the `~/.npmrc` `allow-scripts` line — **owner-side**, workaround recorded (§27AK)
 - [ ] **P3-1** Phase 30B defined or its references removed (ISS-07, ISS-13) — decision needed
-- [ ] **P3-2** `docs/freebuff/*` fate — decision needed
+- [x] **P3-2** `docs/freebuff/*` **retained, decided** (audit/provenance layer; counts annotated as frozen) — §27AL
 - [x] **P3-3** device guide **committed** (2026-10-10; `docs/DEVELOPING_ON_A_PHYSICAL_DEVICE.md`)
-- [ ] **P3-4** stale WIP branch disposed of (ISS-14) — decision needed
-- [ ] **P3-5** single test-count source declared (ISS-15)
+- [x] **P3-4** stale WIP branch — **retained, no action** (ISS-14: 1 ahead / 97 behind; the unique commit is the superseded backup itself) — §27AL
+- [x] **P3-5** test-count source **declared**: CI is the source of truth, and the two older baselines now say so in place (ISS-15) — §27AL
+- [x] **P3-6** Dependabot carve-out **completed** — every Expo-pinned package excluded, derived from the installed SDK (18 of 22 names) — §27AL
 - [ ] **P4** deferred debt — no action (B1, B2, E3, OD-10, L-17, O-5/O-6/O-10/O-11, iOS gates)
 
 ## Documents corrected on 2026-10-10
@@ -6978,9 +6987,10 @@ five** (RN and safe-area). Everything else the SDK pins follows `expo install --
 2. **Bump the SDK only.** `npx expo install expo@^58.0.0` (pin the exact released version if Gate 0
    chose one). Do not hand-edit `package.json`.
 3. **Align every pinned dependency.** `npx expo install --fix`, then `npx expo install --check` →
-   **must report no mismatches**; paste both outputs into the PR. If `--fix` moves the five packages
-   PR #37 ignores, that is the sanctioned path — do not relax the ignore rules, and do not bump them
-   by hand.
+   **must report no mismatches**; paste both outputs into the PR. If `--fix` moves any of the packages
+   the Dependabot carve-out excludes, that is the sanctioned path — **do not relax the ignore rules**, and
+   do not bump them by hand. Since §27AL the carve-out covers **every** package the installed SDK pins, so
+   the excluded set and the set `--fix` is expected to move are the same set by construction.
 4. **Doctor.** `npx expo-doctor` → triage every finding. Expected guest: RNFirebase's
    `compileSdk`/`targetSdk` 34 vs 36 (**ISS-06 / P-3** — re-read 2026-10-10: 34 is RNFirebase's own
    **library** value and a library may compile below the app. Read and **record the generated app values**
@@ -7015,8 +7025,9 @@ five** (RN and safe-area). Everything else the SDK pins follows `expo install --
     waived with a record; the device pass recorded (build ID, date, journeys); test counts re-read and
     recorded in §27AH; no unrelated changes in the diff.
 11. **Land and close out.** Squash-merge; delete the branch; close issue #32's SDK 58 entry; update
-    §27AH's status rows and advisory count (re-read it); leave the #37 ignore rules in place — they are
-    per-SDK, and a future SDK moves the pins again.
+    §27AH's status rows and advisory count (re-read it); **re-derive the Dependabot carve-out against the
+    new SDK** (§27AL — the ignore list is measured from `bundledNativeModules.json`, so a new SDK moves the
+    pins and the list must move with them).
 
 ## Rollback
 
@@ -7210,8 +7221,9 @@ It was reproduced from `main` by hand, through the sanctioned command, and the c
 together under the runbook and its device pass. Taking part of it would leave `expo install --check` failing
 for the remainder. `main` stays green and internally consistent on SDK 57.0.26, and **#38 is closed** with
 this evidence in its thread. The accepted consequence is stated rather than hidden: the project is
-**knowingly one patch behind what Expo's own check asks for** until the SDK 58 upgrade, so that check will
-keep reporting outdated dependencies — a known state, not an unnoticed one.
+**knowingly one patch behind what Expo's own check asks for** until the SDK 58 upgrade,so that check will keep reporting outdated dependencies — a known state, not an unnoticed one. **The queue can
+no longer re-propose it:** the Dependabot carve-out was completed on 2026-10-11 so that *every* Expo-pinned
+package is excluded, derived from the installed SDK rather than from a curated list (§27AL).
 
 ## Environment finding — npm 11.19.1, `allow-scripts`, and every `npx`-driven npm spawn
 
@@ -7247,6 +7259,60 @@ that is not measured.
 `state: fixed` (`fixed_at 2026-10-10T17:10:12Z`) and the open count at **5** — `sprintf-js` (medium),
 `braces` (high), `node-forge` (high), `decode-uri-component` (medium), `uuid` (medium) — exactly the five
 accepted above. Re-read the count before quoting it; it drifts.
+
+# 27AL. Dependabot scope completed — every Expo-pinned package is excluded (2026-10-11)
+
+## What changed, and why the rule is now mechanical
+
+The mobile carve-out named **five** packages (`react`, `react-dom`, `react-native`,
+`react-native-safe-area-context`, `react-native-screens`). Dependabot was therefore still free to propose
+**every other Expo-pinned dependency** — and that is exactly where both dependency failures came from:
+**#34** moved four SDK-pinned packages outside SDK 57 (ISS-16), and **#38** proposed the SDK 57 patch
+rollup that **cannot install at all** (ISS-17, §27AK).
+
+The rule is now mechanical rather than a curated list: **if the package is a key in the installed SDK's
+`expo/bundledNativeModules.json`, it is excluded from version updates.** Measured on 2026-10-11 that is
+**17 of the 21** mobile dependencies, with `expo` added explicitly because it carries the upgrade. The
+three that stay open — `@react-native-firebase/app`, `@react-native-firebase/auth`,
+`@react-native-google-signin/google-signin` — are version choices this project makes, so Dependabot may
+still propose them.
+
+## What this does, and what it deliberately leaves alone
+
+- **Security updates are unaffected:** the header of `dependabot.yml` records that they are exempt from
+  `open-pull-requests-limit` and from `update-types` filters, and that still holds.
+- **Majors are unaffected:** the existing `*` / `version-update:semver-major` rule is untouched.
+- **The SDK train is unaffected in kind, only in who proposes it** — these packages now move the way the
+  policy always said they should: deliberately, with the SDK upgrade, through `npx expo install --fix`
+  under the §27AI runbook.
+- **What it stops:** a weekly red pull request that cannot be merged and has to be closed by hand. The
+  queue's stated intent — "normally empty or trivially green" — is restored rather than re-argued weekly.
+
+## Verification
+
+`dependabot.yml` was re-read and validated in place: the YAML parses; three `updates` entries; every entry
+carries `package-ecosystem`, `directory` and a valid `schedule.interval`; every `ignore` entry carries a
+`dependency-name`; no duplicates. The mobile ignore list was then **compared against the installed SDK**:
+18 names — the pinned set of 17 plus `expo` — with **no pinned package left uncovered and no non-pinned
+package excluded**. That comparison is repeatable (`bundledNativeModules.json` is its authority) and must be
+re-run when the SDK moves; it is the check that keeps this list from silently going stale.
+
+**Not verified:** GitHub has not evaluated the file. `dependabot.yml` is read only from the default branch,
+so the real confirmation is the next scheduled run producing no error — stated rather than assumed.
+
+## The three housekeeping dispositions decided with it
+
+- **P3-2 — `docs/freebuff/*`: retained.** Six files plus an empty `tasks/`, each self-labelled as an
+  audit/provenance layer that claims no authority, last touched 2026-09-30 and referenced by nothing else.
+  Deleting them destroys provenance rather than tidying anything, so they stay — with their counts
+  annotated as frozen snapshots (ISS-15).
+- **P3-4 — the stale WIP branch: retained, no action.** `origin/wip/backup-working-tree` measures **1
+  commit ahead and 97 behind** `main`; its single unique commit is the backup itself, whose content §27AH
+  already records as superseded. Deleting the only copy of a backup is destructive and buys nothing, so the
+  recorded "no action" alternative is taken and the measurement is written down.
+- **P3-5 — the test-count source: declared.** CI is the single source of truth; the two older baselines
+  (`docs/freebuff/TEST_BASELINE.md` and `docs/TS-MIGRATION-MANIFEST.md`) now say so **in place**, beside
+  the figures they freeze, instead of contradicting them from a distance.
 
 # 28. Phase Gate System
 

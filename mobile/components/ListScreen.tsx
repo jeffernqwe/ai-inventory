@@ -83,7 +83,7 @@ function ListScreen<T>({
     ) : undefined,
     onEndReached,
     onEndReachedThreshold: 0.4,
-    ListFooterComponent: loadingMore ? <LoadingBlock label="Loading more…" /> : footer ?? null,
+    ListFooterComponent: loadingMore ? <LoadingBlock label="Loading more…" /> : footer ?? undefined,
     keyboardShouldPersistTaps: 'handled',
     showsVerticalScrollIndicator: false,
   } satisfies FlatListProps<T>;

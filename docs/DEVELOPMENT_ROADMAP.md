@@ -6770,14 +6770,15 @@ update its tracking boxes, status rows and heading date at the end of a session 
 
 | Dimension | Verified state |
 | --- | --- |
-| Repository | `main` @ `3beaf85` = `origin/main`; no tags, no stashes; the device guide is committed (P3-3 resolved); 2026-10-11: **ISS-13 fixed** (#45, §27AM) and the **Expo pin guard** added (§27AN) |
-| CI | `.github/workflows/ci.yml` only — jobs **server / mobile / secret-guard**; last `main` run green on `3beaf85` (run 38074336861, 2026-10-10T18:04Z) |
+| Repository | `main` @ `3adac9d` = `origin/main`; no tags, no stashes; the device guide is committed (P3-3 resolved); 2026-10-11: **ISS-13 fixed** (#45, §27AM), the **Expo pin guard** added (§27AN), the **watch script** landed (§27AQ), the **secret guard made able to fail** (§27AR), and the **first real-device run** performed (§27AT) |
+| CI | `.github/workflows/ci.yml` only — jobs **server / mobile / secret-guard**; last `main` run green on `3adac9d` (run 38078651606, 2026-10-10T19:09Z) |
 | Backend | **117** `.ts` modules + one deferred `.js` (`server/src/services/entitlement.service.js`); **0** open advisories |
 | Mobile | **132** `.ts`/`.tsx` sources and **0** `.js`/`.jsx` in `app/ components/ lib/ __tests__/` (re-counted 2026-10-11); Expo 57 / RN 0.86.3 |
-| Tests | **64** server test files (`server/test/*.test.mjs`) and **50** mobile test files (file counts, re-read 2026-10-11). CI's own summary at `3beaf85`: server **185 suites / 1312 tests, 0 failures**; mobile **49 suites / 660 tests** — a "suite" there is CI's unit, not a file |
-| Open on GitHub | Nothing open but **issue #32** (deferred majors); **PRs #40–#45 merged** 2026-10-10/11 (§27AJ–§27AM plus the `mongoose` patch); #34 (ISS-16) and #38 (ISS-17) closed with their reasons |
+| Tests | **64** server test files (`server/test/*.test.mjs`) and **50** mobile test files (file counts, re-read 2026-10-11). CI's own summary at `3beaf85`: server **185 suites / 1312 tests, 0 failures**; mobile **49 suites / 660 tests** — a "suite" there is CI's unit, not a file. Re-run locally on `3adac9d` for the device pass: mobile **50 / 666**, server **185 / 1312**, both 0 failures, `tsc` and eslint clean (§27AT) |
+| Open on GitHub | **Nothing at all** but **issue #32** (deferred majors) — re-read 2026-10-11: `gh pr list --state open` is empty, **PRs #46–#50 merged** (§27AL–§27AR); #34 (ISS-16) and #38 (ISS-17) closed with their reasons |
 | Open advisories | **5** — 2 high, 3 medium, 0 critical (all mobile; re-read 2026-10-11 from the alerts API after §27AK's disposition — the count drifts, and did) |
 | Production | Render auto-deploy from `main`; `https://ai-inventory-l1mi.onrender.com` reachable and serving the AUTH-04 endpoints |
+| Device | **First physical-device run performed 2026-10-11** (§27AT): dev client `0972948` installed on the OPPO CPH1969 over USB, app launched and rendered, the USB backend path proved, the §27R register validation confirmed on hardware. **Unauthenticated only** — the local database is empty, so sign-in, verification, inventory and the AI assistant remain **not device-verified** |
 
 ## Verified complete — with evidence
 
@@ -6803,8 +6804,20 @@ There is **no in-flight feature work**. P0 closed on 2026-10-10: #35/#36/#37 mer
 `bf0c915`), #34 closed (ISS-16), and the device guide committed (P3-3 resolved). SDK 58 execution is deferred by its
 recorded Gate 0 decision (§27AI). **ISS-02 closed out on 2026-10-10** (remediated — §27AJ, PR #40), the
 **advisories dispositioned** (§27AK, PR #41), and on 2026-10-11 the **Dependabot carve-out completed** with
-the last three P3 housekeeping items decided (§27AL), **ISS-13 fixed** (§27AM, PR #45) and the **Expo pin set
-put under CI** — ISS-16's detection gap (§27AN, PR #46). Next: **P3-1** — the one item left that needs the owner.
+the last three P3 housekeeping items decided (§27AL), **ISS-13 fixed** (§27AM, PR #45), the **Expo pin set
+put under CI** — ISS-16's detection gap (§27AN, PR #46) — the deferred queue re-measured and scripted (§27AQ,
+PR #49), the **secret guard's rules made provable** (§27AR, PR #50), and the **first real-device Android run**
+prepared and performed (§27AT, F-26…F-28).
+
+**Attribution policy tightened (2026-10-11).** The owner required that no unwanted contributor name, AI
+attribution tag or automated signature line appears in commits, messages, pull requests or history. The audit
+found **103 commits on `main`** carrying a trailer — 91 `Co-Authored-By: Claude Code`, 8 Codebuff lines
+(including `🤖 Generated with Codebuff`) and 4 `dependabot[bot]` — while `git config` was already correct and
+**no hook or template in this repository adds one**: the trailers came from a coding agent's own message
+template. CLAUDE.md §16 is now tool-agnostic and forward-binding, and the owner authorised a one-off
+message-only rewrite of the affected commits (§27AS).
+
+Next: **the device-testing account decision** (§27AT) and **P3-1** — the two items left that need the owner.
 
 ## Known issues and required fixes
 
@@ -6866,17 +6879,24 @@ test-count source. *Why:* phase discipline is unenforceable while a "phase" has 
 
 ## Immediate next actions
 
-1. **Decision: P3-1 (Phase 30B)** — define it or remove its references (ISS-07). **This is the only item
-   left that cannot be settled from the repository**: everything else in P0–P3 is now shipped,
-   dispositioned, deferred with a record, or awaiting a build — ISS-13 included (§27AM).
-2. **Keep the upgrade watches — one command now:** `node scripts/check-upgrade-watches.mjs` (§27AQ).
+1. **Decision: the device run's account (§27AT)** — the app is installed and rendering on the phone, but the
+   local backend's database is empty, so nothing behind the login is reachable. Three ways forward, owner's
+   choice: register a fresh test account through the app (exercises AUTH-04 end to end, needs a mailbox),
+   point `EXPO_PUBLIC_API_URL` at the deployed backend and use the real account (immediate, live data), or
+   seed the local database with a test tenant (instant, skips the registration and verification paths).
+2. **Decision: P3-1 (Phase 30B)** — define it or remove its references (ISS-07). **The only item left that
+   cannot be settled from the repository**: everything else in P0–P3 is now shipped, dispositioned, deferred
+   with a record, or awaiting a build — ISS-13 included (§27AM).
+3. **Keep the upgrade watches — one command now:** `node scripts/check-upgrade-watches.mjs` (§27AQ).
    Re-read **2026-10-11**: the SDK 58 **Gate 0 is still closed** (`latest` 57.0.27, `next` 58.0.7); **jest 30
    rides with that promotion** (`jest-expo@58.0.9` depends on the jest 30 line, `57.0.5` on jest 29);
    **TypeScript 7 is upstream-blocked** (the parser line is 8.x, `typescript >=4.8.4 <6.1.0`). When `latest`
    moves to 58, execute §27AI.
-3. **Carry the two build-time confirmations into the next native build** — the remediated PII line absent
+4. **Carry the two build-time confirmations into the next native build** — the remediated PII line absent
    from logcat (ISS-02) and the generated `compileSdk`/`targetSdk` values read and recorded (ISS-06). Neither
-   can be closed without one, and neither is claimed as closed today.
+   can be closed without one, and neither is claimed as closed today. **F-26 sharpens this:** the client on the
+   phone was built 2026-10-03 and so **predates** the ISS-02 patch, which means the device under test is *known*
+   to still carry the unpatched logging — a fresh `development` build is the only way to close it (§27AT).
 
 **Do not:** start any V2/V3/V4 feature, write to production, or push directly to `main`. PRs #34 (ISS-16) and #38 (ISS-17)
 are closed with their reasons; those versions arrive only with the SDK 58 upgrade.
@@ -6901,6 +6921,12 @@ are closed with their reasons; those versions arrive only with the SDK 58 upgrad
   with `--clear`. A `preview`/`production` APK cannot load your edits: an EAS **`development`** build is required.
   Known environment limit: ColorOS refuses the shell `WRITE_SECURE_SETTINGS`, so scrcpy's `-w` (stay-awake) is
   declined — raise the phone's screen timeout instead. Full procedure: `docs/DEVELOPING_ON_A_PHYSICAL_DEVICE.md`.
+  **For a cabled run, prefer the USB tunnel over the LAN address (F-28):** `adb reverse tcp:8081 tcp:8081` and
+  `adb reverse tcp:4000 tcp:4000` with `EXPO_PUBLIC_API_URL=http://localhost:4000` needs no Wi-Fi, no DHCP-lease
+  match and no firewall rule, and it is what §27AT's run was performed with. The guide still presents it as the
+  alternative — it is the deterministic route. Also: a **`development`** client is mandatory and its **native**
+  layer ages silently, so check `eas build:list` for the newest `development` build and rebuild if the change
+  under test is native (F-26).
 - **Baseline.** CI is the **single source of truth** (ISS-15); dated local counts are kept here only as
   snapshots. Latest: **2026-10-11 — mobile 50 suites / 666 tests, 0 failures** (49/660 at `3beaf85`, plus the
   pin guard); server at that date **185 suites / 1312 tests, 0 failures** (`3beaf85`). Re-read the numbers at
@@ -7579,6 +7605,159 @@ comment beside it; a control that pins an accident fails on the next refactor.
 file(s)` · `no credential-shaped content found`, exit 0. The two break/restore runs above. The CI `secret-guard`
 job runs the same command with the step now named for both halves, so the controls ran on this change's own
 pull request.
+
+---
+
+# 27AT. Real-device Android run — what the phone proved, and what it did not (2026-10-11)
+
+## Why this section exists
+
+The owner asked to see the application on a **physical Android phone over USB** rather than an emulator, and to
+be told honestly what is device-verified as opposed to merely test-green. This is that record. **No application
+source code changed**: the work was environment preparation, a device run, and documentation. The one local
+change is `mobile/.env`, which is git-ignored (see below).
+
+## What was actually in place (measured, not assumed)
+
+| Piece | Measured state |
+| --- | --- |
+| Host tooling | `node v26.10.0` (matches `.nvmrc`), `adb 1.0.41`, `scrcpy 4.1`, `npx expo --version` → `57.0.27` |
+| Device | OPPO `CPH1969`, Android 11 (SDK 30), serial `PV4DDMIZZLTCIVSK` |
+| `adb devices` | **`unauthorized`** on first inspection — the USB-debugging prompt had not been accepted. It reached `device` state only after the owner tapped it. (The runbook's own troubleshooting table already names this state and its fix.) |
+| `server/.env` | Complete — `PORT`, `MONGODB_URI`, `JWT_SECRET`, `AI_PROVIDER`, `OPENROUTER_*`, Firebase Admin, `MAIL_PROVIDER`, `RESEND_API_KEY`, `BREVO_API_KEY`, `MAIL_FROM`, `EMAIL_VERIFICATION_CODE_PEPPER`. The backend starts and reports `db: connected`. |
+| `mobile/.env` | `EXPO_PUBLIC_API_URL=http://192.168.1.4:4000`, and the laptop's LAN IPv4 turned out to be exactly `192.168.1.4` — the committed default matched this network. |
+| Dev client on the phone | **None.** `adb shell cmd package list packages | grep inventory` was empty — the F2.9 build is no longer on this device, so the whole client had to be reinstalled before any device work could begin. |
+
+## The decision that shaped the run — which binary
+
+EAS build history, read rather than remembered:
+
+| Profile | Date | Commit | Distribution |
+| --- | --- | --- | --- |
+| `preview` | 2026-10-09 | `e00ba97` | internal |
+| `development` | **2026-10-03** | **`0972948`** | internal |
+
+The newest Android artefact is a **`preview`** build — a standalone APK that bundles its own JS and **cannot be
+driven by Metro**. The newest **`development`** (dev-client) build is 2026-10-03 at `0972948`. The owner chose to
+install that one rather than wait ~15–25 minutes for a fresh EAS build, so the run started in minutes. Installed
+with `adb install -r` (253 MB APK) → `Success`, and confirmed to be a genuine dev client because
+`adb shell cmd package resolve-activity --brief -a android.intent.action.VIEW -d "inventoryai://expo-development-client/?url=http://localhost:8081"`
+answers `com.inventoryai.app/.MainActivity` — a standalone build answers *No activity found*, which is the
+runbook's own discriminator.
+
+**Caveat, measured by date rather than assumed:** that binary was built 2026-10-03 and therefore **predates the
+ISS-02 native patch** (`mobile/patches/@react-native-firebase+auth+26.4.0.patch`, which deletes the
+`Log.d(TAG, "addAuthStateListener:eventBody " + …)` line from `NativeRNFBTurboAuth.java`; the patch landed in
+`da17f8c`). The install on the phone therefore still carries the **unpatched native code**, so this binary's
+logcat is **not** patch-clean. Everything JavaScript-level is current, because Metro serves it. **ISS-02's
+device re-check (§27AI step 9) is not closed by this run** and still needs a native build made after the patch.
+
+## How it was wired — USB only, no Wi-Fi dependency
+
+- **USB tunnels:** `adb reverse tcp:8081 tcp:8081` and `adb reverse tcp:4000 tcp:4000`, so the phone's `localhost`
+  on both ports is this laptop, over the cable. Chosen over the LAN address deliberately: no Wi-Fi, no DHCP-lease
+  match, no Windows Firewall rule.
+- **`mobile/.env`** was pointed at `http://localhost:4000` (the LAN value backed up outside the repository). Since
+  `EXPO_PUBLIC_*` is **inlined at bundle time**, Metro was restarted with `--clear`. `mobile/.env` is
+  git-ignored, so nothing tracked changed; the repository default remains the LAN URL.
+- **Backend:** `cd server && npm start` → `http://localhost:4000`; `/api/health/ready` →
+  `{"status":"ready","db":"connected"}`, `/api/health/live` → `{"status":"live"}`. The database is named **`test`**
+  and is **entirely empty** — 0 users, 0 businesses, 0 products, 0 inventories, 0 inventory transactions,
+  0 locations, 0 suppliers, 0 purchase orders, 0 sessions, 0 audit rows (read directly, read-only).
+- **Metro:** `npx expo start --dev-client --clear --port 8081`; `/status` → `packager-status:running`.
+- **Launch:** `am start -a android.intent.action.VIEW -d "inventoryai://expo-development-client/?url=http%3A%2F%2Flocalhost%3A8081"`.
+- **Mirror:** `scrcpy -s PV4DDMIZZLTCIVSK -m 1024 --window-title "Inventory AI"` → Renderer `direct3d11`,
+  texture `472x1024`, window on the owner's desktop.
+
+## Verified ON THE DEVICE — the three independent signals
+
+1. **Metro served the bundle:**
+   `Android Bundled 13482ms node_modules\expo-router\entry.js (1602 modules)`.
+2. **The app is on the screen:** `mResumedActivity: ActivityRecord{… com.inventoryai.app/.MainActivity}` — and the
+   rendered Login screen was read off the device as *Inventory AI · Multi-tenant inventory for small teams ·
+   Welcome back · Sign in to manage your inventory. · Email \* · Password \* · Sign In · Continue with Google ·
+   Forgot password? · New to Inventory AI? Create an account*.
+3. **It is talking to this laptop:** the backend log recorded `GET /api/health/ready → 200` and
+   `GET /favicon.ico → 404` **originating on the phone** (a URL opened on the device), which proves
+   `phone → adb reverse → laptop:4000` end to end. No request had come from the **app itself** at that point,
+   because no screen that calls the API had been reached — that is expected, not a failure.
+
+Two more device-verified behaviours:
+
+- **Navigation works.** Tapping the sign-up link on Login rendered the register screen — *Create your workspace ·
+  You'll get a new business and an Owner account.* with Business name / Your name / Email / Password /
+  Confirm password.
+- **The §27R required-field fix, on real hardware.** Submitting the register form **completely empty** produced all
+  five inline errors — *Business name is required · Name is required · Email is required · Password is required ·
+  Confirm password is required* — and the backend's request count was **unchanged (5 → 5)**, i.e. the form was
+  rejected **client-side with no network call**, which is precisely what the fix promises. Before §27R the empty
+  form reached the Firebase sign-up path.
+- No crash in logcat, no JS error on Metro, and the app survived being relaunched into the foreground.
+
+## NOT verified on the device — stated plainly
+
+The local database is empty, and the owner's real account lives in the **deployed** backend's database rather than
+this one, so there is nothing to sign in with. Consequently:
+
+| Flow | State |
+| --- | --- |
+| Firebase-first **sign-in** → token exchange → Inventory AI session | **Not run** — needs an account |
+| **Email verification** (AUTH-04, the 6-digit code) | **Not run** — needs an account |
+| Dashboard, products, inventory, locations, stock-in/out, transfer, suppliers, purchase orders, AI assistant, audit trail | **Not run** — unreachable without a session |
+| **Google Sign-In** | **Not run** — needs an account, and on Android additionally depends on the EAS-managed keystore's SHA-1 being registered |
+| **ISS-02** logcat re-check | **Not closed** — the binary predates the patch, and no auth state change occurred, so no `RNFBAuth` lines were emitted at all |
+| **ISS-13** print → scan round trip | **Not run** |
+
+## Findings
+
+**F-26 (Medium — tooling).** The newest Android build on EAS is a `preview` build (2026-10-09) while the newest
+`development` build is 2026-10-03 — six days and roughly 150 commits behind `main` at the time of the run. Only a
+`development` client can be driven by Metro, so the practical device-testing binary is whatever `development`
+build was made last and **its native layer silently ages**. Evidence: `eas build:list` (the table above), plus an
+empty package list on the device, which forced a 253 MB re-download before any device work could start. Remedy:
+build a `development` client at the commit being tested whenever the native layer matters — and say so in the
+guide, instead of discovering it at the phone.
+
+**F-27 (Low — configuration).** `mobile/app.json` sets `android.googleServicesFile: "./google-services.json"` and
+`ios.googleServicesFile: "./GoogleService-Info.plist"`, and **neither file exists in the checkout** (they are
+EAS-managed and deliberately not committed). Metro prints
+`Could not parse Expo config: android.googleServicesFile: "./google-services.json"` — twice, plus the iOS pair —
+on every start. Harmless to a Metro-served JS bundle, because EAS injects the file at build time, but it is noise
+on every run and it means local tooling cannot resolve Google services configuration. **Not fixed here**: it is a
+configuration decision, not a defect, and the files are absent on purpose.
+
+**F-28 (Low — documentation).** `docs/DEVELOPING_ON_A_PHYSICAL_DEVICE.md` presents `adb reverse` as the
+*alternative* to the LAN address. For a cabled run it is in fact the **deterministic** route — no Wi-Fi, no DHCP
+match, no firewall rule — and this run used it successfully. Promote it. A second, smaller note from the same
+session: `uiautomator dump` reports the **whole row** for an expo-router `<Link>` nested inside a `<Text>`, so a
+tap at the row's centre lands on the label rather than the link — **a testing-methodology note, not an application
+defect** (the link navigated correctly once tapped on its own side).
+
+## Verification for this record
+
+`main` @ `3adac9d`, working tree clean.
+
+| Suite | Command | Result |
+| --- | --- | --- |
+| Mobile typecheck | `npx tsc --noEmit` | clean, exit 0 |
+| Mobile lint | `npx eslint .` | clean, exit 0 |
+| Mobile tests | `npx jest` | **50 suites / 666 tests, 0 failures** (15.5 s) |
+| Server typecheck | `npx tsc --noEmit` | clean, exit 0 |
+| Server lint | `npx eslint src` | clean, exit 0 |
+| Server tests | `npm test` | **185 suites / 1312 tests, 0 failures** (232 s) |
+
+The server suite's full mode logs `[db] MongoDB connection lost — requests that need the database will return 503
+until it reconnects` while it runs; the run still ends 1312/1312, and that line is the suite's own teardown, not a
+product failure.
+
+## The next step for device testing
+
+The gating item is an **account on the local backend**. Three ways forward, all recorded in §27AH's order:
+register a fresh test account through the app against the empty local database (which exercises AUTH-04 end to end
+but needs a mailbox the owner can read the 6-digit code from), or point `EXPO_PUBLIC_API_URL` at the deployed
+backend and sign in with the owner's real account (immediate, but it tests live data rather than a laptop run), or
+seed the local database with a test tenant (instant, but it skips the registration and verification paths that are
+themselves worth testing).
 
 ---
 

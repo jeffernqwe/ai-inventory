@@ -27,11 +27,12 @@ name: ci
 #     (roadmap §27AE). `scripts/check-secrets.mjs` is dependency-free, so the job needs
 #     no install step and finishes in seconds. It is a net for the common shapes of a
 #     leaked credential, not a proof a commit is clean — see docs/SOURCE_PROTECTION.md.
-#   * Both actions are pinned to a full-length commit SHA, not to a moving `v4` tag, so
-#     an upstream tag re-point cannot change what this pipeline executes. Each pin was
-#     checked to be the exact commit `v4` already resolved to at the time of the change
-#     (v4.4.0 of both), so this altered no behaviour; `.github/dependabot.yml` keeps the
-#     pins current.
+#   * Both actions are pinned to a full-length commit SHA, not to a moving tag, so an
+#     upstream tag re-point cannot change what this pipeline executes. Each pin is the
+#     exact commit the floating `v7` tag resolved to at the moment of the change — on
+#     2026-10-11 that was checkout v7.0.1 and setup-node v7.1.0 — and `.github/dependabot.yml`
+#     keeps them current within the line. Moving off v4.4.0 is what clears the Node 20
+#     deprecation warning GitHub printed on every run (ISS-12, roadmap §27AO).
 
 on:
   pull_request:
@@ -68,9 +69,9 @@ jobs:
       run:
         working-directory: server
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -187,9 +188,9 @@ jobs:
     # No `defaults.run.working-directory`: this job runs from the repository root, and
     # needs no `npm ci` — the script imports only Node built-ins.
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
 
@@ -202,9 +203,9 @@ jobs:
       run:
         working-directory: mobile
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
           cache: npm

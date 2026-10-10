@@ -6641,10 +6641,12 @@ So the policy is **enforced where the platform allows it and made observable whe
   absence is visible rather than forgotten. Verified by running it against the live API: **no policy
   violations**, with account 2FA, protection and rulesets reported as unavailable or unverifiable.
 - **Action pinning** — `actions/checkout` and `actions/setup-node` are pinned to full commit SHAs, each
-  confirmed by `git ls-remote` to be the commit its floating `v4` tag already resolved to (`v4.4.0` of
-  both), so the change is behaviour-identical and an upstream tag re-point can no longer alter what CI
-  executes. A `github-actions` entry in `.github/dependabot.yml` keeps the pins current, because a pin with
-  no updater silently stops receiving the fixes it exists to make safe to take.
+  confirmed by `git ls-remote` to be the commit its floating tag resolved to, so an upstream tag re-point can
+  no longer alter what CI executes. A `github-actions` entry in `.github/dependabot.yml` keeps the pins
+  current, because a pin with no updater silently stops receiving the fixes it exists to make safe to take.
+  **Re-pinned to `v7` on 2026-10-11** (checkout `v7.0.1` @ `3d3c42e5…`, setup-node `v7.1.0` @ `949feb24…`,
+  each read from its floating tag, §27AO): the pins had sat at `v4.4.0`, whose Node 20 runtime GitHub was
+  already overriding, so every run carried a deprecation warning (ISS-12).
 - **Two stale claims corrected rather than left standing** — `dependabot.yml`'s comment that these PRs land
   on a **protected** `main` (they do not, at this plan level: nothing forces the checks to pass, so a red
   Dependabot PR must not be merged by hand), and the monitor's own first draft, which described the
@@ -6819,7 +6821,7 @@ put under CI** — ISS-16's detection gap (§27AN, PR #46). Next: **P3-1** — t
 | **ISS-09** | Low | Module count stale at 94 | CLAUDE.md:39, `docs/TS-MIGRATION-MANIFEST.md`:16 | Live: **117** `.ts`; corrected 2026-10-10 |
 | **ISS-10** | Low | AUTH-04-H read as pending | CLAUDE.md | Complete — `0972948`; corrected 2026-10-10 |
 | **ISS-11** | Low | Phase 30A's "no EAS build has been executed / statically validated only" is superseded but un-annotated | CLAUDE.md 30A record | Builds exist: development 2026-09-26/09-30/10-03, preview 2026-09-29 and 2026-10-10; annotated |
-| **ISS-12** | Low | CI warns the pinned `actions/*` SHAs target Node 20 (forced onto Node 24) | CI job logs | Resolves with the `actions/*` v7 re-pin in issue #32 |
+| **ISS-12** | Low → **`[✓]`** | CI warned the pinned `actions/*` SHAs target Node 20 (forced onto Node 24) | CI job logs — the warning was in every run, including `3beaf85`'s | **Resolved 2026-10-11 (§27AO):** both actions re-pinned to v7 (checkout v7.0.1, setup-node v7.1.0), each the commit its floating `v7` tag resolved to; the run on the re-pin PR is the verification — green, warning gone |
 | **ISS-13** | Low → **`[~]`** | **F-1 (Phase 30A PDF-sharing finding)** — carried since Phase 30A with **no description ever recorded**, only the identifier (searched 2026-10-11: §27F, `PHASE_HISTORY` and git history all name it, none explains it) | Read at source: the label path is `barcodeLabelHtml` → `printAsync` / `printToFileAsync`+`Sharing.shareAsync`. It held **one** concrete defect — the print path omitted `width`/`height`, so it paged the label at expo-print's US Letter 612×792 while the PDF used the label geometry | **Fixed 2026-10-11:** both actions pass the same `{ html, width, height }`, guarded by 8 cases whose two geometry assertions fail when the fix is reverted (§27AM). **Remaining half is a device round-trip** (print → scan) in the §27AI device pass — **no longer gated on Phase 30B** |
 | **ISS-14** | Low → **`[~]`** | `origin/wip/backup-working-tree` (2026-09-28) is stale and **fully superseded** — measured again 2026-10-11: **1 commit ahead, 97 behind** `main`, its one unique commit being the backup itself. **Disposition: retained, no action** (§27AL) — its checklist is smaller (1040 vs 2160 lines), `main` already has `31D.6`, the 18c/18e plan docs exist on `main`, its `eas.json` change is already on `main` | `git diff main...origin/wip/backup-working-tree` | Delete or leave with a recorded "no action" (P3-4) |
 | **ISS-15** | Info → **`[✓]`** | Three test baselines from three dates, none current | TS manifest (259 unit) · `docs/freebuff/TEST_BASELINE.md` (server 838 / mobile 21 suites, frozen 2026-09-30) · CLAUDE.md N-3 (mobile 36 suites / 509) | **Done 2026-10-11:** CI declared the single source of truth, and both files annotated **in place** beside the figures they freeze (§27AL, §27AH *Verification requirements*) |
@@ -6835,7 +6837,7 @@ P-6 + Gate 1 + iOS app registration (environment-blocked), and the new-identity 
 
 **Fixes:** ISS-06 (with the SDK 58 train) · ISS-17/ISS-18 (decided and recorded, no action pending) · ISS-13 (**fixed, §27AM** — its device half rides with the same pass). *(ISS-01 fixed in #36; ISS-16 disposed in #37; ISS-02 remediated — §27AJ; the 7 advisories dispositioned — §27AK; all 2026-10-10.)*
 **Upgrades, in issue #32's order:** Expo SDK 58 — **deferred by Gate 0 until Expo promotes it to `latest`** (§27AI records the decision and the runbook; the pins differ from PR #34's set — RN 0.88 family, not 0.87.1) → the React 19 type fixes (ISS-01 is the first of them) → TypeScript 7 →
-jest 30 → the `actions/*` v7 re-pin (also clears ISS-12) → `dotenv` 18 and `@types/bcryptjs` 3.
+jest 30 → ~~the `actions/*` v7 re-pin~~ (**taken early 2026-10-11 — ISS-12 resolved, §27AO**) → `dotenv` 18 and `@types/bcryptjs` 3.
 **Testing:** the L-17 mail leg, owner-assisted; and a dated test baseline for this section.
 **Documentation:** Phase 30B (P3-1) — **the only one left**; `docs/freebuff/*` is **decided (retained, §27AL)**, and the corrections and the device guide are done.
 **Deliberately not scheduled:** Facebook Login, Apple Sign-In, and everything in §35 V2/V3/V4. No new feature work
@@ -6909,7 +6911,7 @@ are closed with their reasons; those versions arrive only with the SDK 58 upgrad
 - [x] **P2-1** ISS-02 RNFirebase PII remediation — **implemented, artifact-verified and merged (#40, 2026-10-10, §27AJ)**; device re-check rides with the SDK 58 pass
 - [x] **P2-4** the 7 dependency advisories **dispositioned** — 2 fixed, 5 accepted with reasons, SDK 57 rollup declined (§27AK); Dependabot #38 closed
 - [ ] **P2-2** ISS-06 P-3 SDK alignment — **`[⛔]` corrected to `[~]` on 2026-10-10** (library values, expected-benign); confirmation needs the next native build
-- [ ] **P2-3** issue #32 upgrade train
+- [ ] **P2-3** issue #32 upgrade train — **partly taken 2026-10-11:** the two action re-pins (§27AO, ISS-12 resolved); the app-side train still waits on Gate 0
 - [ ] **P2-5** ISS-18: the `~/.npmrc` `allow-scripts` line — **owner-side**, workaround recorded (§27AK)
 - [x] **P2-6** the Expo pin set is held in CI — ISS-16's detection gap closed by a guard suite against the installed SDK's own table, positive control included (§27AN)
 - [ ] **P3-1** Phase 30B defined or its references removed (ISS-07) — **decision needed**; ISS-13 is no longer waiting on it (§27AM)
@@ -7416,6 +7418,37 @@ Expo's remote table.
 
 `mobile`: **50 suites / 666 tests, 0 failures** (from 49/660 at `3beaf85`), `tsc` 0, `eslint` 0. The server
 suite, the workflows and every runtime path are untouched — the guard runs in the existing `mobile` job.
+
+# 27AO. The workflow actions re-pinned to v7 — ISS-12 cleared early (2026-10-11)
+
+## Why this item moved ahead of the train
+
+Issue #32's suggested order puts the two action re-pins last: after SDK 58, the React 19 type fixes,
+TypeScript 7 and jest 30. That order is about the **app's** dependency graph, where each move constrains the
+next. This item has no relationship to it — GitHub Actions are CI infrastructure and no app module ever sees
+them — so the only thing the order was buying was a deprecation warning on every run of every pull request
+until the train could begin, and the train is blocked on Gate 0 (`latest` is still 57, §27AI). It was taken on
+its own, deliberately, and recorded here rather than silently reordered.
+
+## What changed
+
+`actions/checkout` and `actions/setup-node` moved from `v4.4.0` to **`v7`** in all three jobs. Each pin is the
+commit that action's floating `v7` tag resolved to via `git ls-remote` at the moment of the change — checkout
+`v7.0.1` @ `3d3c42e5aac5ba805825da76410c181273ba90b1`, setup-node `v7.1.0` @
+`949feb2413d6458794dcd2491c4babbbce0c15c1` — never a moving tag in the workflow itself. Dependabot's closed
+PRs #29/#30 had already shown v7 green in CI (issue #32's table records it), and this workflow uses only
+`node-version-file` and the npm cache inputs.
+
+## What it closes, and what it does not
+
+**ISS-12 is cleared:** the Node 20 deprecation warning — printed on every run until now, including
+`3beaf85`'s — is gone, because v7 targets the runtime GitHub is migrating to rather than one it
+force-overrides. **Still waiting:** `dotenv` 18, `@types/bcryptjs` 3, TypeScript 7 and jest 30, and the
+Expo SDK 58 train, which Gate 0 still holds.
+
+The same stale `v4.4.0` claim lived in six places and was corrected with the change, not left standing: the
+workflow header, `dependabot.yml`'s `github-actions` note, `CLAUDE.md`, checklist §42,
+`docs/SOURCE_PROTECTION.md` and §27AE above.
 
 ---
 

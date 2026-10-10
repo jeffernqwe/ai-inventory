@@ -45,7 +45,7 @@ not be read says so.
 | Owned by an organization | **No** — a personal account, which is why some controls below are unavailable |
 | Actions shared with other repositories | **`none`** — this repository's actions are not consumable by any other repository |
 | Default `GITHUB_TOKEN` permissions | **`read`**, and workflows cannot create or approve pull requests |
-| Action references | **Pinned to full commit SHAs**, each equal to the commit the `v4` tag already resolved to (`v4.4.0`), so an upstream tag re-point cannot change what CI executes |
+| Action references | **Pinned to full commit SHAs**, each the commit its floating tag resolved to at the moment of the change — **re-pinned from `v4.4.0` to `v7` on 2026-10-11** (checkout `v7.0.1`, setup-node `v7.1.0`, roadmap §27AO), so an upstream tag re-point cannot change what CI executes and the actions run on the Node runtime GitHub is migrating to rather than one it force-overrides |
 | Public gists on the account | **None** — nothing was ever pasted out that way |
 | InventoryAI code found in public repositories | **None** — code search across the account for two distinctive identifiers returned zero |
 | Other repositories on the account | 4 private, 21 public (unrelated projects) |

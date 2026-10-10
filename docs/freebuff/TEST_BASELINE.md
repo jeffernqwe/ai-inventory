@@ -5,6 +5,13 @@
 > DB-availability policy it is `server/test/testEnv.mjs`. This file records what Freebuff found and
 > what Freebuff has (not) executed.
 
+> **Annotated 2026-10-11 — two dispositions, no content changed.** (1) Every count below is a **frozen
+> snapshot taken 2026-09-30**; it is deliberately left as the dated record it is. **CI is the single source
+> of truth** for current test counts (`ci.yml`'s `server` and `mobile` jobs; roadmap §27AH, ISS-15) — the
+> latest dated local figures live in that section, not here. (2) **This directory is retained** as the
+> audit/provenance layer it was written as (P3-2): it duplicates no authoritative document, claims no
+> authority, and deleting it would destroy provenance rather than tidy anything.
+
 ---
 
 ## 0. The binding rule on this page

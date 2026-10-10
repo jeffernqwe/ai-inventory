@@ -194,8 +194,8 @@ jobs:
         with:
           node-version-file: .nvmrc
 
-      - name: Scan tracked files for credential-shaped content
-        run: node scripts/check-secrets.mjs
+      - name: Prove the guard can still fail, then scan tracked files for credential-shaped content
+        run: node scripts/check-secrets.mjs # the self-test runs first, on every invocation
 
   mobile:
     runs-on: ubuntu-latest

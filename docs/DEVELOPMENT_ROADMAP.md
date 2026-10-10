@@ -7532,6 +7532,54 @@ First live run, 2026-10-11: `expo` **DEFERRED** (`latest` 57.0.27, `next` 58.0.7
 (58.0.9 admits jest 30) · `@typescript-eslint/parser` **DEFERRED** (8.71.1, `typescript >=4.8.4 <6.1.0`).
 `READY` here means a gate recorded above can be started; it is not a decision to start it.
 
+# 27AR. The secret guard can now fail on purpose — controls for every rule (2026-10-11)
+
+## What was wrong
+
+`scripts/check-secrets.mjs` is this repository's only credential control: GitHub's secret scanning and push
+protection are unavailable on a private repository at this plan level (§27AE), so the third CI job *is* the
+net. Its rules had never been exercised. The six fixture values in the test tree are waived on their own
+lines, so a run over the tree finds nothing whether or not the rules still match — a rule that had quietly
+stopped firing, through a botched regex edit or a refactor, would have left every run green while detecting
+nothing. The project had already learned this lesson once, in the history scan: *"a scan that cannot fail
+proves nothing"* (§27AE). The guard's own header even promised *"explicit files (used by the tests)"* — and
+nothing used that mode.
+
+## What changed
+
+**22 controls, run before the scan on every invocation** (`--self-test` runs them alone). Sixteen must-fire
+cases, one per rule — the private-key block, a credentialed Mongo URI, `AIza…`, `AKIA…`, `sk-…`, `re_…`,
+`xkeysib-…`, `SG.…`, `ghp_…`, `github_pat_…`, `xoxb-…`, `sk_live_…`, the service-account JSON, a signed JWT, a
+tracked `.env` — plus six must-not-fire cases: short tokens that only look like keys, a local Mongo URI with
+no credentials, `.env.example`, a dummy PEM whose body is `abc` **with 400-character neighbours**, the PEM
+shape at 100 characters (quiet) and 400 (caught), and a waived line. A failed control run stops the scan
+before it starts, so the tool can no longer print *"no credential-shaped content found"* through rules that no
+longer fire.
+
+**The controls were themselves proven.** Two deliberate breaks were made and reverted: renaming the brevo
+rule's prefix produced `brevo-key.txt: expected [brevo-key], got [clean]`; lowering the resend rule's
+quantifier to `{3,}` produced the opposite failure, `too-short.txt: expected [clean], got [resend-key]`. Both
+exit 1; the restored file passes 22/22. That is the difference between a control set and decoration.
+
+**The guard flagged its own canaries on the first run** — the two literal strings (the Mongo URI and the
+service-account JSON) are lines in this very file — and the fix was the mechanism the file already documents:
+`secret-guard:allow` on those two lines, visible in review rather than hidden in a rule.
+
+## One control was wrong, and the run said so
+
+The first version of the boundary case asserted that a body of `MIN_KEY_BODY - 2` characters was quiet. It
+fired. The threshold measures the **whole block**, header letters included, so the cutoff actually sits near
+185 body characters. The check was not weakened — the **control** was corrected to assert the promise
+("short is quiet, realistic is caught", 100 vs 400) instead of an accidental boundary, with the reasoning in a
+comment beside it; a control that pins an accident fails on the next refactor.
+
+## Evidence
+
+`node scripts/check-secrets.mjs` → `22 control(s) passed (16 must-fire, 6 must-not-fire)` · `scanned 409
+file(s)` · `no credential-shaped content found`, exit 0. The two break/restore runs above. The CI `secret-guard`
+job runs the same command with the step now named for both halves, so the controls ran on this change's own
+pull request.
+
 ---
 
 # 28. Phase Gate System

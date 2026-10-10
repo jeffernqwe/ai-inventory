@@ -887,7 +887,7 @@ is corrected here rather than left to imply those increments never happened.)*
 | Blockers | iOS build host (P-6); new-identity path ENVIRONMENT-BLOCKED (§5b); P-4 and Gates 1/2; **P-3 is expected-benign and unverified (§25)**; owner decisions (§27). |
 | Acceptance criteria | — |
 | Verification state | Server full suite **185 suites / 1312 tests, 0 failures**; mobile **50 suites / 666 tests, 0 failures** (2026-10-11, after the ISS-13 label suite and the §45 pin guard); CI runs `server` + `mobile` + `secret-guard`. Android Google existing-account E2E VERIFIED (§5a); Render Firebase Admin config verified live; dependency-level PII finding **remediated, device confirmation owed** (§24/§28/§43). |
-| Git/branch state | `main` @ `eef25ce`; **PRs #40–#47 merged** (ISS-02 PII patch, advisory disposition, P-3 gate correction, Dependabot scope, `mongoose` patch, ISS-13, the Expo pin guard, the actions v7 re-pin); **PR #48** carries this revision (§27AP); CI runs `server` + `mobile` + `secret-guard`. |
+| Git/branch state | `main` @ `97f06b9`; **PRs #40–#48 merged** (ISS-02 PII patch, advisory disposition, P-3 gate correction, Dependabot scope, `mongoose` patch, ISS-13, the Expo pin guard, the actions v7 re-pin, the server dependency pair); **PR #49** carries this revision (§27AQ); CI runs `server` + `mobile` + `secret-guard`. |
 
 ---
 

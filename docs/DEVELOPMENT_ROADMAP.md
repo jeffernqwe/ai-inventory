@@ -6750,7 +6750,7 @@ nothing. `ci.yml` and its three jobs, `scripts/check-secrets.mjs`, the pinned ac
 
 ---
 
-# 27AH. Current status, known issues and the next-step order (2026-10-10)
+# 27AH. Current status, known issues and the next-step order (2026-10-10, revised 2026-10-11)
 
 ## Why this section exists
 
@@ -6768,13 +6768,13 @@ update its tracking boxes, status rows and heading date at the end of a session 
 
 | Dimension | Verified state |
 | --- | --- |
-| Repository | `main` = `origin/main`, post-P0 (`bf0c915`); no tags, no stashes; the device guide is committed (P3-3 resolved) |
-| CI | `.github/workflows/ci.yml` only — jobs **server / mobile / secret-guard**; last `main` run green (3 m 13 s, 2026-10-09) |
+| Repository | `main` @ `3beaf85` = `origin/main`; no tags, no stashes; the device guide is committed (P3-3 resolved); 2026-10-11: **ISS-13 fixed** (#45, §27AM) and the **Expo pin guard** added (§27AN) |
+| CI | `.github/workflows/ci.yml` only — jobs **server / mobile / secret-guard**; last `main` run green on `3beaf85` (run 38074336861, 2026-10-10T18:04Z) |
 | Backend | **117** `.ts` modules + one deferred `.js` (`server/src/services/entitlement.service.js`); **0** open advisories |
-| Mobile | **129** `.ts`/`.tsx` sources and **0** `.js`/`.jsx` in `app/ components/ lib/ __tests__/`; Expo 57 / RN 0.86.3 |
-| Tests | **68** server test files, **47** mobile test files (file counts; CI is the current source of truth) |
-| Open on GitHub | Nothing open but **issue #32** (deferred majors); #35/#36/#37 merged 2026-10-10 and #34 closed (ISS-16) |
-| Open advisories | **7** — 3 high, 3 medium, 1 low, 0 critical (all mobile) |
+| Mobile | **132** `.ts`/`.tsx` sources and **0** `.js`/`.jsx` in `app/ components/ lib/ __tests__/` (re-counted 2026-10-11); Expo 57 / RN 0.86.3 |
+| Tests | **64** server test files (`server/test/*.test.mjs`) and **50** mobile test files (file counts, re-read 2026-10-11). CI's own summary at `3beaf85`: server **185 suites / 1312 tests, 0 failures**; mobile **49 suites / 660 tests** — a "suite" there is CI's unit, not a file |
+| Open on GitHub | Nothing open but **issue #32** (deferred majors); **PRs #40–#45 merged** 2026-10-10/11 (§27AJ–§27AM plus the `mongoose` patch); #34 (ISS-16) and #38 (ISS-17) closed with their reasons |
+| Open advisories | **5** — 2 high, 3 medium, 0 critical (all mobile; re-read 2026-10-11 from the alerts API after §27AK's disposition — the count drifts, and did) |
 | Production | Render auto-deploy from `main`; `https://ai-inventory-l1mi.onrender.com` reachable and serving the AUTH-04 endpoints |
 
 ## Verified complete — with evidence
@@ -6801,8 +6801,8 @@ There is **no in-flight feature work**. P0 closed on 2026-10-10: #35/#36/#37 mer
 `bf0c915`), #34 closed (ISS-16), and the device guide committed (P3-3 resolved). SDK 58 execution is deferred by its
 recorded Gate 0 decision (§27AI). **ISS-02 closed out on 2026-10-10** (remediated — §27AJ, PR #40), the
 **advisories dispositioned** (§27AK, PR #41), and on 2026-10-11 the **Dependabot carve-out completed** with
-the last three P3 housekeeping items decided (§27AL). Next: **P3-1** — the one decision that still needs the
-owner.
+the last three P3 housekeeping items decided (§27AL), **ISS-13 fixed** (§27AM, PR #45) and the **Expo pin set
+put under CI** — ISS-16's detection gap (§27AN, PR #46). Next: **P3-1** — the one item left that needs the owner.
 
 ## Known issues and required fixes
 
@@ -6825,7 +6825,7 @@ owner.
 | **ISS-15** | Info → **`[✓]`** | Three test baselines from three dates, none current | TS manifest (259 unit) · `docs/freebuff/TEST_BASELINE.md` (server 838 / mobile 21 suites, frozen 2026-09-30) · CLAUDE.md N-3 (mobile 36 suites / 509) | **Done 2026-10-11:** CI declared the single source of truth, and both files annotated **in place** beside the figures they freeze (§27AL, §27AH *Verification requirements*) |
 | **ISS-17** | Medium | **The SDK 57 patch rollup cannot be installed** — `expo install --check` asks for `expo ~57.0.27` / `expo-constants ~57.0.21` / `expo-linking ~57.0.12` / `expo-router ~57.0.25`, but taking it nests `expo-modules-core@57.0.21` under `node_modules/expo/` where root-level `jest-expo` cannot resolve it (48/48 suites fail), and declaring it directly is `ERESOLVE`: it wants `react-native-worklets ^0.7.4…^0.10.0` while `expo-router@57.0.25`'s `react-native-reanimated@4.7.0` forces `0.13.x` | Reproduced from `main` on 2026-10-10 by two routes; Dependabot PR **#38** failed identically and its lockfile dropped the package entirely | **Declined as a whole** and moved to the SDK 58 train (§27AI, §27AK); #38 **closed** with the evidence. Accepted consequence: `expo install --check` reports outdated until then — known, not unnoticed |
 | **ISS-18** | Medium | **`npx`-driven npm commands fail on this host** — npm 11.19.1 rejects the stray `allow-scripts=9router` line in `~/.npmrc` when it arrives **as a flag**, and `npx` forwards it; `npx patch-package` and `expo install` / `--fix` all fail, plain `npm install` works | Measured three ways 2026-10-10; full account in §27AK | Workaround in use: `npm_config_userconfig=<empty file>` for the command, or the equivalent plain `npm install <pkg>@<ver>`. **Owner-side:** the global `~/.npmrc` line was deliberately left alone. CI is unaffected |
-| **ISS-16** | High | **PR #34 moves five Expo-pinned packages outside SDK 57** — `react-native` 0.86.3 → 0.87.1, `react` 19.2.3 → 19.3.0, `react-dom` 19.2.3 → 19.3.0, `react-native-safe-area-context` ~5.7.0 → ~5.10.1, `react-native-screens` ~4.26.0 → ~4.28.0, plus the matching `@types/react` ~19.3.0. Expo SDK 57 expects exactly the old values, and CI runs no `expo-doctor` / `expo install --check`, so a green typecheck cannot see the native incompatibility — it would surface in the next native build | `mobile/node_modules/expo/bundledNativeModules.json` vs `gh pr diff 34` (both read 2026-10-10); `mobile/package.json` | **Do not merge as-is.** Close or hold PR #34 and take these versions with the Expo SDK 58 train via `npx expo install --fix` (issue #32); decide whether Dependabot should ignore the Expo-pinned set (P0-2, owner decision) |
+| **ISS-16** | High | **PR #34 moves five Expo-pinned packages outside SDK 57** — `react-native` 0.86.3 → 0.87.1, `react` 19.2.3 → 19.3.0, `react-dom` 19.2.3 → 19.3.0, `react-native-safe-area-context` ~5.7.0 → ~5.10.1, `react-native-screens` ~4.26.0 → ~4.28.0, plus the matching `@types/react` ~19.3.0. Expo SDK 57 expects exactly the old values, and CI runs no `expo-doctor` / `expo install --check`, so a green typecheck cannot see the native incompatibility — it would surface in the next native build | `mobile/node_modules/expo/bundledNativeModules.json` vs `gh pr diff 34` (both read 2026-10-10); `mobile/package.json` | **Do not merge as-is.** Close or hold PR #34 and take these versions with the Expo SDK 58 train via `npx expo install --fix` (issue #32); decide whether Dependabot should ignore the Expo-pinned set (P0-2 — **decided and completed**, §27AL); **and the detection gap named here is closed** — `mobile/__tests__/expo-sdk-pins.test.ts` holds every Expo-managed dependency to the installed SDK's own pin table, positive control included (§27AN) |
 
 **Correctly recorded as open or deferred — not issues:** L-17 (recovery-mail delivery never inspected end-to-end),
 B1's residual timing term, B2 / E3 / OD-10 (V4), owner decisions O-5 / O-6 / O-10 / O-11, P-4 (device-time),
@@ -6864,9 +6864,9 @@ test-count source. *Why:* phase discipline is unenforceable while a "phase" has 
 
 ## Immediate next actions
 
-1. **Decision: P3-1 (Phase 30B)** — define it or remove its references, and say where ISS-13 (the F-1
-   PDF-sharing finding) belongs. **This is the only item left that cannot be settled from the repository**:
-   everything else in P0–P3 is now shipped, dispositioned, deferred with a record, or awaiting a build.
+1. **Decision: P3-1 (Phase 30B)** — define it or remove its references (ISS-07). **This is the only item
+   left that cannot be settled from the repository**: everything else in P0–P3 is now shipped,
+   dispositioned, deferred with a record, or awaiting a build — ISS-13 included (§27AM).
 2. **Keep the SDK 58 Gate 0 watch** — `npm view expo dist-tags`, re-read **2026-10-11**: `latest = 57.0.27`,
    `next = 58.0.7`, so the upgrade train stays deferred. When `latest` moves to 58, execute §27AI.
 3. **Carry the two build-time confirmations into the next native build** — the remediated PII line absent
@@ -6897,8 +6897,9 @@ are closed with their reasons; those versions arrive only with the SDK 58 upgrad
   Known environment limit: ColorOS refuses the shell `WRITE_SECURE_SETTINGS`, so scrcpy's `-w` (stay-awake) is
   declined — raise the phone's screen timeout instead. Full procedure: `docs/DEVELOPING_ON_A_PHYSICAL_DEVICE.md`.
 - **Baseline.** CI is the **single source of truth** (ISS-15); dated local counts are kept here only as
-  snapshots. Latest: **2026-10-11 — mobile 49 suites / 660 tests, 0 failures**; server at that date **185
-  suites / 1312 tests, 0 failures**. Re-read the numbers at execution; never quote a stale figure.
+  snapshots. Latest: **2026-10-11 — mobile 50 suites / 666 tests, 0 failures** (49/660 at `3beaf85`, plus the
+  pin guard); server at that date **185 suites / 1312 tests, 0 failures** (`3beaf85`). Re-read the numbers at
+  execution; never quote a stale figure.
 
 ## Tracking
 
@@ -6910,6 +6911,7 @@ are closed with their reasons; those versions arrive only with the SDK 58 upgrad
 - [ ] **P2-2** ISS-06 P-3 SDK alignment — **`[⛔]` corrected to `[~]` on 2026-10-10** (library values, expected-benign); confirmation needs the next native build
 - [ ] **P2-3** issue #32 upgrade train
 - [ ] **P2-5** ISS-18: the `~/.npmrc` `allow-scripts` line — **owner-side**, workaround recorded (§27AK)
+- [x] **P2-6** the Expo pin set is held in CI — ISS-16's detection gap closed by a guard suite against the installed SDK's own table, positive control included (§27AN)
 - [ ] **P3-1** Phase 30B defined or its references removed (ISS-07) — **decision needed**; ISS-13 is no longer waiting on it (§27AM)
 - [x] **P3-2** `docs/freebuff/*` **retained, decided** (audit/provenance layer; counts annotated as frozen) — §27AL
 - [x] **P3-3** device guide **committed** (2026-10-10; `docs/DEVELOPING_ON_A_PHYSICAL_DEVICE.md`)
@@ -7365,6 +7367,55 @@ PII and `compileSdk` confirmations.
 **ISS-13 is consequently no longer gated on Phase 30B.** Its actionable half is fixed and its unverifiable
 half has a named test; the P3-1 decision now concerns only what Phase 30B *is*, not where this finding
 belongs.
+
+# 27AN. ISS-16's detection gap closed — the Expo pin set is now held in CI (2026-10-11)
+
+## The gap was named, and it was real
+
+ISS-16's own evidence said it: *"CI runs no `expo-doctor` / `expo install --check`, so a green typecheck
+cannot see the native incompatibility"*. Dependabot's PR #34 moved five native-moving packages outside SDK 57 —
+`react` 19.2.3 → 19.3.0, `react-dom` likewise, `react-native` 0.86.3 → 0.87.1,
+`react-native-safe-area-context` ~5.7.0 → ~5.10.1, `react-native-screens` ~4.26.0 → ~4.28.0 — and **both CI
+jobs reported green**. The response at the time was a policy: `.github/dependabot.yml`'s ignore list, completed
+to every Expo-pinned package in §27AL. A policy binds Dependabot; nothing bound a hand edit, another bot, or a
+mistyped `npm install`.
+
+## What now holds it
+
+`mobile/__tests__/expo-sdk-pins.test.ts` — six cases, no new dependency, no network, no workflow change:
+
+- **The source of truth is read, never transcribed:** the installed SDK's own
+  `expo/bundledNativeModules.json`. A copy would drift from the thing it describes.
+- **The rule is exact equality**, for every direct dependency the SDK names — runtime and dev, so `jest-expo`
+  and `eslint-config-expo` are covered too. Nineteen packages are compared today and **zero deviate**. Equality
+  is the form the table's values take (`react`/`react-native` bare, the rest `~`) and the form
+  `npx expo install --fix` restores. A legitimate change moves the *installed* `expo`, and its table with it —
+  which this guard follows without an edit; the SDK 58 train changes the table, not this file.
+- **A patch-level move inside one SDK moves `expo` first**, table included; a *partial* move — the manifest left
+  between two SDK patch levels — is the half-state this guard refuses. That is a different question from
+  `expo install --check`'s **remote** view, which the project declined for SDK 57 with reasons (§27AK/ISS-17).
+- **The boundary is asserted, not assumed:** RNFirebase and Google Sign-In are native too, but Expo pins
+  neither, so a bump there must *not* be flagged — a case says so.
+
+## Two protections against a guard that cannot fail
+
+1. **A positive control inside the suite.** The five recorded PR #34 moves are kept as a fixture, applied to
+   today's manifest, and the comparator must report **exactly those five**, each carrying both sides
+   (`react-native: 0.87.1 (sdk 0.86.3)`).
+2. **A measured mutation of the real manifest.** The same moves were written into `mobile/package.json` on
+   2026-10-11: the guard failed naming them, and `package.json` was restored and verified blob-identical
+   (`6e0188bb`).
+
+## What it does not prove
+
+That the set **builds** — that is still a native build's job, and ISS-02's and ISS-06's confirmations ride with
+it. Nothing about transitive resolutions inside the lockfile, and nothing about patch-level currency against
+Expo's remote table.
+
+## Evidence
+
+`mobile`: **50 suites / 666 tests, 0 failures** (from 49/660 at `3beaf85`), `tsc` 0, `eslint` 0. The server
+suite, the workflows and every runtime path are untouched — the guard runs in the existing `mobile` job.
 
 ---
 

@@ -263,7 +263,7 @@ export default function RefManage({
           ) : null
         }
         footer={
-          list.items.length >= 20 ? <Text style={styles.count}>{list.total} total</Text> : null
+          list.items.length >= 20 ? <Text style={styles.count}>{list.total} total</Text> : undefined
         }
       />
 

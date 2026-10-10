@@ -6837,7 +6837,7 @@ P-6 + Gate 1 + iOS app registration (environment-blocked), and the new-identity 
 
 **Fixes:** ISS-06 (with the SDK 58 train) · ISS-17/ISS-18 (decided and recorded, no action pending) · ISS-13 (**fixed, §27AM** — its device half rides with the same pass). *(ISS-01 fixed in #36; ISS-16 disposed in #37; ISS-02 remediated — §27AJ; the 7 advisories dispositioned — §27AK; all 2026-10-10.)*
 **Upgrades, in issue #32's order:** Expo SDK 58 — **deferred by Gate 0 until Expo promotes it to `latest`** (§27AI records the decision and the runbook; the pins differ from PR #34's set — RN 0.88 family, not 0.87.1) → the React 19 type fixes (ISS-01 is the first of them) → TypeScript 7 →
-jest 30 → ~~the `actions/*` v7 re-pin~~ (**taken early 2026-10-11 — ISS-12 resolved, §27AO**) → ~~`dotenv` 18 and `@types/bcryptjs` 3~~ (**taken 2026-10-11 — §27AP**: `dotenv` 18 taken with the preload path measured; the `@types/bcryptjs` row's premise was wrong — 3.0.0 is a deprecated stub, so the dependency was **removed** instead and `tsc` proves it).
+jest 30 → ~~the `actions/*` v7 re-pin~~ (**taken early 2026-10-11 — ISS-12 resolved, §27AO**) → ~~`dotenv` 18 and `@types/bcryptjs` 3~~ (**taken 2026-10-11 — §27AP**: `dotenv` 18 taken with the preload path measured; the `@types/bcryptjs` row's premise was wrong — 3.0.0 is a deprecated stub, so the dependency was **removed** instead and `tsc` proves it). **The two that remain are now measured, not pending:** jest 30 arrives *with* the SDK 58 promotion (`jest-expo@58.0.9`), and TypeScript 7 is upstream-blocked on a typescript-eslint line that admits 7 (§27AQ).
 **Testing:** the L-17 mail leg, owner-assisted; and a dated test baseline for this section.
 **Documentation:** Phase 30B (P3-1) — **the only one left**; `docs/freebuff/*` is **decided (retained, §27AL)**, and the corrections and the device guide are done.
 **Deliberately not scheduled:** Facebook Login, Apple Sign-In, and everything in §35 V2/V3/V4. No new feature work
@@ -6869,8 +6869,11 @@ test-count source. *Why:* phase discipline is unenforceable while a "phase" has 
 1. **Decision: P3-1 (Phase 30B)** — define it or remove its references (ISS-07). **This is the only item
    left that cannot be settled from the repository**: everything else in P0–P3 is now shipped,
    dispositioned, deferred with a record, or awaiting a build — ISS-13 included (§27AM).
-2. **Keep the SDK 58 Gate 0 watch** — `npm view expo dist-tags`, re-read **2026-10-11**: `latest = 57.0.27`,
-   `next = 58.0.7`, so the upgrade train stays deferred. When `latest` moves to 58, execute §27AI.
+2. **Keep the upgrade watches — one command now:** `node scripts/check-upgrade-watches.mjs` (§27AQ).
+   Re-read **2026-10-11**: the SDK 58 **Gate 0 is still closed** (`latest` 57.0.27, `next` 58.0.7); **jest 30
+   rides with that promotion** (`jest-expo@58.0.9` depends on the jest 30 line, `57.0.5` on jest 29);
+   **TypeScript 7 is upstream-blocked** (the parser line is 8.x, `typescript >=4.8.4 <6.1.0`). When `latest`
+   moves to 58, execute §27AI.
 3. **Carry the two build-time confirmations into the next native build** — the remediated PII line absent
    from logcat (ISS-02) and the generated `compileSdk`/`targetSdk` values read and recorded (ISS-06). Neither
    can be closed without one, and neither is claimed as closed today.
@@ -6911,7 +6914,7 @@ are closed with their reasons; those versions arrive only with the SDK 58 upgrad
 - [x] **P2-1** ISS-02 RNFirebase PII remediation — **implemented, artifact-verified and merged (#40, 2026-10-10, §27AJ)**; device re-check rides with the SDK 58 pass
 - [x] **P2-4** the 7 dependency advisories **dispositioned** — 2 fixed, 5 accepted with reasons, SDK 57 rollup declined (§27AK); Dependabot #38 closed
 - [ ] **P2-2** ISS-06 P-3 SDK alignment — **`[⛔]` corrected to `[~]` on 2026-10-10** (library values, expected-benign); confirmation needs the next native build
-- [ ] **P2-3** issue #32 upgrade train — **partly taken 2026-10-11:** the two action re-pins (§27AO, ISS-12 resolved) and the server pair (§27AP: `dotenv` 18 taken with its preload path measured; `@types/bcryptjs` removed — its 3.0.0 is a deprecated stub); the app-side train still waits on Gate 0
+- [ ] **P2-3** issue #32 upgrade train — **partly taken 2026-10-11:** the two action re-pins (§27AO, ISS-12 resolved) and the server pair (§27AP: `dotenv` 18 taken with its preload path measured; `@types/bcryptjs` removed — its 3.0.0 is a deprecated stub); what remains is **gated, not pending** — SDK 58 on Gate 0, jest 30 with that promotion, TypeScript 7 upstream (§27AQ, `scripts/check-upgrade-watches.mjs`)
 - [ ] **P2-5** ISS-18: the `~/.npmrc` `allow-scripts` line — **owner-side**, workaround recorded (§27AK)
 - [x] **P2-6** the Expo pin set is held in CI — ISS-16's detection gap closed by a guard suite against the installed SDK's own table, positive control included (§27AN)
 - [ ] **P3-1** Phase 30B defined or its references removed (ISS-07) — **decision needed**; ISS-13 is no longer waiting on it (§27AM)
@@ -7489,6 +7492,45 @@ documented pattern, not this entry point.
 modules, 1,677 specifiers, 0 stale) · `npm run test:unit` **695 passed, 0 failed, 33 deliberately skipped**.
 The full suite and the `/ready` + `/live` + `SIGTERM` boot smoke are CI's, on a throwaway `mongo:7` container;
 that run is the record for both.
+
+# 27AQ. The deferred queue's remaining rows, measured — and the drift a script caught (2026-10-11)
+
+## Why they were measured instead of quoted
+
+Two of issue #32's remaining rows were worded as preferences — "take it deliberately with the types work",
+"belongs in the same pass". Reading them rather than trusting the wording gives a different and more useful
+answer: neither is waiting on a decision, and they are not waiting on the same thing.
+
+- **`jest` 30 — delivered by the SDK 58 train.** `jest-expo@57.0.5` (the installed SDK 57 line) depends on
+  `@jest/globals`, `babel-jest` and `jest-environment-jsdom` at `^29.2.1`. `jest-expo@58.0.9` — the newest
+  58.x, currently `next` — depends on all three at `^30.0.0`. So jest 30 is **scheduled with SDK 58's
+  promotion** (Gate 0, §27AI), which is exactly where issue #32's order puts it.
+- **TypeScript 7 — genuinely upstream-blocked, and not by Expo.** The only published `@typescript-eslint`
+  line is 8.x (`parser@8.70.0` in `mobile/`, `8.71.1` in `server/`), and both declare
+  `typescript >=4.8.4 <6.1.0`; there is no 9.x. TypeScript 7 is outside the parser's supported range in
+  **both** workspaces, so the SDK 58 train does not unblock it — a typescript-eslint release that admits 7
+  does, and for `mobile/` it would arrive through `eslint-config-expo`.
+
+## The drift, kept rather than tidied away
+
+The first reading of the jest-expo question was taken on **58.0.0** and showed `^29.2.1`; a conclusion was
+recorded — *"the SDK 58 train does not by itself deliver jest 30"* — and minutes later the same question asked
+of **58.0.9** showed `^30.0.0`. The line had moved within days, and prose would have carried the wrong answer
+until someone re-read it. The correction is written down (here, and in issue #32's comment) rather than
+edited away, because the episode is the argument for the tool that caught it.
+
+## `scripts/check-upgrade-watches.mjs`
+
+All three watches are now one read-only command — `node scripts/check-upgrade-watches.mjs` (`--json` for
+machine output). Dependency-free, Node's own `fetch`, and it reports `READY` / `DEFERRED` / `UNREADABLE` per
+watch, **never counting an unreadable watch as a pass** — the rule `scripts/audit-access.mjs` already
+follows. It reads `jest-expo`'s `latest` **and** `next`, because the finding above is about `next`; and it is
+deliberately **not** in CI, since a pipeline that goes red when npm is unreachable would turn an upstream
+outage into a failed build.
+
+First live run, 2026-10-11: `expo` **DEFERRED** (`latest` 57.0.27, `next` 58.0.7) · `jest-expo` **READY**
+(58.0.9 admits jest 30) · `@typescript-eslint/parser` **DEFERRED** (8.71.1, `typescript >=4.8.4 <6.1.0`).
+`READY` here means a gate recorded above can be started; it is not a decision to start it.
 
 ---
 

@@ -366,8 +366,7 @@ and that is accepted.
 
 **Two workflows were removed** on the owner's decision, to keep the setup small: `main-guard.yml`
 (it flagged a push to `main` outside a pull request) and `access-guard.yml` (a daily monitor of
-repository visibility and the access list, which had run green). Nothing replaces them
-unattended; the access check is now the manual `node scripts/audit-access.mjs`. `ci.yml`,
+repository visibility and the access list, which had run green).Nothing replaces them unattended; the access check is now the manual `node scripts/audit-access.mjs`, and the deferred-upgrade gates are one read-only command, `node scripts/check-upgrade-watches.mjs` (roadmap §27AQ — outside CI on purpose, since it needs the network). `ci.yml`,
 `scripts/check-secrets.mjs` and the pinned action SHAs are kept.
 
 **Dependency policy:** Dependabot queues **minor and patch updates only**, grouped per package,

@@ -6837,7 +6837,7 @@ P-6 + Gate 1 + iOS app registration (environment-blocked), and the new-identity 
 
 **Fixes:** ISS-06 (with the SDK 58 train) · ISS-17/ISS-18 (decided and recorded, no action pending) · ISS-13 (**fixed, §27AM** — its device half rides with the same pass). *(ISS-01 fixed in #36; ISS-16 disposed in #37; ISS-02 remediated — §27AJ; the 7 advisories dispositioned — §27AK; all 2026-10-10.)*
 **Upgrades, in issue #32's order:** Expo SDK 58 — **deferred by Gate 0 until Expo promotes it to `latest`** (§27AI records the decision and the runbook; the pins differ from PR #34's set — RN 0.88 family, not 0.87.1) → the React 19 type fixes (ISS-01 is the first of them) → TypeScript 7 →
-jest 30 → ~~the `actions/*` v7 re-pin~~ (**taken early 2026-10-11 — ISS-12 resolved, §27AO**) → `dotenv` 18 and `@types/bcryptjs` 3.
+jest 30 → ~~the `actions/*` v7 re-pin~~ (**taken early 2026-10-11 — ISS-12 resolved, §27AO**) → ~~`dotenv` 18 and `@types/bcryptjs` 3~~ (**taken 2026-10-11 — §27AP**: `dotenv` 18 taken with the preload path measured; the `@types/bcryptjs` row's premise was wrong — 3.0.0 is a deprecated stub, so the dependency was **removed** instead and `tsc` proves it).
 **Testing:** the L-17 mail leg, owner-assisted; and a dated test baseline for this section.
 **Documentation:** Phase 30B (P3-1) — **the only one left**; `docs/freebuff/*` is **decided (retained, §27AL)**, and the corrections and the device guide are done.
 **Deliberately not scheduled:** Facebook Login, Apple Sign-In, and everything in §35 V2/V3/V4. No new feature work
@@ -6911,7 +6911,7 @@ are closed with their reasons; those versions arrive only with the SDK 58 upgrad
 - [x] **P2-1** ISS-02 RNFirebase PII remediation — **implemented, artifact-verified and merged (#40, 2026-10-10, §27AJ)**; device re-check rides with the SDK 58 pass
 - [x] **P2-4** the 7 dependency advisories **dispositioned** — 2 fixed, 5 accepted with reasons, SDK 57 rollup declined (§27AK); Dependabot #38 closed
 - [ ] **P2-2** ISS-06 P-3 SDK alignment — **`[⛔]` corrected to `[~]` on 2026-10-10** (library values, expected-benign); confirmation needs the next native build
-- [ ] **P2-3** issue #32 upgrade train — **partly taken 2026-10-11:** the two action re-pins (§27AO, ISS-12 resolved); the app-side train still waits on Gate 0
+- [ ] **P2-3** issue #32 upgrade train — **partly taken 2026-10-11:** the two action re-pins (§27AO, ISS-12 resolved) and the server pair (§27AP: `dotenv` 18 taken with its preload path measured; `@types/bcryptjs` removed — its 3.0.0 is a deprecated stub); the app-side train still waits on Gate 0
 - [ ] **P2-5** ISS-18: the `~/.npmrc` `allow-scripts` line — **owner-side**, workaround recorded (§27AK)
 - [x] **P2-6** the Expo pin set is held in CI — ISS-16's detection gap closed by a guard suite against the installed SDK's own table, positive control included (§27AN)
 - [ ] **P3-1** Phase 30B defined or its references removed (ISS-07) — **decision needed**; ISS-13 is no longer waiting on it (§27AM)
@@ -7449,6 +7449,46 @@ Expo SDK 58 train, which Gate 0 still holds.
 The same stale `v4.4.0` claim lived in six places and was corrected with the change, not left standing: the
 workflow header, `dependabot.yml`'s `github-actions` note, `CLAUDE.md`, checklist §42,
 `docs/SOURCE_PROTECTION.md` and §27AE above.
+
+# 27AP. The server-side queue items taken — and one row's premise was wrong (2026-10-11)
+
+These are the two items in issue #32's deferred queue that touch only `server/`: unlike the mobile train they
+are not gated by Expo SDK 58, and unlike the action re-pin (§27AO) they *are* runtime dependencies — so each
+one was read before it was taken, and the reading changed one of them.
+
+## `@types/bcryptjs` — removed, not bumped
+
+Issue #32's row, written from Dependabot's pull request, says to take `@types/bcryptjs` 2.4.6 → **3.0.0**.
+Reading the package first: **3.0.0 is a deprecated stub**, whose own description is *"Stub TypeScript
+definitions entry for bcryptjs, which provides its own types definitions"*. `bcryptjs` itself is already
+**3.0.3** here — declared and installed — and it ships `index.d.ts` and `umd/index.d.ts` through its exports
+map. The row's action would therefore have installed a package whose only content is a notice saying it is not
+needed.
+
+Removed instead. The proof is the compiler: `npm run typecheck` ⇒ **exit 0** with the package gone, so the
+three `import bcrypt from 'bcryptjs'` sites (`auth.service.ts`, `passwordReset.service.ts`, `users.service.ts`)
+resolve the library's own declarations. Nothing else about the change is interesting, which is the point.
+
+## `dotenv` 18 — taken, with its one risky behaviour measured
+
+dotenv 18's changelog announces a CLI, an opt-in fast parser, and — the line that mattered — **"Removed:
+Remove preloading. Instead use cli `dotenv run -- your-command`"**, while "injecting" output moves to stderr
+and `.env.vault` support is dropped. This server's entire environment loading is `import 'dotenv/config'`
+(`src/index.ts`, plus `cleanup-mongodb.mjs` and `cleanup-test-firebase.mjs`), and a break there would be
+invisible in CI — CI supplies env vars directly, with no `.env` in the checkout.
+
+So it was checked at the source and then measured: dotenv 18.0.7's exports map still publishes `./config` and
+`./config.js`, and with 18.0.7 installed, an `import 'dotenv/config'` executed from `server/` against the real
+`.env` loaded **5 of 5** sampled keys (`MONGODB_URI`, `JWT_SECRET`, `PORT`, `NODE_ENV`, `OPENROUTER_API_KEY`
+— reported as presence, never as values). The preload path survives; what the changelog removed is the older
+documented pattern, not this entry point.
+
+## Evidence
+
+`cd server`: `npm run typecheck` 0 · `npm run lint` 0 · `check:extensions` 0 and `check:specifiers` 0 (337
+modules, 1,677 specifiers, 0 stale) · `npm run test:unit` **695 passed, 0 failed, 33 deliberately skipped**.
+The full suite and the `/ready` + `/live` + `SIGTERM` boot smoke are CI's, on a throwaway `mongo:7` container;
+that run is the record for both.
 
 ---
 

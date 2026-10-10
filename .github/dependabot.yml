@@ -114,8 +114,9 @@ updates:
 
   # The workflow actions are pinned to commit SHAs, so they need an updater of their own: without
   # this entry a pinned action would sit at its current SHA forever instead of receiving the fixes
-  # the pin exists to make safe to take. Majors are excluded here too — the pins currently sit at
-  # v4.4.0, and re-pinning to a new major is a deliberate change (issue #32).
+  # the pin exists to make safe to take. Majors are excluded here too — the pins were re-taken at v7
+  # on 2026-10-11 (checkout v7.0.1, setup-node v7.1.0, each read from the floating `v7` tag), and the
+  # next major re-pin stays a deliberate change (issue #32).
   - package-ecosystem: github-actions
     directory: /
     schedule:

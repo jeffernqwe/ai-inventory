@@ -887,7 +887,7 @@ is corrected here rather than left to imply those increments never happened.)*
 | Blockers | iOS build host (P-6); new-identity path ENVIRONMENT-BLOCKED (§5b); P-4 and Gates 1/2; **P-3 is expected-benign and unverified (§25)**; owner decisions (§27). |
 | Acceptance criteria | — |
 | Verification state | Server full suite **185 suites / 1312 tests, 0 failures**; mobile **50 suites / 666 tests, 0 failures** (2026-10-11, after the ISS-13 label suite and the §45 pin guard); CI runs `server` + `mobile` + `secret-guard`. Android Google existing-account E2E VERIFIED (§5a); Render Firebase Admin config verified live; dependency-level PII finding **remediated, device confirmation owed** (§24/§28/§43). |
-| Git/branch state | `main` @ `3beaf85`; **PRs #40–#45 merged** (ISS-02 PII patch, advisory disposition, P-3 gate correction, Dependabot scope, `mongoose` patch, ISS-13); **PR #46** carries this revision (§45); CI runs `server` + `mobile` + `secret-guard`. |
+| Git/branch state | `main` @ `17ac9a5`; **PRs #40–#46 merged** (ISS-02 PII patch, advisory disposition, P-3 gate correction, Dependabot scope, `mongoose` patch, ISS-13, the Expo pin guard); **PR #47** carries this revision (§27AO); CI runs `server` + `mobile` + `secret-guard`. |
 
 ---
 
@@ -2122,9 +2122,10 @@ answer **`403`** — so owner-only membership is **asserted unattended** and the
 **`scripts/audit-access.mjs`**, which needs the owner's own `gh` session for the rights CI lacks:
 dependency-free, **names only and never a value**, non-zero exit on a violation, verified by running it
 against the live API (**no policy violations**, with the unavailable settings listed as unavailable). Two
-workflow actions are now **pinned to commit SHAs** verified to be what the floating `v4` tags already
-resolved to, with a `github-actions` Dependabot entry to keep them current; two stale claims were
-**corrected rather than left standing**. Verified by PR **#28** → merge **`99e1eac`**, with `ci` green at job
+workflow actions are **pinned to commit SHAs**, each read from its floating tag via `git ls-remote` —
+**re-pinned from `v4.4.0` to `v7` on 2026-10-11** (checkout `v7.0.1`, setup-node `v7.1.0`, clearing the
+Node 20 deprecation warning every run had printed — ISS-12, §27AO) — with a `github-actions` Dependabot entry
+to keep them current; two stale claims were **corrected rather than left standing**. Verified by PR **#28** → merge **`99e1eac`**, with `ci` green at job
 level (`server`, `mobile`, `secret-guard` — which also proves the pins execute) and `access-guard` green on
 `main`. **Still owner-side:** account **2FA** and the **GitHub Apps with repository access** list — an app is
 not a collaborator, so **no automated check here can see one**, and Render reaches this repository through

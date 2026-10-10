@@ -880,13 +880,13 @@ is corrected here rather than left to imply those increments never happened.)*
 | Field | Value |
 | --- | --- |
 | Current authorised phase | **None new.** The last authorised increments — **AUTH-01, AUTH-02, AUTH-03** and the **CI quality gate** — are **implemented and merged** (§29, §42); no further phase has been authorised. |
-| Current task | None in progress. This revision is the **2026-10-09 documentation reconciliation** (§42). |
+| Current task | **ISS-13 resolved** — the Phase 30A "F-1" PDF-sharing finding (the print path used a different page geometry than the PDF path) fixed with a regression suite; PR **#45**. The owner-directed backlog work that preceded it is recorded in **§27AJ–§27AM** (ISS-02 PII patch, advisory disposition, Dependabot scope, ISS-13). |
 | Files/work area | — |
 | Dependencies | — |
 | Blockers | iOS build host (P-6); new-identity path ENVIRONMENT-BLOCKED (§5b); P-4 and Gates 1/2; **P-3 is expected-benign and unverified (§25)**; owner decisions (§27). |
 | Acceptance criteria | — |
-| Verification state | Server full suite **185 suites / 1312 tests, 0 failures**; mobile **48 suites / 652 tests, 0 failures** (2026-10-10, after the ISS-02 guard suite); CI runs `server` + `mobile` + `secret-guard`. Android Google existing-account E2E VERIFIED (§5a); Render Firebase Admin config verified live; dependency-level PII finding **remediated, device confirmation owed** (§24/§28/§43). |
-| Git/branch state | branch `main` @ `3e5d2aa`; `origin/main` @ `3e5d2aa`; **0 ahead / 0 behind**; **PR #7 merged** (`3e5d2aa`, base `6e2252f`, merged head `d415335`); PRs **#1–#6 merged**; **0 open PRs**. |
+| Verification state | Server full suite **185 suites / 1312 tests, 0 failures**; mobile **49 suites / 660 tests, 0 failures** (2026-10-11, after the ISS-13 label suite); CI runs `server` + `mobile` + `secret-guard`. Android Google existing-account E2E VERIFIED (§5a); Render Firebase Admin config verified live; dependency-level PII finding **remediated, device confirmation owed** (§24/§28/§43). |
+| Git/branch state | `main` @ `dcc8c0e`; **PRs #40–#43 merged** (ISS-02 PII patch, advisory disposition, P-3 gate correction, Dependabot scope); **PR #44 open** (Dependabot — `mongoose` 9.11.1, server minor/patch) and **PR #45 open** (ISS-13); CI runs `server` + `mobile` + `secret-guard`. |
 
 ---
 

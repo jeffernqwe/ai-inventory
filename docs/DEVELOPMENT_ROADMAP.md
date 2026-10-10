@@ -6820,7 +6820,7 @@ owner.
 | **ISS-10** | Low | AUTH-04-H read as pending | CLAUDE.md | Complete — `0972948`; corrected 2026-10-10 |
 | **ISS-11** | Low | Phase 30A's "no EAS build has been executed / statically validated only" is superseded but un-annotated | CLAUDE.md 30A record | Builds exist: development 2026-09-26/09-30/10-03, preview 2026-09-29 and 2026-10-10; annotated |
 | **ISS-12** | Low | CI warns the pinned `actions/*` SHAs target Node 20 (forced onto Node 24) | CI job logs | Resolves with the `actions/*` v7 re-pin in issue #32 |
-| **ISS-13** | Low | **F-1 (Phase 30A PDF-sharing finding) is still open and real** | `expo-print`/`expo-sharing` are dependencies; sharing code in `app/(app)/products/[id]/index.tsx` | Fix wherever 30B lands (P3-1) |
+| **ISS-13** | Low → **`[~]`** | **F-1 (Phase 30A PDF-sharing finding)** — carried since Phase 30A with **no description ever recorded**, only the identifier (searched 2026-10-11: §27F, `PHASE_HISTORY` and git history all name it, none explains it) | Read at source: the label path is `barcodeLabelHtml` → `printAsync` / `printToFileAsync`+`Sharing.shareAsync`. It held **one** concrete defect — the print path omitted `width`/`height`, so it paged the label at expo-print's US Letter 612×792 while the PDF used the label geometry | **Fixed 2026-10-11:** both actions pass the same `{ html, width, height }`, guarded by 8 cases whose two geometry assertions fail when the fix is reverted (§27AM). **Remaining half is a device round-trip** (print → scan) in the §27AI device pass — **no longer gated on Phase 30B** |
 | **ISS-14** | Low → **`[~]`** | `origin/wip/backup-working-tree` (2026-09-28) is stale and **fully superseded** — measured again 2026-10-11: **1 commit ahead, 97 behind** `main`, its one unique commit being the backup itself. **Disposition: retained, no action** (§27AL) — its checklist is smaller (1040 vs 2160 lines), `main` already has `31D.6`, the 18c/18e plan docs exist on `main`, its `eas.json` change is already on `main` | `git diff main...origin/wip/backup-working-tree` | Delete or leave with a recorded "no action" (P3-4) |
 | **ISS-15** | Info → **`[✓]`** | Three test baselines from three dates, none current | TS manifest (259 unit) · `docs/freebuff/TEST_BASELINE.md` (server 838 / mobile 21 suites, frozen 2026-09-30) · CLAUDE.md N-3 (mobile 36 suites / 509) | **Done 2026-10-11:** CI declared the single source of truth, and both files annotated **in place** beside the figures they freeze (§27AL, §27AH *Verification requirements*) |
 | **ISS-17** | Medium | **The SDK 57 patch rollup cannot be installed** — `expo install --check` asks for `expo ~57.0.27` / `expo-constants ~57.0.21` / `expo-linking ~57.0.12` / `expo-router ~57.0.25`, but taking it nests `expo-modules-core@57.0.21` under `node_modules/expo/` where root-level `jest-expo` cannot resolve it (48/48 suites fail), and declaring it directly is `ERESOLVE`: it wants `react-native-worklets ^0.7.4…^0.10.0` while `expo-router@57.0.25`'s `react-native-reanimated@4.7.0` forces `0.13.x` | Reproduced from `main` on 2026-10-10 by two routes; Dependabot PR **#38** failed identically and its lockfile dropped the package entirely | **Declined as a whole** and moved to the SDK 58 train (§27AI, §27AK); #38 **closed** with the evidence. Accepted consequence: `expo install --check` reports outdated until then — known, not unnoticed |
@@ -6833,7 +6833,7 @@ P-6 + Gate 1 + iOS app registration (environment-blocked), and the new-identity 
 
 ## Pending
 
-**Fixes:** ISS-13 (once its home is decided) · ISS-06 (with the SDK 58 train) · ISS-17/ISS-18 (decided and recorded, no action pending). *(ISS-01 fixed in #36; ISS-16 disposed in #37; ISS-02 remediated — §27AJ; the 7 advisories dispositioned — §27AK; all 2026-10-10.)*
+**Fixes:** ISS-06 (with the SDK 58 train) · ISS-17/ISS-18 (decided and recorded, no action pending) · ISS-13 (**fixed, §27AM** — its device half rides with the same pass). *(ISS-01 fixed in #36; ISS-16 disposed in #37; ISS-02 remediated — §27AJ; the 7 advisories dispositioned — §27AK; all 2026-10-10.)*
 **Upgrades, in issue #32's order:** Expo SDK 58 — **deferred by Gate 0 until Expo promotes it to `latest`** (§27AI records the decision and the runbook; the pins differ from PR #34's set — RN 0.88 family, not 0.87.1) → the React 19 type fixes (ISS-01 is the first of them) → TypeScript 7 →
 jest 30 → the `actions/*` v7 re-pin (also clears ISS-12) → `dotenv` 18 and `@types/bcryptjs` 3.
 **Testing:** the L-17 mail leg, owner-assisted; and a dated test baseline for this section.
@@ -6897,7 +6897,7 @@ are closed with their reasons; those versions arrive only with the SDK 58 upgrad
   Known environment limit: ColorOS refuses the shell `WRITE_SECURE_SETTINGS`, so scrcpy's `-w` (stay-awake) is
   declined — raise the phone's screen timeout instead. Full procedure: `docs/DEVELOPING_ON_A_PHYSICAL_DEVICE.md`.
 - **Baseline.** CI is the **single source of truth** (ISS-15); dated local counts are kept here only as
-  snapshots. Latest: **2026-10-10 — mobile 48 suites / 652 tests, 0 failures**; server at that date **185
+  snapshots. Latest: **2026-10-11 — mobile 49 suites / 660 tests, 0 failures**; server at that date **185
   suites / 1312 tests, 0 failures**. Re-read the numbers at execution; never quote a stale figure.
 
 ## Tracking
@@ -6910,7 +6910,7 @@ are closed with their reasons; those versions arrive only with the SDK 58 upgrad
 - [ ] **P2-2** ISS-06 P-3 SDK alignment — **`[⛔]` corrected to `[~]` on 2026-10-10** (library values, expected-benign); confirmation needs the next native build
 - [ ] **P2-3** issue #32 upgrade train
 - [ ] **P2-5** ISS-18: the `~/.npmrc` `allow-scripts` line — **owner-side**, workaround recorded (§27AK)
-- [ ] **P3-1** Phase 30B defined or its references removed (ISS-07, ISS-13) — decision needed
+- [ ] **P3-1** Phase 30B defined or its references removed (ISS-07) — **decision needed**; ISS-13 is no longer waiting on it (§27AM)
 - [x] **P3-2** `docs/freebuff/*` **retained, decided** (audit/provenance layer; counts annotated as frozen) — §27AL
 - [x] **P3-3** device guide **committed** (2026-10-10; `docs/DEVELOPING_ON_A_PHYSICAL_DEVICE.md`)
 - [x] **P3-4** stale WIP branch — **retained, no action** (ISS-14: 1 ahead / 97 behind; the unique commit is the superseded backup itself) — §27AL
@@ -7016,7 +7016,8 @@ five** (RN and safe-area). Everything else the SDK pins follows `expo install --
      check `EXPO_PUBLIC_API_URL` (must be reachable from the phone) before touching the SDK.
    - Smoke journeys: Firebase sign-in and the AUTH-03 renewal path; the three list surfaces touched by
      #36 (empty / loading / error / footer states); the email-verification screen; one stock-in and one
-     stock-out; one transfer. In logcat, confirm the remediated RNFirebase PII line (ISS-02, §27AJ) is
+     stock-out; one transfer; and **one label round-trip** — print a label, then scan the printed code back
+     with the app's own scanner (ISS-13, §27AM). In logcat, confirm the remediated RNFirebase PII line (ISS-02, §27AJ) is
      **absent** — a `Log.d` line for `addAuthStateListener:eventBody` must not appear — and that the
      patch still applies at this version.
    - Device limit to expect: ColorOS refuses `WRITE_SECURE_SETTINGS`, so raise the screen timeout
@@ -7150,6 +7151,8 @@ swallows npm's output (`stdio: "ignore"`), surfacing only an opaque spawn error.
 directly through `node` generates the patch normally. **The apply path never shells out to npm**, so
 `postinstall` is unaffected.
 
+---
+
 # 27AK. Dependency advisories — the per-alert disposition (2026-10-10)
 
 Seven alerts were open on `mobile/package-lock.json`, all dependency-level, and §27AH's next action was a
@@ -7260,6 +7263,8 @@ that is not measured.
 `braces` (high), `node-forge` (high), `decode-uri-component` (medium), `uuid` (medium) — exactly the five
 accepted above. Re-read the count before quoting it; it drifts.
 
+---
+
 # 27AL. Dependabot scope completed — every Expo-pinned package is excluded (2026-10-11)
 
 ## What changed, and why the rule is now mechanical
@@ -7313,6 +7318,55 @@ so the real confirmation is the next scheduled run producing no error — stated
 - **P3-5 — the test-count source: declared.** CI is the single source of truth; the two older baselines
   (`docs/freebuff/TEST_BASELINE.md` and `docs/TS-MIGRATION-MANIFEST.md`) now say so **in place**, beside
   the figures they freeze, instead of contradicting them from a distance.
+
+---
+
+# 27AM. ISS-13 — the Phase 30A "F-1" PDF-sharing finding, resolved as far as it can be (2026-10-11)
+
+## Establishing what the finding was had to come first
+
+ISS-13 has been carried since Phase 30A as *"F-1 (PDF-sharing finding) is still open and real"*, with its
+evidence given as "`expo-print`/`expo-sharing` are dependencies; sharing code in
+`app/(app)/products/[id]/index.tsx`" and its fix as "wherever 30B lands". **Its content was never written
+down** — not in §27F, not in `docs/PHASE_HISTORY.md`, and not in the git history (searched 2026-10-11: the
+identifier appears, a description never did). That is precisely why it could not be fixed: the record said a
+defect existed without saying what it was, and every plan inherited the gap.
+
+So the first step was to read the code rather than guess at it. The label path is `barcodeLabelHtml` (a
+self-contained HTML page with an inline-SVG EAN-13) → `printAsync` (print) or `printToFileAsync` +
+`Sharing.shareAsync` (save or share as PDF). Reading it found **one concrete defect and no others**.
+
+## Fixed — the two label actions produced two different documents
+
+`onShareLabel` passed the page geometry `barcodeLabelHtml` returns; `onPrintLabel` passed `{ html }` alone,
+which lets `expo-print` fall back to its default page — **US Letter, 612×792**. Print and share therefore
+produced different layouts from the same label: the printed one a small label adrift on a sheet of paper.
+`expo-print`'s own types state that `width`/`height` apply "only with the `html` option", so the values were
+being computed and then not handed over. Both actions now pass the identical `{ html, width, height }`.
+
+Guarded by a new suite, `mobile/__tests__/product-label-print-share.test.tsx` (8 cases): the two documents
+must be **exactly equal**; the page must be smaller than a sheet in both dimensions; the shared file is
+offered as a PDF carrying the product name and its code; the document is self-contained (its only URL is the
+SVG **namespace**, with no `src=`, no `file://`, no `<img>`, no `url(`); a barcode that is not an EAN-13
+offers no label actions at all; an unavailable share sheet renders no file and says so; a PDF that cannot be
+produced is refused rather than shared; and a print failure is reported with the actions left usable.
+
+**Checked for meaning, not just for green:** reverting the one-line fix makes exactly the two geometry cases
+fail and leaves the other six passing, so the suite pins the defect rather than the implementation.
+
+## Still open — and now expressed as something a device can settle
+
+Two claims cannot be made from a repository: that a printer and the OS share sheet render the file as
+intended, and that a printed label **scans** back into the app's own scanner. The screen already instructs
+the user to do exactly that ("Print it or save/share a PDF, then scan the printed code with the scanner to
+verify it"), so the acceptance item is now a device round-trip, listed in the §27AI device pass beside the
+PII and `compileSdk` confirmations.
+
+**ISS-13 is consequently no longer gated on Phase 30B.** Its actionable half is fixed and its unverifiable
+half has a named test; the P3-1 decision now concerns only what Phase 30B *is*, not where this finding
+belongs.
+
+---
 
 # 28. Phase Gate System
 

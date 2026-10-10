@@ -6810,7 +6810,7 @@ recorded Gate 0 decision (§27AI). **ISS-02 closed out on 2026-10-10** (remediat
 | **ISS-03** | Medium | Documents claim **9 open advisories** (1 critical, 4 high, 3 moderate, 1 low) | CLAUDE.md, checklist §42, this file's §27AE, issue #32 | Live value was **7** (3 high, 3 medium, 1 low, 0 critical) — corrected in place on 2026-10-10; **5 remain open** after the per-alert disposition (§27AK) |
 | **ISS-04** | Medium | `README.md` calls the mobile app "written in **JavaScript**" and starts it with **Expo Go** | README:379, README:391 | It is 129 `.ts`/`.tsx` / 0 `.js`, and it needs a **development build** (RNFirebase + dev client). Corrected 2026-10-10 |
 | **ISS-05** | Medium | §35 stated Google Sign-In was "approved, not implemented" with "no provider SDK installed" and the first dev build still a prerequisite | §35 | Corrected 2026-10-10 (see §35) |
-| **ISS-06** | Medium | **P-3**: RNFirebase declares `compileSdk`/`targetSdk` 34 while the project targets 36 | Checklist §25, P-3 `[⛔]` | Resolve before the next native build (part of the SDK 58 train) |
+| **ISS-06** | Medium → **`[~]`** | **P-3, re-read at source 2026-10-10: the `[⛔]` premise was imprecise.** RNFirebase does not hardcode 34 — it declares `minSdk 23`, `targetSdk 34`, `compileSdk 34` in **its own `package.json`** (`sdkVersions.android`), which its gradle consumes. Those are a **library's** build values: AGP requires the **app's** compileSdk to be ≥ each dependency's, which holds, and a library's `targetSdk` has no runtime effect | `@react-native-firebase/app/android/build.gradle` + its `package.json`; `expo-modules-autolinking`'s `ExpoRootProjectPlugin.kt` (the app's values come from the version catalog, fallback 35); checklist §25 | **Expected-benign, and still unverified** — nothing has been built since. On the next native build, read the generated values and the Gradle output. If the app's levels need raising, the lever is **`expo-build-properties`** (`bundledNativeModules` `~57.0.22`, **not installed**), not a patch of the library |
 | **ISS-07** | Medium | **Phase 30B is referenced but never defined** — "has not started" in four places with no objective, scope or DoD | CLAUDE.md, this file's 30A record, PHASE_HISTORY, README | Define it or remove the references — owner decision (P3-1) |
 | **ISS-08** | Medium | The CLAUDE.md main-guard / access-guard bullets read as if both monitors still exist | CLAUDE.md; `.github/workflows/` holds only `ci.yml` | Corrected 2026-10-10: marked as removed; "do not push to `main`" is a **convention with no automation** |
 | **ISS-09** | Low | Module count stale at 94 | CLAUDE.md:39, `docs/TS-MIGRATION-MANIFEST.md`:16 | Live: **117** `.ts`; corrected 2026-10-10 |
@@ -6862,7 +6862,7 @@ test-count source. *Why:* phase discipline is unenforceable while a "phase" has 
 ## Immediate next actions
 
 1. **P2-2 next** — ISS-06, the RNFirebase `compileSdk`/`targetSdk` alignment, with the next native build.
-2. **Decision: P3-1** (Phase 30B) — define it or remove its references; assign ISS-13 with it.
+2. **Decision: P3-1** (Phase 30B) — define it or remove its references; assign ISS-13 with it. (P2-2's ISS-06 needs a native build to close, so it rides with the SDK 58 train.)
 3. **Re-check `expo install --check` when SDK 58 lands** — it reports outdated until then by the recorded decision (§27AK), not by accident. Keep the Gate 0 watch (`npm view expo dist-tags`).
 
 **Do not:** start any V2/V3/V4 feature, write to production, or push directly to `main`. PRs #34 (ISS-16) and #38 (ISS-17)
@@ -6899,7 +6899,7 @@ are closed with their reasons; those versions arrive only with the SDK 58 upgrad
 - [x] **P1** ISS-03 / ISS-04 / ISS-05 / ISS-08 / ISS-09 / ISS-10 / ISS-11 corrections *(done 2026-10-10)*
 - [x] **P2-1** ISS-02 RNFirebase PII remediation — **implemented, artifact-verified and merged (#40, 2026-10-10, §27AJ)**; device re-check rides with the SDK 58 pass
 - [x] **P2-4** the 7 dependency advisories **dispositioned** — 2 fixed, 5 accepted with reasons, SDK 57 rollup declined (§27AK); Dependabot #38 closed
-- [ ] **P2-2** ISS-06 P-3 SDK alignment
+- [ ] **P2-2** ISS-06 P-3 SDK alignment — **`[⛔]` corrected to `[~]` on 2026-10-10** (library values, expected-benign); confirmation needs the next native build
 - [ ] **P2-3** issue #32 upgrade train
 - [ ] **P2-5** ISS-18: the `~/.npmrc` `allow-scripts` line — **owner-side**, workaround recorded (§27AK)
 - [ ] **P3-1** Phase 30B defined or its references removed (ISS-07, ISS-13) — decision needed
@@ -6982,7 +6982,9 @@ five** (RN and safe-area). Everything else the SDK pins follows `expo install --
    PR #37 ignores, that is the sanctioned path — do not relax the ignore rules, and do not bump them
    by hand.
 4. **Doctor.** `npx expo-doctor` → triage every finding. Expected guest: RNFirebase's
-   `compileSdk`/`targetSdk` 34 vs 36 (**ISS-06 / P-3** — resolve it here; it stops being deferrable).
+   `compileSdk`/`targetSdk` 34 vs 36 (**ISS-06 / P-3** — re-read 2026-10-10: 34 is RNFirebase's own
+   **library** value and a library may compile below the app. Read and **record the generated app values**
+   here, and raise the **app's** levels through `expo-build-properties` if Play policy requires it).
    Any warning left standing needs a dated record; none may be ignored silently.
 5. **Type pass.** `npx tsc --noEmit`. The four ISS-01 sites are already fixed (#36); **any new error
    is new information** — fix it in code. `as any`, `@ts-ignore` and relaxed tsconfig are not options
@@ -7026,7 +7028,8 @@ Record the reason and reopen issue #32's entry.
 
 - **First real RN 0.88 native build** — JS CI cannot prove it; only step 9 can.
 - **Pre-release pins** — the RN RC is exactly what Gate 0 exists for.
-- **`compileSdk` (P-3 / ISS-06)** — the upgrade is where it must be fixed.
+- **`compileSdk` (P-3 / ISS-06)** — the upgrade is where it gets *read*: record the generated app values and any
+  Gradle warning. A library compiling below the app is not itself a blocker (see §27AH ISS-06).
 - **ISS-02 PII** — remediated at the artifact level (§27AJ); this pass is where the fix is finally observed on a device.
 - **Advisories drift** — re-read the count at execution (7 on 2026-10-10); some may change with the
   new dependency graph.
@@ -7239,6 +7242,11 @@ fail on this machine.
 is in a production bundle and carries a re-check at the SDK 58 train), and the SDK 57 patch rollup declined
 with its upstream conflict documented. No alert is dismissed without a reason, and none is claimed fixed
 that is not measured.
+
+**Confirmed by the platform, not inferred:** after the merge, Dependabot reports both `@grpc/grpc-js` alerts
+`state: fixed` (`fixed_at 2026-10-10T17:10:12Z`) and the open count at **5** — `sprintf-js` (medium),
+`braces` (high), `node-forge` (high), `decode-uri-component` (medium), `uuid` (medium) — exactly the five
+accepted above. Re-read the count before quoting it; it drifts.
 
 # 28. Phase Gate System
 

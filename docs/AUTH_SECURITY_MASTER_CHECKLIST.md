@@ -866,6 +866,7 @@ Chronological. **History is not rewritten.**
 | **AUTH-04** | Custom 6-digit email-verification code (A…H; G passed live on Brevo 2026-10-04) | `[✓]` | §40; live acceptance reported there | `56a3f84` … `0972948` |
 | **CI quality gates** | `.github/workflows/ci.yml` — `server` + `mobile` jobs on every PR and on `main` | `[✓]` | first green run on PR #7 | `9f4c5c1`, `d415335` |
 | **ISS-02** | RNFirebase Auth PII log remediated (dependency-local `patch-package` patch + `postinstall --error-on-fail`, LF-pinned by `.gitattributes`, held by a guard suite) | `[~]` | patch content + end-to-end reinstall + 8-case guard + mobile 48/652; **no native build yet** | PR #40 |
+| **Dependency advisories** | Per-alert disposition: 2 of 7 fixed by an override, 5 accepted with written reasons, the SDK 57 patch rollup declined as un-installable upstream | `[✓]` | chains from `npm ls`; the fix verified by install + 48/652; the decline reproduced from `main` | §27AK |
 
 ---
 
@@ -2141,8 +2142,9 @@ collaborator is discovered only when someone runs `node scripts/audit-access.mjs
 not a control**, and the statement above that owner-only membership is "asserted unattended" is
 **superseded**. `ci.yml` (with `secret-guard`), `scripts/check-secrets.mjs` and the pinned action SHAs
 remain. Separately, **`CLAUDE.md` was reduced from 143 KB to 57 KB** by moving its phase prose verbatim
-to `docs/PHASE_HISTORY.md`, and the record-keeping obligation became proportional to the change. The
-**seven** open dependency advisories are unchanged (nine when this was written on 2026-10-09; the count drifts), and the deferred **major** upgrades are tracked separately in issue #32.
+to `docs/PHASE_HISTORY.md`, and the record-keeping obligation became proportional to the change. The dependency
+advisories stood at **seven** (nine when this was written on 2026-10-09; the count drifts) and were **dispositioned on
+2026-10-10 — see §44**; the deferred **major** upgrades are tracked separately in issue #32.
 Roadmap §27AG.
 
 ### What remains open, unchanged
@@ -2170,6 +2172,30 @@ what a release build ships; the full engineering record is roadmap **§27AJ**.
 | Evidence | Patch content re-read; package deleted and `npm install` re-applied it through `postinstall` (`@react-native-firebase/auth@26.4.0 ✔`, exit 0) with the line absent and all 38 `Log.e` diagnostics intact; a fresh checkout restores the patch as **933 bytes of LF**; `mobile/__tests__/iss-02-rnfirebase-auth-pii-patch.test.ts` — **8 cases**; mobile **48 suites / 652 tests, 0 failures**; `tsc`/`eslint` clean; lockfile untouched by the reinstall |
 | **Status change** | §24 `[!]` → `[~]`; §26 `[!]` → `[~]`; §28 → **REMEDIATED IN THE REPOSITORY / DEVICE VERIFICATION OWED** |
 | **Still open** | **No native Android build of the patched source has been run and the log has not been observed absent on a device** — that confirmation belongs to the SDK 58 device pass (roadmap §27AI step 9). The finding is therefore **not closed** |
+
+---
+
+## 44. DEPENDENCY ADVISORY DISPOSITION (2026-10-10)
+
+All **seven** open alerts — every one in `mobile/package-lock.json` — were dispositioned on 2026-10-10.
+The per-alert table, the chains and the evidence are in roadmap **§27AK**; this is the security summary.
+
+| Outcome | Alerts | Why |
+| --- | --- | --- |
+| **FIXED** | `@grpc/grpc-js` (1 high, 1 low) | An `overrides` entry raises it to **1.14.6**, past the first patched 1.13.6. It is the Firebase **web** SDK's Node gRPC transport: no app module imports the web SDK and RNFirebase's app package does not require it, so React Native never executes it. Verified by install, a clean `npm ls`, and 48 suites / 652 tests |
+| **ACCEPTED — in a production bundle** | `decode-uri-component` (medium) | The only accepted alert in the shipped bundle (`expo-router` → `query-string@7` → `decode-uri-component`, used by `getPathFromState`). The patched **0.5.0 is ESM-only** while `query-string@7` is CommonJS, so an override would break resolution exactly where it is used. Impact is a malformed-`%` DoS in the device's own URL parsing — a crash, no data exposure, no server effect. **Re-check at the SDK 58 train** |
+| **ACCEPTED — build/test only** | `uuid` (medium) | `xcode` runs at config/prebuild time and never ships; the patched version is a **major** (11.x, ESM-first) against `^7.0.3`, so the override buys no runtime benefit and risks the build tool |
+| **ACCEPTED — unfixable** | `node-forge` (high), `braces` (high), `sprintf-js` (medium) | **No patched version exists** (no `first_patched_version`), so neither a bump nor an override can clear them. They sit in `@expo/cli` and in Jest's tree and ship nowhere. They clear when those projects publish fixes |
+
+**Also decided here, because it blocks them:** the SDK 57 patch rollup is **declined as a whole** and moved to the
+SDK 58 train. `expo install --check` asks for four moves, but taking them nests `expo-modules-core@57.0.21` where
+root-level `jest-expo` cannot resolve it (48/48 suites fail), and declaring it directly is an `ERESOLVE` conflict:
+`expo-modules-core@57.0.21` wants `react-native-worklets ^0.7.4…^0.10.0`, while `expo-router@57.0.25`'s
+`react-native-reanimated@4.7.0` forces `0.13.x`. Dependabot's **PR #38** hit the same wall and resolved it by
+dropping the package from the lockfile — it is **closed**, not merged. Accepted consequence, recorded rather than
+hidden: `expo install --check` reports outdated dependencies until the SDK 58 upgrade.
+
+No finding here is dismissed without a reason, and none is claimed fixed that was not measured.
 
 ---
 

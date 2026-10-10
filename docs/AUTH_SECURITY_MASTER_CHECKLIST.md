@@ -867,6 +867,7 @@ Chronological. **History is not rewritten.**
 | **CI quality gates** | `.github/workflows/ci.yml` — `server` + `mobile` jobs on every PR and on `main` | `[✓]` | first green run on PR #7 | `9f4c5c1`, `d415335` |
 | **ISS-02** | RNFirebase Auth PII log remediated (dependency-local `patch-package` patch + `postinstall --error-on-fail`, LF-pinned by `.gitattributes`, held by a guard suite) | `[~]` | patch content + end-to-end reinstall + 8-case guard + mobile 48/652; **no native build yet** | PR #40 |
 | **Dependency advisories** | Per-alert disposition: 2 of 7 fixed by an override, 5 accepted with written reasons, the SDK 57 patch rollup declined as un-installable upstream | `[✓]` | chains from `npm ls`; the fix verified by install + 48/652; the decline reproduced from `main` | §27AK |
+| **Expo pin guard** | ISS-16's detection gap closed — every Expo-managed dependency is held to the installed SDK's own pin table, with a positive control and a measured mutation of the real manifest | `[✓]` | `mobile/__tests__/expo-sdk-pins.test.ts` (6 cases, 50/666); the guard failed on the recorded PR #34 moves | §45 · roadmap §27AN |
 
 ---
 
@@ -880,13 +881,13 @@ is corrected here rather than left to imply those increments never happened.)*
 | Field | Value |
 | --- | --- |
 | Current authorised phase | **None new.** The last authorised increments — **AUTH-01, AUTH-02, AUTH-03** and the **CI quality gate** — are **implemented and merged** (§29, §42); no further phase has been authorised. |
-| Current task | **ISS-13 resolved** — the Phase 30A "F-1" PDF-sharing finding (the print path used a different page geometry than the PDF path) fixed with a regression suite; PR **#45**. The owner-directed backlog work that preceded it is recorded in **§27AJ–§27AM** (ISS-02 PII patch, advisory disposition, Dependabot scope, ISS-13). |
+| Current task | **ISS-13 resolved** (PR **#45**, §27AM) and **ISS-16's detection gap closed** — the Expo pin set is now held in CI by a guard suite against the installed SDK's own table (PR **#46**, §45, roadmap §27AN). The owner-directed backlog work that preceded both is recorded in **§27AJ–§27AN**. |
 | Files/work area | — |
 | Dependencies | — |
 | Blockers | iOS build host (P-6); new-identity path ENVIRONMENT-BLOCKED (§5b); P-4 and Gates 1/2; **P-3 is expected-benign and unverified (§25)**; owner decisions (§27). |
 | Acceptance criteria | — |
-| Verification state | Server full suite **185 suites / 1312 tests, 0 failures**; mobile **49 suites / 660 tests, 0 failures** (2026-10-11, after the ISS-13 label suite); CI runs `server` + `mobile` + `secret-guard`. Android Google existing-account E2E VERIFIED (§5a); Render Firebase Admin config verified live; dependency-level PII finding **remediated, device confirmation owed** (§24/§28/§43). |
-| Git/branch state | `main` @ `dcc8c0e`; **PRs #40–#43 merged** (ISS-02 PII patch, advisory disposition, P-3 gate correction, Dependabot scope); **PR #44 open** (Dependabot — `mongoose` 9.11.1, server minor/patch) and **PR #45 open** (ISS-13); CI runs `server` + `mobile` + `secret-guard`. |
+| Verification state | Server full suite **185 suites / 1312 tests, 0 failures**; mobile **50 suites / 666 tests, 0 failures** (2026-10-11, after the ISS-13 label suite and the §45 pin guard); CI runs `server` + `mobile` + `secret-guard`. Android Google existing-account E2E VERIFIED (§5a); Render Firebase Admin config verified live; dependency-level PII finding **remediated, device confirmation owed** (§24/§28/§43). |
+| Git/branch state | `main` @ `3beaf85`; **PRs #40–#45 merged** (ISS-02 PII patch, advisory disposition, P-3 gate correction, Dependabot scope, `mongoose` patch, ISS-13); **PR #46** carries this revision (§45); CI runs `server` + `mobile` + `secret-guard`. |
 
 ---
 
@@ -2199,6 +2200,20 @@ No finding here is dismissed without a reason, and none is claimed fixed that wa
 against the alerts API after the merge:** both `@grpc/grpc-js` alerts report `state: fixed`
 (`fixed_at 2026-10-10T17:10:12Z`) and the open count is **5** — the five accepted rows above. The count
 drifts; re-read it before quoting.
+
+---
+
+## 45. THE EXPO PIN SET IS ENFORCED IN CI (2026-10-11)
+
+ISS-16's row named the gap: the five-package move in PR #34 was native-incompatible and **CI could not see it**
+(no `expo-doctor`, no `expo install --check` ran). The Dependabot ignore list (§27AL) removed one source of
+such a move; this removes the class — the existing `mobile` job now asserts every Expo-managed dependency
+against the installed SDK's own pin table (`expo/bundledNativeModules.json`), exact equality, no new
+dependency, no network, no workflow change. `mobile/__tests__/expo-sdk-pins.test.ts`, 6 cases, carrying two
+protections against a guard that cannot fail: the recorded PR #34 moves are a fixture the comparator must
+catch, and the same moves were written into the real manifest and caught before being reverted (restored blob
+`6e0188bb`). Roadmap §27AN. **Not** a native build, and not the remote patch-level check (ISS-17, declined
+with reasons in §44).
 
 ---
 

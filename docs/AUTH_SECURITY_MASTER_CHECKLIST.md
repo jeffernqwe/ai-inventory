@@ -2052,7 +2052,8 @@ re-reported as fresh. **`LICENSE`** is **proprietary, all rights reserved** (the
 hosting, not a grant of reuse rights), replacing an unstated default; **`.github/dependabot.yml`** covers
 version updates for both `server/` and `mobile/`, validated against the published `dependabot-2.0` schema,
 with security updates deliberately left ungrouped. Enabling the alerts produced a result worth recording: GitHub immediately reported
-**9 open advisories, all in `mobile/package-lock.json`** (1 critical, 4 high, 3 moderate, 1 low) and
+**9 open advisories, all in `mobile/package-lock.json`** (1 critical, 4 high, 3 moderate, 1 low)
+*(corrected 2026-10-10: **7** open — 3 high, 3 medium, 1 low, **0 critical**; advisory counts drift, so the live Dependabot list is the authority)* and
 **Dependabot opened three security-update pull requests on its own (`#12`–`#14`)** — the feature working,
 not merely enabled. Three of the nine (`braces`, `node-forge`, `sprintf-js`) have **no published fix** and
 are **open dependency debt**, and a fourth (`uuid`) has a fix the graph **cannot reach** — Dependabot's own
@@ -2108,7 +2109,7 @@ rotation is owed.**
 **The planner's limit is recorded, not assumed:** protection and rulesets answer `403`, secret scanning is
 `null`, and `allow_forking: false` answers `422 "Allow forks setting can only be changed on org-owned
 private repositories"` on a personal private repository. The response is to make the policy **observable**:
-**`.github/workflows/access-guard.yml`** runs **daily** and **hard-fails** on a non-private repository, a
+**`.github/workflows/access-guard.yml`** runs **daily** and **hard-fails** on a non-private repository *(removed later the same day — see “Workflow simplification” below)*, a
 fork or fork network, or a collaborator other than the owner. Its **first real run (`37893715498`) supplied
 the measurement the design depends on** — the **collaborators endpoint answers `200` to `GITHUB_TOKEN`**,
 while invitations, deploy keys, webhooks, Actions secrets, the Actions policy, protection and rulesets all
@@ -2139,7 +2140,7 @@ not a control**, and the statement above that owner-only membership is "asserted
 **superseded**. `ci.yml` (with `secret-guard`), `scripts/check-secrets.mjs` and the pinned action SHAs
 remain. Separately, **`CLAUDE.md` was reduced from 143 KB to 57 KB** by moving its phase prose verbatim
 to `docs/PHASE_HISTORY.md`, and the record-keeping obligation became proportional to the change. The
-nine open dependency advisories are unchanged and the mobile-side ones are tracked in issue #32.
+**seven** open dependency advisories are unchanged (nine when this was written on 2026-10-09; the count drifts), and the deferred **major** upgrades are tracked separately in issue #32.
 Roadmap §27AG.
 
 ### What remains open, unchanged

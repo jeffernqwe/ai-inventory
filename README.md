@@ -56,7 +56,7 @@ JWT + bcrypt with server-authoritative role/business context on every request.
 ### TypeScript migration (campaign complete)
 
 The backend source is **TypeScript**, and the server TypeScript migration campaign
-(**TS-1** … **TS-2F-p**) is **complete and closed**. `server/src` holds 94 `.ts` modules and
+(**TS-1** … **TS-2F-p**) is **complete and closed**. `server/src` holds **117** `.ts` modules (94 at campaign close-out; re-counted 2026-10-10) and
 exactly one intentionally deferred `.js` module, `server/src/services/entitlement.service.js`;
 `.ts` is canonical for all new and modified server code.
 
@@ -376,7 +376,7 @@ unreachable — `/api/health` reports `db: connected|disconnected`.
 
 ## Mobile (`mobile/`)
 
-Expo app with Expo Router (file-based routing), written in JavaScript. It is a **client
+Expo app with Expo Router (file-based routing), written in **TypeScript** (`app/`, `components/` and `lib/` hold 129 `.ts`/`.tsx` files and no `.js`). It is a **client
 only** — the backend is the security boundary. The app never connects to MongoDB and
 never holds MongoDB or AI credentials. The JWT is the only thing persisted (Expo
 SecureStore); the user profile is re-fetched from `/api/auth/me` on every launch so
@@ -388,7 +388,8 @@ working here at the next request.
 cd mobile
 npm install
 cp .env.example .env        # optional: set EXPO_PUBLIC_API_URL (see below)
-npx expo start              # start Metro dev server (Expo Go / simulator)
+npx expo start              # start Metro dev server — requires a DEVELOPMENT BUILD (Expo Go cannot run this app:
+                             #  it uses RNFirebase and expo-dev-client). See docs/DEVELOPING_ON_A_PHYSICAL_DEVICE.md
 ```
 
 - **API base URL:** the app reads `EXPO_PUBLIC_API_URL`. When it is unset it defaults to
@@ -454,6 +455,9 @@ committed.
 ---
 
 ## Phase Status
+
+> **Current open work, known issues and the next-step order:** `docs/DEVELOPMENT_ROADMAP.md` **§27AH**. Start
+> there — it is kept current so the whole repository does not have to be re-audited.
 
 - **Phase 00 — Planning & Inspection:** complete
 - **Phase 01 — Project Foundation:** complete (Expo mobile scaffold + Express server scaffold)

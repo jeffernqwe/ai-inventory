@@ -6831,7 +6831,7 @@ P-6 + Gate 1 + iOS app registration (environment-blocked), and the new-identity 
 ## Pending
 
 **Fixes:** ISS-01 (the React 19.3 type migration) · ISS-16 (dispose of PR #34; decide the Dependabot carve-out) · ISS-02 (decision then remediation) · ISS-13 (once its home is decided).
-**Upgrades, in issue #32's order:** Expo SDK 58 via `npx expo install --fix` — the only safe vehicle for the RN/React versions PR #34 proposed (ISS-16) → the React 19 type fixes (ISS-01 is the first of them) → TypeScript 7 →
+**Upgrades, in issue #32's order:** Expo SDK 58 via `npx expo install --fix` — the only safe vehicle for the RN/React versions PR #34 proposed (ISS-16; runbook: **§27AI**, whose verified pins differ from PR #34's set — RN 0.88 family, not 0.87.1) → the React 19 type fixes (ISS-01 is the first of them) → TypeScript 7 →
 jest 30 → the `actions/*` v7 re-pin (also clears ISS-12) → `dotenv` 18 and `@types/bcryptjs` 3.
 **Testing:** the L-17 mail leg, owner-assisted; and a dated test baseline for this section.
 **Documentation:** the corrections listed at the end of this section; Phase 30B; the device guide; `docs/freebuff/*`.
@@ -6862,6 +6862,7 @@ test-count source. *Why:* phase discipline is unenforceable while a "phase" has 
 
 1. **Review and merge PRs #35 → #36 → #37** (docs → type migration → dependency policy), then delete the three merged branches — all P0 work is executed; only review and merge remain.
 2. **Then decide P3-1** (Phase 30B): once the fix and corrections are in, the remaining ambiguity is scope, not code.
+3. **Then execute §27AI** (Expo SDK 58) — Gate 0 first: SDK 58 is still on the `next` dist-tag with an RN release candidate pinned, so either wait for its promotion or record an explicit owner decision to proceed.
 
 **Do not:** start any V2/V3/V4 feature, write to production, or push directly to `main`. PR #34 is closed (ISS-16); its versions arrive only with the SDK 58 upgrade.
 
@@ -6910,6 +6911,119 @@ AUTH-04-H, the advisory count), `docs/AUTH_SECURITY_MASTER_CHECKLIST.md` (adviso
 from deferred majors), `docs/TS-MIGRATION-MANIFEST.md` (module count annotated), and §35 and §27AE of this file.
 Deliberately **not** changed: `docs/SOURCE_PROTECTION.md` and `SECURITY.md` were already correct for the private-repo
 state, and `docs/freebuff/*` awaits its decision (P3-2).
+
+---
+
+# 27AI. Expo SDK 58 upgrade — the approved procedure (2026-10-10)
+
+## Why this exists, and its status
+
+Issue #32 lists **Expo SDK 58** as the first deferred major, and §27AH's P2 train says the RN/React
+versions must arrive through `npx expo install --fix` rather than a raw Dependabot bump (ISS-16 —
+PR #34). This section is the **runbook**: the ordered steps, the checks, the device acceptance pass
+and the rollback, so the upgrade can be executed without re-deriving any of it.
+
+**Approval:** merging the PR that adds this section constitutes approval of the procedure.
+**Execution has not started** and must not begin before Gate 0 and the prerequisites below.
+
+## Gate 0 — release status (re-check at execution)
+
+Read on 2026-10-10 with `npm view expo dist-tags`: `latest = 57.0.27`, **`next = 58.0.7`**,
+`canary = 58.0.0-canary…`. SDK 58 is **not yet the stable channel**, and `expo@58.0.7` pins
+`react-native` **0.88.0-rc.4** — a release candidate. Therefore:
+
+- **Preferred:** wait until Expo promotes SDK 58 to `latest` (the pins are then final), then execute.
+- **Alternative:** execute on the pre-release SDK **only by an explicit owner decision**, recorded in
+  the executing PR. Re-run `npm view expo dist-tags` at execution — never trust this line.
+
+## Verified target set (read from the package, not guessed)
+
+`npm pack expo@58.0.7` → its `bundledNativeModules.json`, 2026-10-10:
+
+| Package | SDK 57 today | SDK 58 declares | PR #34 proposed |
+| --- | --- | --- | --- |
+| `react` | 19.2.3 | **19.3.0** | 19.3.0 |
+| `react-dom` | 19.2.3 | **19.3.0** | 19.3.0 |
+| `react-native` | 0.86.3 | **0.88.0-rc.4** | 0.87.1 |
+| `react-native-safe-area-context` | ~5.7.0 | **~5.9.1** | ~5.10.1 |
+| `react-native-screens` | ~4.26.0 | **~4.28.0** | ~4.28.0 |
+
+Two lessons held verbatim: the SDK — not Dependabot — decides, and **PR #34 was wrong on two of
+five** (RN and safe-area). Everything else the SDK pins follows `expo install --fix`;
+`@types/react` (dev-only, not in the map) must move alongside to ~19.3.x or `tsc` will say so.
+
+## Prerequisites (all must be true before step 1)
+
+- [ ] PRs #35 (docs), #36 (ISS-01 fixes) and #37 (Dependabot carve-out) merged; `main` green.
+- [ ] The Gate 0 decision recorded.
+- [ ] One development-build slot on the Android device — this plan ends with a device pass, not a CI result.
+- [ ] Issue #32's SDK 58 entry open and linked to the executing PR.
+
+## The procedure
+
+1. **Branch + baseline.** `git checkout -b chore/expo-sdk-58 main`. Record the green baseline:
+   `cd mobile && npx tsc --noEmit && npx eslint . && npx jest --ci` (2026-10-10: 47 suites / 644
+   tests) and `npx expo install --check` (clean on SDK 57 — if not, stop and record why).
+2. **Bump the SDK only.** `npx expo install expo@^58.0.0` (pin the exact released version if Gate 0
+   chose one). Do not hand-edit `package.json`.
+3. **Align every pinned dependency.** `npx expo install --fix`, then `npx expo install --check` →
+   **must report no mismatches**; paste both outputs into the PR. If `--fix` moves the five packages
+   PR #37 ignores, that is the sanctioned path — do not relax the ignore rules, and do not bump them
+   by hand.
+4. **Doctor.** `npx expo-doctor` → triage every finding. Expected guest: RNFirebase's
+   `compileSdk`/`targetSdk` 34 vs 36 (**ISS-06 / P-3** — resolve it here; it stops being deferrable).
+   Any warning left standing needs a dated record; none may be ignored silently.
+5. **Type pass.** `npx tsc --noEmit`. The four ISS-01 sites are already fixed (#36); **any new error
+   is new information** — fix it in code. `as any`, `@ts-ignore` and relaxed tsconfig are not options
+   (project rule).
+6. **Lint + tests.** `npx eslint .` and `npx jest --ci`; every failure is an SDK behavior change
+   until proven otherwise. No snapshot updates or weakened assertions without a recorded reason.
+7. **CNG sanity.** No `ios/` or `android/` directory may appear (Phase 30A rule); check `git status`
+   and `npx expo config --type public`.
+8. **CI.** Push the branch; the `mobile` job is the gate and `server`/`secret-guard` must stay green.
+   Do not merge red, and do not merge with `expo install --check` mismatched.
+9. **Development-build validation pass — the acceptance gate.** For a native SDK move, a JS-only
+   pass proves nothing:
+   - `eas build --profile development --platform android`; record the build ID. iOS stays export-only
+     (environment-blocked).
+   - Install, then `npx expo start --dev-client --clear`; open the app.
+   - Require the three independent signals (§27AH): Metro prints `Android Bundled … expo-router\entry.js`;
+     the app renders (read mechanically with `adb shell uiautomator dump`); the local server logs
+     `{"type":"http",…}` lines as the app is used. If the first two pass and the third stays silent,
+     check `EXPO_PUBLIC_API_URL` (must be reachable from the phone) before touching the SDK.
+   - Smoke journeys: Firebase sign-in and the AUTH-03 renewal path; the three list surfaces touched by
+     #36 (empty / loading / error / footer states); the email-verification screen; one stock-in and one
+     stock-out; one transfer. In logcat, compare the RNFirebase PII note (ISS-02) against its recorded
+     disposition — it must not quietly widen.
+   - Device limit to expect: ColorOS refuses `WRITE_SECURE_SETTINGS`, so raise the screen timeout
+     manually (see `docs/DEVELOPING_ON_A_PHYSICAL_DEVICE.md`).
+10. **Merge criteria.** All of: CI green; `expo install --check` clean; doctor findings resolved or
+    waived with a record; the device pass recorded (build ID, date, journeys); test counts re-read and
+    recorded in §27AH; no unrelated changes in the diff.
+11. **Land and close out.** Squash-merge; delete the branch; close issue #32's SDK 58 entry; update
+    §27AH's status rows and advisory count (re-read it); leave the #37 ignore rules in place — they are
+    per-SDK, and a future SDK moves the pins again.
+
+## Rollback
+
+Revert the single upgrade PR on `main`; reinstall the previous development build if the device build
+regressed. The Dependabot ignores and all policy stay untouched — a revert needs no config change.
+Record the reason and reopen issue #32's entry.
+
+## Risks (recorded, not glossed)
+
+- **First real RN 0.88 native build** — JS CI cannot prove it; only step 9 can.
+- **Pre-release pins** — the RN RC is exactly what Gate 0 exists for.
+- **`compileSdk` (P-3 / ISS-06)** — the upgrade is where it must be fixed.
+- **ISS-02 PII** — validate against its disposition; if remediation lands first, this pass re-tests it.
+- **Advisories drift** — re-read the count at execution (7 on 2026-10-10); some may change with the
+  new dependency graph.
+- **iOS** — unverifiable on this host; export-only until a macOS host exists.
+
+## Evidence to record when executed
+
+Branch + PR number; CI run URL; `expo install --check` and `expo-doctor` outputs; EAS build ID;
+device-pass notes (signals + journeys); new test counts; updated §27AH rows; closed issue #32 entry.
 
 ---
 

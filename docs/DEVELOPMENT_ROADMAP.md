@@ -6799,7 +6799,7 @@ Facebook Login and Apple Sign-In remain unimplemented.
 
 There is **no in-flight feature work**. P0 closed on 2026-10-10: #35/#36/#37 merged (`f2f6731`, `aadab04`,
 `bf0c915`), #34 closed (ISS-16), and the device guide committed (P3-3 resolved). SDK 58 execution is deferred by its
-recorded Gate 0 decision (§27AI). **ISS-02 closed out on 2026-10-10** (remediated — §27AJ). Next: the **advisories disposition**, then P3-1.
+recorded Gate 0 decision (§27AI). **ISS-02 closed out on 2026-10-10** (remediated — §27AJ, PR #40). Next: the **advisories disposition**, then P3-1.
 
 ## Known issues and required fixes
 
@@ -7033,7 +7033,7 @@ device-pass notes (signals + journeys); new test counts; updated §27AH rows; cl
 
 ---
 
-# 27AJ. ISS-02 — the RNFirebase Auth PII log, remediated (2026-10-10)
+# 27AJ. ISS-02 — the RNFirebase Auth PII log, remediated (2026-10-10, PR #40)
 
 ## The finding, re-read at source
 

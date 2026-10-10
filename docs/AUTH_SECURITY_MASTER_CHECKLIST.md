@@ -865,7 +865,7 @@ Chronological. **History is not rewritten.**
 | **AUTH-03** | Inventory session renewal — server boundary + mobile client | `[✓]` | `phaseAUTH03-session-renewal.test.mjs`; `phaseAUTH03-*` mobile suites | `3085e3f`, `5da0692` |
 | **AUTH-04** | Custom 6-digit email-verification code (A…H; G passed live on Brevo 2026-10-04) | `[✓]` | §40; live acceptance reported there | `56a3f84` … `0972948` |
 | **CI quality gates** | `.github/workflows/ci.yml` — `server` + `mobile` jobs on every PR and on `main` | `[✓]` | first green run on PR #7 | `9f4c5c1`, `d415335` |
-| **ISS-02** | RNFirebase Auth PII log remediated (dependency-local `patch-package` patch + `postinstall --error-on-fail`, LF-pinned by `.gitattributes`, held by a guard suite) | `[~]` | patch content + end-to-end reinstall + 8-case guard + mobile 48/652; **no native build yet** | — |
+| **ISS-02** | RNFirebase Auth PII log remediated (dependency-local `patch-package` patch + `postinstall --error-on-fail`, LF-pinned by `.gitattributes`, held by a guard suite) | `[~]` | patch content + end-to-end reinstall + 8-case guard + mobile 48/652; **no native build yet** | PR #40 |
 
 ---
 

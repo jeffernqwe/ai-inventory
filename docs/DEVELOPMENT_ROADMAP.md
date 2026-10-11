@@ -8559,6 +8559,30 @@ so nothing was added. **This build will be the first to carry §27AY's dependenc
 native-build verification of that change as well as the ISS-02 logcat re-check (F-26) — two things this entry
 cannot claim, because neither a build nor an install was performed here.
 
+## ISS-06, narrowed without a build
+
+ISS-06 wants the **generated** `minSdk` / `compileSdk` / `targetSdk` read out of a build. No build was run, so it
+stays **open** — but the pre-build expectation is now measured rather than guessed, and the reason the generated
+values cannot be read offline is established rather than assumed.
+
+- **What the installed toolchain declares.** `node_modules/expo-modules-core/android/ExpoModulesCorePlugin.gradle`,
+  in `ext.useDefaultAndroidSdkVersions` (lines 65–69), sets `compileSdkVersion` **36**, `minSdkVersion` **24** and
+  `targetSdkVersion` **36** as the SDK's own defaults, each overridable through `safeExtGet`. Those are the
+  *module* defaults, and the values the app-level template is expected to match.
+- **What cannot be known offline, and why.** The **app-level** template that writes the generated
+  `android/build.gradle` is **not installed**: nothing under `@expo/` or `expo/` carries the
+  `android.compileSdkVersion` property defaults, because prebuild fetches that template at prebuild time. The
+  generated numbers are therefore genuinely unavailable until a build runs, and no figure in this entry should be
+  quoted as if it were the generated one.
+- **`expo-build-properties` is not needed up front.** The project overrides none of the three — `app.json`,
+  `app.config.js` and `eas.json` contain no SDK-level property — so the generated values will be the template's
+  defaults. ISS-06 says to add that package only if the app's own levels need raising, and nothing found here
+  shows they do. Adding it now would be a dependency with no identified need.
+- **How to capture them from the owner's cloud build.** `minSdk` and `targetSdk` are recorded **in the installed
+  APK**, so `adb shell dumpsys package com.inventoryai.app` on the connected phone reports both with no local
+  prebuild — this is the recommended capture. **`compileSdk` is not in the APK** (it is build-time only), so it
+  has to come from the build log first, and from a throwaway prebuild only if the log does not show it.
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

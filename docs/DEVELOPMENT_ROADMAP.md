@@ -8528,6 +8528,37 @@ and was merged as **`cd405a3`** — the dependency policy producing a routine gr
 it was written to prevent. The installed SDK's pin table does **not** name that package, so the carve-out guard
 added here correctly left it proposable: the guard is not over-broad.
 
+## The owner's decisions, taken the same session
+
+Three items were put to the owner rather than guessed at, and all three are now closed.
+
+**The `~/.npmrc` line — removed, and the command verified.** See Change 1 above: `npx expo install --check`
+reports "Dependencies are up to date" and `--fix` completes. **The SDK 58 blockage is gone** (§27AI).
+
+**ISS-20 — the device run writes into the DEVELOPMENT database, and it already did.** No change was needed:
+`server/.env` carries `NODE_ENV=development` and `MONGODB_DB_NAME=inventoryai_dev_db`, and the server's own
+startup line, captured by running `node src/index.ts` the way the runbook prescribes, reads
+`[db] connected to MongoDB (database: inventoryai_dev_db)`. That is the verification: the resolved database is
+read off the process the owner will actually start, not derived from the rule in `config/env.ts`. The **1,815**
+unusable fixture accounts §27AV found live in `inventoryai_test_db` and are not in the path of this run.
+
+**One thing deliberately NOT changed, because it looked like a defect and is not.** `mobile/.env` carries
+`EXPO_PUBLIC_API_URL=http://localhost:4000`, which is wrong on a phone over Wi-Fi — `localhost` there means the
+phone. It is nonetheless **correct for this workflow**: the runbook (§6c, and **F-28**) *prefers* the USB tunnel
+for a cabled run, where `adb reverse tcp:4000 tcp:4000` maps the phone's `localhost` to this laptop, and the
+server binds loopback only. A device run therefore needs the two `adb reverse` tunnels and **not** the LAN
+address, a firewall exception or a matching DHCP lease. Recorded so a future session does not "fix" it onto the
+LAN address and silently break the prescribed path.
+
+**The build — EAS cloud `development`, and no new runbook.** The owner chose the EAS route over a local
+`expo run:android` (which would generate the `mobile/android/` directory this project deliberately does not
+keep), and the procedure already exists in `docs/DEVELOPING_ON_A_PHYSICAL_DEVICE.md` §6a —
+`eas build --profile development --platform android` from `mobile/`, then `adb install -r <apk>`. The
+dashboard-managed `GOOGLE_SERVICES_JSON` file variable it depends on is already owner-verified (checklist §42),
+so nothing was added. **This build will be the first to carry §27AY's dependency change**, which makes it the
+native-build verification of that change as well as the ISS-02 logcat re-check (F-26) — two things this entry
+cannot claim, because neither a build nor an install was performed here.
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

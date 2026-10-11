@@ -6770,7 +6770,7 @@ update its tracking boxes, status rows and heading date at the end of a session 
 
 | Dimension | Verified state |
 | --- | --- |
-| Repository | `main` @ `3adac9d` = `origin/main`; no tags, no stashes; the device guide is committed (P3-3 resolved); 2026-10-11: **ISS-13 fixed** (#45, §27AM), the **Expo pin guard** added (§27AN), the **watch script** landed (§27AQ), the **secret guard made able to fail** (§27AR), and the **first real-device run** performed (§27AT) |
+| Repository | `main` @ `3adac9d` = `origin/main`; no tags, no stashes; the device guide is committed (P3-3 resolved); 2026-10-11: **ISS-13 fixed** (#45, §27AM), the **Expo pin guard** added (§27AN), the **watch script** landed (§27AQ), the **secret guard made able to fail** (§27AR), and the **first real-device run** performed (§27AT), and the **attribution-bearing history rewritten** (§27AS — every tree hash unchanged) |
 | CI | `.github/workflows/ci.yml` only — jobs **server / mobile / secret-guard**; last `main` run green on `3adac9d` (run 38078651606, 2026-10-10T19:09Z) |
 | Backend | **117** `.ts` modules + one deferred `.js` (`server/src/services/entitlement.service.js`); **0** open advisories |
 | Mobile | **132** `.ts`/`.tsx` sources and **0** `.js`/`.jsx` in `app/ components/ lib/ __tests__/` (re-counted 2026-10-11); Expo 57 / RN 0.86.3 |
@@ -6809,13 +6809,16 @@ put under CI** — ISS-16's detection gap (§27AN, PR #46) — the deferred queu
 PR #49), the **secret guard's rules made provable** (§27AR, PR #50), and the **first real-device Android run**
 prepared and performed (§27AT, F-26…F-28).
 
-**Attribution policy tightened (2026-10-11).** The owner required that no unwanted contributor name, AI
-attribution tag or automated signature line appears in commits, messages, pull requests or history. The audit
-found **103 commits on `main`** carrying a trailer — 91 `Co-Authored-By: Claude Code`, 8 Codebuff lines
-(including `🤖 Generated with Codebuff`) and 4 `dependabot[bot]` — while `git config` was already correct and
-**no hook or template in this repository adds one**: the trailers came from a coding agent's own message
-template. CLAUDE.md §16 is now tool-agnostic and forward-binding, and the owner authorised a one-off
-message-only rewrite of the affected commits (§27AS).
+**Attribution policy tightened, and the history rewritten (2026-10-11).** The owner required that no
+unwanted contributor name, AI attribution tag or automated signature line appears in commits, messages,
+pull requests or history. The audit found **99 commits on `main` carrying 107 removable trailer lines**
+in four forms (91 `Co-Authored-By: Claude Code`, 8 `🤖 Generated with Codebuff`, 5 capital-`A`
+`Co-Authored-By: Codebuff`, 3 `Co-authored-by: Codebuff`), while `git config` was already correct and
+**no hook or template in this repository can add one** — the trailers came from a coding agent's own
+message template. CLAUDE.md §16 is now tool-agnostic and forward-binding, and the owner authorised a
+one-off **message-only** rewrite, performed and verified commit by commit (§27AS): `main` `f8493f8` →
+`3cef708`, with every tree hash unchanged. The 4 `dependabot[bot]` trailers are deliberately kept. (The
+earlier "103 commits" figure in this section was the first, incomplete measurement.)
 
 Next: **the device-testing account decision** (§27AT) and **P3-1** — the two items left that need the owner.
 
@@ -7607,6 +7610,106 @@ job runs the same command with the step now named for both halves, so the contro
 pull request.
 
 ---
+
+# 27AS. The attribution cleanup — a message-only rewrite, measured three times (2026-10-11)
+
+**Why.** The owner required that no unwanted contributor name, AI attribution tag or automated
+signature line appears in commits, commit messages, pull requests or history, and that commits carry
+only `jeffernzxc <jefferndullamalinaozxc@gmail.com>`. CLAUDE.md §16 now states the policy in
+tool-agnostic, forward-binding terms (rules 1–10). This section is the authoritative record of the
+one-off rewrite the owner authorised for history that already existed.
+
+**The audit, final measurement.** Across `main`'s 234 commits, **99 commits carried 107 removable
+attribution lines**, in exactly **four** distinct forms:
+
+| Form | Lines |
+| --- | --- |
+| `Co-Authored-By: Claude Code <noreply@anthropic.com>` | 91 |
+| `🤖 Generated with Codebuff` | 8 |
+| `Co-Authored-By: Codebuff <noreply@codebuff.com>` | 5 |
+| `Co-authored-by: Codebuff <noreply@codebuff.com>` | 3 |
+
+The earlier figure of "103 commits" was the *first* measurement and was incomplete: it counted the
+forms already known. The five capital-`A` `Co-Authored-By:` lines surfaced only because the first
+push was re-scanned on the remote (F-29). **No AI identity is an author or a committer anywhere in
+the history** — every trailer was the coding agent's own message template.
+
+**Deliberately kept.** The 4 `Co-authored-by: dependabot[bot] <…@users.noreply.github.com>` trailers
+on the dependency-update commits stay: they credit a bot the owner runs for changes it made, and
+removing them would attribute those changes to the owner. One `Claude Code` string also remains, in
+the subject `chore: ignore local Freebuff and Claude Code tooling state`, where it names tooling being
+ignored rather than claiming authorship.
+
+**Method.** `git filter-branch --msg-filter` over `main` and `wip/backup-working-tree`, with the
+filter kept in `.git/msg-filter.py` so it can never be committed. It removes only whole lines that are
+trailer-shaped, matched case-insensitively and on the value, so an uppercase `Co-Authored-By:` and
+every address form of these tools are caught while prose that merely mentions a tool is preserved.
+
+**Three passes, recorded rather than quietly fixed.**
+
+1. The first filter also collapsed runs of blank lines. Pairwise comparison showed **128 of 234
+   messages differed** from the original by a trailing blank line — outside the agreed scope of
+   "trailers only". Reverted and redone.
+2. The second filter matched the trailer tokens case-sensitively and matched only the forms already
+   seen, so the 5 capital-`A` lines survived. Found by re-scanning the pushed commit graph.
+3. The third pass is the one in force.
+
+**Verification of the pass in force.** Before rewriting, the filter was dry-run over the pre-rewrite
+graph and **every line it would drop was enumerated** — 107 lines, the four forms above and nothing
+else — and the predicate was self-tested against 6 trailer forms that must go and 5 prose/fixture
+lines that must survive (the dependabot trailer and a `CLAUDE.md` reference among them). After
+rewriting, every commit was compared pairwise against the original graph:
+
+| Ref | Commits | Trees differing | Messages differing beyond the removals | Commits still carrying a trailer |
+| --- | --- | --- | --- | --- |
+| `main` | 234 → 234 | **0** | **0** | **0** |
+| `wip/backup-working-tree` | 129 → 129 | **0** | **0** | **0** |
+
+**Result.** `main` `f8493f8` → **`3cef708`**; `wip/backup-working-tree` `e9616cf` → **`d94bec2`**
+(that branch's rewrite is identical to a separate re-run, which is the determinism check). Every tree
+hash is unchanged, so **the work is preserved exactly** — only message lines were removed. Both refs
+were pushed with `--force-with-lease` pinned to the exact value the remote served at that moment, and
+the remote was re-read afterwards to confirm the result rather than trusting the push output.
+
+**Backups, and how to undo.** `.git/pre-rewrite-backup.bundle` (3.9 MB, `git bundle verify` clean)
+holds both pre-rewrite tips, and `/tmp/inventoryai-backup.git` is a full mirror taken earlier the same
+day (`main` @ `3adac9d`). Restoring means forcing the ref back to `f8493f8` / `e9616cf` from the
+bundle.
+
+**Impact.** No branch other than those two existed on the remote — every feature branch had already
+been deleted at merge — so no open pull request was disturbed and there were no tags or stashes. PRs
+**#1–#51** remain recorded as merged, but their commits are no longer ancestors of the rewritten
+`main`: GitHub still renders those pages from its own stored data, while the old commit objects become
+unreachable on the remote over time. CI re-ran on `3cef708`.
+
+**Repository-wide sweep, not just commits.** 50 pull requests, their bodies, their conversation
+comments, the pull-request review comments and the repository description were searched for
+`codebuff|claude code|anthropic.com|generated with|co-authored-by`: **0 matches**. Author and
+committer fields across `main` are the owner's own identities only — `jeffernzxc`, `jeffyy` (an
+earlier display name, same email) and `Jeffernzxc <141919050+nreffejzxc@users.noreply.github.com>`
+(the GitHub web-UI form) — plus `dependabot[bot]` and `GitHub` for web merges. **`jeffyy` (97
+commits) and the GitHub noreply address (33 commits) are the owner's own earlier identities, not
+attribution violations, and were left as they are** (F-32); normalising them would be a second,
+separate rewrite and requires its own request.
+
+**Nothing can re-add them.** `git config` is `jeffernzxc` / `jefferndullamalinaozxc@gmail.com` and was
+already correct; `commit.template` is unset; and `.git/hooks/` holds **no** non-`*.sample` hook, so
+`commit-msg` and `prepare-commit-msg` cannot append anything. The trailers that existed came from a
+coding agent's own message template — exactly what CLAUDE.md rule 7 forbids reintroducing.
+
+**Standing rule.** A history rewrite stays forbidden except on a new, explicit owner request (CLAUDE.md
+rule 9); this authorisation does not carry forward.
+
+**Findings.**
+
+- **F-29** — the capital-`A` `Co-Authored-By:` variant, invisible both to a case-sensitive filter and
+  to a count that only looks for the forms already known.
+- **F-30** — a blank-line-collapsing filter changes messages beyond the trailer lines; only a
+  commit-by-commit pairwise comparison catches it.
+- **F-31** — Git Bash's `/tmp` and a Windows Python's `/tmp` are different directories, so a filter
+  script written to one and read from the other is not the script that runs.
+- **F-32** — three display names and two email forms in the history are the owner's own past
+  identities, not AI attribution.
 
 # 27AT. Real-device Android run — what the phone proved, and what it did not (2026-10-11)
 

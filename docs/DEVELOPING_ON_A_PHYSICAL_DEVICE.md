@@ -362,8 +362,8 @@ consequences you will otherwise mistake for bugs:
 
 - **No `User`, no `Business` and no session exist for your address until the first person completes
   verification** — and that person **creates the tenant** and becomes its OWNER. The *database* itself is
-  not necessarily empty: on this machine it is `inventoryai_test_db`, which the test suite fills with
-  fixtures. Read the name off the server's boot line — see 7c probe 1b and 7e.
+  **not** empty: on this machine it is `inventoryai_dev_db`, which holds 11 acceptance-test tenants, every one
+  of them empty. **Read the name off the server's boot line rather than assuming it** — see 7c probe 1b and 7e.
 - After a first sign-in the inventory, dashboard, history and audit screens are **legitimately
   empty**. Nothing is broken; there is simply no data yet.
 - An address that **already exists** in Firebase does not fail cleanly — see 7f.
@@ -438,8 +438,10 @@ curl.exe -s -o NUL -w "ready %{http_code}`n" http://localhost:4000/api/health/re
 #     URI's path segment does not; a client built from the URI alone falls back to a database named
 #     `test`, which here DOES NOT EXIST, so checking emptiness there proves nothing. The name is printed
 #     once at boot (7e): look for `[db] connected to MongoDB`. On this machine it reads
-#     `database: inventoryai_test_db` — the database `npm test` writes to and
-#     `npm run cleanup:test-mongodb` EMPTIES. An account created here can be deleted by a test run.
+#     `database: inventoryai_dev_db` — the correct one. (Before 2026-10-11 it read
+#     `inventoryai_test_db`, the database `npm test` writes to and `npm run cleanup:test-mongodb`
+#     EMPTIES — an account created there could be deleted by a test run. Repointed and restarted;
+#     roadmap §27AV.)
 
 # 2. THE decisive probe. A deliberately invalid token, on a route that verifies one.
 curl.exe -s -X POST http://localhost:4000/api/auth/email-verification/request `
@@ -501,16 +503,17 @@ are not, and they appear exactly once.
 visible:
 
 ```text
-[db] connected to MongoDB (database: inventoryai_test_db)
+[db] connected to MongoDB (database: inventoryai_dev_db)
 [server] environment=development listening on http://localhost:4000
 ```
 
 **Read that name rather than assuming one.** The connection passes an explicit `dbName`, so `MONGODB_DB_NAME`
 decides the database and the URI's own path segment does not. A client built from the URI alone falls back
 to a database called `test` — on this machine that database **does not exist**, so counting documents
-there proves nothing about the service. On 2026-10-11 the local server read `inventoryai_test_db`,
-the same database the test suite writes to and `npm run cleanup:test-mongodb` empties; a test run can
-therefore delete what a device run created. Full account: roadmap §27AV.
+there proves nothing about the service. Before 2026-10-11 the local server read `inventoryai_test_db` — the
+database the test suite writes to and `npm run cleanup:test-mongodb` empties, so a test run could delete what
+a device run created. It now reads `inventoryai_dev_db`, which holds the owner's acceptance-test tenants.
+Full account: roadmap §27AV.
 
 **HTTP records** — one per request:
 

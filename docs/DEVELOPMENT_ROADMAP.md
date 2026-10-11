@@ -6850,7 +6850,7 @@ Next: **both owner decisions this section was waiting on are taken (2026-10-11)*
 
 | **ISS-19** | Medium → **`[✓]`** | **The deferred-upgrade watch reported `jest-expo` as `READY` while §27AI Gate 0 was shut** — the gate asked whether *any* jest-expo release admitted jest 30 (reading the prerelease tag `next`, 58.0.9) rather than whether the **installed** SDK's pin did, and never checked installability: 58.0.9 also peers `@react-native/jest-preset@^0.88.0-rc.4` against this project's RN 0.86.3. **Its third watch had the same flaw:** it read `@typescript-eslint/parser`, a package **neither workspace depends on**, while `server/` resolves the `typescript-eslint` meta package and `mobile/` resolves the parser through the SDK-pinned `eslint-config-expo` | `scripts/check-upgrade-watches.mjs` read at source 2026-10-11; §27AQ recorded the `READY` in the same section as the sentence saying jest 30 rides with the SDK 58 promotion | **Fixed 2026-10-11 (§27AU + its follow-on):** each gate reads the constraint that actually governs it — the installed SDK's pin table and the RN preset peer for `jest-expo`, one line **per workspace** for `typescript-eslint` — so all three watches report `DEFERRED`; guarded by **15 controls** run before every report, with break/restore proof for both bug classes (`expected ["DEFERRED"], got ["READY"]`, exit 1, three separate times) |
 
-| **ISS-20** | **High → `[~]`** | **The local development server serves the TEST database** — `server/.env` sets `MONGODB_DB_NAME=inventoryai_test_db`, which the resolver honours, so development and test share one database; `.env.example` names that combination as forbidden ("never to a value belonging to another environment"). `inventoryai_dev_db` (11 users / 11 businesses) is unused, and `npm test` / `npm run cleanup:test-mongodb` (`deleteMany({})` per collection) can therefore **delete data the local server is serving** — including the account the device run creates | Read at source 2026-10-11: `config/env.ts:52-111` (`DATABASE_NAMES`, `resolveDatabaseName`), `config/db.ts:165-169` (explicit `dbName`); the startup line `[db] connected to MongoDB (database: inventoryai_test_db)`; cluster `listDatabases()` → `inventoryai_dev_db`, `inventoryai_test_db`, `inventoryai_prod_db`, and **no `test`** | **Decision needed (§27AV):** repoint `server/.env` at `inventoryai_dev_db` before the device registration, or keep the test database and accept that a test run erases the run's account. **`server/.env` deliberately not edited** — git-ignored, owner's credentials, owner's data |
+| **ISS-20** | **High → `[✓]`** | **The local development server serves the TEST database** — `server/.env` sets `MONGODB_DB_NAME=inventoryai_test_db`, which the resolver honours, so development and test share one database; `.env.example` names that combination as forbidden ("never to a value belonging to another environment"). `inventoryai_dev_db` (11 users / 11 businesses) is unused, and `npm test` / `npm run cleanup:test-mongodb` (`deleteMany({})` per collection) can therefore **delete data the local server is serving** — including the account the device run creates | Read at source 2026-10-11: `config/env.ts:52-111` (`DATABASE_NAMES`, `resolveDatabaseName`), `config/db.ts:165-169` (explicit `dbName`); the startup line `[db] connected to MongoDB (database: inventoryai_test_db)`; cluster `listDatabases()` → `inventoryai_dev_db`, `inventoryai_test_db`, `inventoryai_prod_db`, and **no `test`** | **RESOLVED 2026-10-11 by owner decision (§27AV):** `server/.env` repointed to `inventoryai_dev_db` — one line changed, previous file kept as a git-ignored backup, key sets verified identical with exactly one value differing. The restarted backend's boot line reads `database: inventoryai_dev_db`, and repointing revealed that the development database holds the owner's 11 **acceptance-test tenants** (all empty), which the misconfiguration had been hiding |
 
 **Correctly recorded as open or deferred — not issues:** L-17 (recovery-mail delivery never inspected end-to-end),
 B1's residual timing term, B2 / E3 / OD-10 (V4), owner decisions O-5 / O-6 / O-10 / O-11, P-4 (device-time),
@@ -6889,19 +6889,16 @@ build launched and used per native change. *Dependency:* P2's ISS-01 pattern is 
 
 1. **DECIDED 2026-10-11 — the device run's account is a fresh registration through the app** (exercises
    AUTH-04 end to end; needs a mailbox the owner can read the 6-digit code from). The other two routes
-   recorded in §27AT are superseded by that choice. **A new dependency sits in front of it, §27AV:** the
-   registration writes into `inventoryai_test_db` — the database `npm test` writes to and
-   `npm run cleanup:test-mongodb` **empties** — because `server/.env` overrides the development database
-   name. Either the local server is repointed at `inventoryai_dev_db` first, or the run accepts that a test
-   run can delete the account it creates. **That is the decision now open (ISS-20).**
+   recorded in §27AT are superseded by that choice. **The database it writes into is no longer a risk:**
+   `server/.env` was repointed at `inventoryai_dev_db`, which `npm test` and `npm run cleanup:test-mongodb` do
+   not touch (**ISS-20 resolved**, §27AV). That database holds the owner's 11 **acceptance-test tenants** —
+   OWNER accounts on real addresses, each with a `firebaseUid`, **all of them empty** — so a sign-in path is
+   available too, and both routes are ready to try.
 2. **DECIDED 2026-10-11 — Phase 30B is defined** as **Native & Device Acceptance** (§27AW): the native
    build and on-device measurement work, scoped to the ISS-02 logcat re-check, the ISS-06 generated SDK
    levels, the ISS-13 print→scan round trip, the authenticated device run, and iOS (environment-blocked).
    **ISS-07 resolved.** It is a definition, not a start: 30B has not begun, and it needs a native build.
-3. **Decision now open instead: which database the local server serves** (**ISS-20**, §27AV) —
-   `server/.env` points the development server at `inventoryai_test_db`, which `npm test` writes to and
-   `npm run cleanup:test-mongodb` **empties**, so a test run can delete the account the device run creates.
-4. **Keep the upgrade watches — one command, now with its own proof:**
+3. **Keep the upgrade watches — one command, now with its own proof:**
    `node scripts/check-upgrade-watches.mjs` (`--self-test` runs the 15 controls alone; **§27AU**). Re-read
    **2026-10-11**: the SDK 58 **Gate 0 is still closed** (`latest` 57.0.27, `next` 58.0.7) — and after the
    §27AU correction **all three watches report `DEFERRED`**, `jest-expo` included: jest 30 rides with that
@@ -6910,7 +6907,7 @@ build launched and used per native change. *Dependency:* P2's ISS-01 pattern is 
    upstream-blocked on two different lines** — `server/`'s declared `typescript-eslint` meta package and the
    parser `mobile/`'s SDK-pinned `eslint-config-expo` resolves both read `typescript >=4.8.4 <6.1.0`, and no
    published release admits 7. When `latest` moves to 58, execute §27AI.
-5. **Carry the two build-time confirmations into the next native build** — Phase 30B's opening items (§27AW) — the remediated PII line absent
+4. **Carry the two build-time confirmations into the next native build** — Phase 30B's opening items (§27AW) — the remediated PII line absent
    from logcat (ISS-02) and the generated `compileSdk`/`targetSdk` values read and recorded (ISS-06). Neither
    can be closed without one, and neither is claimed as closed today. **F-26 sharpens this:** the client on the
    phone was built 2026-10-03 and so **predates** the ISS-02 patch, which means the device under test is *known*
@@ -6969,7 +6966,7 @@ are closed with their reasons; those versions arrive only with the SDK 58 upgrad
 - [x] **P3-5** test-count source **declared**: CI is the source of truth, and the two older baselines now say so in place (ISS-15) — §27AL
 - [x] **P3-6** Dependabot carve-out **completed** — every Expo-pinned package excluded, derived from the installed SDK (18 of 22 names) — §27AL
 - [x] **P3-7** the device-run account route — **DECIDED 2026-10-11: register a fresh test account** (§27AT, §27AH *Immediate next actions*); the other two routes are superseded
-- [ ] **P3-8** which database the local server serves (**ISS-20**, §27AV) — **decision needed**: repoint `server/.env` at `inventoryai_dev_db`, or accept that `npm test` and `cleanup:test-mongodb` can erase the device run's account
+- [x] **P3-8** the local server now serves its own environment's database — **`MONGODB_DB_NAME` repointed to `inventoryai_dev_db` (ISS-20 resolved, §27AV)**, so `npm test` and `cleanup:test-mongodb` can no longer erase the device run's account
 - [ ] **P4** deferred debt — no action (B1, B2, E3, OD-10, L-17, O-5/O-6/O-10/O-11, iOS gates)
 
 ## Documents corrected on 2026-10-10
@@ -8113,13 +8110,42 @@ the local development server serves is a decision about their data rather than a
 silently. No source, test, workflow or dependency changed either. What is recorded is the finding, the
 measurement, and the correction to §27AT and §27AH; the configuration decision is the owner's.
 
+## Resolution — 2026-10-11, owner decision
+
+The owner chose to repoint the local server at its own environment's database. **One line of `server/.env`
+changed** — `MONGODB_DB_NAME=inventoryai_test_db` → `inventoryai_dev_db` — with the previous file preserved
+as `.env.backup-<timestamp>` beside it (both are git-ignored: `.gitignore` rules `.env` and `.env.*`). The
+edit rewrote the single matching line, and integrity was **proved rather than assumed**: the key sets of the
+backup and the edited file are identical (19 keys) and exactly one value differs.
+
+The backend was restarted, and its boot line now reads:
+
+```text
+[db] connected to MongoDB (database: inventoryai_dev_db)
+[server] environment=development listening on http://localhost:4000
+```
+
+`/api/health/ready` → `{"status":"ready","db":"connected"}`, `/api/health/live` → `{"status":"live"}`,
+and the USB path was re-proved from the phone afterwards: a URL opened on the device produced
+`GET /api/health/ready → 200` and `GET /favicon.ico → 404` in this log, and
+`com.inventoryai.app/.MainActivity` was brought back to the foreground for the run.
+
+**And repointing revealed what the wrong database had been hiding.** `inventoryai_dev_db` is not a scratch
+database. It holds the owner's own **acceptance-test tenants**: 11 users on their real addresses, each with a
+`firebaseUid`, role `OWNER`, status `ACTIVE`, and 11 businesses named `AcceptanceTest01`, `AcceptanceTest02`, …
+with `planCode: FOUNDATION`. Every one of those tenants is **empty** — 0 products, 0 inventories, 0 locations,
+0 transactions, 0 suppliers, 0 purchase orders, 0 audit rows, 23 sessions. So the development server had been
+pointed away from the only database holding the accounts a device run exists to sign in with, and at a
+database of suite fixtures instead. That is the concrete cost of the misconfiguration, now reversed.
+
 ## Evidence
 
 All read-only, 2026-10-11: the resolver and its comments (`config/env.ts:52-111`, `config/db.ts:165-169`,
 `config/db.ts:141`); the startup line from a locally restarted backend; `listDatabases()` on the cluster;
-per-collection `countDocuments()`; and a five-document sample of `users` projected to email, role,
-`firebaseUid` and status only — no credential field was read. `MONGODB_DB_NAME` and `NODE_ENV` are
-recorded as names only. The `.env` file itself was never printed.
+per-collection `countDocuments()`; and a sample of `users` and `businesses` projected to email, role,
+`firebaseUid`, status, name and `planCode` only — no credential field was read. `MONGODB_DB_NAME` and
+`NODE_ENV` are recorded as names only. The `.env` file itself was never printed; the one line that changed
+is quoted because a database name is not a secret and both values are already in this document.
 
 # 27AW. Phase 30B defined — Native & Device Acceptance (2026-10-11)
 

@@ -6778,7 +6778,7 @@ update its tracking boxes, status rows and heading date at the end of a session 
 | Open on GitHub | **Nothing at all** but **issue #32** (deferred majors) — re-read 2026-10-11 (late): `gh pr list --state open` is empty and one issue is open, **PRs #46–#55 merged** (§27AL–§27AU); #34 (ISS-16) and #38 (ISS-17) closed with their reasons |
 | Open advisories | **5** — 2 high, 3 medium, 0 critical (all mobile; re-read 2026-10-11 from the alerts API after §27AK's disposition, and **verified again** the same evening — the count drifts, and did) |
 | Production | Render auto-deploy from `main`; `https://ai-inventory-l1mi.onrender.com` reachable and serving the AUTH-04 endpoints |
-| Device | **First physical-device run performed 2026-10-11** (§27AT): dev client `0972948` installed on the OPPO CPH1969 over USB, app launched and rendered, the USB backend path proved, the §27R register validation confirmed on hardware. **Unauthenticated only** — the local database is empty, so sign-in, verification, inventory and the AI assistant remain **not device-verified** |
+| Device | **First physical-device run performed 2026-10-11** (§27AT): dev client `0972948` installed on the OPPO CPH1969 over USB, app launched and rendered, the USB backend path proved, the §27R register validation confirmed on hardware.  **Unauthenticated only** — nothing behind the login was reachable, so sign-in, verification, inventory and the AI assistant remain **not device-verified**. *(Corrected 2026-10-11 — §27AV: the database is not empty; it is the **test** database and holds 1,815 unusable fixture accounts. The device-run account decision is **taken** — register a fresh test account — and the database it will write into is an open owner decision, **ISS-20**.)* |
 
 ## Verified complete — with evidence
 
@@ -6850,6 +6850,8 @@ Next: **the device-testing account decision** (§27AT) and **P3-1** — the two 
 
 | **ISS-19** | Medium → **`[✓]`** | **The deferred-upgrade watch reported `jest-expo` as `READY` while §27AI Gate 0 was shut** — the gate asked whether *any* jest-expo release admitted jest 30 (reading the prerelease tag `next`, 58.0.9) rather than whether the **installed** SDK's pin did, and never checked installability: 58.0.9 also peers `@react-native/jest-preset@^0.88.0-rc.4` against this project's RN 0.86.3. **Its third watch had the same flaw:** it read `@typescript-eslint/parser`, a package **neither workspace depends on**, while `server/` resolves the `typescript-eslint` meta package and `mobile/` resolves the parser through the SDK-pinned `eslint-config-expo` | `scripts/check-upgrade-watches.mjs` read at source 2026-10-11; §27AQ recorded the `READY` in the same section as the sentence saying jest 30 rides with the SDK 58 promotion | **Fixed 2026-10-11 (§27AU + its follow-on):** each gate reads the constraint that actually governs it — the installed SDK's pin table and the RN preset peer for `jest-expo`, one line **per workspace** for `typescript-eslint` — so all three watches report `DEFERRED`; guarded by **15 controls** run before every report, with break/restore proof for both bug classes (`expected ["DEFERRED"], got ["READY"]`, exit 1, three separate times) |
 
+| **ISS-20** | **High → `[~]`** | **The local development server serves the TEST database** — `server/.env` sets `MONGODB_DB_NAME=inventoryai_test_db`, which the resolver honours, so development and test share one database; `.env.example` names that combination as forbidden ("never to a value belonging to another environment"). `inventoryai_dev_db` (11 users / 11 businesses) is unused, and `npm test` / `npm run cleanup:test-mongodb` (`deleteMany({})` per collection) can therefore **delete data the local server is serving** — including the account the device run creates | Read at source 2026-10-11: `config/env.ts:52-111` (`DATABASE_NAMES`, `resolveDatabaseName`), `config/db.ts:165-169` (explicit `dbName`); the startup line `[db] connected to MongoDB (database: inventoryai_test_db)`; cluster `listDatabases()` → `inventoryai_dev_db`, `inventoryai_test_db`, `inventoryai_prod_db`, and **no `test`** | **Decision needed (§27AV):** repoint `server/.env` at `inventoryai_dev_db` before the device registration, or keep the test database and accept that a test run erases the run's account. **`server/.env` deliberately not edited** — git-ignored, owner's credentials, owner's data |
+
 **Correctly recorded as open or deferred — not issues:** L-17 (recovery-mail delivery never inspected end-to-end),
 B1's residual timing term, B2 / E3 / OD-10 (V4), owner decisions O-5 / O-6 / O-10 / O-11, P-4 (device-time),
 P-6 + Gate 1 + iOS app registration (environment-blocked), and the new-identity `REGISTRATION_REQUIRED` path.
@@ -6887,11 +6889,13 @@ test-count source. *Why:* phase discipline is unenforceable while a "phase" has 
 
 ## Immediate next actions
 
-1. **Decision: the device run's account (§27AT)** — the app is installed and rendering on the phone, but the
-   local backend's database is empty, so nothing behind the login is reachable. Three ways forward, owner's
-   choice: register a fresh test account through the app (exercises AUTH-04 end to end, needs a mailbox),
-   point `EXPO_PUBLIC_API_URL` at the deployed backend and use the real account (immediate, live data), or
-   seed the local database with a test tenant (instant, skips the registration and verification paths).
+1. **DECIDED 2026-10-11 — the device run's account is a fresh registration through the app** (exercises
+   AUTH-04 end to end; needs a mailbox the owner can read the 6-digit code from). The other two routes
+   recorded in §27AT are superseded by that choice. **A new dependency sits in front of it, §27AV:** the
+   registration writes into `inventoryai_test_db` — the database `npm test` writes to and
+   `npm run cleanup:test-mongodb` **empties** — because `server/.env` overrides the development database
+   name. Either the local server is repointed at `inventoryai_dev_db` first, or the run accepts that a test
+   run can delete the account it creates. **That is the decision now open (ISS-20).**
 2. **Decision: P3-1 (Phase 30B)** — define it or remove its references (ISS-07). **The only item left that
    cannot be settled from the repository**: everything else in P0–P3 is now shipped, dispositioned, deferred
    with a record, or awaiting a build — ISS-13 included (§27AM).
@@ -6962,6 +6966,8 @@ are closed with their reasons; those versions arrive only with the SDK 58 upgrad
 - [x] **P3-4** stale WIP branch — **retained, no action** (ISS-14: 1 ahead / 97 behind; the unique commit is the superseded backup itself) — §27AL
 - [x] **P3-5** test-count source **declared**: CI is the source of truth, and the two older baselines now say so in place (ISS-15) — §27AL
 - [x] **P3-6** Dependabot carve-out **completed** — every Expo-pinned package excluded, derived from the installed SDK (18 of 22 names) — §27AL
+- [x] **P3-7** the device-run account route — **DECIDED 2026-10-11: register a fresh test account** (§27AT, §27AH *Immediate next actions*); the other two routes are superseded
+- [ ] **P3-8** which database the local server serves (**ISS-20**, §27AV) — **decision needed**: repoint `server/.env` at `inventoryai_dev_db`, or accept that `npm test` and `cleanup:test-mongodb` can erase the device run's account
 - [ ] **P4** deferred debt — no action (B1, B2, E3, OD-10, L-17, O-5/O-6/O-10/O-11, iOS gates)
 
 ## Documents corrected on 2026-10-10
@@ -7787,6 +7793,11 @@ device re-check (§27AI step 9) is not closed by this run** and still needs a na
   `{"status":"ready","db":"connected"}`, `/api/health/live` → `{"status":"live"}`. The database is named **`test`**
   and is **entirely empty** — 0 users, 0 businesses, 0 products, 0 inventories, 0 inventory transactions,
   0 locations, 0 suppliers, 0 purchase orders, 0 sessions, 0 audit rows (read directly, read-only).
+  *(**Corrected 2026-10-11 — §27AV.** This measurement read the wrong database and therefore proved
+  nothing: `MONGODB_URI` carries no path segment, so the client fell back to MongoDB's default name,
+  `test`, **which does not exist**. The service resolves its database in code and `server/.env` points it
+  at **`inventoryai_test_db`**, which holds **1,815 users** and **12,243 businesses**. The sentence is kept
+  as the record of what was actually measured; §27AV carries the correction and the real counts.)*
 - **Metro:** `npx expo start --dev-client --clear --port 8081`; `/status` → `packager-status:running`.
 - **Launch:** `am start -a android.intent.action.VIEW -d "inventoryai://expo-development-client/?url=http%3A%2F%2Flocalhost%3A8081"`.
 - **Mirror:** `scrcpy -s PV4DDMIZZLTCIVSK -m 1024 --window-title "Inventory AI"` → Renderer `direct3d11`,
@@ -7820,7 +7831,9 @@ Two more device-verified behaviours:
 ## NOT verified on the device — stated plainly
 
 The local database is empty, and the owner's real account lives in the **deployed** backend's database rather than
-this one, so there is nothing to sign in with. Consequently:
+this one, so there is nothing to sign in with. *(**Corrected 2026-10-11 — §27AV:** the database is not empty —
+it holds 1,815 test-fixture users — but **none is usable**, because they are the server suite's own accounts with
+passwords nobody holds and there are 0 inventories. The conclusion stands; the reason did not.)* Consequently:
 
 | Flow | State |
 | --- | --- |
@@ -7878,11 +7891,17 @@ product failure.
 ## The next step for device testing
 
 The gating item is an **account on the local backend**. Three ways forward, all recorded in §27AH's order:
-register a fresh test account through the app against the empty local database (which exercises AUTH-04 end to end
+register a fresh test account through the app against the local database (which exercises AUTH-04 end to end
 but needs a mailbox the owner can read the 6-digit code from), or point `EXPO_PUBLIC_API_URL` at the deployed
 backend and sign in with the owner's real account (immediate, but it tests live data rather than a laptop run), or
 seed the local database with a test tenant (instant, but it skips the registration and verification paths that are
 themselves worth testing).
+
+**Decided 2026-10-11 — the owner chose the first.** Register a fresh test account on the phone. **Before doing
+so, note §27AV:** that registration writes into `inventoryai_test_db`, the same database `npm test` writes to and
+`npm run cleanup:test-mongodb` empties, because `server/.env` overrides the development database name. The account
+can therefore be deleted by a test run or a cleanup, and which database the local server should serve is an open
+owner decision (§27AV, **ISS-20**).
 
 ---
 
@@ -8013,6 +8032,92 @@ report, and the deliberate exclusion of this script from CI all stay as they wer
 `server/` exits 2 with *"ESLint couldn't find an eslint.config.\* file"*, which is a **config-resolution
 error, not a lint finding** — the same standing as `scripts/audit-access.mjs` and
 `scripts/check-secrets.mjs`. Syntax here is proven by execution, not by a linter.
+
+# 27AV. The local backend was serving the TEST database — and the "empty database" measurement read a different one (2026-10-11)
+
+## Which database the server uses is decided in code, not by the URI
+
+`server/src/config/env.ts` resolves the MongoDB database name and `config/db.ts:169` passes it to
+`mongoose.connect` as an explicit `dbName`. The URI supplies the cluster and the credentials; it does
+**not** supply the database. The module's own comment states it:
+
+> Every connection passes an explicit `dbName` (see config/db.ts), so the database a process talks to is
+> decided here rather than by whatever path segment happens to sit in MONGODB_URI.
+
+`DATABASE_NAMES` is `inventoryai_dev_db` / `inventoryai_test_db` / `inventoryai_prod_db`, resolved in this
+order: a TEST run always gets the test database (fail-closed by construction); otherwise `MONGODB_DB_NAME`
+wins when set; otherwise `NODE_ENV=production` selects production and anything else selects development.
+Two combinations are refused outright. The legacy shared `inventory_ai` database is deliberately not
+nameable at all.
+
+## What `server/.env` does, against its own documented rule
+
+`server/.env` sets **`MONGODB_DB_NAME=inventoryai_test_db`**, so the local development server resolves to
+the **test** database. `.env.example` forbids exactly that, in its own words:
+
+> Set [MONGODB_DB_NAME] only to give an environment a database of its own — e.g. a staging deployment —
+> and **never to a value belonging to another environment**.
+
+The backend says it out loud on every start:
+`[db] connected to MongoDB (database: inventoryai_test_db)`.
+
+Measured read-only on 2026-10-11 — one cluster, four databases present:
+
+| Database | users | businesses | What it is |
+| --- | --- | --- | --- |
+| `inventoryai_test_db` | **1815** | **12243** | **what the running development server serves** |
+| `inventoryai_dev_db` | 11 | 11 | the database development is supposed to use |
+| `inventoryai_prod_db` | 0 | 0 | production |
+| `test` | — | — | **does not exist** |
+
+`inventoryai_test_db` additionally holds **254** products, **7** locations, **1593** sessions, and **0**
+inventories, **0** inventory transactions and **0** audit rows. Its users are the server suite's own
+fixtures — `p07b-…@example.com`, role `OWNER`, some `ACTIVE` and some `DISABLED`.
+
+## The false claim this corrects
+
+§27AT recorded the following as measured evidence for the first device run:
+
+> The database is named **`test`** and is **entirely empty** — 0 users, 0 businesses, 0 products,
+> 0 inventories, 0 inventory transactions, 0 locations, 0 suppliers, 0 purchase orders, 0 sessions,
+> 0 audit rows (read directly, read-only).
+
+**Both halves are wrong, and the second follows from the first.** `MONGODB_URI` carries no database path
+segment (verified), so the reader's client — `new MongoClient(uri).db()` — fell back to MongoDB's default
+name, `test`, **which does not exist**. The count was taken against a database the server never touches.
+The service's own database is `inventoryai_test_db`, and it holds **1,815 users**.
+
+The conclusion §27AT drew from it — "there is nothing to sign in with" — survives, but for a different
+reason than the one recorded: those 1,815 are test fixtures whose passwords nobody holds, and there are 0
+inventories. The measurement that supported the conclusion was not a measurement of the service.
+
+## Why this matters beyond a wrong number
+
+- **A real risk to the run the owner just chose.** `inventoryai_test_db` is the database `npm test` writes
+  to and `npm run cleanup:test-mongodb` **empties** — it calls `deleteMany({})` per collection. A
+  development server sharing it means a test run or a cleanup can delete the account registered on the
+  phone, which is precisely the artifact the first authenticated run exists to create.
+- **Environment separation, defeated by configuration.** Resolving the name in code exists so that
+  development, test and production can share one cluster "without ever sharing data". Here development
+  and test share a database — the one combination `.env.example` names as forbidden.
+- **A misleading verification habit.** "Read the database directly and quote the count" stops being
+  evidence when the reader resolves the database differently from the writer. The platform line
+  `[db] connected to MongoDB (database: …)` is the authoritative answer, and it is printed on every start.
+
+## Not changed here, deliberately
+
+**`server/.env` was not edited.** It is git-ignored, it holds the owner's credentials, and which database
+the local development server serves is a decision about their data rather than a defect to patch
+silently. No source, test, workflow or dependency changed either. What is recorded is the finding, the
+measurement, and the correction to §27AT and §27AH; the configuration decision is the owner's.
+
+## Evidence
+
+All read-only, 2026-10-11: the resolver and its comments (`config/env.ts:52-111`, `config/db.ts:165-169`,
+`config/db.ts:141`); the startup line from a locally restarted backend; `listDatabases()` on the cluster;
+per-collection `countDocuments()`; and a five-document sample of `users` projected to email, role,
+`firebaseUid` and status only — no credential field was read. `MONGODB_DB_NAME` and `NODE_ENV` are
+recorded as names only. The `.env` file itself was never printed.
 
 # 28. Phase Gate System
 

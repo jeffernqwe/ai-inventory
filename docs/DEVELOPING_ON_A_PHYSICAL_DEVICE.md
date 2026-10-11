@@ -343,6 +343,11 @@ run is what creates a tenant.
 > server with their real answers recorded below. The **full registration run end to end has not
 > been performed yet** — 7d–7f are written from the code, with file references, so that the first
 > attempt is diagnosable rather than a mystery. Treat them as a runbook, not as a transcript.
+>
+> **One measured correction, 2026-10-11 (roadmap §27AV):** an earlier session recorded the local database
+> as "entirely empty". It is not, and the count behind that claim was taken against a database named
+> `test` that does not exist. What is true, and what 7a now says, is that **no tenant exists for a new
+> address** until verification completes. Probe 1b shows you how to read the name the server actually uses.
 
 ### 7a. What "authenticated" needs — and why the first run is special
 
@@ -355,8 +360,10 @@ Firebase account  →  code mailed  →  you verify  →  MongoDB Business + Use
 No `Business`, no `User`, no JWT and no session row exist until the address is verified. Three
 consequences you will otherwise mistake for bugs:
 
-- The local database is **empty until the first person completes verification** — and that person
-  **creates the tenant** and becomes its OWNER.
+- **No `User`, no `Business` and no session exist for your address until the first person completes
+  verification** — and that person **creates the tenant** and becomes its OWNER. The *database* itself is
+  not necessarily empty: on this machine it is `inventoryai_test_db`, which the test suite fills with
+  fixtures. Read the name off the server's boot line — see 7c probe 1b and 7e.
 - After a first sign-in the inventory, dashboard, history and audit screens are **legitimately
   empty**. Nothing is broken; there is simply no data yet.
 - An address that **already exists** in Firebase does not fail cleanly — see 7f.
@@ -427,6 +434,13 @@ four passed:
 curl.exe -s -o NUL -w "ready %{http_code}`n" http://localhost:4000/api/health/ready
 # -> ready 200
 
+# 1b. WHICH database it is serving — read it, never assume it. `MONGODB_DB_NAME` decides this and the
+#     URI's path segment does not; a client built from the URI alone falls back to a database named
+#     `test`, which here DOES NOT EXIST, so checking emptiness there proves nothing. The name is printed
+#     once at boot (7e): look for `[db] connected to MongoDB`. On this machine it reads
+#     `database: inventoryai_test_db` — the database `npm test` writes to and
+#     `npm run cleanup:test-mongodb` EMPTIES. An account created here can be deleted by a test run.
+
 # 2. THE decisive probe. A deliberately invalid token, on a route that verifies one.
 curl.exe -s -X POST http://localhost:4000/api/auth/email-verification/request `
   -H "Content-Type: application/json" -d "{\"idToken\":\"not-a-real-token\"}"
@@ -480,7 +494,23 @@ If step 2 succeeds and step 3 logs **nothing at all**, the app could not reach t
 
 ### 7e. Reading the backend log
 
-Two record shapes, and knowing which is which makes the rest obvious.
+Three shapes, and knowing which is which makes the rest obvious. The first two are JSON; the boot lines
+are not, and they appear exactly once.
+
+**Boot records** — printed when the server starts, and the only place the resolved database name is
+visible:
+
+```text
+[db] connected to MongoDB (database: inventoryai_test_db)
+[server] environment=development listening on http://localhost:4000
+```
+
+**Read that name rather than assuming one.** The connection passes an explicit `dbName`, so `MONGODB_DB_NAME`
+decides the database and the URI's own path segment does not. A client built from the URI alone falls back
+to a database called `test` — on this machine that database **does not exist**, so counting documents
+there proves nothing about the service. On 2026-10-11 the local server read `inventoryai_test_db`,
+the same database the test suite writes to and `npm run cleanup:test-mongodb` empties; a test run can
+therefore delete what a device run created. Full account: roadmap §27AV.
 
 **HTTP records** — one per request:
 

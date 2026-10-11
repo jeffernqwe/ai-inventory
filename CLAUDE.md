@@ -381,10 +381,13 @@ its version and Dependabot cannot know it (all **21** of the 30 packages the mob
 dependencies and devDependencies both, since **2026-10-12** — the earlier figure of 17 missed the two
 SDK-pinned devDependencies, `eslint-config-expo` and `jest-expo`, and the completeness of that list is now
 held by `mobile/__tests__/expo-sdk-pins.test.ts` rather than by hand). These move only with an Expo SDK
-upgrade via `npx expo install --fix` (roadmap §27AH/§27AL; ISS-16, ISS-17) — a command that **cannot run
-on the owner's machine** while the user-level `~/.npmrc` carries `allow-scripts=9router`, because npm
-11.19.1 rejects the flag form Expo's installer passes and `expo install` writes `package.json` before the
-install it then fails on; the SDK 58 train inherits this (roadmap §27AY, finding **F-41**). The four that
+upgrade via `npx expo install --fix` (roadmap §27AH/§27AL; ISS-16, ISS-17). That command was **blocked** on
+the owner's machine by `allow-scripts=9router` in the user-level `~/.npmrc` — npm 11.19.1 rejects the flag
+form Expo's installer passes, and `expo install` writes `package.json` before the install it then fails on —
+and is **fixed as of 2026-10-12**, the line having been removed (verified: `npx expo install --check` reports
+"Dependencies are up to date"). Note separately that npm 11.19.1 gates **dependency install scripts by
+default**, so the `npm warn install-scripts` notice is not a local misconfiguration (roadmap §27AY, findings
+**F-41** and **F-42**; this host also runs Node 26 while `.nvmrc` pins 24 — **F-43**). The four that
 stay open are
 `@react-native-firebase/app`, `@react-native-firebase/auth`, `@react-native-google-signin/google-signin`
 and `expo` itself, whose versions this project chooses deliberately.

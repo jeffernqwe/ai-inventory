@@ -8,7 +8,11 @@ Steps 1–6 and the troubleshooting table were executed and verified on this mac
 (2026-10-10) against an **OPPO CPH1969 running Android 11 (SDK 30)**, with scrcpy 4.1 and
 adb 37.0.1. Two things are **upstream-documented rather than verified here**, and are marked
 as such below: pressing `a` in the Metro terminal (step 6d — the deep link is the verified
-route) and the wireless setup (step 9).
+route) and the wireless setup (step 10).
+
+**Section 7 (the authenticated walkthrough) states its own provenance at the top:** its tunnel,
+launch and pre-flight steps were verified on **2026-10-11**, while the registration journey itself
+has **not yet been run** on the device and is written from the code.
 
 ---
 
@@ -172,7 +176,7 @@ scrcpy -s $serial -m 1024 --window-title "Inventory AI"
 | `--no-audio` | Skip audio (Android 11+ streams audio by default) |
 | `-w` | Keep the phone awake — **see the ColorOS caveat below** |
 | `--record=file.mp4` | Also record the session (great for bug reports) |
-| `--tcpip=PHONE_IP` | Switch to a wireless connection (step 9) |
+| `--tcpip=PHONE_IP` | Switch to a wireless connection (step 10) |
 
 **Where it runs:** in any folder. The terminal you started it from **is** scrcpy's console —
 it prints logs and closing it stops mirroring.
@@ -309,7 +313,7 @@ adb reverse tcp:4000 tcp:4000     # phone's localhost:4000 -> your backend
 1. **Metro served the bundle:** its terminal prints
    `Android Bundled 2930ms node_modules\expo-router\entry.js (1602 modules)`.
 2. **The app is on the screen:** you see it in the scrcpy window. For text you can read
-   mechanically: `adb shell uiautomator dump /sdcard/w.xml` then `adb exec-out cat /sdcard/w.xml`.
+   mechanically: `adb shell uiautomator dump /sdcard/w.xml` then `adb exec-out cat /sdcard/w.xml` — **this can fail with `ERROR: null root node returned by UiTestAutomationBridge`** (see 7e).
 3. **It is talking to your laptop:** the terminal from 6b logs lines such as
    `{"ts":"...","type":"http","method":"GET","path":"/api/auth/me","status":401}`.
 
@@ -327,7 +331,240 @@ recheck `EXPO_PUBLIC_API_URL` and restart Metro with `--clear`.
 
 ---
 
-## 7. Troubleshooting
+## 7. The authenticated walkthrough — registration, verification, and reading the log
+
+Everything above gets the app **running on the phone**. This section gets you **signed in**, which
+is a different job: it crosses Firebase, the mail provider and MongoDB, and the first successful
+run is what creates a tenant.
+
+> **Provenance — read this before trusting a step.** The tunnel, launch, bundle and
+> "it is really talking to this laptop" steps in 7b were executed and verified on this machine on
+> **2026-10-11** (OPPO CPH1969), and the four pre-flight probes in 7c were run against the live
+> server with their real answers recorded below. The **full registration run end to end has not
+> been performed yet** — 7d–7f are written from the code, with file references, so that the first
+> attempt is diagnosable rather than a mystery. Treat them as a runbook, not as a transcript.
+
+### 7a. What "authenticated" needs — and why the first run is special
+
+Registration is **Firebase-first**, and the ordering *is* the security model:
+
+```text
+Firebase account  →  code mailed  →  you verify  →  MongoDB Business + User  →  Inventory AI JWT
+```
+
+No `Business`, no `User`, no JWT and no session row exist until the address is verified. Three
+consequences you will otherwise mistake for bugs:
+
+- The local database is **empty until the first person completes verification** — and that person
+  **creates the tenant** and becomes its OWNER.
+- After a first sign-in the inventory, dashboard, history and audit screens are **legitimately
+  empty**. Nothing is broken; there is simply no data yet.
+- An address that **already exists** in Firebase does not fail cleanly — see 7f.
+
+### 7b. The USB tunnels (verified)
+
+This is the variant that needs no Wi-Fi agreement between the phone and the laptop, and it is what
+the 2026-10-11 run used. The phone's own `localhost` is forwarded to this laptop:
+
+```powershell
+adb reverse tcp:8081 tcp:8081     # phone's localhost:8081 -> your Metro
+adb reverse tcp:4000 tcp:4000     # phone's localhost:4000 -> your backend
+adb -s $serial reverse --list     # MUST list both
+```
+
+`mobile/.env` must then point at that loopback address, and Metro must be restarted because
+`EXPO_PUBLIC_*` is inlined at bundle time:
+
+```powershell
+# mobile/.env
+EXPO_PUBLIC_API_URL=http://localhost:4000
+
+cd C:\Users\jeffe\inventory-ai\mobile
+npx expo start --dev-client --clear
+```
+
+Launch the app against this Metro (the scheme is `inventoryai`; the inner URL must be
+percent-encoded):
+
+```powershell
+adb shell am start -a android.intent.action.VIEW `
+  -d "inventoryai://expo-development-client/?url=http%3A%2F%2Flocalhost%3A8081"
+```
+
+Then prove the three signals of step 6e — and note what each one actually proves:
+
+| Signal | Where you see it | What it proves |
+|---|---|---|
+| `Android Bundled <n>ms node_modules\expo-router\entry.js (1602 modules)` | the Metro terminal | the **phone** fetched the JS from **this** Metro |
+| `mResumedActivity: ... com.inventoryai.app/.MainActivity` | `adb shell dumpsys activity activities` | the app is the foreground activity, not a crash dialog |
+| a new `{"type":"http",...}` line in the backend terminal | the backend terminal | the phone reached **this** laptop's API |
+
+**Two tunnel gotchas, both observed on this machine:**
+
+- **The tunnels do not survive an adb server restart or a replug.** After `adb kill-server`, a USB
+  hiccup or a reboot, re-run both `adb reverse` commands and check `reverse --list` — the app will
+  otherwise show a network error while everything else looks healthy.
+- **After the adb daemon restarts, the phone can drop back to `unauthorized`** even though it was
+  `device` minutes earlier. Unlock it and accept the prompt again (see the troubleshooting table).
+
+To prove the tunnel **independently of the app** — worth doing when a screen is stuck — open the
+API from the phone's own browser. A request you did not make from the laptop will appear in the
+backend log:
+
+```powershell
+adb shell am start -a android.intent.action.VIEW -d "http://localhost:4000/api/health/live"
+# backend log then shows: GET /api/health/live -> 200  (and a follow-up GET /favicon.ico -> 404)
+```
+
+### 7c. Pre-flight — prove the server can verify and mail *before* you type anything
+
+Four probes, in order of what they rule out. **Run them from the repository root** — the
+`.env` paths below are relative to it — and note that all four were run on 2026-10-11 and all
+four passed:
+
+```powershell
+# 1. The server is up and MongoDB is reachable
+curl.exe -s -o NUL -w "ready %{http_code}`n" http://localhost:4000/api/health/ready
+# -> ready 200
+
+# 2. THE decisive probe. A deliberately invalid token, on a route that verifies one.
+curl.exe -s -X POST http://localhost:4000/api/auth/email-verification/request `
+  -H "Content-Type: application/json" -d "{\"idToken\":\"not-a-real-token\"}"
+```
+
+Read the answer as a configuration report — this is why the probe is worth more than a code review:
+
+| Answer | Meaning |
+|---|---|
+| code `FIREBASE_TOKEN_INVALID` (HTTP 400) | **all three are present** — Admin credentials, code pepper and a mail provider. Healthy. |
+| HTTP 503 code `FIREBASE_NOT_CONFIGURED` | the Firebase service account is missing or unparseable |
+| HTTP 503 code `EMAIL_VERIFICATION_NOT_CONFIGURED` | the 32+ character pepper, or the mail provider, is missing |
+| HTTP 503 code `EMAIL_VERIFICATION_MAIL_FAILED` | the provider refused a send — but note this only fires *after* a valid token, so a bad-token probe never reaches it |
+
+```powershell
+# 3. Is Email/Password sign-in ENABLED for the Firebase project?
+$key = (Get-Content .\mobile\.env | Select-String '^EXPO_PUBLIC_FIREBASE_API_KEY=').ToString().Split('=',2)[1]
+curl.exe -s -X POST "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=$key" `
+  -H "Content-Type: application/json" `
+  -d "{\"email\":\"preflight-does-not-exist@example.invalid\",\"password\":\"not-a-real-password-1\",\"returnSecureToken\":false}"
+# -> INVALID_LOGIN_CREDENTIALS / EMAIL_NOT_FOUND  = provider ENABLED, safe to proceed
+# -> OPERATION_NOT_ALLOWED = BLOCKER: enable Email/Password in the Firebase console
+
+# 4. Is the mail sender verified in the provider? (Brevo; adapt for Resend)
+$bk = (Get-Content .\server\.env | Select-String '^BREVO_API_KEY=').ToString().Split('=',2)[1]
+curl.exe -s -H "api-key: $bk" -H "accept: application/json" `
+  -H "User-Agent: InventoryAI-preflight/1.0" https://api.brevo.com/v3/senders
+# -> {"senders":[{"email":"<your MAIL_FROM>","active":true}]}  — MAIL_FROM must appear here, active
+```
+
+> **If probe 4 answers 403 with a Cloudflare "Error 1010" page:** that is a *request-shape* block,
+> not a Brevo refusal — a bare HTTP client is rejected before the API sees it. The
+> `User-Agent` header above is the fix. Do **not** read it as "the sender is unverified".
+
+### 7d. The journey, step by step — and what each step must leave in the log
+
+Run this with the backend terminal visible. Each row's log evidence is what success looks like.
+
+| # | On the phone | What the backend must log | Notes |
+|---|---|---|---|
+| 1 | Open the app, tap **New to Inventory AI? Create one** | *nothing* | a server line here means something else fired |
+| 2 | Fill business name, your name, email, password → **Create Account** | *nothing yet* | this step talks to **Firebase over the phone's internet**, not to your laptop |
+| 3 | *(automatic)* the app requests the verification code | `POST /api/auth/email-verification/request → 200`, then a `email_verification_code_requested` record | the code is mailed to the address the **token** names |
+| 4 | Read the email, type the six digits, submit | `POST /api/auth/email-verification/confirm → 200`, then `email_verification_completed` | 5 attempts per code, 10-minute TTL |
+| 5 | *(automatic)* tenant creation — this is where MongoDB changes | `POST /api/auth/firebase/register → 201` | **201**, the only 201 in this flow |
+| 6 | *(automatic)* session exchange | `POST /api/auth/firebase/exchange → 200` | the JWT is minted here and nowhere else |
+| 7 | You land on the dashboard | `GET /api/auth/me → 200`, then that screen's own list calls | empty lists are correct on a fresh tenant |
+
+If step 2 succeeds and step 3 logs **nothing at all**, the app could not reach the API: check
+`adb reverse --list` first, before reading anything else.
+
+### 7e. Reading the backend log
+
+Two record shapes, and knowing which is which makes the rest obvious.
+
+**HTTP records** — one per request:
+
+```json
+{"ts":"2026-10-11T08:18:17.000Z","level":"info","type":"http","requestId":"...","method":"GET","path":"/api/health/live","status":200,"durationMs":1.9}
+```
+
+`path` is the **path only** — the query string is captured away — and **the request body is never
+logged**. That is what keeps a Firebase ID token, a password or a verification code out of the log
+by construction rather than by discipline.
+
+**Event records** — the flow's own milestones, named by an allowlist:
+
+| `type` | `reason` values | Means |
+|---|---|---|
+| `email_verification_code_requested` | — | a code became the identity's current challenge |
+| `email_verification_completed` | — | the code was correct and Firebase recorded `email_verified` |
+| `email_verification_failed` | `blank_code`, `invalid_code`, `mail_not_configured`, `mail_delivery_failure`, `mail_dispatch_error` | a code was refused, or could not be delivered |
+| `email_verification_bridge_failed` | `firebase_token_invalid`, `firebase_not_configured`, `firebase_unavailable`, `firebase_unknown` | the code was **right** and the Admin write failed |
+| `firebase_token_rejected` / `firebase_unavailable` / `firebase_not_configured` | an allowlisted SDK reason such as `malformed-token` | the token verifier's own verdict |
+
+**None of these carry a uid, an email address, a code, an HMAC, the pepper or a token.** A log can
+therefore be shared or pasted into an issue without redaction.
+
+To keep a searchable copy instead of scrolling a terminal:
+
+```powershell
+cd C:\Users\jeffe\inventory-ai\server
+npm start *> "$env:TEMP\inventoryai-server.log"        # all streams to one file
+
+# in another window — the lines that matter, live
+Get-Content "$env:TEMP\inventoryai-server.log" -Wait |
+  Select-String 'email_verification|api/auth|firebase_|"status":5'
+```
+
+The Bash equivalent, if you are in Git Bash: `grep -aE 'email_verification|api/auth' file.log`.
+Keep log files **out of the repository** — `$env:TEMP` is a good place; `.git/` also works and can
+never be committed.
+
+Two reading traps worth knowing:
+
+- `curl` from **this laptop** and requests from the **phone** land in the same log. A request you
+  made yourself is not evidence the app is connected; that is why 7b uses the phone's own browser.
+- On this device `adb shell uiautomator dump` can fail with
+  **`ERROR: null root node returned by UiTestAutomationBridge`**, which leaves you unable to read
+  the screen mechanically even though it renders fine. Fall back to the scrcpy window and to
+  `dumpsys activity activities` for which activity is in front.
+
+### 7f. Failure → log line → cause → fix
+
+| What you see | Backend log | Cause | Fix |
+|---|---|---|---|
+| *"Cannot reach the sign-in service. Check your connection and try again."* | **no line at all** | the **phone has no internet**. Firebase goes over the phone's data/Wi-Fi; only the API goes over USB. | reconnect the phone's data or Wi-Fi — the tunnel cannot help here |
+| *"An account with this email already exists"* | no line | Firebase has that address and **this password does not open it** | sign in instead, or use a different address |
+| You are **adopted** silently and land on the verify screen with a code in flight | `request → 200`, `code_requested` | the address already existed in Firebase and the **same password** opened it | expected, not an error — continue |
+| Failure shown right after **Create Account** | `email_verification_failed` with `mail_delivery_failure`, or HTTP 503 | the send failed; the challenge was kept and its cooldown is **still running** | wait out the on-screen cooldown, then **Resend** |
+| Resend is refused immediately | HTTP 429 `EMAIL_VERIFICATION_RATE_LIMITED` + `Retry-After` | the **60-second** cooldown | wait the seconds the app shows — it reads the server's own number |
+| 429 persists across several attempts | 429 on every verify route | the **per-IP** limiter: 30 requests per 15 minutes, shared by everything the phone does | wait, or restart the server (development only) |
+| *"That verification code is invalid or has expired"* | HTTP 400, `email_verification_failed` with `invalid_code` | wrong, expired (10 min), already used, or **5 attempts spent** | request a new code — note this one answer is deliberately the same for every one of those causes |
+| A code was requested but never arrived | `code_requested` present, **no** failure record | it left the server | check **Spam/Promotions** — the sender is your own address, so it is in your own mailbox, not in the API's control |
+| HTTP 503 `EMAIL_VERIFICATION_NOT_CONFIGURED` | same code | the pepper or the mail provider is missing | fix `server\.env`, restart the server |
+| HTTP 503 `FIREBASE_NOT_CONFIGURED` | same code | the service account is missing/unparseable | fix `FIREBASE_SERVICE_ACCOUNT_JSON`, restart |
+| HTTP 503 `FIREBASE_UNAVAILABLE` | `firebase_unavailable` | Google was unreachable | transient; try again |
+| HTTP 400 `FIREBASE_TOKEN_INVALID` | `firebase_token_rejected` | the provider credential was rejected — expired, or **revoked** | in the app use **Wrong account? Sign out**, then start again. This is deliberately 400 and **not** 401, so a bad provider credential can never look like a lost session |
+| The onboarding screen asks for your business name again | `exchange → 403 REGISTRATION_REQUIRED` | you verified, but the app no longer remembers the registration context — it is **in-memory** and an app restart clears it | type it again; this is the recovery path, not a defect |
+| `409 EMAIL_IN_USE` | same code | a MongoDB account already owns that address | sign in to it |
+| The screen spins and then fails, everything else looks fine | **no line** for the attempt | the USB tunnel dropped | `adb -s $serial reverse --list`, then re-run both `adb reverse` commands |
+
+### 7g. What this runbook has and has not proven
+
+**Verified on 2026-10-11:** the USB tunnels, Metro serving the bundle to the device, the launch
+deep link, the phone's own request reaching this laptop's API, `mobile\.env` pointing at
+`http://localhost:4000`, and all four pre-flight probes (Firebase Admin present, pepper present,
+Brevo key live with the configured `MAIL_FROM` a verified active sender, Email/Password enabled for
+the project).
+
+**Not yet performed:** the registration journey itself, end to end, on the device — so steps 7d–7f
+are code-derived. The first attempt should be treated as the test of this section, and the log
+table above is what makes the outcome readable either way.
+
+**Outside this machine's reach:** whether the mail provider's daily quota has room, and whether the
+receiving mailbox files the code as spam. Neither is a code defect.
+
+## 8. Troubleshooting
 
 | Symptom | Cause | Fix |
 |---|---|---|
@@ -347,10 +584,14 @@ recheck `EXPO_PUBLIC_API_URL` and restart Metro with `--clear`.
 | `Could not parse Expo config: google-services.json` while bundling | Those files are EAS-managed and not in the repo | Non-fatal warning; ignore |
 | Metro: port 8081 in use | A previous Metro is still running | Close it, or answer its "use another port" prompt |
 | Stale UI after changing `.env` | `EXPO_PUBLIC_*` is inlined at bundle time | `npx expo start --dev-client --clear` |
+| `adb devices` returns `unauthorized` after it worked before | The adb server restarted (reboot, `adb kill-server`, USB hiccup) and the phone wants re-approval | Unlock and accept the prompt; if none appears, revoke authorizations in Developer options and replug |
+| `uiautomator dump` prints `ERROR: null root node returned by UiTestAutomationBridge` | The shell cannot read this window's accessibility tree (seen here on Android 11 with the RN surface up) | Read the scrcpy window instead; `dumpsys activity activities` still names the foreground activity — see 7e |
+| The app reports a network error while the backend is healthy | The `adb reverse` tunnels were lost — they do not survive an adb server restart or a replug | Re-run both `adb reverse` commands; confirm with `adb -s $serial reverse --list` |
+| *"Cannot reach the sign-in service"* while the API is reachable | Firebase Auth goes over the phone's **internet**, not the USB tunnel | Reconnect the phone's data/Wi-Fi |
 
 ---
 
-## 8. The routine — do this every time
+## 9. The routine — do this every time
 
 ```powershell
 # 1. plug the phone in, then:
@@ -371,7 +612,7 @@ if you change `.env`, restart Metro with `--clear`.
 
 ---
 
-## 9. Optional: go wireless *(documented, not verified on this machine)*
+## 10. Optional: go wireless *(documented, not verified on this machine)*
 
 ```powershell
 # while still connected over USB (the phone must be on the same Wi-Fi as the laptop)
@@ -390,7 +631,7 @@ slower and can drop when the phone sleeps — USB remains the reliable default f
 
 ---
 
-## 10. References
+## 11. References
 
 - scrcpy: <https://github.com/Genymobile/scrcpy> — `scrcpy --help` is the authoritative flag list
 - Android platform-tools: <https://developer.android.com/tools/adb>

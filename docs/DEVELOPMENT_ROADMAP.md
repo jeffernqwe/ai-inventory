@@ -6393,7 +6393,7 @@ back clean:
   `phase32b-firebase-admin.test.mjs`; the JWT-shaped strings are **fixtures** (`{"sub":"1234567890"}`,
   `{"sub":"1"}`, `{"sub":"u1"}`). No real key or token exists anywhere in history.
 
-**Branch protection is now APPLIED and verified by API readback (2026-10-09):** required checks
+**Branch protection is now APPLIED and verified by API readback (2026-10-09):** *(**Corrected 2026-10-12: it is not, and has not been since the same day.** The repository was reversed to **private**, and protection on a private repository at this plan level answers `403 Upgrade to GitHub Pro or make this repository public` — re-read 2026-10-12. §27AF and §27AG below already record the loss; this parenthesis puts the correction on the claim itself, because this paragraph describes a configuration that existed for part of one day.)* required checks
 **`server`** and **`mobile`** — the check-run names GitHub actually reports, **not** the
 `ci / server` / `ci / mobile` form the pull-request UI displays (see the correction below) — with
 **strict** up-to-date enforcement, a pull request required
@@ -6770,12 +6770,12 @@ update its tracking boxes, status rows and heading date at the end of a session 
 
 | Dimension | Verified state |
 | --- | --- |
-| Repository | `main` @ `31bd7b7` = `origin/main`; no tags, no stashes; the device guide is committed (P3-3 resolved); 2026-10-11: **ISS-13 fixed** (#45, §27AM), the **Expo pin guard** added (§27AN), the **watch script** landed (§27AQ), the **secret guard made able to fail** (§27AR), the **attribution-bearing history rewritten** (§27AS — every tree hash unchanged), the **first real-device run** performed (§27AT), the **device runbook written** (#53), and the **upgrade watch's false `READY` corrected** (§27AU, **ISS-19**) — and then the **same registry-vs-project flaw found and fixed in its third watch** (#55) |
-| CI | `.github/workflows/ci.yml` only — jobs **server / mobile / secret-guard**; last `main` run green on `31bd7b7` (run 38129734595, 2026-10-11T09:49Z), and green on both §27AU pull requests before it |
+| Repository | `main` @ `b1ccc7b` = `origin/main` (re-read 2026-10-12 — this row had said `31bd7b7` and missed #56–#59); no tags, no stashes; the device guide is committed (P3-3 resolved); 2026-10-11: **ISS-13 fixed** (#45, §27AM), the **Expo pin guard** added (§27AN), the **watch script** landed (§27AQ), the **secret guard made able to fail** (§27AR), the **attribution-bearing history rewritten** (§27AS — every tree hash unchanged), the **first real-device run** performed (§27AT), the **device runbook written** (#53), and the **upgrade watch's false `READY` corrected** (§27AU, **ISS-19**) — and then the **same registry-vs-project flaw found and fixed in its third watch** (#55) |
+| CI | `.github/workflows/ci.yml` only — jobs **server / mobile / secret-guard**; last `main` run green on `b1ccc7b` (run `38131717424`, 3m30s, 2026-10-11T10:22Z — re-read 2026-10-12; the row had said `31bd7b7`), and green on the seven runs before it |
 | Backend | **117** `.ts` modules + one deferred `.js` (`server/src/services/entitlement.service.js`); **0** open advisories |
 | Mobile | **132** `.ts`/`.tsx` sources and **0** `.js`/`.jsx` in `app/ components/ lib/ __tests__/` (re-counted 2026-10-11); Expo 57 / RN 0.86.3 |
-| Tests | **64** server test files (`server/test/*.test.mjs`) and **50** mobile test files (file counts, re-read 2026-10-11). CI's own summary at `3beaf85`: server **185 suites / 1312 tests, 0 failures**; mobile **49 suites / 660 tests** — a "suite" there is CI's unit, not a file. Re-run locally on `3adac9d` for the device pass: mobile **50 / 666**, server **185 / 1312**, both 0 failures, `tsc` and eslint clean (§27AT) |
-| Open on GitHub | **Nothing at all** but **issue #32** (deferred majors) — re-read 2026-10-11 (late): `gh pr list --state open` is empty and one issue is open, **PRs #46–#55 merged** (§27AL–§27AU); #34 (ISS-16) and #38 (ISS-17) closed with their reasons |
+| Tests | **65** server test files (`server/test/*.test.mjs`, up from 64 on 2026-10-12 by §27AX's route-inventory guard) and **50** mobile test files (file counts, re-read 2026-10-11). CI's own summary at `3beaf85`: server **185 suites / 1312 tests, 0 failures**; mobile **49 suites / 660 tests** — a "suite" there is CI's unit, not a file. Re-run locally on `3adac9d` for the device pass: mobile **50 / 666**, server **185 / 1312**, both 0 failures, `tsc` and eslint clean (§27AT) |
+| Open on GitHub | **Nothing at all** but **issue #32** (deferred majors) — re-read 2026-10-11 (late): `gh pr list --state open` is empty and one issue is open (**re-read 2026-10-12: still exactly one, #32**), **PRs #46–#59 merged** (§27AL–§27AU); #34 (ISS-16) and #38 (ISS-17) closed with their reasons |
 | Open advisories | **5** — 2 high, 3 medium, 0 critical (all mobile; re-read 2026-10-11 from the alerts API after §27AK's disposition, and **verified again** the same evening — the count drifts, and did) |
 | Production | Render auto-deploy from `main`; `https://ai-inventory-l1mi.onrender.com` reachable and serving the AUTH-04 endpoints |
 | Device | **First physical-device run performed 2026-10-11** (§27AT): dev client `0972948` installed on the OPPO CPH1969 over USB, app launched and rendered, the USB backend path proved, the §27R register validation confirmed on hardware.  **Unauthenticated only** — nothing behind the login was reachable, so sign-in, verification, inventory and the AI assistant remain **not device-verified**. *(Corrected 2026-10-11 — §27AV: the database is not empty; it is the **test** database and holds 1,815 unusable fixture accounts. The device-run account decision is **taken** — register a fresh test account — and the database it will write into is an open owner decision, **ISS-20**.)* |
@@ -7704,8 +7704,7 @@ bundle.
 **Impact.** No branch other than those two existed on the remote — every feature branch had already
 been deleted at merge — so no open pull request was disturbed and there were no tags or stashes. PRs
 **#1–#51** remain recorded as merged, but their commits are no longer ancestors of the rewritten
-`main`: GitHub still renders those pages from its own stored data, while the old commit objects become
-unreachable on the remote over time. CI re-ran on `3cef708`.
+`main`: GitHub still renders those pages from its own stored data. *(**Corrected 2026-10-12 — the old commit objects are NOT unreachable; they are still fetchable from the remote.** `git ls-remote origin` advertises **58 `refs/pull/*` refs**, and an ancestry walk from those tips reaches **all 99** trailer-bearing commits — 49 of the 57 pull refs whose history is resolvable locally contain at least one. The clause originally written here read "while the old commit objects become unreachable on the remote over time": GitHub prunes unreachable **objects**, but it keeps **pull-request refs**, and those refs are the reachability. This is also why the documentation's citations still resolve at all — see §27AX, which measures both effects and states the exposure plainly.)* CI re-ran on `3cef708`.
 
 **Repository-wide sweep, not just commits.** 50 pull requests, their bodies, their conversation
 comments, the pull-request review comments and the repository description were searched for
@@ -8198,6 +8197,170 @@ was already fixed in code (§27AM), so what remains of it is the round trip list
 
 Documentation only. The four sites that said 30B had not started now point here, **ISS-07** records them,
 and **P3-1** is closed by this definition. No source, test, dependency, workflow or configuration changed.
+
+# 27AX. Documentation truth pass, the invalidated citations, and a guard on the route inventory (2026-10-12)
+
+**Why.** A read-only audit of every documentation file in the repository (39 tracked `.md`, plus the
+scripts and workflows that enforce policy) was performed before any implementation work. It found the
+documentation largely accurate and unusually disciplined — supersessions are annotated in place and
+snapshots are dated — and **four things that were not**, one of them a *security-control* claim three
+authoritative files assert and the GitHub API denies. It also found — and this has the longest tail — that
+the **2026-10-11 message-only rewrite (§27AS) invalidated the documentation's own evidence citations**,
+because a message-only rewrite is still a new history and therefore moved every pre-rewrite SHA. Nothing
+in the repository recorded that.
+
+## The claim that was false (D-2)
+
+CLAUDE.md's main-guard bullet, §27AE and checklist §42 all stated that **branch protection is applied and
+the two `ci` checks are required on `main`**. Re-read 2026-10-12:
+
+| Probe | Result |
+| --- | --- |
+| `gh api repos/nreffejzxc/ai-inventory/branches/main/protection` | **`403 Upgrade to GitHub Pro or make this repository public`** |
+| `gh api repos/nreffejzxc/ai-inventory/rulesets` | **`403`**, identically |
+| `security_and_analysis` | `null` |
+| `allow_forking` | `true` (setting unchangeable on a personal private repo) |
+| Collaborators | **1** — the owner, `admin` |
+
+The configuration those three passages describe existed for part of **2026-10-09** and stopped existing
+~90 minutes later, when the repository was reversed to **private** — a reversal §27AF/§27AG and
+`SECURITY.md` already record. What was missing was the correction **on the claim itself**: each file
+retracted it *elsewhere* in itself, so a reader who stopped at the phase record believed a control existed.
+**All three are now annotated in place**, in this repository's own dated-parenthesis convention.
+
+## The route inventory was four routes stale (D-3)
+
+The Firebase design authority §2.6 stated **68 routes** (47 gated, 11 authenticated, 10 public). Measured
+from three independent angles on 2026-10-12: **72** — **47 permission-gated, 13 authenticated, 12 public,
+0 role-gated**. AUTH-03 (`POST /api/auth/renew`), AUTH-04 (`/email-verification/request`, `/confirm`) and
+the N-4 bridge (`POST /api/auth/credentials-changed`) had all shipped after the last edit of that section,
+and the section's own auth-surface table was missing all four rows. §2.6 is corrected and the table now
+lists all **17** auth routes. The **gated** tier is still **47**, which is the property §2.6's history
+cares about: no provider, session or recovery work has added or moved a permission-gated route.
+
+## The citations were invalidated (D-5) — measured, not inferred
+
+The audit enumerated every SHA-like token cited across the docs and resolved each:
+
+| Outcome | Count |
+| --- | --- |
+| Resolves to a commit **on `main`** | **3** |
+| Resolves, but **orphaned from `main`** (pre-rewrite) | **148** |
+| Present, not a commit object | 11 |
+| Absent from the object store | 56 |
+
+*(Enumerated by regex, so the two non-commit buckets contain false positives — byte counts, UUID fragments.
+Every load-bearing SHA was resolved individually: `703a9da`, `0972948`, `6e2252f`, `3beaf85`, `b3f1146`,
+`6a0f41b`, `3085e3f`, `9f4c5c1`, `d415335`, `5acaf44`, `3e5d2aa`, `0c54613`, `01ae73f`, `0c3f87d`,
+`f2f6731`, `aadab04`, `bf0c915`, `3adac9d`, `bbc29b4`, `8af1d49`, `d8b693a`, `6bac86e2`, `0c28e74` — **all
+orphaned**.)*
+
+**One citation is now affirmatively false:** CLAUDE.md states that the credential-change bridge's commit
+`703a9da` is "an ancestor of `main`". It is not. It is the only SHA in the corpus described that way.
+
+**Settled with a real clone**, into a temporary directory outside the repository:
+
+| State | Load-bearing SHAs resolvable |
+| --- | --- |
+| A fresh `git clone` of `origin` | **2 of 27** |
+| After `git fetch origin '+refs/pull/*:refs/remotes/pr/*'` | **25 of 27** |
+
+So the evidence trail is **not** broken locally (the `refs/original` refs hold it) and is **not** broken on
+GitHub either — but it is not readable by default. Reproducing a documented figure from a clone requires a
+refspec nobody is told about. The convention this exchange establishes: **cite section anchors, file paths
+and PR numbers as primary evidence; treat a pre-2026-10-11 SHA as historical**, because a message-only
+rewrite moves it.
+
+## The exposure the rewrite's record understates (D-1)
+
+§27AS stated that "the old commit objects become unreachable on the remote over time". Measured 2026-10-12:
+`git ls-remote origin` advertises **58 `refs/pull/*` refs**, and an ancestry walk from those tips reaches
+**all 99 trailer-bearing commits** — 49 of the 57 pull refs whose history is resolvable locally contain at
+least one. GitHub prunes unreachable **objects**; it keeps **pull-request refs**, and those refs *are* the
+reachability. So the 2026-10-11 rewrite removed the trailers from `main` and **not** from the repository.
+
+**Severity, stated plainly rather than dramatised:** the repository is **private with one collaborator**,
+so the audience today is the owner. It becomes material if access is ever granted or the visibility flips
+again — and the 90-minute public window of 2026-10-09 *did* expose the pre-rewrite `main`, which carried
+the 91 `Co-Authored-By: Claude Code` lines; **no secret was exposed then (that scan is recorded in §27AF),
+but the attribution exposure was never described.** §27AS is corrected in place. Remediating the refs
+requires GitHub Support or a repository re-create, so it is an **owner decision, not an agent action**, and
+none was taken.
+
+## Decisions taken
+
+1. **Correct the documents in place; change no behaviour.** Documentation only — no source file, route,
+schema, permission, dependency, environment variable, workflow or test *assertion* was altered except to
+*add* one guard.
+2. **`refs/original/*` is RETAINED, and the earlier "delete the refs" suggestion is WITHDRAWN.** It was
+made before the citation measurement: those two refs are the only reason ~132 cited SHAs resolve on this
+machine, so deleting them would turn the documentation's evidence into dangling references here as well as
+remotely. A recovery artifact with a live use is not clutter.
+3. **No history operation of any kind.** No rewrite, reset, rebase, force-push, tag or branch deletion.
+CLAUDE.md rule 9 stands: the 2026-10-11 authorisation does not carry forward.
+4. **Pin the figures to a test, not to vigilance.** The drift that hid for ten days was invisible because
+no test read a document.
+
+## The guard
+
+`server/test/phase-docs-route-inventory.test.mjs` — **DB-free, PURE_UNIT**, registered in
+`scripts/run-tests.mjs`. It **never imports the application**: it classifies the declarations in
+`server/src/routes/*.ts` plus the app-level registrations in `server/src/app.ts`, then compares the result
+with the §2.6 sentence. The Phase 23 guard classifies the **same set** from the mounted router stacks at
+runtime — **two independent methods, one number, 72 = 47 + 13 + 12 + 0**. It fails loudly if §2.6's sentence
+can no longer be read, refuses an unparseable sentence rather than guessing, and carries an in-memory
+negative control built from the exact pre-fix figures.
+
+**Break/restore proof (2026-10-12).** With §2.6's total edited `72 → 73`: **exit 1, 2 failed, 9 passed**,
+and the message names the remedy (`§2.6 documents 73 routes; the sources declare 72. Update the documented
+figure …`). Restored: **exit 0, 11 pass, 0 fail**.
+
+## Verification, as executed
+
+| Command | Result |
+| --- | --- |
+| `node --test test/phase-docs-route-inventory.test.mjs` (server) | **11 tests / 2 suites / 11 pass / 0 fail**, exit **0** |
+| same, with §2.6's figure deliberately broken | **exit 1**, 2 fail — then restored to **exit 0** |
+| `npm run lint` | clean, exit **0** |
+| `npm run typecheck` | clean, exit **0** |
+| `npm run check:extensions` | OK — **338** modules scanned |
+| `npm run check:specifiers` | OK — **338** files, **1677** relative specifiers, 0 stale, 0 unresolved |
+| `gh api …/branches/main/protection`, `…/rulesets`, advisories, PR/issue lists, `gh run list` | recorded above |
+| fresh `git clone` + PR-ref fetch | **2/27 then 25/27** |
+
+**Full backend and mobile suites were not re-run locally** — nothing in them changed except the one added
+file, and the PR's CI run is the complete-suite evidence. **No device, native build or iOS behaviour was
+exercised**, and none is claimed.
+
+## Files changed
+
+**Corrected in place:** `CLAUDE.md` (main-guard bullet) · `docs/DEVELOPMENT_ROADMAP.md` (§27AE claim, §27AS
+claim, and the §27AH status rows for repository/CI/PRs/test count) ·
+`docs/AUTH_SECURITY_MASTER_CHECKLIST.md` (§42 protection claim, §42 advisory figure) ·
+`docs/superpowers/specs/2026-09-18-firebase-auth-design.md` (§2.6 figures, table, dated correction) ·
+`README.md` (the mobile language bullet, the mobile file count) · `docs/freebuff/HANDOFF.md` (a staleness
+banner on a "Current state" whose HEAD is not an ancestor of `main`).
+**Added:** `server/test/phase-docs-route-inventory.test.mjs`; one registration line in
+`server/scripts/run-tests.mjs`.
+
+## Findings
+
+- **F-33 — a message-only rewrite invalidates every SHA the documentation cites.** Trees and refs were
+  verified; citations were not, and could not have been, because the rewrite moved them by definition.
+  Cite anchors, paths and PR numbers as primary.
+- **F-34 — `refs/pull/*` is a durable copy of pre-rewrite history.** A force-push removes a *branch*;
+  GitHub keeps the pull-request refs, so "removed from `main`" and "removed from the repository" are
+  different claims. This cuts both ways: it is also why the citations still resolve at all.
+- **F-35 — a documented number with no test drifts.** Ten days, four routes, no signal.
+- **F-36 — a claim corrected only *elsewhere* in the same file still misleads.** The correction must sit on
+  the claim.
+
+## Still open, and not closed here
+
+**L-17** (mail delivery never inspected end to end), **B1**, **B2 / E3 / OD-10**, the owner decisions
+**O-5 / O-6 / O-10 / O-11**, **ISS-02 / ISS-06 / ISS-13** and the whole of **Phase 30B** — the native build
+and the authenticated device run remain the project's real blocker, and no documentation change alters
+that. **D-1's remediation is an owner decision** and remains untaken. The `refs/original` refs stay.
 
 # 28. Phase Gate System
 

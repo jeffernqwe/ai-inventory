@@ -8,6 +8,17 @@
 > after the Phase 7 current-state reconciliation (2026-09-28). The historical blocks §1
 > (FB-002 → FB-005), §1a (FB-006) and §1b (FB-007 / FB-008) are preserved as written; **FB-012** is the
 > latest trail task.
+>
+> ---
+>
+> **STALENESS BANNER — added 2026-10-12. §2 "Current state" below is a snapshot of 2026-09-29 and is
+> superseded; do not read it as current.** It names HEAD `bbc29b4` and a "current phase" that a month of
+> later phase records has overtaken, and that commit is **not even an ancestor of `main` any more** — the
+> 2026-10-11 attribution rewrite moved every pre-rewrite SHA, so most SHAs cited anywhere in this
+> directory no longer resolve from `main` (measured: 25 of 27 sampled pre-rewrite SHAs fail to resolve in
+> a fresh clone; see `docs/DEVELOPMENT_ROADMAP.md` §27AX). **Current status lives in
+> `docs/DEVELOPMENT_ROADMAP.md` §27AH.** The historical blocks §1, §1a, §1b and §4–§7 are preserved as
+> written, as this file's own rules require.
 
 ---
 

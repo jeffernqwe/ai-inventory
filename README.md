@@ -2,7 +2,7 @@
 
 An AI-powered inventory management system for Android and iOS.
 
-- **Mobile:** React Native + Expo + Expo Router (JavaScript)
+- **Mobile:** React Native + Expo + Expo Router (TypeScript)
 - **Backend:** Node.js + Express (TypeScript, ES Modules)
 - **Database (Phase 02+):** MongoDB Atlas + Mongoose
 - **AI (Phase 06):** read-only assistant via a provider abstraction
@@ -376,7 +376,7 @@ unreachable — `/api/health` reports `db: connected|disconnected`.
 
 ## Mobile (`mobile/`)
 
-Expo app with Expo Router (file-based routing), written in **TypeScript** (`app/`, `components/` and `lib/` hold 129 `.ts`/`.tsx` files and no `.js`). It is a **client
+Expo app with Expo Router (file-based routing), written in **TypeScript** (`app/`, `components/` and `lib/` hold 82 `.ts`/`.tsx` files and no `.js`; `__tests__/` adds 50 more — both re-counted 2026-10-12). It is a **client
 only** — the backend is the security boundary. The app never connects to MongoDB and
 never holds MongoDB or AI credentials. The JWT is the only thing persisted (Expo
 SecureStore); the user profile is re-fetched from `/api/auth/me` on every launch so

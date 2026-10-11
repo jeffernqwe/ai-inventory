@@ -6770,12 +6770,12 @@ update its tracking boxes, status rows and heading date at the end of a session 
 
 | Dimension | Verified state |
 | --- | --- |
-| Repository | `main` @ `074cacc` = `origin/main`; no tags, no stashes; the device guide is committed (P3-3 resolved); 2026-10-11: **ISS-13 fixed** (#45, §27AM), the **Expo pin guard** added (§27AN), the **watch script** landed (§27AQ), the **secret guard made able to fail** (§27AR), the **attribution-bearing history rewritten** (§27AS — every tree hash unchanged), the **first real-device run** performed (§27AT), the **device runbook written** (#53), and the **upgrade watch's false `READY` corrected** (§27AU, **ISS-19**) — and then the **same flaw found and fixed in its third watch** |
-| CI | `.github/workflows/ci.yml` only — jobs **server / mobile / secret-guard**; last `main` run green on `074cacc` (run 38125618984, 2026-10-11T08:40Z) |
+| Repository | `main` @ `31bd7b7` = `origin/main`; no tags, no stashes; the device guide is committed (P3-3 resolved); 2026-10-11: **ISS-13 fixed** (#45, §27AM), the **Expo pin guard** added (§27AN), the **watch script** landed (§27AQ), the **secret guard made able to fail** (§27AR), the **attribution-bearing history rewritten** (§27AS — every tree hash unchanged), the **first real-device run** performed (§27AT), the **device runbook written** (#53), and the **upgrade watch's false `READY` corrected** (§27AU, **ISS-19**) — and then the **same registry-vs-project flaw found and fixed in its third watch** (#55) |
+| CI | `.github/workflows/ci.yml` only — jobs **server / mobile / secret-guard**; last `main` run green on `31bd7b7` (run 38129734595, 2026-10-11T09:49Z), and green on both §27AU pull requests before it |
 | Backend | **117** `.ts` modules + one deferred `.js` (`server/src/services/entitlement.service.js`); **0** open advisories |
 | Mobile | **132** `.ts`/`.tsx` sources and **0** `.js`/`.jsx` in `app/ components/ lib/ __tests__/` (re-counted 2026-10-11); Expo 57 / RN 0.86.3 |
 | Tests | **64** server test files (`server/test/*.test.mjs`) and **50** mobile test files (file counts, re-read 2026-10-11). CI's own summary at `3beaf85`: server **185 suites / 1312 tests, 0 failures**; mobile **49 suites / 660 tests** — a "suite" there is CI's unit, not a file. Re-run locally on `3adac9d` for the device pass: mobile **50 / 666**, server **185 / 1312**, both 0 failures, `tsc` and eslint clean (§27AT) |
-| Open on GitHub | **Nothing at all** but **issue #32** (deferred majors) — re-read 2026-10-11 (late): `gh pr list --state open` is empty and one issue is open, **PRs #46–#53 merged** (§27AL–§27AU); #34 (ISS-16) and #38 (ISS-17) closed with their reasons |
+| Open on GitHub | **Nothing at all** but **issue #32** (deferred majors) — re-read 2026-10-11 (late): `gh pr list --state open` is empty and one issue is open, **PRs #46–#55 merged** (§27AL–§27AU); #34 (ISS-16) and #38 (ISS-17) closed with their reasons |
 | Open advisories | **5** — 2 high, 3 medium, 0 critical (all mobile; re-read 2026-10-11 from the alerts API after §27AK's disposition, and **verified again** the same evening — the count drifts, and did) |
 | Production | Render auto-deploy from `main`; `https://ai-inventory-l1mi.onrender.com` reachable and serving the AUTH-04 endpoints |
 | Device | **First physical-device run performed 2026-10-11** (§27AT): dev client `0972948` installed on the OPPO CPH1969 over USB, app launched and rendered, the USB backend path proved, the §27R register validation confirmed on hardware. **Unauthenticated only** — the local database is empty, so sign-in, verification, inventory and the AI assistant remain **not device-verified** |
@@ -6935,8 +6935,9 @@ are closed with their reasons; those versions arrive only with the SDK 58 upgrad
   declined — raise the phone's screen timeout instead. Full procedure: `docs/DEVELOPING_ON_A_PHYSICAL_DEVICE.md`.
   **For a cabled run, prefer the USB tunnel over the LAN address (F-28):** `adb reverse tcp:8081 tcp:8081` and
   `adb reverse tcp:4000 tcp:4000` with `EXPO_PUBLIC_API_URL=http://localhost:4000` needs no Wi-Fi, no DHCP-lease
-  match and no firewall rule, and it is what §27AT's run was performed with. The guide still presents it as the
-  alternative — it is the deterministic route. Also: a **`development`** client is mandatory and its **native**
+  match and no firewall rule, and it is what §27AT's run was performed with. *(**F-28 resolved 2026-10-11:** the
+  guide no longer presents it as the alternative — §7b is titled **"The USB tunnels (verified)"** and leads with
+  them, so the promotion this note asked for is done.)* Also: a **`development`** client is mandatory and its **native**
   layer ages silently, so check `eas build:list` for the newest `development` build and rebuild if the change
   under test is native (F-26).
 - **Baseline.** CI is the **single source of truth** (ISS-15); dated local counts are kept here only as
@@ -7850,7 +7851,9 @@ configuration decision, not a defect, and the files are absent on purpose.
 
 **F-28 (Low — documentation).** `docs/DEVELOPING_ON_A_PHYSICAL_DEVICE.md` presents `adb reverse` as the
 *alternative* to the LAN address. For a cabled run it is in fact the **deterministic** route — no Wi-Fi, no DHCP
-match, no firewall rule — and this run used it successfully. Promote it. A second, smaller note from the same
+match, no firewall rule — and this run used it successfully. ~~Promote it.~~ **Done 2026-10-11 (#53):** the guide's
+§7b is titled "The USB tunnels (verified)" and the tunnels are the route it walks, with the LAN address kept as the
+fallback. A second, smaller note from the same
 session: `uiautomator dump` reports the **whole row** for an expo-router `<Link>` nested inside a `<Text>`, so a
 tap at the row's centre lands on the label rather than the link — **a testing-methodology note, not an application
 defect** (the link navigated correctly once tapped on its own side).

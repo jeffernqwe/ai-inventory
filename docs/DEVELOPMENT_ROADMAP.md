@@ -6770,13 +6770,13 @@ update its tracking boxes, status rows and heading date at the end of a session 
 
 | Dimension | Verified state |
 | --- | --- |
-| Repository | `main` @ `3adac9d` = `origin/main`; no tags, no stashes; the device guide is committed (P3-3 resolved); 2026-10-11: **ISS-13 fixed** (#45, §27AM), the **Expo pin guard** added (§27AN), the **watch script** landed (§27AQ), the **secret guard made able to fail** (§27AR), and the **first real-device run** performed (§27AT), and the **attribution-bearing history rewritten** (§27AS — every tree hash unchanged) |
-| CI | `.github/workflows/ci.yml` only — jobs **server / mobile / secret-guard**; last `main` run green on `3adac9d` (run 38078651606, 2026-10-10T19:09Z) |
+| Repository | `main` @ `074cacc` = `origin/main`; no tags, no stashes; the device guide is committed (P3-3 resolved); 2026-10-11: **ISS-13 fixed** (#45, §27AM), the **Expo pin guard** added (§27AN), the **watch script** landed (§27AQ), the **secret guard made able to fail** (§27AR), the **attribution-bearing history rewritten** (§27AS — every tree hash unchanged), the **first real-device run** performed (§27AT), the **device runbook written** (#53), and the **upgrade watch's false `READY` corrected** (§27AU, **ISS-19**) |
+| CI | `.github/workflows/ci.yml` only — jobs **server / mobile / secret-guard**; last `main` run green on `074cacc` (run 38125618984, 2026-10-11T08:40Z) |
 | Backend | **117** `.ts` modules + one deferred `.js` (`server/src/services/entitlement.service.js`); **0** open advisories |
 | Mobile | **132** `.ts`/`.tsx` sources and **0** `.js`/`.jsx` in `app/ components/ lib/ __tests__/` (re-counted 2026-10-11); Expo 57 / RN 0.86.3 |
 | Tests | **64** server test files (`server/test/*.test.mjs`) and **50** mobile test files (file counts, re-read 2026-10-11). CI's own summary at `3beaf85`: server **185 suites / 1312 tests, 0 failures**; mobile **49 suites / 660 tests** — a "suite" there is CI's unit, not a file. Re-run locally on `3adac9d` for the device pass: mobile **50 / 666**, server **185 / 1312**, both 0 failures, `tsc` and eslint clean (§27AT) |
-| Open on GitHub | **Nothing at all** but **issue #32** (deferred majors) — re-read 2026-10-11: `gh pr list --state open` is empty, **PRs #46–#50 merged** (§27AL–§27AR); #34 (ISS-16) and #38 (ISS-17) closed with their reasons |
-| Open advisories | **5** — 2 high, 3 medium, 0 critical (all mobile; re-read 2026-10-11 from the alerts API after §27AK's disposition — the count drifts, and did) |
+| Open on GitHub | **Nothing at all** but **issue #32** (deferred majors) — re-read 2026-10-11 (late): `gh pr list --state open` is empty and one issue is open, **PRs #46–#53 merged** (§27AL–§27AU); #34 (ISS-16) and #38 (ISS-17) closed with their reasons |
+| Open advisories | **5** — 2 high, 3 medium, 0 critical (all mobile; re-read 2026-10-11 from the alerts API after §27AK's disposition, and **verified again** the same evening — the count drifts, and did) |
 | Production | Render auto-deploy from `main`; `https://ai-inventory-l1mi.onrender.com` reachable and serving the AUTH-04 endpoints |
 | Device | **First physical-device run performed 2026-10-11** (§27AT): dev client `0972948` installed on the OPPO CPH1969 over USB, app launched and rendered, the USB backend path proved, the §27R register validation confirmed on hardware. **Unauthenticated only** — the local database is empty, so sign-in, verification, inventory and the AI assistant remain **not device-verified** |
 
@@ -6807,7 +6807,10 @@ recorded Gate 0 decision (§27AI). **ISS-02 closed out on 2026-10-10** (remediat
 the last three P3 housekeeping items decided (§27AL), **ISS-13 fixed** (§27AM, PR #45), the **Expo pin set
 put under CI** — ISS-16's detection gap (§27AN, PR #46) — the deferred queue re-measured and scripted (§27AQ,
 PR #49), the **secret guard's rules made provable** (§27AR, PR #50), and the **first real-device Android run**
-prepared and performed (§27AT, F-26…F-28).
+prepared and performed (§27AT, F-26…F-28), and the **device runbook** written into the physical-device guide
+(#53). Finally the deferred-upgrade watch was read back and found to be reporting an **open gate that was
+shut**, and corrected with controls of its own (§27AU, ISS-19) — the one unblocked correctness defect left on
+the board (§27AU's *Why this came first*).
 
 **Attribution policy tightened, and the history rewritten (2026-10-11).** The owner required that no
 unwanted contributor name, AI attribution tag or automated signature line appears in commits, messages,
@@ -6844,6 +6847,8 @@ Next: **the device-testing account decision** (§27AT) and **P3-1** — the two 
 | **ISS-17** | Medium | **The SDK 57 patch rollup cannot be installed** — `expo install --check` asks for `expo ~57.0.27` / `expo-constants ~57.0.21` / `expo-linking ~57.0.12` / `expo-router ~57.0.25`, but taking it nests `expo-modules-core@57.0.21` under `node_modules/expo/` where root-level `jest-expo` cannot resolve it (48/48 suites fail), and declaring it directly is `ERESOLVE`: it wants `react-native-worklets ^0.7.4…^0.10.0` while `expo-router@57.0.25`'s `react-native-reanimated@4.7.0` forces `0.13.x` | Reproduced from `main` on 2026-10-10 by two routes; Dependabot PR **#38** failed identically and its lockfile dropped the package entirely | **Declined as a whole** and moved to the SDK 58 train (§27AI, §27AK); #38 **closed** with the evidence. Accepted consequence: `expo install --check` reports outdated until then — known, not unnoticed |
 | **ISS-18** | Medium | **`npx`-driven npm commands fail on this host** — npm 11.19.1 rejects the stray `allow-scripts=9router` line in `~/.npmrc` when it arrives **as a flag**, and `npx` forwards it; `npx patch-package` and `expo install` / `--fix` all fail, plain `npm install` works | Measured three ways 2026-10-10; full account in §27AK | Workaround in use: `npm_config_userconfig=<empty file>` for the command, or the equivalent plain `npm install <pkg>@<ver>`. **Owner-side:** the global `~/.npmrc` line was deliberately left alone. CI is unaffected |
 | **ISS-16** | High | **PR #34 moves five Expo-pinned packages outside SDK 57** — `react-native` 0.86.3 → 0.87.1, `react` 19.2.3 → 19.3.0, `react-dom` 19.2.3 → 19.3.0, `react-native-safe-area-context` ~5.7.0 → ~5.10.1, `react-native-screens` ~4.26.0 → ~4.28.0, plus the matching `@types/react` ~19.3.0. Expo SDK 57 expects exactly the old values, and CI runs no `expo-doctor` / `expo install --check`, so a green typecheck cannot see the native incompatibility — it would surface in the next native build | `mobile/node_modules/expo/bundledNativeModules.json` vs `gh pr diff 34` (both read 2026-10-10); `mobile/package.json` | **Do not merge as-is.** Close or hold PR #34 and take these versions with the Expo SDK 58 train via `npx expo install --fix` (issue #32); decide whether Dependabot should ignore the Expo-pinned set (P0-2 — **decided and completed**, §27AL); **and the detection gap named here is closed** — `mobile/__tests__/expo-sdk-pins.test.ts` holds every Expo-managed dependency to the installed SDK's own pin table, positive control included (§27AN) |
+
+| **ISS-19** | Medium → **`[✓]`** | **The deferred-upgrade watch reported `jest-expo` as `READY` while §27AI Gate 0 was shut** — the gate asked whether *any* jest-expo release admitted jest 30 (reading the prerelease tag `next`, 58.0.9) rather than whether the **installed** SDK's pin did, and never checked installability: 58.0.9 also peers `@react-native/jest-preset@^0.88.0-rc.4` against this project's RN 0.86.3 | `scripts/check-upgrade-watches.mjs` read at source 2026-10-11; §27AQ recorded the `READY` in the same section as the sentence saying jest 30 rides with the SDK 58 promotion | **Fixed 2026-10-11 (§27AU):** the gate reads the installed SDK's own pin table and requires the RN preset peer to be satisfied here, so all three watches report `DEFERRED`; guarded by **9 controls** run before every report, with break/restore proof that the bug's own control fires (`expected ["DEFERRED"], got ["READY"]`, exit 1) |
 
 **Correctly recorded as open or deferred — not issues:** L-17 (recovery-mail delivery never inspected end-to-end),
 B1's residual timing term, B2 / E3 / OD-10 (V4), owner decisions O-5 / O-6 / O-10 / O-11, P-4 (device-time),
@@ -6890,11 +6895,14 @@ test-count source. *Why:* phase discipline is unenforceable while a "phase" has 
 2. **Decision: P3-1 (Phase 30B)** — define it or remove its references (ISS-07). **The only item left that
    cannot be settled from the repository**: everything else in P0–P3 is now shipped, dispositioned, deferred
    with a record, or awaiting a build — ISS-13 included (§27AM).
-3. **Keep the upgrade watches — one command now:** `node scripts/check-upgrade-watches.mjs` (§27AQ).
-   Re-read **2026-10-11**: the SDK 58 **Gate 0 is still closed** (`latest` 57.0.27, `next` 58.0.7); **jest 30
-   rides with that promotion** (`jest-expo@58.0.9` depends on the jest 30 line, `57.0.5` on jest 29);
-   **TypeScript 7 is upstream-blocked** (the parser line is 8.x, `typescript >=4.8.4 <6.1.0`). When `latest`
-   moves to 58, execute §27AI.
+3. **Keep the upgrade watches — one command, now with its own proof:**
+   `node scripts/check-upgrade-watches.mjs` (`--self-test` runs the 9 controls alone; **§27AU**). Re-read
+   **2026-10-11**: the SDK 58 **Gate 0 is still closed** (`latest` 57.0.27, `next` 58.0.7) — and after the
+   §27AU correction **all three watches report `DEFERRED`**, `jest-expo` included: jest 30 rides with that
+   promotion, and `jest-expo@58.0.9` additionally needs *SDK 58's* RN jest preset (`^0.88.0-rc.4`) against
+   this project's 0.86.3, so it is not installable here even once jest 30 exists. **TypeScript 7 is
+   upstream-blocked** (the parser line is 8.x, `typescript >=4.8.4 <6.1.0`). When `latest` moves to 58,
+   execute §27AI.
 4. **Carry the two build-time confirmations into the next native build** — the remediated PII line absent
    from logcat (ISS-02) and the generated `compileSdk`/`targetSdk` values read and recorded (ISS-06). Neither
    can be closed without one, and neither is claimed as closed today. **F-26 sharpens this:** the client on the
@@ -6943,7 +6951,7 @@ are closed with their reasons; those versions arrive only with the SDK 58 upgrad
 - [x] **P2-1** ISS-02 RNFirebase PII remediation — **implemented, artifact-verified and merged (#40, 2026-10-10, §27AJ)**; device re-check rides with the SDK 58 pass
 - [x] **P2-4** the 7 dependency advisories **dispositioned** — 2 fixed, 5 accepted with reasons, SDK 57 rollup declined (§27AK); Dependabot #38 closed
 - [ ] **P2-2** ISS-06 P-3 SDK alignment — **`[⛔]` corrected to `[~]` on 2026-10-10** (library values, expected-benign); confirmation needs the next native build
-- [ ] **P2-3** issue #32 upgrade train — **partly taken 2026-10-11:** the two action re-pins (§27AO, ISS-12 resolved) and the server pair (§27AP: `dotenv` 18 taken with its preload path measured; `@types/bcryptjs` removed — its 3.0.0 is a deprecated stub); what remains is **gated, not pending** — SDK 58 on Gate 0, jest 30 with that promotion, TypeScript 7 upstream (§27AQ, `scripts/check-upgrade-watches.mjs`)
+- [ ] **P2-3** issue #32 upgrade train — **partly taken 2026-10-11:** the two action re-pins (§27AO, ISS-12 resolved) and the server pair (§27AP: `dotenv` 18 taken with its preload path measured; `@types/bcryptjs` removed — its 3.0.0 is a deprecated stub); what remains is **gated, not pending** — SDK 58 on Gate 0, jest 30 with that promotion, TypeScript 7 upstream (§27AQ, `scripts/check-upgrade-watches.mjs` — whose `jest-expo` `READY` was wrong and is now corrected with controls, **ISS-19 / §27AU**)
 - [ ] **P2-5** ISS-18: the `~/.npmrc` `allow-scripts` line — **owner-side**, workaround recorded (§27AK)
 - [x] **P2-6** the Expo pin set is held in CI — ISS-16's detection gap closed by a guard suite against the installed SDK's own table, positive control included (§27AN)
 - [ ] **P3-1** Phase 30B defined or its references removed (ISS-07) — **decision needed**; ISS-13 is no longer waiting on it (§27AM)
@@ -7553,13 +7561,22 @@ edited away, because the episode is the argument for the tool that caught it.
 All three watches are now one read-only command — `node scripts/check-upgrade-watches.mjs` (`--json` for
 machine output). Dependency-free, Node's own `fetch`, and it reports `READY` / `DEFERRED` / `UNREADABLE` per
 watch, **never counting an unreadable watch as a pass** — the rule `scripts/audit-access.mjs` already
-follows. It reads `jest-expo`'s `latest` **and** `next`, because the finding above is about `next`; and it is
-deliberately **not** in CI, since a pipeline that goes red when npm is unreachable would turn an upstream
-outage into a failed build.
+follows. It is deliberately **not** in CI, since a pipeline that goes red when npm is unreachable would turn
+an upstream outage into a failed build.
+
+~~It reads `jest-expo`'s `latest` **and** `next`, because the finding above is about `next`~~ — **corrected
+later the same day, §27AU:** reading `next` was itself the defect. The `jest-expo` watch now reads the
+**installed SDK's own pin table** and requires the candidate's `@react-native/jest-preset` peer to be
+satisfied here, because `jest-expo` is Expo's to version rather than the registry's.
 
 First live run, 2026-10-11: `expo` **DEFERRED** (`latest` 57.0.27, `next` 58.0.7) · `jest-expo` **READY**
 (58.0.9 admits jest 30) · `@typescript-eslint/parser` **DEFERRED** (8.71.1, `typescript >=4.8.4 <6.1.0`).
 `READY` here means a gate recorded above can be started; it is not a decision to start it.
+
+*(**Corrected 2026-10-11 — §27AU.** That `jest-expo` **READY** was wrong, and the sentence in this section's
+first bullet was the true one: 58.0.9 belongs to the SDK 58 line and peers a release-candidate React Native
+preset this project cannot resolve, so **no** gate was open, and all three watches now report **DEFERRED**.
+The line above is kept as the record of what the first version of the script actually printed.)*
 
 # 27AR. The secret guard can now fail on purpose — controls for every rule (2026-10-11)
 
@@ -7863,6 +7880,99 @@ seed the local database with a test tenant (instant, but it skips the registrati
 themselves worth testing).
 
 ---
+
+# 27AU. An upgrade watch reported a gate as OPEN that was shut — corrected, with controls (2026-10-11)
+
+## Why this exists
+
+`scripts/check-upgrade-watches.mjs` was added hours earlier (§27AQ) to answer the deferred-upgrade
+queue's three questions from a measurement instead of a memory. Its second watch, `jest-expo`,
+printed **READY** on its first live run — and §27AQ recorded that READY **in the same section** that
+says jest 30 "is **scheduled with SDK 58's promotion** (Gate 0, §27AI)". The two cannot both be true:
+Gate 0 was still closed (`latest` 57.0.27, `next` 58.0.7), so no gate was open.
+
+The cause was the gate's **definition**, not its arithmetic.
+
+## What the watch asked, and why it was the wrong question
+
+Read at source, the first version asked the registry whether **any** jest-expo release admitted jest 30,
+reading `latest` **and** `next`, and cleared itself when one did. It found that `next` (58.0.9) depends
+on `@jest/globals@^30.0.0`. Three separate things were wrong with treating that as an open gate:
+
+- **`next` is another SDK's line.** The `expo` watch directly above it reads only `latest`, on the
+  stated principle that *"Expo promotes an SDK when it is ready"*. Reading a **prerelease** tag on a
+  **pinned** package applied the opposite rule to the same decision.
+- **`jest-expo` is Expo's to version, not this project's.** It is a key in the installed SDK's own
+  `expo/bundledNativeModules.json` (`jest-expo -> ~57.0.5`) — the same table §27AL's Dependabot carve-out
+  derives its exclusions from. The candidate is therefore whatever the **installed SDK pins**, never the
+  newest published release.
+- **And the candidate was not installable here.** This is the half the original gate never asked about:
+  `jest-expo@58.0.9` also peers `@react-native/jest-preset@^0.88.0-rc.4` — SDK 58's React Native line, a
+  **release candidate** — while this project runs RN 0.86.3 and has `@react-native/jest-preset@0.86.3`
+  installed. A version whose preset cannot resolve is not a candidate however attractive its jest range
+  looks. That is the ISS-16 / ISS-17 class of change, declined twice already for exactly this reason.
+
+The consequence was not cosmetic. §27AH's *Immediate next actions* tells every session to run this
+command first, and `READY` is an instruction: it said to take another SDK's test harness — and an RC
+preset — onto SDK 57, in a repository whose mobile regression net is **50 suites / 666 tests** running on
+that preset.
+
+## What changed
+
+The watch now answers one question — **may this project take jest 30 without leaving its installed Expo
+SDK line?** — and `READY` requires **both** halves: the installed SDK's own pin must reach a jest-30 line
+**and** that version's `@react-native/jest-preset` peer must be satisfied by the installed `react-native`.
+Its inputs are read from `node_modules` (the installed SDK's pin table, the installed RN, the installed
+preset) rather than from registry tags, and an unreadable range answers `DEFERRED`, never `READY`.
+
+**9 controls, run before the report on every invocation** (`--self-test` runs them alone), following
+§27AR's standard that a check which cannot fail proves nothing. The pair that matters is the false READY
+itself: a version that admits jest 30 while its RN preset is unreachable must **DEFER**, and the *same*
+version on a line whose React Native is 0.88 must **READY**. Without the second, the corrected rule could
+only ever say DEFERRED — a rule that cannot fire is the same defect pointing the other way. A failed
+control stops the report before it is printed and exits 1; a produced report is otherwise still exit 0,
+so the "READY is news, not a failure" contract is intact.
+
+## Evidence
+
+- `node scripts/check-upgrade-watches.mjs` → all three watches **DEFERRED**, the jest-expo row now naming
+  the real reason and the future cost: `pinned 57.0.5: @jest/globals=^29.2.1 — no jest 30 on the installed
+  SDK's line — installed react-native=0.86.3; newest published stable: 58.0.9 (peer
+  @react-native/jest-preset ^0.88.0-rc.4)`.
+- `--self-test` → `9 control(s) passed (1 must-fire, 6 must-not-fire, 2 range)`, exit 0.
+- **The controls were proven able to fail — twice — and then restored.** Break A removed the RN-preset
+  half, i.e. reintroduced the original bug, and the control that encodes it fired:
+  `the false READY this fixes — jest 30 admitted, RN preset unreachable (must not fire): expected ["DEFERRED"], got ["READY"]`,
+  exit 1. Break B made the pin arithmetic ignore the pin and two controls fired, exit 1. Restored: 9/9,
+  exit 0. The break runs were planted in throwaway copies and the tree is otherwise untouched.
+- `--json` shape unchanged (`checkedAt` + `package, gate, detail, status, unblocks`), so any consumer of
+  the machine output is unaffected.
+- Volatile figures re-read at the same moment rather than quoted: `main` @ `074cacc` = `origin/main`; CI
+  green on `074cacc` (run `38125618984`, 2026-10-11T08:40Z); **5** open advisories (2 high, 3 medium, 0
+  critical).
+
+## The lesson, stated rather than implied
+
+§27AQ already made the argument for this tool — *"prose would have carried the wrong answer until someone
+re-read it"* — and the tool then carried the wrong answer itself, in the one field a reader acts on. A
+watch that reads a registry learns about the registry; it does not learn about **this project**. The
+version a pinned package may take is a fact about the installed SDK, not about npm. Two of the three
+watches were right; the third needed the installed tree to be right at all.
+
+## Not changed
+
+No dependency, `package.json`, lockfile, CI job, application or test source. The `expo` and
+`@typescript-eslint/parser` watches, the report's output shape, the exit-code contract for a produced
+report, and the deliberate exclusion of this script from CI all stay as they were.
+
+## One limitation, kept visible
+
+`scripts/` is outside both workspaces' lint scopes — `server/eslint.config.js` and
+`mobile/eslint.config.js` are resolved from their own directories and CI lints with
+`working-directory: server` / `mobile`, so this file is linted by neither. Running ESLint over it from
+`server/` exits 2 with *"ESLint couldn't find an eslint.config.\* file"*, which is a **config-resolution
+error, not a lint finding** — the same standing as `scripts/audit-access.mjs` and
+`scripts/check-secrets.mjs`. Syntax here is proven by execution, not by a linter.
 
 # 28. Phase Gate System
 

@@ -6770,7 +6770,7 @@ update its tracking boxes, status rows and heading date at the end of a session 
 
 | Dimension | Verified state |
 | --- | --- |
-| Repository | `main` @ `074cacc` = `origin/main`; no tags, no stashes; the device guide is committed (P3-3 resolved); 2026-10-11: **ISS-13 fixed** (#45, §27AM), the **Expo pin guard** added (§27AN), the **watch script** landed (§27AQ), the **secret guard made able to fail** (§27AR), the **attribution-bearing history rewritten** (§27AS — every tree hash unchanged), the **first real-device run** performed (§27AT), the **device runbook written** (#53), and the **upgrade watch's false `READY` corrected** (§27AU, **ISS-19**) |
+| Repository | `main` @ `074cacc` = `origin/main`; no tags, no stashes; the device guide is committed (P3-3 resolved); 2026-10-11: **ISS-13 fixed** (#45, §27AM), the **Expo pin guard** added (§27AN), the **watch script** landed (§27AQ), the **secret guard made able to fail** (§27AR), the **attribution-bearing history rewritten** (§27AS — every tree hash unchanged), the **first real-device run** performed (§27AT), the **device runbook written** (#53), and the **upgrade watch's false `READY` corrected** (§27AU, **ISS-19**) — and then the **same flaw found and fixed in its third watch** |
 | CI | `.github/workflows/ci.yml` only — jobs **server / mobile / secret-guard**; last `main` run green on `074cacc` (run 38125618984, 2026-10-11T08:40Z) |
 | Backend | **117** `.ts` modules + one deferred `.js` (`server/src/services/entitlement.service.js`); **0** open advisories |
 | Mobile | **132** `.ts`/`.tsx` sources and **0** `.js`/`.jsx` in `app/ components/ lib/ __tests__/` (re-counted 2026-10-11); Expo 57 / RN 0.86.3 |
@@ -6848,7 +6848,7 @@ Next: **the device-testing account decision** (§27AT) and **P3-1** — the two 
 | **ISS-18** | Medium | **`npx`-driven npm commands fail on this host** — npm 11.19.1 rejects the stray `allow-scripts=9router` line in `~/.npmrc` when it arrives **as a flag**, and `npx` forwards it; `npx patch-package` and `expo install` / `--fix` all fail, plain `npm install` works | Measured three ways 2026-10-10; full account in §27AK | Workaround in use: `npm_config_userconfig=<empty file>` for the command, or the equivalent plain `npm install <pkg>@<ver>`. **Owner-side:** the global `~/.npmrc` line was deliberately left alone. CI is unaffected |
 | **ISS-16** | High | **PR #34 moves five Expo-pinned packages outside SDK 57** — `react-native` 0.86.3 → 0.87.1, `react` 19.2.3 → 19.3.0, `react-dom` 19.2.3 → 19.3.0, `react-native-safe-area-context` ~5.7.0 → ~5.10.1, `react-native-screens` ~4.26.0 → ~4.28.0, plus the matching `@types/react` ~19.3.0. Expo SDK 57 expects exactly the old values, and CI runs no `expo-doctor` / `expo install --check`, so a green typecheck cannot see the native incompatibility — it would surface in the next native build | `mobile/node_modules/expo/bundledNativeModules.json` vs `gh pr diff 34` (both read 2026-10-10); `mobile/package.json` | **Do not merge as-is.** Close or hold PR #34 and take these versions with the Expo SDK 58 train via `npx expo install --fix` (issue #32); decide whether Dependabot should ignore the Expo-pinned set (P0-2 — **decided and completed**, §27AL); **and the detection gap named here is closed** — `mobile/__tests__/expo-sdk-pins.test.ts` holds every Expo-managed dependency to the installed SDK's own pin table, positive control included (§27AN) |
 
-| **ISS-19** | Medium → **`[✓]`** | **The deferred-upgrade watch reported `jest-expo` as `READY` while §27AI Gate 0 was shut** — the gate asked whether *any* jest-expo release admitted jest 30 (reading the prerelease tag `next`, 58.0.9) rather than whether the **installed** SDK's pin did, and never checked installability: 58.0.9 also peers `@react-native/jest-preset@^0.88.0-rc.4` against this project's RN 0.86.3 | `scripts/check-upgrade-watches.mjs` read at source 2026-10-11; §27AQ recorded the `READY` in the same section as the sentence saying jest 30 rides with the SDK 58 promotion | **Fixed 2026-10-11 (§27AU):** the gate reads the installed SDK's own pin table and requires the RN preset peer to be satisfied here, so all three watches report `DEFERRED`; guarded by **9 controls** run before every report, with break/restore proof that the bug's own control fires (`expected ["DEFERRED"], got ["READY"]`, exit 1) |
+| **ISS-19** | Medium → **`[✓]`** | **The deferred-upgrade watch reported `jest-expo` as `READY` while §27AI Gate 0 was shut** — the gate asked whether *any* jest-expo release admitted jest 30 (reading the prerelease tag `next`, 58.0.9) rather than whether the **installed** SDK's pin did, and never checked installability: 58.0.9 also peers `@react-native/jest-preset@^0.88.0-rc.4` against this project's RN 0.86.3. **Its third watch had the same flaw:** it read `@typescript-eslint/parser`, a package **neither workspace depends on**, while `server/` resolves the `typescript-eslint` meta package and `mobile/` resolves the parser through the SDK-pinned `eslint-config-expo` | `scripts/check-upgrade-watches.mjs` read at source 2026-10-11; §27AQ recorded the `READY` in the same section as the sentence saying jest 30 rides with the SDK 58 promotion | **Fixed 2026-10-11 (§27AU + its follow-on):** each gate reads the constraint that actually governs it — the installed SDK's pin table and the RN preset peer for `jest-expo`, one line **per workspace** for `typescript-eslint` — so all three watches report `DEFERRED`; guarded by **15 controls** run before every report, with break/restore proof for both bug classes (`expected ["DEFERRED"], got ["READY"]`, exit 1, three separate times) |
 
 **Correctly recorded as open or deferred — not issues:** L-17 (recovery-mail delivery never inspected end-to-end),
 B1's residual timing term, B2 / E3 / OD-10 (V4), owner decisions O-5 / O-6 / O-10 / O-11, P-4 (device-time),
@@ -6896,13 +6896,14 @@ test-count source. *Why:* phase discipline is unenforceable while a "phase" has 
    cannot be settled from the repository**: everything else in P0–P3 is now shipped, dispositioned, deferred
    with a record, or awaiting a build — ISS-13 included (§27AM).
 3. **Keep the upgrade watches — one command, now with its own proof:**
-   `node scripts/check-upgrade-watches.mjs` (`--self-test` runs the 9 controls alone; **§27AU**). Re-read
+   `node scripts/check-upgrade-watches.mjs` (`--self-test` runs the 15 controls alone; **§27AU**). Re-read
    **2026-10-11**: the SDK 58 **Gate 0 is still closed** (`latest` 57.0.27, `next` 58.0.7) — and after the
    §27AU correction **all three watches report `DEFERRED`**, `jest-expo` included: jest 30 rides with that
    promotion, and `jest-expo@58.0.9` additionally needs *SDK 58's* RN jest preset (`^0.88.0-rc.4`) against
    this project's 0.86.3, so it is not installable here even once jest 30 exists. **TypeScript 7 is
-   upstream-blocked** (the parser line is 8.x, `typescript >=4.8.4 <6.1.0`). When `latest` moves to 58,
-   execute §27AI.
+   upstream-blocked on two different lines** — `server/`'s declared `typescript-eslint` meta package and the
+   parser `mobile/`'s SDK-pinned `eslint-config-expo` resolves both read `typescript >=4.8.4 <6.1.0`, and no
+   published release admits 7. When `latest` moves to 58, execute §27AI.
 4. **Carry the two build-time confirmations into the next native build** — the remediated PII line absent
    from logcat (ISS-02) and the generated `compileSdk`/`targetSdk` values read and recorded (ISS-06). Neither
    can be closed without one, and neither is claimed as closed today. **F-26 sharpens this:** the client on the
@@ -7544,9 +7545,10 @@ answer: neither is waiting on a decision, and they are not waiting on the same t
   promotion** (Gate 0, §27AI), which is exactly where issue #32's order puts it.
 - **TypeScript 7 — genuinely upstream-blocked, and not by Expo.** The only published `@typescript-eslint`
   line is 8.x (`parser@8.70.0` in `mobile/`, `8.71.1` in `server/`), and both declare
-  `typescript >=4.8.4 <6.1.0`; there is no 9.x. TypeScript 7 is outside the parser's supported range in
-  **both** workspaces, so the SDK 58 train does not unblock it — a typescript-eslint release that admits 7
-  does, and for `mobile/` it would arrive through `eslint-config-expo`.
+`typescript >=4.8.4 <6.1.0`; there is no 9.x. *(Corrected 2026-10-11 — §27AU's follow-on: `server/` does
+not depend on the parser directly at all. It depends on the meta package `typescript-eslint@^8.71.1`, whose
+peer range is the one quoted here, and that is the line `server/` would move. The conclusion — upstream-blocked
+in both workspaces — is unchanged; the package named for `server/` was not the one it resolves.)*
 
 ## The drift, kept rather than tidied away
 
@@ -7926,7 +7928,8 @@ Its inputs are read from `node_modules` (the installed SDK's pin table, the inst
 preset) rather than from registry tags, and an unreadable range answers `DEFERRED`, never `READY`.
 
 **9 controls, run before the report on every invocation** (`--self-test` runs them alone), following
-§27AR's standard that a check which cannot fail proves nothing. The pair that matters is the false READY
+§27AR's standard that a check which cannot fail proves nothing. (9 at the time of this first correction;
+**15** after the follow-on below.) The pair that matters is the false READY
 itself: a version that admits jest 30 while its RN preset is unreachable must **DEFER**, and the *same*
 version on a line whose React Native is 0.88 must **READY**. Without the second, the corrected rule could
 only ever say DEFERRED — a rule that cannot fire is the same defect pointing the other way. A failed
@@ -7958,6 +7961,40 @@ re-read it"* — and the tool then carried the wrong answer itself, in the one f
 watch that reads a registry learns about the registry; it does not learn about **this project**. The
 version a pinned package may take is a fact about the installed SDK, not about npm. Two of the three
 watches were right; the third needed the installed tree to be right at all.
+
+## Follow-on, same day — the third watch read a package neither workspace depends on
+
+Correcting `jest-expo` made the same question worth asking of the third watch, and it failed it the same way.
+It read `@typescript-eslint/parser`'s `latest` and reported that peer range for **both** workspaces — but
+**neither workspace depends on that package**:
+
+| Workspace | What it actually resolves | Where it comes from |
+| --- | --- | --- |
+| `server/` | the meta package `typescript-eslint@^8.71.1` | `server/package.json`, directly |
+| `mobile/` | `@typescript-eslint/parser` through `eslint-config-expo@57.0.2` (`^8.59.0`) | transitively; `eslint-config-expo` is itself **SDK-pinned** (`~57.0.2`) |
+
+So the old question could not see a `typescript-eslint` 9.x that admits 7, and would have reported `READY` off
+a parser release `mobile/` cannot load even if one existed. It answered correctly on 2026-10-11 only by
+coincidence: both lines happened to read `>=4.8.4 <6.1.0`.
+
+The watch — now named `typescript-eslint` rather than for a package the project does not use — reports **one
+line per workspace** and requires both to admit 7. The asymmetry is deliberate and is the same rule the
+`jest-expo` gate uses, *the constraint the project cannot choose is the gate*: `mobile/`'s parser arrives
+through the SDK-pinned `eslint-config-expo`, so mobile's answer is resolved through that chain, while
+`server/` declares the meta package itself and can bump it as part of taking TypeScript 7.
+
+**6 more controls, 15 in total** (`2 must-fire, 11 must-not-fire, 2 range`), and the new set's must-not-fire
+pair was proven load-bearing: with the mobile chain ignored — the original one-package logic — the control
+fires, `the bug — a 7-admitting release exists but mobile cannot load it (must not fire): expected ["DEFERRED"], got ["READY"]`, exit 1. Restored: 15/15, exit 0.
+
+The corrected report, with both lines visible:
+
+```text
+DEFERRED   typescript-eslint
+           gate:    TypeScript 7 — the linter EACH workspace resolves must declare a typescript peer that admits 7
+           current: server: typescript-eslint declared ^8.71.1, latest 8.71.1 peer typescript=>=4.8.4 <6.1.0 |
+                    mobile: eslint-config-expo 57.0.2 (SDK pins ~57.0.2) resolves parser 8.71.1 peer typescript=>=4.8.4 <6.1.0
+```
 
 ## Not changed
 

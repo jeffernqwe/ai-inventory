@@ -18,9 +18,12 @@
  *                             58.x — depends on `^30.0.0`, so jest 30 is delivered by the promotion of
  *                             SDK 58 (§27AI Gate 0). This watch is where the corrected `READY` semantics
  *                             live; see the block above `decideJestExpo` for what it got wrong first.
- *   3. `@typescript-eslint` — TypeScript 7 is blocked until the parser's `typescript` peer range admits
- *                             7. Measured 2026-10-11: the only line is 8.x, `>=4.8.4 <6.1.0`, in both
- *                             workspaces; there is no 9.x.
+ *   3. `typescript-eslint`  — TypeScript 7 is blocked until the linter each WORKSPACE actually resolves
+ *                             declares a `typescript` peer that admits 7 — and those are two different
+ *                             packages: `server/` depends on the meta package `typescript-eslint` and
+ *                             never on the parser directly, while `mobile/` gets its parser from
+ *                             `eslint-config-expo`, itself SDK-pinned. Measured 2026-10-11: both lines
+ *                             read `>=4.8.4 <6.1.0`, so no published 9.x admits 7 on either path.
  *
  * HOW TO RUN. `node scripts/check-upgrade-watches.mjs` (add `--json` for machine output, `--self-test`
  * to run the controls alone). It needs the network and is deliberately NOT part of CI: a pipeline that
@@ -140,12 +143,24 @@ function readInstalledMobileFacts() {
   const pins = readJsonIfPresent(join(REPO_ROOT, 'mobile/node_modules/expo/bundledNativeModules.json'));
   const reactNative = readJsonIfPresent(join(REPO_ROOT, 'mobile/node_modules/react-native/package.json'));
   const jestPreset = readJsonIfPresent(join(REPO_ROOT, 'mobile/node_modules/@react-native/jest-preset/package.json'));
+  const eslintConfigExpo = readJsonIfPresent(join(REPO_ROOT, 'mobile/node_modules/eslint-config-expo/package.json'));
   return {
     sdkVersion: sdkManifest?.version ?? null,
     jestExpoPin: pins?.['jest-expo'] ?? null,
     installedReactNative: reactNative?.version ?? null,
     installedJestPreset: jestPreset?.version ?? null,
+    sdkEslintConfigExpoPin: pins?.['eslint-config-expo'] ?? null,
+    installedEslintConfigExpo: eslintConfigExpo?.version ?? null,
+    // The parser range `mobile/` may actually resolve. mobile/ never declares the parser itself, so its
+    // own package.json cannot answer this — the import in `eslint.config.js` is `eslint-config-expo`.
+    mobileParserRange: eslintConfigExpo?.dependencies?.['@typescript-eslint/parser'] ?? null,
   };
+}
+
+/** A dependency range declared in one of the workspace manifests, or `null`. */
+function readDeclaredRange(relativeManifestPath, packageName) {
+  const manifest = readJsonIfPresent(join(REPO_ROOT, relativeManifestPath));
+  return manifest?.devDependencies?.[packageName] ?? manifest?.dependencies?.[packageName] ?? null;
 }
 
 /** The newest published version a simple range admits, or `null` when none does. */
@@ -184,6 +199,57 @@ function rnPresetAdmits(range, installedReactNative) {
  * Returns `{ status, detail }` with `status` one of `READY` / `DEFERRED` / `UNREADABLE`, and
  * `UNREADABLE` is never a pass.
  */
+/**
+ * The TypeScript 7 gate, per workspace, as a pure function so the controls can drive it.
+ *
+ * THE BUG THIS REPLACES. The first version read `@typescript-eslint/parser`'s `latest` and reported its
+ * `typescript` peer for both workspaces. **Neither workspace depends on that package.** `server/`
+ * depends on the meta package `typescript-eslint@^8.71.1`, and `mobile/` resolves the parser only
+ * through `eslint-config-expo@57.0.2` (`^8.59.0`) — a package the SDK pins. The old question therefore
+ * could not see a `typescript-eslint` 9.x that admits 7, and would have reported READY off a parser
+ * release `mobile/` cannot load even if it existed. It answered correctly on 2026-10-11 by coincidence:
+ * both lines happened to read `>=4.8.4 <6.1.0`.
+ *
+ * THE ASYMMETRY IS DELIBERATE, and it is the same rule the jest-expo gate uses — **the constraint the
+ * project cannot choose is the gate.** `mobile/`'s parser arrives through the SDK-pinned
+ * `eslint-config-expo`, so mobile's answer is resolved through that chain. `server/` declares the meta
+ * package itself, so the project can bump it as part of taking TypeScript 7 and the gate is simply
+ * whether a published release admits 7. `READY` needs both halves, and an unreadable input is never a
+ * pass.
+ */
+function decideTypescript7({
+  serverRange,
+  serverLatest,
+  serverPeer,
+  sdkEslintConfigExpoPin,
+  installedEslintConfigExpo,
+  mobileParserRange,
+  mobileParser,
+  mobilePeer,
+}) {
+  const serverLine = `server: typescript-eslint declared ${serverRange ?? '(none)'}, latest ${serverLatest ?? '(unreadable)'} peer typescript=${serverPeer ?? '(missing)'}`;
+  const mobileLine = mobileParserRange
+    ? `mobile: eslint-config-expo ${installedEslintConfigExpo ?? '(unreadable)'} (SDK pins ${sdkEslintConfigExpoPin ?? '(none)'}) resolves parser ${mobileParser ?? '(none)'} peer typescript=${mobilePeer ?? '(missing)'}`
+    : 'mobile: eslint-config-expo declares no @typescript-eslint/parser range (unreadable)';
+  const detail = `${serverLine} | ${mobileLine}`;
+
+  if (!serverLatest || !mobileParserRange) {
+    return { status: 'UNREADABLE', detail: `${detail} — an input could not be read` };
+  }
+
+  const serverVerdict = rangeAdmits(serverPeer, '7.0.0');
+  const mobileVerdict = rangeAdmits(mobilePeer, '7.0.0');
+  if (serverVerdict.unparsed || mobileVerdict.unparsed) {
+    return { status: 'UNREADABLE', detail: `${detail} — an unparsed peer range` };
+  }
+  if (serverVerdict.ok && mobileVerdict.ok) return { status: 'READY', detail };
+
+  const blockers = [];
+  if (!serverVerdict.ok) blockers.push('the server `typescript-eslint` line');
+  if (!mobileVerdict.ok) blockers.push('the SDK-pinned `eslint-config-expo` line for mobile');
+  return { status: 'DEFERRED', detail: `${detail} — TypeScript 7 waits on ${blockers.join(' and ')}` };
+}
+
 function decideJestExpo({ pin, installedReactNative, inLineVersion, inLineManifest, newestPublished, newestManifest }) {
   const newer =
     newestPublished && newestManifest
@@ -279,16 +345,36 @@ const WATCHES = [
     },
   },
   {
-    name: '@typescript-eslint/parser',
-    gate: 'TypeScript 7 — the typescript peer range must admit 7',
+    name: 'typescript-eslint',
+    gate: 'TypeScript 7 — the linter EACH workspace resolves must declare a typescript peer that admits 7',
     async read() {
-      const manifest = await getJson(`${REGISTRY}/${scoped('@typescript-eslint/parser')}/latest`);
-      const range = manifest.peerDependencies?.typescript;
-      const verdict = rangeAdmits(range, '7.0.0');
+      const facts = readInstalledMobileFacts();
+      const serverRange = readDeclaredRange('server/package.json', 'typescript-eslint');
+      const serverManifest = await getJson(`${REGISTRY}/${scoped('typescript-eslint')}/latest`);
+      const parserVersions = Object.keys(
+        (await getJson(`${REGISTRY}/${scoped('@typescript-eslint/parser')}`)).versions ?? {}
+      );
+      const mobileParser = facts.mobileParserRange
+        ? newestSatisfying(parserVersions, facts.mobileParserRange)
+        : null;
+      const mobileManifest = mobileParser
+        ? await getJson(`${REGISTRY}/${scoped('@typescript-eslint/parser')}/${mobileParser}`)
+        : null;
+
+      const { status, detail } = decideTypescript7({
+        serverRange,
+        serverLatest: serverManifest.version,
+        serverPeer: serverManifest.peerDependencies?.typescript ?? null,
+        sdkEslintConfigExpoPin: facts.sdkEslintConfigExpoPin,
+        installedEslintConfigExpo: facts.installedEslintConfigExpo,
+        mobileParserRange: facts.mobileParserRange,
+        mobileParser,
+        mobilePeer: mobileManifest?.peerDependencies?.typescript ?? null,
+      });
       return {
-        detail: `latest=${manifest.version}, peer typescript=${range ?? '(missing)'}`,
-        ready: verdict.ok,
-        unparsed: verdict.unparsed,
+        detail,
+        ready: status === 'READY',
+        unparsed: status === 'UNREADABLE',
         unblocks: 'TypeScript 7 in mobile/ and server/',
       };
     },
@@ -398,11 +484,112 @@ const RANGE_CONTROLS = [
   },
 ];
 
+/**
+ * The second control set, for the TypeScript 7 gate. Its must-not-fire pair is the whole point: a
+ * `typescript-eslint` release that admits 7 must still DEFER while mobile's SDK-pinned chain resolves a
+ * parser that does not, which is the case the version this replaced could not see at all.
+ */
+const TYPESCRIPT7_CONTROLS = [
+  {
+    name: 'both the server meta package and the mobile chain sit on the 8.x line (must not fire)',
+    run: () =>
+      decideTypescript7({
+        serverRange: '^8.71.1',
+        serverLatest: '8.71.1',
+        serverPeer: '>=4.8.4 <6.1.0',
+        sdkEslintConfigExpoPin: '~57.0.2',
+        installedEslintConfigExpo: '57.0.2',
+        mobileParserRange: '^8.59.0',
+        mobileParser: '8.71.1',
+        mobilePeer: '>=4.8.4 <6.1.0',
+      }),
+    expect: 'DEFERRED',
+  },
+  {
+    name: 'the bug — a 7-admitting release exists but mobile cannot load it (must not fire)',
+    run: () =>
+      decideTypescript7({
+        serverRange: '^8.71.1',
+        serverLatest: '9.0.0',
+        serverPeer: '>=4.8.4 <7.1.0',
+        sdkEslintConfigExpoPin: '~57.0.2',
+        installedEslintConfigExpo: '57.0.2',
+        mobileParserRange: '^8.59.0',
+        mobileParser: '8.71.1',
+        mobilePeer: '>=4.8.4 <6.1.0',
+      }),
+    expect: 'DEFERRED',
+  },
+  {
+    name: 'the server meta package is the only blocker (must not fire)',
+    run: () =>
+      decideTypescript7({
+        serverRange: '^8.71.1',
+        serverLatest: '8.71.1',
+        serverPeer: '>=4.8.4 <6.1.0',
+        sdkEslintConfigExpoPin: '~58.0.0',
+        installedEslintConfigExpo: '58.0.2',
+        mobileParserRange: '^9.0.0',
+        mobileParser: '9.0.0',
+        mobilePeer: '>=4.8.4 <7.1.0',
+      }),
+    expect: 'DEFERRED',
+  },
+  {
+    name: 'both paths admit 7 (must fire)',
+    run: () =>
+      decideTypescript7({
+        serverRange: '^8.71.1',
+        serverLatest: '9.0.0',
+        serverPeer: '>=4.8.4 <7.1.0',
+        sdkEslintConfigExpoPin: '~58.0.0',
+        installedEslintConfigExpo: '58.0.2',
+        mobileParserRange: '^9.0.0',
+        mobileParser: '9.0.0',
+        mobilePeer: '>=4.8.4 <7.1.0',
+      }),
+    expect: 'READY',
+  },
+  {
+    name: 'a missing mobile parser range is reported, never passed',
+    run: () =>
+      decideTypescript7({
+        serverRange: '^8.71.1',
+        serverLatest: '9.0.0',
+        serverPeer: '>=4.8.4 <7.1.0',
+        sdkEslintConfigExpoPin: '~57.0.2',
+        installedEslintConfigExpo: '57.0.2',
+        mobileParserRange: null,
+        mobileParser: null,
+        mobilePeer: null,
+      }),
+    expect: 'UNREADABLE',
+  },
+  {
+    name: 'an unparsed peer range is reported, never passed',
+    run: () =>
+      decideTypescript7({
+        serverRange: '^8.71.1',
+        serverLatest: '8.71.1',
+        serverPeer: 'workspace:^',
+        sdkEslintConfigExpoPin: '~57.0.2',
+        installedEslintConfigExpo: '57.0.2',
+        mobileParserRange: '^8.59.0',
+        mobileParser: '8.71.1',
+        mobilePeer: '>=4.8.4 <6.1.0',
+      }),
+    expect: 'UNREADABLE',
+  },
+];
+
+/** Everything the controls assert, in one list, so the summary counts are read from one place. */
+const ALL_STATE_CONTROLS = [...CONTROLS, ...TYPESCRIPT7_CONTROLS];
+
 const render = (value) => (value === null ? 'null' : JSON.stringify(value));
 
 function runControls() {
   const failures = [];
-  for (const control of [...CONTROLS, ...RANGE_CONTROLS]) {
+  for (const control of [...ALL_STATE_CONTROLS, ...RANGE_CONTROLS]) {
     let value;
     try {
       const answer = control.run();
@@ -421,7 +608,7 @@ const argv = process.argv.slice(2);
 const controlFailures = runControls();
 
 if (argv.includes('--self-test') || controlFailures.length) {
-  const total = CONTROLS.length + RANGE_CONTROLS.length;
+  const total = ALL_STATE_CONTROLS.length + RANGE_CONTROLS.length;
   if (controlFailures.length) {
     console.log(`[upgrade-watches] ${controlFailures.length} control(s) FAILED — the report was not produced:`);
     for (const failure of controlFailures) console.log(`  - ${failure}`);
@@ -430,8 +617,8 @@ if (argv.includes('--self-test') || controlFailures.length) {
   // Labelled by what each group actually asserts: how many must fire, how many must not, and how
   // many pin the range arithmetic. Calling the range controls "must-not-fire" would be a label that
   // does not match its contents.
-  const mustFire = CONTROLS.filter((c) => c.expect === 'READY').length;
-  const mustNotFire = CONTROLS.length - mustFire;
+  const mustFire = ALL_STATE_CONTROLS.filter((c) => c.expect === 'READY').length;
+  const mustNotFire = ALL_STATE_CONTROLS.length - mustFire;
   console.log(
     `[upgrade-watches] ${total} control(s) passed (${mustFire} must-fire, ${mustNotFire} must-not-fire, ${RANGE_CONTROLS.length} range)`
   );

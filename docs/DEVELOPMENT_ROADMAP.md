@@ -6752,7 +6752,7 @@ nothing. `ci.yml` and its three jobs, `scripts/check-secrets.mjs`, the pinned ac
 
 ---
 
-# 27AH. Current status, known issues and the next-step order (2026-10-10, revised 2026-10-11)
+# 27AH. Current status, known issues and the next-step order (2026-10-10, revised 2026-10-12)
 
 ## Why this section exists
 
@@ -6770,13 +6770,13 @@ update its tracking boxes, status rows and heading date at the end of a session 
 
 | Dimension | Verified state |
 | --- | --- |
-| Repository | `main` @ `b1ccc7b` = `origin/main` (re-read 2026-10-12 — this row had said `31bd7b7` and missed #56–#59); no tags, no stashes; the device guide is committed (P3-3 resolved); 2026-10-11: **ISS-13 fixed** (#45, §27AM), the **Expo pin guard** added (§27AN), the **watch script** landed (§27AQ), the **secret guard made able to fail** (§27AR), the **attribution-bearing history rewritten** (§27AS — every tree hash unchanged), the **first real-device run** performed (§27AT), the **device runbook written** (#53), and the **upgrade watch's false `READY` corrected** (§27AU, **ISS-19**) — and then the **same registry-vs-project flaw found and fixed in its third watch** (#55) |
-| CI | `.github/workflows/ci.yml` only — jobs **server / mobile / secret-guard**; last `main` run green on `b1ccc7b` (run `38131717424`, 3m30s, 2026-10-11T10:22Z — re-read 2026-10-12; the row had said `31bd7b7`), and green on the seven runs before it |
+| Repository | `main` @ `373b30a` = `origin/main` (re-read 2026-10-12 after **#60** and **#61** merged — this row had said `b1ccc7b`, which had itself replaced `31bd7b7`); **§27AY lands as #62**; no tags, no stashes; the device guide is committed (P3-3 resolved); 2026-10-11: **ISS-13 fixed** (#45, §27AM), the **Expo pin guard** added (§27AN), the **watch script** landed (§27AQ), the **secret guard made able to fail** (§27AR), the **attribution-bearing history rewritten** (§27AS — every tree hash unchanged), the **first real-device run** performed (§27AT), the **device runbook written** (#53), and the **upgrade watch's false `READY` corrected** (§27AU, **ISS-19**) — and then the **same registry-vs-project flaw found and fixed in its third watch** (#55) |
+| CI | `.github/workflows/ci.yml` only — jobs **server / mobile / secret-guard**; last `main` run green on `373b30a` (run `38163192326`, 2m39s, 2026-10-12 — jobs `server` / `mobile` / `secret-guard` all success; re-read 2026-10-12), and green on every run before it |
 | Backend | **117** `.ts` modules + one deferred `.js` (`server/src/services/entitlement.service.js`); **0** open advisories |
-| Mobile | **132** `.ts`/`.tsx` sources and **0** `.js`/`.jsx` in `app/ components/ lib/ __tests__/` (re-counted 2026-10-11); Expo 57 / RN 0.86.3 |
-| Tests | **65** server test files (`server/test/*.test.mjs`, up from 64 on 2026-10-12 by §27AX's route-inventory guard) and **50** mobile test files (file counts, re-read 2026-10-11). CI's own summary at `3beaf85`: server **185 suites / 1312 tests, 0 failures**; mobile **49 suites / 660 tests** — a "suite" there is CI's unit, not a file. Re-run locally on `3adac9d` for the device pass: mobile **50 / 666**, server **185 / 1312**, both 0 failures, `tsc` and eslint clean (§27AT) |
-| Open on GitHub | **Nothing at all** but **issue #32** (deferred majors) — re-read 2026-10-11 (late): `gh pr list --state open` is empty and one issue is open (**re-read 2026-10-12: still exactly one, #32**), **PRs #46–#59 merged** (§27AL–§27AU); #34 (ISS-16) and #38 (ISS-17) closed with their reasons |
-| Open advisories | **5** — 2 high, 3 medium, 0 critical (all mobile; re-read 2026-10-11 from the alerts API after §27AK's disposition, and **verified again** the same evening — the count drifts, and did). **Re-read 2026-10-12: still exactly 5**, confirmed independently by `npm audit --json`; `server` reports **0**; and a plain `npm audit` on `mobile/` prints **71 (55 high, 16 moderate)** for the same five advisories, because it also counts the **61 packages that merely depend on them** — see §27AK's re-confirmation before treating that larger number as a second wave. All five now have a **named fix path, all through the SDK 58 train** |
+| Mobile | **133** `.ts`/`.tsx` sources and **0** `.js`/`.jsx` in `app/ components/ lib/ __tests__/` (re-counted 2026-10-12 after §27AY's new guard); Expo 57 / RN 0.86.3, and since §27AY `react-native-reanimated` 4.5.1 / `react-native-worklets` 0.10.1 declared directly at the SDK's own pins — `expo-doctor` **21/21** and `npm ls` free of invalid entries |
+| Tests | **65** server test files (`server/test/*.test.mjs`, up from 64 on 2026-10-12 by §27AX's route-inventory guard) and **51** mobile test files (file counts, re-read 2026-10-12 — §27AY added one). CI's own summary at `3beaf85`: server **185 suites / 1312 tests, 0 failures**; mobile **49 suites / 660 tests** — a "suite" there is CI's unit, not a file. Re-run locally on `3adac9d` for the device pass: mobile **50 / 666**, server **185 / 1312**, both 0 failures, `tsc` and eslint clean (§27AT); re-run locally on 2026-10-12 (§27AY): mobile **51 suites / 674 tests**, 0 failures, with `tsc` and eslint clean |
+| Open on GitHub | **Nothing at all** but **issue #32** (deferred majors) — re-read 2026-10-11 (late): `gh pr list --state open` is empty and one issue is open (**re-read 2026-10-12: still exactly one, #32**), **PRs #46–#61 merged** (§27AL–§27AY — #60 the documentation truth pass, #61 the advisory re-confirmation); #34 (ISS-16) and #38 (ISS-17) closed with their reasons |
+| Open advisories | **5** — 2 high, 3 medium, 0 critical (all mobile; re-read 2026-10-11 from the alerts API after §27AK's disposition, and **verified again** the same evening — the count drifts, and did). **Re-read 2026-10-12: still exactly 5**, confirmed independently by `npm audit --json`; `server` reports **0**; and a plain `npm audit` on `mobile/` prints **71 (55 high, 16 moderate)** for the same five advisories, because it also counts the **61 packages that merely depend on them** — see §27AK's re-confirmation before treating that larger number as a second wave. All five now have a **named fix path, all through the SDK 58 train**. Re-read once more after §27AY's dependency change: **still 5, unchanged** |
 | Production | Render auto-deploy from `main`; `https://ai-inventory-l1mi.onrender.com` reachable and serving the AUTH-04 endpoints |
 | Device | **First physical-device run performed 2026-10-11** (§27AT): dev client `0972948` installed on the OPPO CPH1969 over USB, app launched and rendered, the USB backend path proved, the §27R register validation confirmed on hardware.  **Unauthenticated only** — nothing behind the login was reachable, so sign-in, verification, inventory and the AI assistant remain **not device-verified**. *(Corrected 2026-10-11 — §27AV: the database is not empty; it is the **test** database and holds 1,815 unusable fixture accounts. The device-run account decision is **taken** — register a fresh test account — and the database it will write into is an open owner decision, **ISS-20**.)* |
 
@@ -8393,6 +8393,104 @@ banner on a "Current state" whose HEAD is not an ancestor of `main`).
 **O-5 / O-6 / O-10 / O-11**, **ISS-02 / ISS-06 / ISS-13** and the whole of **Phase 30B** — the native build
 and the authenticated device run remain the project's real blocker, and no documentation change alters
 that. **D-1's remediation is an owner decision** and remains untaken. The `refs/original` refs stay.
+
+# 27AY. The native pairing nothing was checking, and the four packages the doctor wanted (2026-10-12)
+
+Started as a pre-build check before any EAS build and turned into a real defect. Two changes, both mobile-only,
+plus two guards. Nothing server-side, and no route, permission, session, model, schema or history change.
+
+## Change 1 — the four SDK-owned packages
+
+`npx expo-doctor` on HEAD `373b30a` reported **20/21**, failing only on *"packages match versions required by the
+installed Expo SDK"*: `expo` 57.0.26 vs expected `~57.0.27`, `expo-constants` 57.0.20 vs `~57.0.21`,
+`expo-linking` 57.0.11 vs `~57.0.12`, `expo-router` 57.0.24 vs `~57.0.25`. Patch-level, SDK-owned, inside the
+project's own rule that these move with the SDK. They are now at the expected versions and the doctor reports
+**21/21, "No issues detected"**.
+
+**The sanctioned command could not run here, and that is a finding.** `npx expo install --fix` — the command the
+dependency policy, `.github/dependabot.yml` and the §27AI runbook all name — aborts on this machine with
+`npm error code EALLOWSCRIPTS: --allow-scripts is not allowed in project-scoped installs`. The cause is the
+**user-level** `C:\Users\jeffe\.npmrc`, which contains `allow-scripts=9router`; npm 11.19.1 refuses the flag form
+Expo's installer passes and points at a `package.json` field or `.npmrc` entry instead. `expo install` writes
+`package.json` **before** the install it then fails on, so the failed run left the manifest half-moved — the
+reason `expo` briefly read `~57.0.27` with a lockfile still on 57.0.26. The same setting also prints
+`npm warn install-scripts 3 packages ... not yet covered by allowScripts` (`@firebase/util`, `protobufjs`,
+`unrs-resolver`), so **a local `node_modules` can silently differ from CI's**, which has no such `.npmrc`.
+Worked around by installing the exact versions the doctor named directly; **the SDK 58 train will hit the same
+wall** (roadmap §27AI). The `~/.npmrc` line is the owner's to change — asked, not changed.
+
+## Change 2 — a pre-existing invalid native pairing, invisible to every existing check
+
+`npm ls --package-lock-only --all` on HEAD reported `react-native-worklets@0.13.0` **invalid** against
+`expo-modules-core`'s peerOptional range `^0.7.4 || ^0.8.0 || ^0.9.0 || ^0.10.0`. **It pre-existed**: proved by
+evaluating the HEAD lockfile itself, with no `node_modules` and no network, which reproduces the same
+`ELSPROBLEMS` at `expo-modules-core@57.0.20`. Neither check could see it — `expo-doctor` validates **direct**
+dependencies, and so does §27AN's pin guard, while `react-native-reanimated` and `react-native-worklets` arrived
+only as **optional peers** (`expo-router` → reanimated; its bundled `@expo/ui` → worklets) and were resolved from
+a `*` range to the newest published versions.
+
+**Fix:** declare the pair the installed SDK's own table already names — `react-native-reanimated` **4.5.1**,
+`react-native-worklets` **0.10.1** — as **direct dependencies**, exactly as the table spells them, so the
+§27AN pin guard compares them from now on. `npm ls` is clean of invalid entries, and `expo-doctor` stays 21/21.
+
+**A wrong first hypothesis, recorded because the guard caught it.** The first draft concluded that 4.5.1 was
+*incompatible* with this app, on the reading that its `react-native: "0.83 - 0.86"` peer excluded 0.86.3, and so
+proposed keeping 4.7.1 and recording the range as stale. The new guard's own control failed: a **partial**
+hyphen range means *below the next minor*, so `0.83 - 0.86` is `>=0.83.0 <0.87.0` and **admits 0.86.3**.
+The downgrade was therefore the correct fix after all — and had the control been absent, the project would have
+kept an invalid tree on a stated reason that was simply wrong.
+
+## Change 3 — two guards, and the carve-out gap they closed
+
+- **`mobile/__tests__/native-module-pairing.test.ts`** (new, 6 tests): the installed worklets satisfies what the
+  installed reanimated states; both native packages support the installed React Native; and
+  `expo-modules-core`'s range admits the installed worklets, so the `ELSPROBLEMS` above cannot return. It carries
+  a range matcher for the forms these manifests use (`*`, `x`-pinned, exact, `^`, `~`, `a.b - c.d`, `||`) that
+  **throws on any form it does not recognise**, so an unreadable range cannot make it pass by not looking.
+- **`mobile/__tests__/expo-sdk-pins.test.ts`** (extended, +2 tests): §27AN's guard checks the manifest and fails
+  **after** a move; nothing checked that Dependabot cannot *propose* one. Measured 2026-10-12, the `/mobile`
+  ignore list was missing **four** SDK-pinned direct dependencies — `eslint-config-expo` and `jest-expo`
+  (**devDependencies**, missed because the derivation read only `dependencies`, which is what "17 of the 21" in
+  that comment was quietly wrong about), plus `react-native-reanimated` and `react-native-worklets` once Change 2
+  made them direct. All four are now listed — **21 of 21** pinned direct dependencies — and the file's YAML is
+  read as text precisely so no YAML dependency was added.
+
+Both guards were broken and restored: the pairing guard fails **2 of 6** when the installed worklets is reported
+as 0.13.0, the carve-out guard fails **2 of 8** when one ignore entry is dropped, and each passes 6/6 and 8/8
+restored. Neither is vacuous.
+
+## Evidence
+
+| Check | Result |
+| --- | --- |
+| `npx expo-doctor` | **21/21**, "No issues detected" (was 20/21) |
+| `npm ls --package-lock-only --all` | **no invalid entries** (was: worklets invalid) |
+| `npm run typecheck` | exit 0 |
+| `npm run lint` | exit 0 |
+| mobile jest | **51 suites / 674 tests**, 0 failures (was 50 / 666) |
+| `npx expo config --type public --json` | resolves; package `com.inventoryai.app`, scheme `inventoryai`, EAS project id and all six plugins intact |
+| Advisories | **unchanged: 5** — 2 high, 3 medium, 0 critical. `npm audit` still prints 71 for the same five (§27AK's two-count trap); `react-native-reanimated` and `react-native-worklets` appear there as dependents, not as new advisories |
+
+## Findings
+
+- **F-37 — a *check* that only covers direct dependencies reports success over an invalid transitive tree.** Both
+  the doctor and the pin guard were green on `373b30a` while `npm ls` was not.
+- **F-38 — a mechanical rule applied by hand drifts silently.** "Every SDK-pinned package is excluded" was correct
+  as policy and wrong as practice, twice over, because the derivation read `dependencies` and the rule was never
+  guarded.
+- **F-39 — a semver range is not readable by inspection.** `0.83 - 0.86` means `<0.87.0`, not `<=0.86.0`; the
+  project's decision flipped on that one character being understood correctly, and only a failing control caught it.
+- **F-40 — a tool that writes before it validates can leave a half-applied change.** `expo install --fix` edited
+  the manifest and then aborted, so the "nothing was changed" assumption after a failed command is unsafe here.
+- **F-41 — a developer-machine setting can block the project's own sanctioned commands.** `~/.npmrc` is outside
+  the repository, invisible in review, and named by the runbook; the same class as the ISS-19/§27AU watch flaw.
+
+## Still open, and not closed here
+
+**L-17**, **B1**, **B2 / E3 / OD-10** and the owner decisions are untouched. **ISS-02 / ISS-06 / ISS-13** and
+**Phase 30B** still need the device: this entry makes the *build inputs* correct and does not claim a build,
+an install or a device run — no EAS build was attempted, and the §27AT unauthenticated device result stands.
+**ISS-20** (which database the device run writes into) remains an owner decision, now beside the `~/.npmrc` one.
 
 # 28. Phase Gate System
 

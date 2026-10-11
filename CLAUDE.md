@@ -377,9 +377,15 @@ at most two open PRs per package, weekly — major versions are taken deliberate
 in issue #32 rather than as standing red PRs. Security updates are exempt from all of that and
 still arrive on their own. **Every package the installed Expo SDK pins** is additionally excluded from
 version updates — the rule is mechanical: if it is a key in `expo/bundledNativeModules.json`, Expo owns
-its version and Dependabot cannot know it (17 of the 21 mobile dependencies on 2026-10-11, up from the
-five React/RN core packages the carve-out originally named). These move only with an Expo SDK upgrade via
-`npx expo install --fix` (roadmap §27AH/§27AL; ISS-16, ISS-17). The four that stay open are
+its version and Dependabot cannot know it (all **21** of the 30 packages the mobile manifest declares,
+dependencies and devDependencies both, since **2026-10-12** — the earlier figure of 17 missed the two
+SDK-pinned devDependencies, `eslint-config-expo` and `jest-expo`, and the completeness of that list is now
+held by `mobile/__tests__/expo-sdk-pins.test.ts` rather than by hand). These move only with an Expo SDK
+upgrade via `npx expo install --fix` (roadmap §27AH/§27AL; ISS-16, ISS-17) — a command that **cannot run
+on the owner's machine** while the user-level `~/.npmrc` carries `allow-scripts=9router`, because npm
+11.19.1 rejects the flag form Expo's installer passes and `expo install` writes `package.json` before the
+install it then fails on; the SDK 58 train inherits this (roadmap §27AY, finding **F-41**). The four that
+stay open are
 `@react-native-firebase/app`, `@react-native-firebase/auth`, `@react-native-google-signin/google-signin`
 and `expo` itself, whose versions this project chooses deliberately.
 

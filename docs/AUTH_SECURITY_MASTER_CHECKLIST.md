@@ -1997,7 +1997,7 @@ reachable history was scanned for credentials** (48.7 MB of blobs across every r
 no `.env`, keystore, `.pem`, `.p12`, `google-services.json` or plist was ever added; zero matches for
 Google/AWS/OpenAI/Resend/Brevo/SendGrid/GitHub/Render token patterns or a credentialed `mongodb+srv://`
 URI; the "PRIVATE KEY" hits are dummy bodies in `phase32b-firebase-admin.test.mjs` and the JWT-shaped
-strings are fixtures. **Branch protection is applied and verified by API readback:** required checks
+strings are fixtures. **Branch protection is applied and verified by API readback:** *(**Corrected 2026-10-12: it is NOT applied.** The repository was reversed to **private the same day**, and protection on a private repository at this plan level answers `403 Upgrade to GitHub Pro or make this repository public` — re-read 2026-10-12, recorded as **§47**. The paragraph below already records this under "Source protection — visibility reversed to PRIVATE"; this parenthesis is on the claim itself so a reader who stops here is not misled.)* required checks
 `server` and `mobile` (**check-run names, not the UI's `ci / server` display form** — F-24), strict
 up-to-date enforcement, pull request required (**0** approvals — no
 self-approval deadlock), stale reviews dismissed, force-push and deletion blocked, and
@@ -2057,7 +2057,7 @@ hosting, not a grant of reuse rights), replacing an unstated default; **`.github
 version updates for both `server/` and `mobile/`, validated against the published `dependabot-2.0` schema,
 with security updates deliberately left ungrouped. Enabling the alerts produced a result worth recording: GitHub immediately reported
 **9 open advisories, all in `mobile/package-lock.json`** (1 critical, 4 high, 3 moderate, 1 low)
-*(corrected 2026-10-10: **7** open — 3 high, 3 medium, 1 low, **0 critical**; advisory counts drift, so the live Dependabot list is the authority)* and
+*(corrected 2026-10-10: **7** open — 3 high, 3 medium, 1 low, **0 critical**; advisory counts drift, so the live Dependabot list is the authority — and **2 of those 7 were then fixed, leaving 5, per §44**; re-read 2026-10-12: **5** — `braces`, `node-forge` (high), `sprintf-js`, `decode-uri-component`, `uuid` (medium))* and
 **Dependabot opened three security-update pull requests on its own (`#12`–`#14`)** — the feature working,
 not merely enabled. Three of the nine (`braces`, `node-forge`, `sprintf-js`) have **no published fix** and
 are **open dependency debt**, and a fourth (`uuid`) has a fix the graph **cannot reach** — Dependabot's own
@@ -2230,6 +2230,23 @@ becomes over-broad each exit 1 naming the case. The guard also flagged its own t
 first run, fixed with the documented per-line waiver rather than by hiding the strings. Roadmap §27AR.
 **Still pattern matching, not proof** — the controls prove the rules fire, not that every credential shape is
 covered.
+
+---
+
+## 47. DOCUMENTATION TRUTH PASS — THE PROTECTION CLAIM WAS FALSE, AND THE ATTRIBUTION EXPOSURE WAS UNDERSTATED (2026-10-12)
+
+Recorded here because two of its findings are security-relevant; the full engineering record is roadmap **§27AX**.
+
+| Field | Value |
+| --- | --- |
+| **The false claim** | §42 above, CLAUDE.md's main-guard bullet and roadmap §27AE all stated that **branch protection is applied and the `server`/`mobile` checks are required on `main`**. **They are not.** Re-read 2026-10-12: `gh api repos/nreffejzxc/ai-inventory/branches/main/protection` → **`403 Upgrade to GitHub Pro or make this repository public`**; `…/rulesets` → `403`; `security_and_analysis` → `null`; `allow_forking` → `true`; one collaborator (owner/admin). The configuration existed for part of **2026-10-09** and ended when the repository was reversed to private — already recorded in §42's "Source protection" paragraph, but **never on the claim itself**, so a reader who stopped at the phase record believed a gate existed |
+| **Why it mattered** | The project's stated convention is *"do not push to `main`"*, and this checklist's own §32 asserted enforcement. Nothing gates a merge and nothing flags a direct push. `SECURITY.md` was already correct |
+| **Action** | The claim is corrected **in place** in all three documents (§42 above carries it; roadmap §27AE and CLAUDE.md likewise). No setting was changed and none can be, at this plan level |
+| **The understated exposure** | §42's public-window analysis records `forks: 0`, `network_count: 0` and the traffic-API lag, and concludes it cannot be established that no copy was taken. It does **not** state *what* was exposed. Measured 2026-10-12: the pre-rewrite `main` carried **99 commits with 107 removable attribution lines** (91 `Co-Authored-By: Claude Code`), and while the repository was **public on 2026-10-09** that history was cloneable. **No secret was exposed** — the credential scan is recorded in §42 and found none — but the attribution exposure is now stated rather than left implicit |
+| **It is also not removed from the remote** | The 2026-10-11 rewrite cleaned `main`. It did **not** clean the repository: `git ls-remote origin` advertises **58 `refs/pull/*` refs**, and an ancestry walk from those tips reaches **all 99** trailer-bearing commits. GitHub prunes unreachable objects but keeps pull-request refs. Audience today is the **single owner** on a private repository; it becomes material if access widens or visibility flips. Remediating needs GitHub Support or a repository re-create — an **owner decision, recorded and untaken** |
+| **Citations** | The same rewrite **invalidated the documentation's own evidence citations**, because a message-only rewrite is still a new history: a fresh clone of `origin` resolves **2 of 27** sampled pre-rewrite SHAs; explicitly fetching `refs/pull/*` resolves **25**. Convention adopted: cite **section anchors, file paths and PR numbers** as primary evidence; treat a pre-2026-10-11 SHA as historical. `refs/original/*` is **retained** — it is what makes ~132 cited SHAs resolve locally |
+| **Guard added** | `server/test/phase-docs-route-inventory.test.mjs` — DB-free; pins the design authority's §2.6 route inventory (**72 = 47 gated + 13 authenticated + 12 public + 0 role-gated**) to the route declarations and the app registrations, by a method independent of the Phase 23 runtime classifier. **11 tests, exit 0; break/restore proven (exit 1 with the figure wrong, exit 0 restored)** |
+| **Not changed** | No source, route, model, permission, session, limiter, schema, dependency, workflow or environment variable. No Git history operation of any kind. `L-17`, `B1`, `B2`, `E3`, `OD-10` and the owner decisions all stay open |
 
 ---
 

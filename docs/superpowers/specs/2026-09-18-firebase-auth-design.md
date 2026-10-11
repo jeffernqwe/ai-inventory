@@ -156,10 +156,13 @@ set.
 
 ## 2.6 Route inventory
 
-Phase 23 classifies **68 routes**: **47 permission-gated**, **11 authenticated**, **10 public**,
+Phase 23 classifies **72 routes**: **47 permission-gated**, **13 authenticated**, **12 public**,
 **0 role-gated**. The `PUBLIC` and `AUTHENTICATED` buckets are explicit lists that each carry a
 written reason; a route in no bucket fails the guard, and a declared exemption that has stopped being
-true also fails. There is deliberately **no route-count assertion**.
+true also fails. The guard deliberately asserts **no route count** — a route is *declared* or it is not,
+and the number is derived from the declarations — so the figure above is pinned separately, by
+`server/test/phase-docs-route-inventory.test.mjs`, which reads this section and the router sources and
+fails if the two disagree.
 
 > **Updated by Phase 32F (2026-09-20).** Phase 32A recorded this as "60 routes: 47 gated, 7
 > authenticated, 6 public". Phase 26A added three authenticated routes, Phase 26B-3 added two public
@@ -168,9 +171,18 @@ true also fails. There is deliberately **no route-count assertion**.
 > provider work has added or moved a permission-gated route.
 >
 > **Phase 32H added one authenticated route, `POST /api/auth/firebase/link`** (§14B.1) —
-> 47 + 11 + 10 = **68**, the current total. *(Corrected 2026-09-22, documentation only, no behaviour
+> 47 + 11 + 10 = **68**, the total as of Phase 32H (not current — see the 2026-10-12 correction below). *(Corrected 2026-09-22, documentation only, no behaviour
 > change: the 67 figure was correct through Phase 32C and was not updated when Phase 32H added the
 > authenticated link route.)*
+>
+> **Corrected 2026-10-12 — this inventory was four routes stale.** AUTH-03 (`POST /api/auth/renew`),
+> AUTH-04 (`POST /api/auth/email-verification/request` and `/confirm`) and the N-4 credential-change
+> bridge (`POST /api/auth/credentials-changed`) all shipped **after** the last edit above, so this
+> section said **68** where the mounted set is **72**: **47 permission-gated**, **13 authenticated**,
+> **12 public**, **0 role-gated**. The figure is now measured from the route declarations in
+> `server/src/routes/*.ts` and the app-level registrations in `server/src/app.ts` by
+> `server/test/phase-docs-route-inventory.test.mjs`, which fails if this section and the code disagree. The **gated** tier is still **47** — the property the note above cares about —
+> so no provider, session or recovery work has added or moved a permission-gated route.
 
 The auth surface (`server/src/routes/auth.routes.ts`):
 
@@ -189,6 +201,10 @@ The auth surface (`server/src/routes/auth.routes.ts`):
 | GET | `/api/auth/sessions` | `requireAuth` |
 | DELETE | `/api/auth/sessions/:id` | `requireAuth` |
 | POST | `/api/auth/firebase/link` | `requireAuth` (Phase 32H) |
+| POST | `/api/auth/email-verification/request` | email-verification request limiter → controller (**pre-session**, Firebase-authenticated; AUTH-04-C) |
+| POST | `/api/auth/email-verification/confirm` | email-verification confirm limiter → controller (**pre-session**, Firebase-authenticated; AUTH-04-C) |
+| POST | `/api/auth/renew` | `requireAuth` → session-renew limiter → controller (AUTH-03) |
+| POST | `/api/auth/credentials-changed` | `requireAuth` (the N-4 credential-change bridge) |
 
 Both Firebase routes are **public** and declared with their reasons in the Phase 23 guard: a caller
 exchanging an ID token holds no Inventory AI JWT by definition, which is what the exchange exists to

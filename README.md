@@ -822,8 +822,10 @@ Phase 07 (testing + production hardening) and Phase 08 (owner-directed hardening
   `preview` and `production` — under `cli.appVersionSource: "remote"`. Both platforms use the hyphen-free
   identifier `com.inventoryai.app`. **No `eas build`, `eas submit` or `expo prebuild` has been run, so
   nothing in this phase is runtime-verified:** the evidence is the local toolchain (jest 11 suites / 88
-  tests, `tsc --noEmit`, `eslint .`, `expo-doctor` 21/21) plus config introspection. **F-1 (PDF sharing)
-  is not fixed and not closed**, and **Phase 30B has not started**.
+  tests, `tsc --noEmit`, `eslint .`, `expo-doctor` 21/21) plus config introspection.  **F-1 (PDF sharing) is fixed in code as of 2026-10-11** (§27AM — both print actions pass the same label
+  geometry, guarded by 8 cases whose two geometry assertions fail if the fix is reverted), with its
+  **print → scan round trip still unverified on hardware**; and **Phase 30B is defined as Native & Device
+  Acceptance** (§27AW) — **not started**, since it needs a native build.
 - **Phase 31 — AI Provider Wire Diagnostics & the AgentRouter → OpenRouter Migration:** complete —
   provider wire diagnostics that make an upstream failure diagnosable (`31D.3` began recording the
   status, Content-Type and a redacted body prefix for a 2xx whose body could not be parsed; `31D.6`

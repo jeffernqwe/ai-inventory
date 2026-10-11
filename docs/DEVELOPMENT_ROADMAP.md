@@ -3452,7 +3452,7 @@ this phase is **statically** validated.
 - Both platform identifiers are `com.inventoryai.app`.
 - Nothing is documented as runtime-verified, because nothing was run.
 - F-1 is recorded as **not fixed and not closed**.
-- Phase 30B is **not** started.
+- Phase 30B is **not started** — **defined 2026-10-11 as Native & Device Acceptance (§27AW)**, which resolves ISS-07.
 - Nothing committed or pushed without explicit owner approval.
 
 ---
@@ -6823,7 +6823,7 @@ one-off **message-only** rewrite, performed and verified commit by commit (§27A
 `3cef708`, with every tree hash unchanged. The 4 `dependabot[bot]` trailers are deliberately kept. (The
 earlier "103 commits" figure in this section was the first, incomplete measurement.)
 
-Next: **the device-testing account decision** (§27AT) and **P3-1** — the two items left that need the owner.
+Next: **both owner decisions this section was waiting on are taken (2026-10-11)** — the device run's account is a **fresh registration through the app**, and **Phase 30B is defined** as Native & Device Acceptance (§27AW, ISS-07 resolved). What replaces them is one new decision: **which database the local server serves** (**ISS-20**, §27AV) — the development server is currently pointed at the *test* database by `MONGODB_DB_NAME`.
 
 ## Known issues and required fixes
 
@@ -6835,7 +6835,7 @@ Next: **the device-testing account decision** (§27AT) and **P3-1** — the two 
 | **ISS-04** | Medium | `README.md` calls the mobile app "written in **JavaScript**" and starts it with **Expo Go** | README:379, README:391 | It is 129 `.ts`/`.tsx` / 0 `.js`, and it needs a **development build** (RNFirebase + dev client). Corrected 2026-10-10 |
 | **ISS-05** | Medium | §35 stated Google Sign-In was "approved, not implemented" with "no provider SDK installed" and the first dev build still a prerequisite | §35 | Corrected 2026-10-10 (see §35) |
 | **ISS-06** | Medium → **`[~]`** | **P-3, re-read at source 2026-10-10: the `[⛔]` premise was imprecise.** RNFirebase does not hardcode 34 — it declares `minSdk 23`, `targetSdk 34`, `compileSdk 34` in **its own `package.json`** (`sdkVersions.android`), which its gradle consumes. Those are a **library's** build values: AGP requires the **app's** compileSdk to be ≥ each dependency's, which holds, and a library's `targetSdk` has no runtime effect | `@react-native-firebase/app/android/build.gradle` + its `package.json`; `expo-modules-autolinking`'s `ExpoRootProjectPlugin.kt` (the app's values come from the version catalog, fallback 35); checklist §25 | **Expected-benign, and still unverified** — nothing has been built since. On the next native build, read the generated values and the Gradle output. If the app's levels need raising, the lever is **`expo-build-properties`** (`bundledNativeModules` `~57.0.22`, **not installed**), not a patch of the library |
-| **ISS-07** | Medium | **Phase 30B is referenced but never defined** — "has not started" in four places with no objective, scope or DoD | CLAUDE.md, this file's 30A record, PHASE_HISTORY, README | Define it or remove the references — owner decision (P3-1) |
+| **ISS-07** | Medium → **`[✓]`** | **Phase 30B is referenced but never defined** — "has not started" in four places with no objective, scope or DoD | CLAUDE.md, this file's 30A record, PHASE_HISTORY, README | **Defined 2026-10-11 (§27AW) as Native & Device Acceptance** — the native build and on-device measurement work, scoped to the ISS-02 logcat re-check, the ISS-06 generated SDK levels, the ISS-13 print→scan round trip, the authenticated device run, and iOS (**environment-blocked**, no macOS here). Every item needs a **device-measured observation**; blocked items are recorded as blocked, never as passing; no item closes on a code read. All four sites now point at §27AW |
 | **ISS-08** | Medium | The CLAUDE.md main-guard / access-guard bullets read as if both monitors still exist | CLAUDE.md; `.github/workflows/` holds only `ci.yml` | Corrected 2026-10-10: marked as removed; "do not push to `main`" is a **convention with no automation** |
 | **ISS-09** | Low | Module count stale at 94 | CLAUDE.md:39, `docs/TS-MIGRATION-MANIFEST.md`:16 | Live: **117** `.ts`; corrected 2026-10-10 |
 | **ISS-10** | Low | AUTH-04-H read as pending | CLAUDE.md | Complete — `0972948`; corrected 2026-10-10 |
@@ -6862,7 +6862,7 @@ P-6 + Gate 1 + iOS app registration (environment-blocked), and the new-identity 
 **Upgrades, in issue #32's order:** Expo SDK 58 — **deferred by Gate 0 until Expo promotes it to `latest`** (§27AI records the decision and the runbook; the pins differ from PR #34's set — RN 0.88 family, not 0.87.1) → the React 19 type fixes (ISS-01 is the first of them) → TypeScript 7 →
 jest 30 → ~~the `actions/*` v7 re-pin~~ (**taken early 2026-10-11 — ISS-12 resolved, §27AO**) → ~~`dotenv` 18 and `@types/bcryptjs` 3~~ (**taken 2026-10-11 — §27AP**: `dotenv` 18 taken with the preload path measured; the `@types/bcryptjs` row's premise was wrong — 3.0.0 is a deprecated stub, so the dependency was **removed** instead and `tsc` proves it). **The two that remain are now measured, not pending:** jest 30 arrives *with* the SDK 58 promotion (`jest-expo@58.0.9`), and TypeScript 7 is upstream-blocked on a typescript-eslint line that admits 7 (§27AQ).
 **Testing:** the L-17 mail leg, owner-assisted; and a dated test baseline for this section.
-**Documentation:** Phase 30B (P3-1) — **the only one left**; `docs/freebuff/*` is **decided (retained, §27AL)**, and the corrections and the device guide are done.
+**Documentation:** ~~Phase 30B (P3-1) — the only one left~~ — **done 2026-10-11 (§27AW):** 30B is defined as Native & Device Acceptance and all four sites point at it (**ISS-07** resolved). `docs/freebuff/*` is **decided (retained, §27AL)**, and the corrections and the device guide are done.
 **Deliberately not scheduled:** Facebook Login, Apple Sign-In, and everything in §35 V2/V3/V4. No new feature work
 before P0–P2 are clear.
 
@@ -6880,9 +6880,7 @@ native confirmation rides with the SDK 58 device pass) and ~~the advisory queue~
 2 of 7 fixed, 5 accepted with reasons), then ISS-06 and issue #32's upgrade train. *Exit:* CI green at each step; one device
 build launched and used per native change. *Dependency:* P2's ISS-01 pattern is established (#36).
 
-**P3 — decisions and housekeeping (owner input required).** Define or remove **Phase 30B** and assign ISS-13 to it;
-decide `docs/freebuff/*`; commit or discard the device guide; dispose of the stale WIP branch; declare CI the single
-test-count source. *Why:* phase discipline is unenforceable while a "phase" has no scope and three documents disagree.
+**P3 — decisions and housekeeping (owner input required).** ~~Define or remove **Phase 30B** and assign ISS-13 to it;~~ — **clear as of 2026-10-11:** Phase 30B **defined** as Native & Device Acceptance (**§27AW**, ISS-07 resolved; ISS-13 stopped waiting on it in §27AM); `docs/freebuff/*` **decided, retained** (§27AL); the device guide **committed** (2026-10-10); the stale WIP branch **retained with a recorded no-action** (§27AL); CI **declared the single test-count source** (ISS-15, §27AL). *Why it mattered:* phase discipline is unenforceable while a "phase" has no scope and three documents disagree — which is what §27AW ends. **One new decision replaces them: ISS-20** (§27AV).
 
 **P4 — deferred and accepted debt.** B1's residual, B2 / E3 / OD-10, L-17, O-5 / O-6 / O-10 / O-11, and the iOS gates
 (environment-blocked — no progress is possible on this host). Revisit only when P0–P3 are clear or a disposition changes.
@@ -6896,10 +6894,14 @@ test-count source. *Why:* phase discipline is unenforceable while a "phase" has 
    `npm run cleanup:test-mongodb` **empties** — because `server/.env` overrides the development database
    name. Either the local server is repointed at `inventoryai_dev_db` first, or the run accepts that a test
    run can delete the account it creates. **That is the decision now open (ISS-20).**
-2. **Decision: P3-1 (Phase 30B)** — define it or remove its references (ISS-07). **The only item left that
-   cannot be settled from the repository**: everything else in P0–P3 is now shipped, dispositioned, deferred
-   with a record, or awaiting a build — ISS-13 included (§27AM).
-3. **Keep the upgrade watches — one command, now with its own proof:**
+2. **DECIDED 2026-10-11 — Phase 30B is defined** as **Native & Device Acceptance** (§27AW): the native
+   build and on-device measurement work, scoped to the ISS-02 logcat re-check, the ISS-06 generated SDK
+   levels, the ISS-13 print→scan round trip, the authenticated device run, and iOS (environment-blocked).
+   **ISS-07 resolved.** It is a definition, not a start: 30B has not begun, and it needs a native build.
+3. **Decision now open instead: which database the local server serves** (**ISS-20**, §27AV) —
+   `server/.env` points the development server at `inventoryai_test_db`, which `npm test` writes to and
+   `npm run cleanup:test-mongodb` **empties**, so a test run can delete the account the device run creates.
+4. **Keep the upgrade watches — one command, now with its own proof:**
    `node scripts/check-upgrade-watches.mjs` (`--self-test` runs the 15 controls alone; **§27AU**). Re-read
    **2026-10-11**: the SDK 58 **Gate 0 is still closed** (`latest` 57.0.27, `next` 58.0.7) — and after the
    §27AU correction **all three watches report `DEFERRED`**, `jest-expo` included: jest 30 rides with that
@@ -6908,7 +6910,7 @@ test-count source. *Why:* phase discipline is unenforceable while a "phase" has 
    upstream-blocked on two different lines** — `server/`'s declared `typescript-eslint` meta package and the
    parser `mobile/`'s SDK-pinned `eslint-config-expo` resolves both read `typescript >=4.8.4 <6.1.0`, and no
    published release admits 7. When `latest` moves to 58, execute §27AI.
-4. **Carry the two build-time confirmations into the next native build** — the remediated PII line absent
+5. **Carry the two build-time confirmations into the next native build** — Phase 30B's opening items (§27AW) — the remediated PII line absent
    from logcat (ISS-02) and the generated `compileSdk`/`targetSdk` values read and recorded (ISS-06). Neither
    can be closed without one, and neither is claimed as closed today. **F-26 sharpens this:** the client on the
    phone was built 2026-10-03 and so **predates** the ISS-02 patch, which means the device under test is *known*
@@ -6960,7 +6962,7 @@ are closed with their reasons; those versions arrive only with the SDK 58 upgrad
 - [ ] **P2-3** issue #32 upgrade train — **partly taken 2026-10-11:** the two action re-pins (§27AO, ISS-12 resolved) and the server pair (§27AP: `dotenv` 18 taken with its preload path measured; `@types/bcryptjs` removed — its 3.0.0 is a deprecated stub); what remains is **gated, not pending** — SDK 58 on Gate 0, jest 30 with that promotion, TypeScript 7 upstream (§27AQ, `scripts/check-upgrade-watches.mjs` — whose `jest-expo` `READY` was wrong and is now corrected with controls, **ISS-19 / §27AU**)
 - [ ] **P2-5** ISS-18: the `~/.npmrc` `allow-scripts` line — **owner-side**, workaround recorded (§27AK)
 - [x] **P2-6** the Expo pin set is held in CI — ISS-16's detection gap closed by a guard suite against the installed SDK's own table, positive control included (§27AN)
-- [ ] **P3-1** Phase 30B defined or its references removed (ISS-07) — **decision needed**; ISS-13 is no longer waiting on it (§27AM)
+- [x] **P3-1** Phase 30B **defined** (ISS-07 resolved) — Native & Device Acceptance, with objective, scope and DoD (§27AW); ISS-13 is no longer waiting on it (§27AM)
 - [x] **P3-2** `docs/freebuff/*` **retained, decided** (audit/provenance layer; counts annotated as frozen) — §27AL
 - [x] **P3-3** device guide **committed** (2026-10-10; `docs/DEVELOPING_ON_A_PHYSICAL_DEVICE.md`)
 - [x] **P3-4** stale WIP branch — **retained, no action** (ISS-14: 1 ahead / 97 behind; the unique commit is the superseded backup itself) — §27AL
@@ -8118,6 +8120,58 @@ All read-only, 2026-10-11: the resolver and its comments (`config/env.ts:52-111`
 per-collection `countDocuments()`; and a five-document sample of `users` projected to email, role,
 `firebaseUid` and status only — no credential field was read. `MONGODB_DB_NAME` and `NODE_ENV` are
 recorded as names only. The `.env` file itself was never printed.
+
+# 27AW. Phase 30B defined — Native & Device Acceptance (2026-10-11)
+
+## Why this section exists
+
+Phase 30A left four statements that "Phase 30B has not started" and no statement of what it **is**
+(**ISS-07**): no objective, no scope, no definition of done. A phase that cannot be scoped can be neither
+finished nor refused, and the repository's phase discipline is unenforceable while one entry is a
+placeholder. **The owner defined it on 2026-10-11: 30B is the native build and on-device acceptance
+phase** — the work that is unreachable from JavaScript-only CI.
+
+## Objective
+
+Perform the native build(s) and the on-device measurement that no CI job can perform, and close the items
+that can only be closed with one — or record them as blocked with their reason, never as passing.
+
+## Scope
+
+| Item | What has to be **measured** | Why CI cannot do it |
+| --- | --- | --- |
+| **ISS-02** — the RNFirebase Auth PII log | on a `development` build made **after** the `patch-package` patch, drive an auth state change and confirm the `addAuthStateListener:eventBody …` line is **absent** from logcat | the line is emitted by native code in a release-shaped binary; no JS test can read logcat |
+| **ISS-06** — SDK level alignment | read the **generated** `minSdk` / `compileSdk` / `targetSdk` out of the build and record them; `expo-build-properties` enters only if the app's own levels need raising | resolvable only by Gradle, at build time |
+| **ISS-13** — the PDF label geometry | print a label from the app and **scan it back** | needs a printer and a scanner on real hardware; the fix's code half is already unit-guarded (§27AM) |
+| **the authenticated device run** | everything behind login: Firebase-first sign-in → AUTH-04 verification → tenant creation → dashboard, inventory, locations, stock in/out, transfers, suppliers, purchase orders, AI assistant, audit trail | it crosses Firebase, the mail provider, MongoDB and the phone's transport in one flow |
+| **iOS** | the same acceptance pass on iOS | **environment-blocked** — this host has no macOS, and the iOS gates are already recorded as blocked |
+
+**One constraint governs the whole phase (F-26).** The `development` client installed on the phone was
+built 2026-10-03, before the ISS-02 patch, so its native layer is *known* stale. Any item whose subject is
+native must be measured on a build made **after** the change under test — the JS half is current because
+Metro serves it, and that is exactly what makes the distinction easy to get wrong.
+
+## Definition of done
+
+- Every item above carries a **device-measured observation** — a logcat line, a Gradle value, a scanned
+  label, a request/response pair — recorded here with its date.
+- Items that cannot be measured on this host are marked **blocked with the reason** and are **not** counted
+  as passing. iOS is the standing example.
+- **No item is closed from a code read alone**, and no "not runtime-verified" claim left by 30A is upgraded
+  without its own measurement.
+- The phase adds **no** dependency, route, permission or schema change. Anything that would is a separate
+  phase with its own record.
+
+## What 30B is explicitly not
+
+Not the SDK 58 upgrade — that is §27AI's train, gated on Expo promoting the SDK. Not Phase 30A's EAS
+foundation, which is complete. And not a catch-all: the one item that used to be assigned here, ISS-13,
+was already fixed in code (§27AM), so what remains of it is the round trip listed above rather than the fix.
+
+## Evidence
+
+Documentation only. The four sites that said 30B had not started now point here, **ISS-07** records them,
+and **P3-1** is closed by this definition. No source, test, dependency, workflow or configuration changed.
 
 # 28. Phase Gate System
 

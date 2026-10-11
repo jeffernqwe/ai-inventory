@@ -548,8 +548,10 @@ and without them. The committed `app.json` diff is therefore four intentional ad
 **Nothing in Phase 30A is runtime-verified.** No `eas build`, no `eas submit`, no `expo prebuild`, no
 simulator or device run and no APK install was performed. The phase is **statically** validated only:
 `jest` 11 suites / 88 tests, `tsc --noEmit`, `eslint .` and `expo-doctor` 21/21, all identical before and
-after, plus config introspection for the resolved native surface. **F-1 (PDF sharing) is NOT fixed and
-NOT closed**, and **Phase 30B has NOT started**.
+after, plus config introspection for the resolved native surface. **F-1 (PDF sharing) was NOT fixed and NOT closed at the close of Phase 30A — corrected 2026-10-11: it is
+now FIXED in code (§27AM, both print actions pass the same label geometry, guarded by 8 cases), with only
+its print → scan round trip left unverified on hardware.** **Phase 30B has NOT started**, and it is now
+**defined** as Native & Device Acceptance (§27AW).
 
 Phase 32B and 32C are the server half of the Firebase migration, and both are additive by construction.
 32B installs the Admin SDK and the ID-token verify boundary behind `server/src/services/firebase/` and

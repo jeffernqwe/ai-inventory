@@ -12,23 +12,29 @@
  *   1. `expo`               — `latest` must move to 58 before the SDK 58 train (§27AI) can run. The
  *                             gate is deliberately `latest`, not `next`: Expo promotes an SDK when it
  *                             is ready, and the runbook is written for that moment.
- *   2. `jest-expo`          — jest 30 arrives with the SDK 58 train: the SDK 57 line (57.0.5) depends on
- *                             `@jest/globals@^29.2.1`, while 58.0.9 — the newest 58.x — depends on
- *                             `^30.0.0`, so the promotion of SDK 58 is what delivers jest 30. This entry
- *                             exists because a first manual reading of `58.0.0` showed `^29.2.1` and the
- *                             line had moved by 58.0.9 within days: it reads the registry, not a note.
+ *   2. `jest-expo`          — jest 30 arrives with the SDK 58 train, and the candidate it judges is the
+ *                             one the INSTALLED SDK pins, never the registry's `latest`/`next`. The SDK
+ *                             57 line (57.0.5) depends on `@jest/globals@^29.2.1`; 58.0.9 — the newest
+ *                             58.x — depends on `^30.0.0`, so jest 30 is delivered by the promotion of
+ *                             SDK 58 (§27AI Gate 0). This watch is where the corrected `READY` semantics
+ *                             live; see the block above `decideJestExpo` for what it got wrong first.
  *   3. `@typescript-eslint` — TypeScript 7 is blocked until the parser's `typescript` peer range admits
  *                             7. Measured 2026-10-11: the only line is 8.x, `>=4.8.4 <6.1.0`, in both
  *                             workspaces; there is no 9.x.
  *
- * HOW TO RUN. `node scripts/check-upgrade-watches.mjs` (add `--json` for machine output). It needs the
- * network and is deliberately NOT part of CI: a pipeline that fails when npm is unreachable would turn
- * an upstream outage into a red build. Exit code is 0 for "report produced" — a watch being READY is
- * news, not a failure of this script.
+ * HOW TO RUN. `node scripts/check-upgrade-watches.mjs` (add `--json` for machine output, `--self-test`
+ * to run the controls alone). It needs the network and is deliberately NOT part of CI: a pipeline that
+ * fails when npm is unreachable would turn an upstream outage into a red build. Exit code is 0 for
+ * "report produced" — a watch being READY is news, not a failure of this script. The one non-zero exit
+ * is a **failed control**, which stops the report before it is printed, so a broken rule can never be
+ * read as a clean bill of health (§27AR's rule, applied here).
  *
  * WHAT IT DOES NOT DO: it never installs, never edits `package.json`, and never decides. `READY` means
  * the gate recorded in the roadmap can be started, nothing more.
  */
+import { readFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const REGISTRY = 'https://registry.npmjs.org';
 
@@ -95,6 +101,128 @@ function compareSemver(a, b) {
 
 const compareMajorMinor = (a, b) => compareSemver(a, b);
 
+// ---------------------------------------------------------------------------
+// The jest-expo gate — what the SDK owns, and the false READY this corrects
+// ---------------------------------------------------------------------------
+//
+// THE BUG THIS REPLACES. The first version of this watch asked the registry whether ANY jest-expo
+// release admitted jest 30, reading `latest` and `next`, and set READY when one did. It found that
+// `next` (58.0.9) depends on `@jest/globals@^30.0.0` and therefore printed **READY** on 2026-10-11 —
+// while the SDK 58 promotion the roadmap gates jest 30 on (§27AI Gate 0) was still closed. The result
+// was an instruction to take `jest-expo@58.0.9` onto Expo 57, and that version is not installable
+// here: it also peers `@react-native/jest-preset@^0.88.0-rc.4` — SDK 58's React Native line, a release
+// candidate — against this project's RN 0.86.3. That is the ISS-16 / ISS-17 class of change, both of
+// which were declined for exactly this reason. The file's own header already said jest 30 "arrives with
+// the SDK 58 train"; only the code disagreed. §27AQ recorded both the READY and the SDK-promotion
+// sentence, one line apart, without noticing they contradict each other.
+//
+// WHY `next` WAS THE WRONG PLACE TO LOOK. The `expo` watch above reads only `latest` on the stated
+// principle that "Expo promotes an SDK when it is ready". Reading a *prerelease* tag on a *pinned*
+// package and calling it a green light applied the opposite rule to the same decision.
+
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+
+function readJsonIfPresent(absolutePath) {
+  try {
+    return JSON.parse(readFileSync(absolutePath, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * What the installed mobile workspace actually has. Read from `node_modules` rather than from
+ * `package.json`, because the pin table that owns these versions is the installed SDK's, and the RN
+ * version that must satisfy a preset peer is the one that would run the tests.
+ */
+function readInstalledMobileFacts() {
+  const sdkManifest = readJsonIfPresent(join(REPO_ROOT, 'mobile/node_modules/expo/package.json'));
+  const pins = readJsonIfPresent(join(REPO_ROOT, 'mobile/node_modules/expo/bundledNativeModules.json'));
+  const reactNative = readJsonIfPresent(join(REPO_ROOT, 'mobile/node_modules/react-native/package.json'));
+  const jestPreset = readJsonIfPresent(join(REPO_ROOT, 'mobile/node_modules/@react-native/jest-preset/package.json'));
+  return {
+    sdkVersion: sdkManifest?.version ?? null,
+    jestExpoPin: pins?.['jest-expo'] ?? null,
+    installedReactNative: reactNative?.version ?? null,
+    installedJestPreset: jestPreset?.version ?? null,
+  };
+}
+
+/** The newest published version a simple range admits, or `null` when none does. */
+function newestSatisfying(versions, range) {
+  const admitted = versions.filter((version) => rangeAdmits(range, version).ok);
+  if (!admitted.length) return null;
+  return admitted.reduce((best, version) => (compareSemver(version, best) > 0 ? version : best));
+}
+
+/** The release triple of a version, prerelease tags dropped (`0.88.0-rc.4` → `0.88.0`). */
+function releaseTriple(version) {
+  const m = /^(\d+)\.(\d+)\.(\d+)/.exec(String(version));
+  return m ? `${m[1]}.${m[2]}.${m[3]}` : null;
+}
+
+/**
+ * Does the installed React Native reach the line a candidate's `@react-native/jest-preset` peer asks
+ * for? Compared as release triples with prerelease tags dropped: the question is whether the installed
+ * RN is at least the line the preset was built for, and for these `0.x` peers — npm's caret caps within
+ * the minor — that floor comparison is the question. Anything unreadable answers `false`, never a pass,
+ * so an unrecognised range defers the watch instead of clearing it.
+ */
+function rnPresetAdmits(range, installedReactNative) {
+  if (typeof range !== 'string' || !installedReactNative) return false;
+  const floor = /(?:\^|~|>=)?\s*(\d+\.\d+\.\d+)/.exec(range.trim());
+  if (!floor) return false;
+  const installed = releaseTriple(installedReactNative);
+  if (!installed) return false;
+  return compareSemver(installed, releaseTriple(floor[1])) >= 0;
+}
+
+/**
+ * The jest-expo gate as a pure function, so the controls below can drive it without the network.
+ * `READY` requires BOTH halves: the installed SDK's own pin must reach a jest-30 line AND that
+ * version's RN jest-preset peer must be satisfied here. The jest range alone was the wrong question.
+ * Returns `{ status, detail }` with `status` one of `READY` / `DEFERRED` / `UNREADABLE`, and
+ * `UNREADABLE` is never a pass.
+ */
+function decideJestExpo({ pin, installedReactNative, inLineVersion, inLineManifest, newestPublished, newestManifest }) {
+  const newer =
+    newestPublished && newestManifest
+      ? `${newestPublished} (peer @react-native/jest-preset ${newestManifest.peerDependencies?.['@react-native/jest-preset'] ?? '(none)'})`
+      : 'n/a';
+  const suffix = `installed react-native=${installedReactNative ?? '(unreadable)'}; newest published stable: ${newer}`;
+
+  if (!pin) return { status: 'UNREADABLE', detail: `the installed SDK declares no jest-expo pin — ${suffix}` };
+  if (!inLineVersion || !inLineManifest) {
+    return { status: 'DEFERRED', detail: `the pin ${pin} admits no published jest-expo — ${suffix}` };
+  }
+
+  const jestRange = inLineManifest.dependencies?.['@jest/globals'] ?? inLineManifest.dependencies?.['babel-jest'] ?? null;
+  const jestVerdict = rangeAdmits(jestRange, '30.0.0');
+  if (jestVerdict.unparsed) {
+    return { status: 'UNREADABLE', detail: `unparsed jest range ${String(jestRange)} on pinned ${inLineVersion} — ${suffix}` };
+  }
+
+  const presetPeer = inLineManifest.peerDependencies?.['@react-native/jest-preset'] ?? null;
+  const presetOk = rnPresetAdmits(presetPeer, installedReactNative);
+
+  if (jestVerdict.ok && presetOk) {
+    return {
+      status: 'READY',
+      detail: `pinned ${inLineVersion}: @jest/globals=${jestRange}, preset peer ${presetPeer} satisfied by react-native ${installedReactNative} — ${suffix}`,
+    };
+  }
+  if (jestVerdict.ok) {
+    return {
+      status: 'DEFERRED',
+      detail: `pinned ${inLineVersion} admits jest 30 but its preset peer ${presetPeer ?? '(none)'} is not satisfied by react-native ${installedReactNative} — ${suffix}`,
+    };
+  }
+  return {
+    status: 'DEFERRED',
+    detail: `pinned ${inLineVersion}: @jest/globals=${jestRange ?? '(missing)'} — no jest 30 on the installed SDK's line — ${suffix}`,
+  };
+}
+
 async function getJson(url) {
   const res = await fetch(url, { headers: { accept: 'application/json' } });
   if (!res.ok) throw new Error(`${url} → HTTP ${res.status}`);
@@ -120,24 +248,34 @@ const WATCHES = [
   },
   {
     name: 'jest-expo',
-    gate: 'jest 30 — a jest-expo release must depend on the jest 30 line',
+    gate: "jest 30 — the INSTALLED SDK's own jest-expo pin must reach a jest-30 line, installable here",
     async read() {
-      // `latest` AND `next`, because the finding this watch exists for is that the 58 line did not
-      // move either — reading only `latest` would hide the SDK-58 train's own answer until promotion.
-      const tags = await getJson(`${REGISTRY}/-/package/jest-expo/dist-tags`);
-      const candidates = [...new Set([tags.latest, tags.next].filter(Boolean))];
-      const lines = [];
-      let ready = false;
-      let unparsed = false;
-      for (const version of candidates) {
-        const manifest = await getJson(`${REGISTRY}/jest-expo/${version}`);
-        const range = manifest.dependencies?.['@jest/globals'] ?? manifest.dependencies?.['babel-jest'];
-        const verdict = rangeAdmits(range, '30.0.0');
-        lines.push(`${version}: @jest/globals=${range ?? '(missing)'}${verdict.ok ? ' ← admits 30' : ''}`);
-        if (verdict.ok) ready = true;
-        if (verdict.unparsed) unparsed = true;
-      }
-      return { detail: lines.join(' | '), ready, unparsed, unblocks: 'jest 30 in mobile/' };
+      const facts = readInstalledMobileFacts();
+      const packument = await getJson(`${REGISTRY}/jest-expo`);
+      const versions = Object.keys(packument.versions ?? {});
+      const stable = versions.filter((version) => /^\d+\.\d+\.\d+$/.test(version));
+      const newestPublished = stable.reduce(
+        (best, version) => (best && compareSemver(version, best) <= 0 ? best : version),
+        null
+      );
+      const newestManifest = newestPublished ? await getJson(`${REGISTRY}/jest-expo/${newestPublished}`) : null;
+      const inLineVersion = newestSatisfying(versions, facts.jestExpoPin);
+      const inLineManifest = inLineVersion ? await getJson(`${REGISTRY}/jest-expo/${inLineVersion}`) : null;
+
+      const { status, detail } = decideJestExpo({
+        pin: facts.jestExpoPin,
+        installedReactNative: facts.installedReactNative,
+        inLineVersion,
+        inLineManifest,
+        newestPublished,
+        newestManifest,
+      });
+      return {
+        detail: `installed SDK ${facts.sdkVersion ?? '(unreadable)'} pins jest-expo ${facts.jestExpoPin ?? '(none)'} | ${detail}`,
+        ready: status === 'READY',
+        unparsed: status === 'UNREADABLE',
+        unblocks: 'jest 30 in mobile/',
+      };
     },
   },
   {
@@ -156,6 +294,149 @@ const WATCHES = [
     },
   },
 ];
+
+// ---------------------------------------------------------------------------
+// Controls — the correction's own proof
+// ---------------------------------------------------------------------------
+//
+// The §27AR standard: a check that cannot fail proves nothing. The pair that matters is the last two
+// must-not-fire cases — a version that admits jest 30 but whose RN preset this project cannot resolve
+// must DEFER — and the must-fire case in which the same candidate on an SDK whose line IS RN 0.88
+// turns READY. Without that pair, the fix would be a rule that only ever says DEFERRED.
+
+const controlManifest = (jestRange, presetPeer) => ({
+  dependencies: jestRange === undefined ? {} : { '@jest/globals': jestRange },
+  peerDependencies: presetPeer === undefined ? {} : { '@react-native/jest-preset': presetPeer },
+});
+
+const CONTROLS = [
+  {
+    name: 'the installed SDK 57 line is not a jest-30 candidate (must not fire)',
+    run: () =>
+      decideJestExpo({
+        pin: '~57.0.5',
+        installedReactNative: '0.86.3',
+        inLineVersion: '57.0.5',
+        inLineManifest: controlManifest('^29.2.1', '^0.86.3'),
+        newestPublished: '58.0.9',
+        newestManifest: controlManifest('^30.0.0', '^0.88.0-rc.4'),
+      }),
+    expect: 'DEFERRED',
+  },
+  {
+    name: 'the false READY this fixes — jest 30 admitted, RN preset unreachable (must not fire)',
+    run: () =>
+      decideJestExpo({
+        pin: '~58.0.9',
+        installedReactNative: '0.86.3',
+        inLineVersion: '58.0.9',
+        inLineManifest: controlManifest('^30.0.0', '^0.88.0-rc.4'),
+        newestPublished: '58.0.9',
+        newestManifest: controlManifest('^30.0.0', '^0.88.0-rc.4'),
+      }),
+    expect: 'DEFERRED',
+  },
+  {
+    name: 'the promotion — same candidate on an SDK line that is RN 0.88 (must fire)',
+    run: () =>
+      decideJestExpo({
+        pin: '~58.0.9',
+        installedReactNative: '0.88.0',
+        inLineVersion: '58.0.9',
+        inLineManifest: controlManifest('^30.0.0', '^0.88.0-rc.4'),
+        newestPublished: '58.0.9',
+        newestManifest: controlManifest('^30.0.0', '^0.88.0-rc.4'),
+      }),
+    expect: 'READY',
+  },
+  {
+    name: 'a pin with no published match (must not fire)',
+    run: () => decideJestExpo({ pin: '~99.0.0', installedReactNative: '0.86.3', inLineVersion: null, inLineManifest: null }),
+    expect: 'DEFERRED',
+  },
+  {
+    name: 'no jest-expo pin at all — reported, never passed',
+    run: () => decideJestExpo({ pin: null, installedReactNative: '0.86.3' }),
+    expect: 'UNREADABLE',
+  },
+  {
+    name: 'an unparsed jest range — reported, never passed',
+    run: () =>
+      decideJestExpo({
+        pin: '~57.0.5',
+        installedReactNative: '0.86.3',
+        inLineVersion: '57.0.5',
+        inLineManifest: controlManifest('workspace:^', '^0.86.3'),
+      }),
+    expect: 'UNREADABLE',
+  },
+  {
+    name: 'an unreadable RN preset peer defers rather than clearing (must not fire)',
+    run: () =>
+      decideJestExpo({
+        pin: '~58.0.9',
+        installedReactNative: '0.88.0',
+        inLineVersion: '58.0.9',
+        inLineManifest: controlManifest('^30.0.0', undefined),
+        newestPublished: '58.0.9',
+        newestManifest: controlManifest('^30.0.0', undefined),
+      }),
+    expect: 'DEFERRED',
+  },
+];
+
+const RANGE_CONTROLS = [
+  {
+    name: 'newestSatisfying picks the SDK line, not the newest overall',
+    run: () => newestSatisfying(['57.0.4', '57.0.5', '58.0.9'], '~57.0.5'),
+    expect: '57.0.5',
+  },
+  {
+    name: 'newestSatisfying reports an empty line as null',
+    run: () => newestSatisfying(['57.0.4', '58.0.9'], '~57.0.9'),
+    expect: null,
+  },
+];
+
+const render = (value) => (value === null ? 'null' : JSON.stringify(value));
+
+function runControls() {
+  const failures = [];
+  for (const control of [...CONTROLS, ...RANGE_CONTROLS]) {
+    let value;
+    try {
+      const answer = control.run();
+      value = answer && typeof answer === 'object' && 'status' in answer ? answer.status : answer;
+    } catch (error) {
+      value = `threw: ${error.message}`;
+    }
+    if (render(value) !== render(control.expect)) {
+      failures.push(`${control.name}: expected [${render(control.expect)}], got [${render(value)}]`);
+    }
+  }
+  return failures;
+}
+
+const argv = process.argv.slice(2);
+const controlFailures = runControls();
+
+if (argv.includes('--self-test') || controlFailures.length) {
+  const total = CONTROLS.length + RANGE_CONTROLS.length;
+  if (controlFailures.length) {
+    console.log(`[upgrade-watches] ${controlFailures.length} control(s) FAILED — the report was not produced:`);
+    for (const failure of controlFailures) console.log(`  - ${failure}`);
+    process.exit(1);
+  }
+  // Labelled by what each group actually asserts: how many must fire, how many must not, and how
+  // many pin the range arithmetic. Calling the range controls "must-not-fire" would be a label that
+  // does not match its contents.
+  const mustFire = CONTROLS.filter((c) => c.expect === 'READY').length;
+  const mustNotFire = CONTROLS.length - mustFire;
+  console.log(
+    `[upgrade-watches] ${total} control(s) passed (${mustFire} must-fire, ${mustNotFire} must-not-fire, ${RANGE_CONTROLS.length} range)`
+  );
+  process.exit(0);
+}
 
 const results = [];
 let failed = 0;

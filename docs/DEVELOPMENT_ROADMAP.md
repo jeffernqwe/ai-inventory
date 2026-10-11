@@ -6776,7 +6776,7 @@ update its tracking boxes, status rows and heading date at the end of a session 
 | Mobile | **132** `.ts`/`.tsx` sources and **0** `.js`/`.jsx` in `app/ components/ lib/ __tests__/` (re-counted 2026-10-11); Expo 57 / RN 0.86.3 |
 | Tests | **65** server test files (`server/test/*.test.mjs`, up from 64 on 2026-10-12 by §27AX's route-inventory guard) and **50** mobile test files (file counts, re-read 2026-10-11). CI's own summary at `3beaf85`: server **185 suites / 1312 tests, 0 failures**; mobile **49 suites / 660 tests** — a "suite" there is CI's unit, not a file. Re-run locally on `3adac9d` for the device pass: mobile **50 / 666**, server **185 / 1312**, both 0 failures, `tsc` and eslint clean (§27AT) |
 | Open on GitHub | **Nothing at all** but **issue #32** (deferred majors) — re-read 2026-10-11 (late): `gh pr list --state open` is empty and one issue is open (**re-read 2026-10-12: still exactly one, #32**), **PRs #46–#59 merged** (§27AL–§27AU); #34 (ISS-16) and #38 (ISS-17) closed with their reasons |
-| Open advisories | **5** — 2 high, 3 medium, 0 critical (all mobile; re-read 2026-10-11 from the alerts API after §27AK's disposition, and **verified again** the same evening — the count drifts, and did) |
+| Open advisories | **5** — 2 high, 3 medium, 0 critical (all mobile; re-read 2026-10-11 from the alerts API after §27AK's disposition, and **verified again** the same evening — the count drifts, and did). **Re-read 2026-10-12: still exactly 5**, confirmed independently by `npm audit --json`; `server` reports **0**; and a plain `npm audit` on `mobile/` prints **71 (55 high, 16 moderate)** for the same five advisories, because it also counts the **61 packages that merely depend on them** — see §27AK's re-confirmation before treating that larger number as a second wave. All five now have a **named fix path, all through the SDK 58 train** |
 | Production | Render auto-deploy from `main`; `https://ai-inventory-l1mi.onrender.com` reachable and serving the AUTH-04 endpoints |
 | Device | **First physical-device run performed 2026-10-11** (§27AT): dev client `0972948` installed on the OPPO CPH1969 over USB, app launched and rendered, the USB backend path proved, the §27R register validation confirmed on hardware.  **Unauthenticated only** — nothing behind the login was reachable, so sign-in, verification, inventory and the AI assistant remain **not device-verified**. *(Corrected 2026-10-11 — §27AV: the database is not empty; it is the **test** database and holds 1,815 unusable fixture accounts. The device-run account decision is **taken** — register a fresh test account — and the database it will write into is an open owner decision, **ISS-20**.)* |
 
@@ -7315,6 +7315,38 @@ that is not measured.
 accepted above. Re-read the count before quoting it; it drifts.
 
 ---
+
+## Re-confirmed 2026-10-12 — the disposition stands, and one count is a trap
+
+`npm audit` was re-run on **both** workspaces during the documentation audit. **`server/`: `found 0
+vulnerabilities`.** `mobile/`: the **same five** advisories, unchanged — **2 high (`node-forge`,
+`braces`), 3 medium (`sprintf-js`, `decode-uri-component`, `uuid`), 0 critical** — matching the
+Dependabot API exactly.
+
+**Two legitimate counts, and the larger one is not a regression.** Dependabot alerts and `npm audit
+--json`'s `vulnerabilities` map both report **5**. A plain `npm audit` prints **71 vulnerabilities (55
+high, 16 moderate, 0 critical)** for the same tree, because npm *also* counts the **61 packages that
+merely depend on** one of those five — `jest` → `@jest/*` → `jest-expo`, `expo` → `@expo/*` → `metro`,
+`@react-native/*`, `react-native`, `patch-package`, `xcode` and so on. **Five real advisories, five
+real packages; the 71 is amplification.** Anyone quoting an advisory figure should say which command
+produced it.
+
+**“Unfixable” refined — `npm audit` now names the fix path for every one of the five, and it is one
+upgrade, not five patches.** The table above records `Patched: none` for four of them; measured
+2026-10-12, each has a semver-major fix and **all five arrive with the SDK 58 train**:
+
+| Alert | Sev | Fix requires | Arrives with |
+| --- | --- | --- | --- |
+| `braces` | high | `jest` **30.5.2** (major) | SDK 58 — jest 30 rides with it (§27AQ) |
+| `sprintf-js` | medium | `jest` **30.5.2** (major) | same |
+| `decode-uri-component` | medium | `expo-router` **58.0.17** (major) | SDK 58 |
+| `node-forge` | high | `expo` (major) | SDK 58 |
+| `uuid` | medium | `expo` (major) | SDK 58 |
+
+So the disposition **stands — accept, take no action today** — with a sharper reason: they are blocked on
+**one** upgrade, and §27AI's **Gate 0** (`latest` must be 58) is the single switch. Re-read 2026-10-12:
+`latest=57.0.27`, `next=58.0.7` — **still closed**, and `node scripts/check-upgrade-watches.mjs` reports
+all three watches `DEFERRED`.
 
 # 27AL. Dependabot scope completed — every Expo-pinned package is excluded (2026-10-11)
 

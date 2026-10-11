@@ -44,6 +44,9 @@ type Manifest = {
 
 const projectRoot = join(__dirname, '..');
 
+/** The repository root, one level above `mobile/` — where `.github/dependabot.yml` lives. */
+const repoRoot = join(projectRoot, '..');
+
 const packageJson = JSON.parse(
   readFileSync(join(projectRoot, 'package.json'), 'utf8')
 ) as Manifest;
@@ -156,5 +159,61 @@ describe("the manifest is the installed Expo SDK's own pin set", () => {
     expect(sdkPins['@react-native-firebase/auth']).toBeUndefined();
     expect(sdkPins['@react-native-google-signin/google-signin']).toBeUndefined();
     expect(compare(unmanaged, sdkPins)).toEqual([]);
+  });
+});
+
+/**
+ * The OTHER half of the same rule: every SDK-pinned direct dependency must also be
+ * refused by Dependabot.
+ *
+ * WHY. The guard above only fails once a move has been made. The thing that stops a move
+ * being PROPOSED is the ignore list in `.github/dependabot.yml`, and that list is derived
+ * by hand from the same table — with no check that the derivation is complete. It was not:
+ * measured 2026-10-12 (roadmap §27AY), the derivation read `dependencies` and missed the
+ * two SDK-pinned DEVdependencies, so `eslint-config-expo` and `jest-expo` were free to be
+ * proposed even though the guard above rejects a move in either — the standing-red-PR
+ * outcome the carve-out exists to prevent. `react-native-reanimated` and
+ * `react-native-worklets` were missing too once they became direct dependencies.
+ *
+ * The YAML is read as text, deliberately: the mobile suite declares no YAML parser, and
+ * adding a dependency to parse four keys would be a worse trade than matching the one
+ * line shape this file needs. The control below keeps that honest.
+ */
+
+describe('Dependabot refuses every package the SDK pins', () => {
+  const dependabotYaml = readFileSync(join(repoRoot, '.github', 'dependabot.yml'), 'utf8');
+
+  /** The `dependency-name` values of the `/mobile` update, and nothing else. */
+  function mobileIgnoredNames(text: string): string[] {
+    // Split at each update block so the server and actions lists cannot leak in.
+    const blocks = text.split(/^\s*- package-ecosystem:/m).slice(1);
+    const mobileBlock = blocks.find((block) => /^\s*directory:\s*\/mobile\s*$/m.test(block));
+    if (!mobileBlock) throw new Error('no `/mobile` update block in .github/dependabot.yml');
+    return [...mobileBlock.matchAll(/^\s*- dependency-name:\s*"?([^"\n\r]+)"?\s*$/gm)]
+      .map((match) => match[1].trim())
+      .filter((name) => name !== '*');
+  }
+
+  const ignored = mobileIgnoredNames(dependabotYaml);
+
+  /** Pinned names the ignore list does not name — the failures. */
+  function missingFromIgnore(manifest: Manifest, ignoreNames: string[]): string[] {
+    return coveredNames(manifest, sdkPins).filter((name) => !ignoreNames.includes(name));
+  }
+
+  it('names every SDK-pinned direct dependency in its ignore list', () => {
+    // A failure here is a one-line fix: add the name to the `/mobile` `ignore` list (see the
+    // block comment beside it) rather than letting the package be proposed and then rejected
+    // by the guard above.
+    expect(missingFromIgnore(packageJson, ignored)).toEqual([]);
+  });
+
+  it('is not vacuous — a dropped entry is reported', () => {
+    // The comparator run against the same list with exactly one name removed.
+    const covered = coveredNames(packageJson, sdkPins);
+    const dropped = covered[0];
+    expect(missingFromIgnore(packageJson, ignored.filter((name) => name !== dropped))).toEqual([
+      dropped,
+    ]);
   });
 });

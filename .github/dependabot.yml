@@ -74,7 +74,8 @@ updates:
       #
       # WHY THE SCOPE GREW (2026-10-11). The carve-out originally covered five packages, which made
       # Dependabot free to propose the other twelve — derived by reading `bundledNativeModules.json`,
-      # 17 of the 21 mobile dependencies are SDK-pinned. That is exactly where the two failures came
+      # 21 of the 30 packages the mobile manifest declares — dependencies AND devDependencies — are
+      # SDK-pinned. That is exactly where the two failures came
       # from: PR #34 moved react-native/react/safe-area-context/screens outside SDK 57 (ISS-16), and
       # PR #38 proposed the SDK 57 patch rollup that cannot install at all — it nests
       # `expo-modules-core` where root-level `jest-expo` cannot resolve it, and declaring it directly
@@ -87,6 +88,15 @@ updates:
       # roadmap §27AI. Every entry below is measured against the installed SDK, so this list is
       # re-derived when the SDK moves rather than guessed.
       #
+      # WHY FOUR ENTRIES WERE ADDED (2026-10-12, roadmap §27AY). The derivation above read
+      # `dependencies` and missed the two SDK-pinned DEVdependencies, so `eslint-config-expo` and
+      # `jest-expo` sat proposable even though the pin guard (`__tests__/expo-sdk-pins.test.ts`)
+      # compares devDependencies too and rejects a move in either. The other two,
+      # `react-native-reanimated` and `react-native-worklets`, became direct dependencies that day:
+      # they had been resolved from `*` as optional peers to 4.7.1 / 0.13.0, which the installed
+      # `expo-modules-core` reported invalid (`npm ls` ELSPROBLEMS), and the fix was to declare the
+      # pair the pin table already named.
+      #
       # THE FOUR THAT STAY OPEN: `@react-native-firebase/app`, `@react-native-firebase/auth`,
       # `@react-native-google-signin/google-signin` and `expo` itself are not pinned this way — the
       # first three are version choices this project makes and Dependabot may still propose them.
@@ -94,6 +104,7 @@ updates:
       #
       # Security updates remain unaffected by every rule in this list (see the header).
       - dependency-name: "@expo/vector-icons"
+      - dependency-name: eslint-config-expo
       - dependency-name: expo
       - dependency-name: expo-camera
       - dependency-name: expo-constants
@@ -106,11 +117,14 @@ updates:
       - dependency-name: expo-sharing
       - dependency-name: expo-status-bar
       - dependency-name: expo-system-ui
+      - dependency-name: jest-expo
       - dependency-name: react
       - dependency-name: react-dom
       - dependency-name: react-native
+      - dependency-name: react-native-reanimated
       - dependency-name: react-native-safe-area-context
       - dependency-name: react-native-screens
+      - dependency-name: react-native-worklets
 
   # The workflow actions are pinned to commit SHAs, so they need an updater of their own: without
   # this entry a pinned action would sit at its current SHA forever instead of receiving the fixes

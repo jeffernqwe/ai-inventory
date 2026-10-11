@@ -7780,7 +7780,7 @@ change is `mobile/.env`, which is git-ignored (see below).
 
 | Piece | Measured state |
 | --- | --- |
-| Host tooling | `node v26.10.0` (matches `.nvmrc`), `adb 1.0.41`, `scrcpy 4.1`, `npx expo --version` → `57.0.27` |
+| Host tooling | `node v26.10.0` — **corrected 2026-10-12 (§27AY, F-43): this does NOT match `.nvmrc`, which pins `24`**, and `server/package.json` declares `engines.node: ">=24.0.0"`, so the run used a Node major ahead of CI's; `adb 1.0.41`, `scrcpy 4.1`, `npx expo --version` → `57.0.27` |
 | Device | OPPO `CPH1969`, Android 11 (SDK 30), serial `PV4DDMIZZLTCIVSK` |
 | `adb devices` | **`unauthorized`** on first inspection — the USB-debugging prompt had not been accepted. It reached `device` state only after the owner tapped it. (The runbook's own troubleshooting table already names this state and its fix.) |
 | `server/.env` | Complete — `PORT`, `MONGODB_URI`, `JWT_SECRET`, `AI_PROVIDER`, `OPENROUTER_*`, Firebase Admin, `MAIL_PROVIDER`, `RESEND_API_KEY`, `BREVO_API_KEY`, `MAIL_FROM`, `EMAIL_VERIFICATION_CODE_PEPPER`. The backend starts and reports `db: connected`. |
@@ -8407,17 +8407,30 @@ installed Expo SDK"*: `expo` 57.0.26 vs expected `~57.0.27`, `expo-constants` 57
 project's own rule that these move with the SDK. They are now at the expected versions and the doctor reports
 **21/21, "No issues detected"**.
 
-**The sanctioned command could not run here, and that is a finding.** `npx expo install --fix` — the command the
-dependency policy, `.github/dependabot.yml` and the §27AI runbook all name — aborts on this machine with
-`npm error code EALLOWSCRIPTS: --allow-scripts is not allowed in project-scoped installs`. The cause is the
-**user-level** `C:\Users\jeffe\.npmrc`, which contains `allow-scripts=9router`; npm 11.19.1 refuses the flag form
-Expo's installer passes and points at a `package.json` field or `.npmrc` entry instead. `expo install` writes
-`package.json` **before** the install it then fails on, so the failed run left the manifest half-moved — the
-reason `expo` briefly read `~57.0.27` with a lockfile still on 57.0.26. The same setting also prints
-`npm warn install-scripts 3 packages ... not yet covered by allowScripts` (`@firebase/util`, `protobufjs`,
-`unrs-resolver`), so **a local `node_modules` can silently differ from CI's**, which has no such `.npmrc`.
-Worked around by installing the exact versions the doctor named directly; **the SDK 58 train will hit the same
-wall** (roadmap §27AI). The `~/.npmrc` line is the owner's to change — asked, not changed.
+**The sanctioned command could not run here — now fixed, with two separate causes kept apart.** The first draft of
+this record attributed both symptoms below to one cause. There are two, and only one of them was the machine.
+
+1. **`npx expo install --fix` — the command the dependency policy, `.github/dependabot.yml` and the §27AI runbook
+   all name — aborted** with `npm error code EALLOWSCRIPTS: --allow-scripts is not allowed in project-scoped
+   installs`. The cause was the **user-level** `C:\Users\jeffe\.npmrc`, which carried `allow-scripts=9router`:
+   npm 11.19.1 refuses the flag form Expo's installer passes and points at a `package.json` field or `.npmrc`
+   entry instead. `expo install` writes `package.json` **before** the install it then fails on, so the failed run
+   left the manifest half-moved — the reason `expo` briefly read `~57.0.27` with a lockfile still on 57.0.26.
+   **Resolved the same session, with the owner's approval**: that one line was removed (backed up as
+   `~/.npmrc.bak.20261012030255`, and the file deleted once empty). Re-run afterwards:
+   **`npx expo install --check` → "Dependencies are up to date", exit 0**, and `npx expo install --fix` completes
+   cleanly. **This was the whole of the SDK 58 blockage** (§27AI), and it is gone.
+2. **The install-scripts warning is NOT caused by that line — it is npm's own default.** `npm warn install-scripts
+   3 packages have install scripts not yet covered by allowScripts` (`@firebase/util`, `protobufjs`,
+   `unrs-resolver`) still printed **after** the line was removed, which is what disproved the first attribution.
+   `npm config ls -l` shows why: `allow-scripts = [""]`, `allow-scripts-pin = true`, `ignore-scripts = false` —
+   npm 11.19.1 gates *dependency* install scripts by default and expects `npm install-scripts approve`. Nothing in
+   this repository changes that, and it applies wherever this npm version runs.
+
+**A third, unrelated drift found while checking the second.** This host runs `node v26.10.0`, while `.nvmrc` pins
+**24** and `server/package.json` declares `engines.node: ">=24.0.0"`; CI resolves Node from `.nvmrc`. The local
+runtime is therefore a **major ahead of CI's**, and version-dependent npm behaviour locally cannot be assumed to be
+the pinned behaviour. §27AT had recorded the opposite — corrected on that claim itself, and as **F-43** below.
 
 ## Change 2 — a pre-existing invalid native pairing, invisible to every existing check
 
@@ -8469,6 +8482,7 @@ restored. Neither is vacuous.
 | `npm run lint` | exit 0 |
 | mobile jest | **51 suites / 674 tests**, 0 failures (was 50 / 666) |
 | `npx expo config --type public --json` | resolves; package `com.inventoryai.app`, scheme `inventoryai`, EAS project id and all six plugins intact |
+| `npx expo install --check` / `--fix` | **exit 0, "Dependencies are up to date"** — the sanctioned command, re-run after the `~/.npmrc` line was removed. Before that it aborted with `EALLOWSCRIPTS`, which is why this change was made by installing exact versions directly |
 | Advisories | **unchanged: 5** — 2 high, 3 medium, 0 critical. `npm audit` still prints 71 for the same five (§27AK's two-count trap); `react-native-reanimated` and `react-native-worklets` appear there as dependents, not as new advisories. **Re-read from the alerts API after the merge on `cd405a3`, once Dependabot had re-evaluated the new lockfile: still exactly 5, the same five packages** (`braces`, `decode-uri-component`, `node-forge`, `sprintf-js`, `uuid`), and the push's own banner agreed |
 
 ## Findings
@@ -8484,13 +8498,26 @@ restored. Neither is vacuous.
   the manifest and then aborted, so the "nothing was changed" assumption after a failed command is unsafe here.
 - **F-41 — a developer-machine setting can block the project's own sanctioned commands.** `~/.npmrc` is outside
   the repository, invisible in review, and named by the runbook; the same class as the ISS-19/§27AU watch flaw.
+  Confirmed and then removed: `expo install --fix` works again. *(Corrected 2026-10-12: the first draft of this
+  finding also blamed that line for the install-scripts warning. It does not cause it — see F-42.)*
+- **F-42 — a package manager's DEFAULT can look like a local misconfiguration.** npm 11.19.1 gates dependency
+  install scripts unless approved (`allow-scripts = [""]`, `allow-scripts-pin = true`), so this warning appears on
+  a clean machine with no `.npmrc` at all. The obvious suspect was the one file that was genuinely at fault for a
+  *different* error in the same session — and it was the wrong one. Only re-running after the fix separated them.
+- **F-43 — a measurement recorded as "matching" had never been compared.** §27AT's tooling table wrote
+  `node v26.10.0` *(matches `.nvmrc`)* while `.nvmrc` pins `24`. The consequence is real rather than cosmetic: a
+  Node major ahead of CI's means locally-observed npm behaviour is not the pinned behaviour — the exact class this
+  entry spent its time on.
 
 ## Still open, and not closed here
 
 **L-17**, **B1**, **B2 / E3 / OD-10** and the owner decisions are untouched. **ISS-02 / ISS-06 / ISS-13** and
 **Phase 30B** still need the device: this entry makes the *build inputs* correct and does not claim a build,
 an install or a device run — no EAS build was attempted, and the §27AT unauthenticated device result stands.
-**ISS-20** (which database the device run writes into) remains an owner decision, now beside the `~/.npmrc` one.
+**ISS-20** (which database the device run writes into) and the build path were put to the owner the same session
+and **both are decided**: the device run writes into the **development database**, and the Phase 30B build is an
+**EAS cloud `development` build** the owner runs under their own Expo login. The `~/.npmrc` decision is closed
+above.
 
 ## Landed
 

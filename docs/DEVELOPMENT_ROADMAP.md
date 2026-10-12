@@ -8843,13 +8843,13 @@ no Firebase project state and no database row was written, and the only reposito
 ## The first registration attempt — AUTH-04 verified on hardware, and a refusal that is correct
 
 Driven from the phone against **this laptop's** backend, on the owner's primary address (the one already carrying an
-acceptance-test tenant, §27AV). Three requests, all logged by the server:
+acceptance-test tenant, §27AV). Five requests, all logged by the server, in the order they arrived:
 
 | Step | Endpoint | Result |
 | --- | --- | --- |
 | Code requested | `POST /api/auth/email-verification/request` | **200** (1958 ms) |
 | Code entered | `POST /api/auth/email-verification/confirm` | **200** (1299 ms) |
-| Tenant creation | `POST /api/auth/firebase/register` | **409 `EMAIL_IN_USE`** (366 ms) |
+| Tenant creation — **attempted twice** | `POST /api/auth/firebase/register` | **409 `EMAIL_IN_USE`** **both times** (366 ms, then 1152 ms after the code was re-confirmed at 10:21:10) |
 
 The app displayed the server's own message — *"An account with this email already exists"* — and the code the owner
 read from their inbox was accepted, so the verification half completed.
@@ -8859,7 +8859,7 @@ read from their inbox was accepted, so the verification half completed.
 `inventoryai_dev_db` (no email, no credential field and no token material printed) found **exactly one** user for
 that address: role `OWNER`, status `ACTIVE`, `firebaseUid` present, in business **`AcceptanceTest06`**
 (`planCode: FOUNDATION`, and empty — 0 products, 0 inventories, 0 locations, 0 inventory transactions). The database
-holds **11** users and **11** businesses — the §27AV acceptance-test tenants.
+holds **11** users and **11** businesses — the §27AV acceptance-test tenants. **Both refusals created nothing:** afterwards the counts are still **11 users / 11 businesses / 23 sessions**, unchanged. That is the pre-check firing *before* `Business.create` rather than depending on the rollback, it is what makes the refusal atomic in practice, and it means a refused registration leaves **no trace at all** — no business, no user, and no session minted.
 
 **So two things the phase wanted are now device-verified that were not before:**
 

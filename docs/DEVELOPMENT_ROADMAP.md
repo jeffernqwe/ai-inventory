@@ -8840,6 +8840,40 @@ login has been device-verified** — the app was launched unauthenticated and no
 **Process note:** the backend and Metro were started for this run and are still running; nothing was installed,
 no Firebase project state and no database row was written, and the only repository change is this record.
 
+## The first registration attempt — AUTH-04 verified on hardware, and a refusal that is correct
+
+Driven from the phone against **this laptop's** backend, on the owner's primary address (the one already carrying an
+acceptance-test tenant, §27AV). Three requests, all logged by the server:
+
+| Step | Endpoint | Result |
+| --- | --- | --- |
+| Code requested | `POST /api/auth/email-verification/request` | **200** (1958 ms) |
+| Code entered | `POST /api/auth/email-verification/confirm` | **200** (1299 ms) |
+| Tenant creation | `POST /api/auth/firebase/register` | **409 `EMAIL_IN_USE`** (366 ms) |
+
+The app displayed the server's own message — *"An account with this email already exists"* — and the code the owner
+read from their inbox was accepted, so the verification half completed.
+
+**The 409 is the designed behaviour, and it was verified against the database rather than argued.**
+`src/services/firebaseAuth.service.ts:288` pre-checks `User.exists({ email })` and refuses. A read-only query on
+`inventoryai_dev_db` (no email, no credential field and no token material printed) found **exactly one** user for
+that address: role `OWNER`, status `ACTIVE`, `firebaseUid` present, in business **`AcceptanceTest06`**
+(`planCode: FOUNDATION`, and empty — 0 products, 0 inventories, 0 locations, 0 inventory transactions). The database
+holds **11** users and **11** businesses — the §27AV acceptance-test tenants.
+
+**So two things the phase wanted are now device-verified that were not before:**
+
+1. **AUTH-04 works end-to-end from the phone** — request → code delivered to a real inbox → confirm **200**. (This is
+the *verification* mail, not the *recovery* mail, so **L-17 stays open** and is not touched by this.)
+2. **The email-collision refusal works end-to-end from the phone, and it is a refusal** — the account was neither
+merged nor re-pointed, which is exactly what Phase 32C promises. No `firebase_identity_collision` log was emitted, so
+the collision was on `email` and not on `firebaseUid`; the two are deliberately different events.
+
+**What it means for the run:** the registration walkthrough needs an address with **no existing `User`** — a fresh
+test account — because an address that already owns a tenant can never register a second one. That is a property of
+the design, not a defect, and it is why this attempt is recorded as a **pass of the refusal path** rather than a
+failure of registration.
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

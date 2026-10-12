@@ -6770,7 +6770,7 @@ update its tracking boxes, status rows and heading date at the end of a session 
 
 | Dimension | Verified state |
 | --- | --- |
-| Repository | `main` @ `cd405a3` = `origin/main` (re-read 2026-10-12 after **#60**–**#63** merged; this row has now drifted three times — `31bd7b7` → `b1ccc7b` → `373b30a` before it — so **run `git rev-parse HEAD` for the live value** and treat the SHA here as a snapshot); **§27AY landed as #62**, #63 was a routine Dependabot minor the same session; no tags, no stashes; the device guide is committed (P3-3 resolved); 2026-10-11: **ISS-13 fixed** (#45, §27AM), the **Expo pin guard** added (§27AN), the **watch script** landed (§27AQ), the **secret guard made able to fail** (§27AR), the **attribution-bearing history rewritten** (§27AS — every tree hash unchanged), the **first real-device run** performed (§27AT), the **device runbook written** (#53), and the **upgrade watch's false `READY` corrected** (§27AU, **ISS-19**) — and then the **same registry-vs-project flaw found and fixed in its third watch** (#55) |
+| Repository | `main` @ `da9c401` = `origin/main` (re-read 2026-10-12 after **#60**–**#67** merged — and this row has drifted **four** times now; `cd405a3` → `da9c401` was the fourth; this row has now drifted three times — `31bd7b7` → `b1ccc7b` → `373b30a` before it — so **run `git rev-parse HEAD` for the live value** and treat the SHA here as a snapshot); **§27AY landed as #62**, #63 was a routine Dependabot minor the same session; no tags, no stashes; the device guide is committed (P3-3 resolved); 2026-10-11: **ISS-13 fixed** (#45, §27AM), the **Expo pin guard** added (§27AN), the **watch script** landed (§27AQ), the **secret guard made able to fail** (§27AR), the **attribution-bearing history rewritten** (§27AS — every tree hash unchanged), the **first real-device run** performed (§27AT), the **device runbook written** (#53), and the **upgrade watch's false `READY` corrected** (§27AU, **ISS-19**) — and then the **same registry-vs-project flaw found and fixed in its third watch** (#55) |
 | CI | `.github/workflows/ci.yml` only — jobs **server / mobile / secret-guard**; last `main` run green on `cd405a3` (run `38165714705`, 2026-10-12 — jobs `server` / `mobile` / `secret-guard` all success), and on `957e5b3` before it (run `38165357249`), and on every run before those |
 | Backend | **117** `.ts` modules + one deferred `.js` (`server/src/services/entitlement.service.js`); **0** open advisories |
 | Mobile | **133** `.ts`/`.tsx` sources and **0** `.js`/`.jsx` in `app/ components/ lib/ __tests__/` (re-counted 2026-10-12 after §27AY's new guard); Expo 57 / RN 0.86.3, and since §27AY `react-native-reanimated` 4.5.1 / `react-native-worklets` 0.10.1 declared directly at the SDK's own pins — `expo-doctor` **21/21** and `npm ls` free of invalid entries |
@@ -6778,7 +6778,7 @@ update its tracking boxes, status rows and heading date at the end of a session 
 | Open on GitHub | **Nothing at all** but **issue #32** (deferred majors) — re-read 2026-10-11 (late): `gh pr list --state open` is empty and one issue is open (**re-read 2026-10-12: still exactly one, #32**), **PRs #46–#63 merged** (§27AL–§27AY — #60 the documentation truth pass, #61 the advisory re-confirmation, #62 §27AY, #63 a routine Dependabot minor); #34 (ISS-16) and #38 (ISS-17) closed with their reasons |
 | Open advisories | **5** — 2 high, 3 medium, 0 critical (all mobile; re-read 2026-10-11 from the alerts API after §27AK's disposition, and **verified again** the same evening — the count drifts, and did). **Re-read 2026-10-12: still exactly 5**, confirmed independently by `npm audit --json`; `server` reports **0**; and a plain `npm audit` on `mobile/` prints **71 (55 high, 16 moderate)** for the same five advisories, because it also counts the **61 packages that merely depend on them** — see §27AK's re-confirmation before treating that larger number as a second wave. All five now have a **named fix path, all through the SDK 58 train**. Re-read once more after §27AY's dependency change: **still 5, unchanged** |
 | Production | Render auto-deploy from `main`; `https://ai-inventory-l1mi.onrender.com` reachable and serving the AUTH-04 endpoints |
-| Device | **First physical-device run performed 2026-10-11** (§27AT): dev client `0972948` installed on the OPPO CPH1969 over USB, app launched and rendered, the USB backend path proved, the §27R register validation confirmed on hardware.  **Unauthenticated only** — nothing behind the login was reachable, so sign-in, verification, inventory and the AI assistant remain **not device-verified**. *(Corrected 2026-10-11 — §27AV: the database is not empty; it is the **test** database and holds 1,815 unusable fixture accounts. The device-run account decision is **taken** — register a fresh test account — and the database it will write into is an open owner decision, **ISS-20**.)* |
+| Device | **First physical-device run performed 2026-10-11** (§27AT): dev client `0972948` installed on the OPPO CPH1969 over USB, app launched and rendered, the USB backend path proved, the §27R register validation confirmed on hardware.  **Unauthenticated only** — nothing behind the login was reachable, so sign-in, verification, inventory and the AI assistant remain **not device-verified**. *(Corrected 2026-10-11 — §27AV: the database is not empty; it is the **test** database and holds 1,815 unusable fixture accounts. The device-run account decision is **taken** — register a fresh test account — and the database it will write into is **decided — `inventoryai_dev_db`** (ISS-20 **resolved** 2026-10-11, §27AV). A `development` APK at `da9c401` now exists and is **staged but not installed** (§27AZ, build `436b2942`).)* |
 
 ## Verified complete — with evidence
 
@@ -6823,18 +6823,18 @@ one-off **message-only** rewrite, performed and verified commit by commit (§27A
 `3cef708`, with every tree hash unchanged. The 4 `dependabot[bot]` trailers are deliberately kept. (The
 earlier "103 commits" figure in this section was the first, incomplete measurement.)
 
-Next: **both owner decisions this section was waiting on are taken (2026-10-11)** — the device run's account is a **fresh registration through the app**, and **Phase 30B is defined** as Native & Device Acceptance (§27AW, ISS-07 resolved). What replaces them is one new decision: **which database the local server serves** (**ISS-20**, §27AV) — the development server is currently pointed at the *test* database by `MONGODB_DB_NAME`.
+Next: **both owner decisions this section was waiting on are taken (2026-10-11)** — the device run's account is a **fresh registration through the app**, and **Phase 30B is defined** as Native & Device Acceptance (§27AW, ISS-07 resolved). The third item that session raised — **which database the local server serves** (**ISS-20**, §27AV) — was **decided and closed the same day**: `server/.env` serves `inventoryai_dev_db`, verified from the running process's own startup line. **Nothing here is waiting on an owner decision; the next step is a native build, not a choice** — and as of 2026-10-12 that build exists (§27AZ).
 
 ## Known issues and required fixes
 
 | ID | Sev | Issue | Evidence | Fix |
 | --- | --- | --- | --- | --- |
 | **ISS-01** | High | PR #34 fails the `mobile` job with four `TS2322`: `Type 'null' is not assignable to type 'Element \| ComponentType<any> \| undefined'` at `components/ListScreen.tsx(102,10)` and `(109,8)`, `components/RefManage.tsx(265,9)`, `components/SelectField.tsx(147,13)` | CI run `37899073322` (reproduced twice) | Fix the `null`-typed prop values — `ListScreen.tsx:86` (`?? null`), `RefManage.tsx:266` and `SelectField.tsx:150` (`: null`) → `undefined`. **Done, verified locally — PR #36** (`npx tsc --noEmit`, `npx eslint .`, `npx jest`: 47 suites / 644 tests); **not** a check to relax |
-| **ISS-02** | High → **`[~]`** | **RNFirebase PII logging reaches release builds**: `@react-native-firebase/auth` 26.4.0 logs the Firebase user object via `Log.d`, **not build-gated**; logcat only; uid/email/displayName/provider metadata, no credentials; no supported toggle | Checklist §24/§28; source re-read 2026-10-10 (one line; the id-token listener logs nothing; iOS side logs nothing) | **Remediated 2026-10-10 — `patch-package` patch + `postinstall --error-on-fail`, §27AJ.** Artifact-level verified (patch content, end-to-end reinstall applies it, 8-case guard, mobile 48/652, LF-pinned by `.gitattributes`). **Not closed:** no native build yet — §27AI step 9 re-checks logcat |
+| **ISS-02** | High → **`[~]`** | **RNFirebase PII logging reaches release builds**: `@react-native-firebase/auth` 26.4.0 logs the Firebase user object via `Log.d`, **not build-gated**; logcat only; uid/email/displayName/provider metadata, no credentials; no supported toggle | Checklist §24/§28; source re-read 2026-10-10 (one line; the id-token listener logs nothing; iOS side logs nothing) | **Remediated 2026-10-10 — `patch-package` patch + `postinstall --error-on-fail`, §27AJ.** Artifact-level verified (patch content, end-to-end reinstall applies it, 8-case guard, mobile 48/652, LF-pinned by `.gitattributes`). **Artifact-verified 2026-10-12 — §27AZ:** the literal the patch removes is **absent from the built APK's dex** and **present in a pre-patch build of the same variant** (1 → 0, four sibling log literals unchanged as controls), so this commit ships no PII-printing statement to log at all. **Still `[~]` and not `[✓]`:** §27AW requires a **device-measured** observation, so the logcat read on a phone running this build remains — narrowly, install + sign in + read |
 | **ISS-03** | Medium | Documents claim **9 open advisories** (1 critical, 4 high, 3 moderate, 1 low) | CLAUDE.md, checklist §42, this file's §27AE, issue #32 | Live value was **7** (3 high, 3 medium, 1 low, 0 critical) — corrected in place on 2026-10-10; **5 remain open** after the per-alert disposition (§27AK) |
 | **ISS-04** | Medium | `README.md` calls the mobile app "written in **JavaScript**" and starts it with **Expo Go** | README:379, README:391 | It is 129 `.ts`/`.tsx` / 0 `.js`, and it needs a **development build** (RNFirebase + dev client). Corrected 2026-10-10 |
 | **ISS-05** | Medium | §35 stated Google Sign-In was "approved, not implemented" with "no provider SDK installed" and the first dev build still a prerequisite | §35 | Corrected 2026-10-10 (see §35) |
-| **ISS-06** | Medium → **`[~]`** | **P-3, re-read at source 2026-10-10: the `[⛔]` premise was imprecise.** RNFirebase does not hardcode 34 — it declares `minSdk 23`, `targetSdk 34`, `compileSdk 34` in **its own `package.json`** (`sdkVersions.android`), which its gradle consumes. Those are a **library's** build values: AGP requires the **app's** compileSdk to be ≥ each dependency's, which holds, and a library's `targetSdk` has no runtime effect | `@react-native-firebase/app/android/build.gradle` + its `package.json`; `expo-modules-autolinking`'s `ExpoRootProjectPlugin.kt` (the app's values come from the version catalog, fallback 35); checklist §25 | **Expected-benign, and still unverified** — nothing has been built since. On the next native build, read the generated values and the Gradle output. If the app's levels need raising, the lever is **`expo-build-properties`** (`bundledNativeModules` `~57.0.22`, **not installed**), not a patch of the library |
+| **ISS-06** | Medium → **`[✓]`** | **P-3, re-read at source 2026-10-10: the `[⛔]` premise was imprecise.** RNFirebase does not hardcode 34 — it declares `minSdk 23`, `targetSdk 34`, `compileSdk 34` in **its own `package.json`** (`sdkVersions.android`), which its gradle consumes. Those are a **library's** build values: AGP requires the **app's** compileSdk to be ≥ each dependency's, which holds, and a library's `targetSdk` has no runtime effect | `@react-native-firebase/app/android/build.gradle` + its `package.json`; `expo-modules-autolinking`'s `ExpoRootProjectPlugin.kt` (the app's values come from the version catalog, fallback 35); checklist §25 | Expected-benign, **and now measured — CLOSED 2026-10-12 (§27AZ):** the built APK's merged manifest reads `compileSdk` **36**, `minSdk` **24**, `targetSdk` **36** (AGP 8.12.0), measured rather than inferred. RNFirebase's `minSdk 23` is satisfied and the levels are the SDK's own defaults, so **no level needs raising and `expo-build-properties` is not needed** — it stays uninstalled. **`compileSdk` *is* readable from the APK** (AGP writes it into the merged manifest), contrary to the note in §27AY (**F-44**); no build log and no prebuild are required |
 | **ISS-07** | Medium → **`[✓]`** | **Phase 30B is referenced but never defined** — "has not started" in four places with no objective, scope or DoD | CLAUDE.md, this file's 30A record, PHASE_HISTORY, README | **Defined 2026-10-11 (§27AW) as Native & Device Acceptance** — the native build and on-device measurement work, scoped to the ISS-02 logcat re-check, the ISS-06 generated SDK levels, the ISS-13 print→scan round trip, the authenticated device run, and iOS (**environment-blocked**, no macOS here). Every item needs a **device-measured observation**; blocked items are recorded as blocked, never as passing; no item closes on a code read. All four sites now point at §27AW |
 | **ISS-08** | Medium | The CLAUDE.md main-guard / access-guard bullets read as if both monitors still exist | CLAUDE.md; `.github/workflows/` holds only `ci.yml` | Corrected 2026-10-10: marked as removed; "do not push to `main`" is a **convention with no automation** |
 | **ISS-09** | Low | Module count stale at 94 | CLAUDE.md:39, `docs/TS-MIGRATION-MANIFEST.md`:16 | Live: **117** `.ts`; corrected 2026-10-10 |
@@ -6858,7 +6858,7 @@ P-6 + Gate 1 + iOS app registration (environment-blocked), and the new-identity 
 
 ## Pending
 
-**Fixes:** ISS-06 (with the SDK 58 train) · ISS-17/ISS-18 (decided and recorded, no action pending) · ISS-13 (**fixed, §27AM** — its device half rides with the same pass). *(ISS-01 fixed in #36; ISS-16 disposed in #37; ISS-02 remediated — §27AJ; the 7 advisories dispositioned — §27AK; all 2026-10-10.)*
+**Fixes:** ~~ISS-06~~ (**CLOSED 2026-10-12 — §27AZ**, measured from the built APK: `compileSdk` 36 / `minSdk` 24 / `targetSdk` 36, no raise needed) · ISS-17/ISS-18 (decided and recorded, no action pending) · ISS-13 (**fixed, §27AM** — its device half rides with the same pass). *(ISS-01 fixed in #36; ISS-16 disposed in #37; ISS-02 remediated — §27AJ; the 7 advisories dispositioned — §27AK; all 2026-10-10.)*
 **Upgrades, in issue #32's order:** Expo SDK 58 — **deferred by Gate 0 until Expo promotes it to `latest`** (§27AI records the decision and the runbook; the pins differ from PR #34's set — RN 0.88 family, not 0.87.1) → the React 19 type fixes (ISS-01 is the first of them) → TypeScript 7 →
 jest 30 → ~~the `actions/*` v7 re-pin~~ (**taken early 2026-10-11 — ISS-12 resolved, §27AO**) → ~~`dotenv` 18 and `@types/bcryptjs` 3~~ (**taken 2026-10-11 — §27AP**: `dotenv` 18 taken with the preload path measured; the `@types/bcryptjs` row's premise was wrong — 3.0.0 is a deprecated stub, so the dependency was **removed** instead and `tsc` proves it). **The two that remain are now measured, not pending:** jest 30 arrives *with* the SDK 58 promotion (`jest-expo@58.0.9`), and TypeScript 7 is upstream-blocked on a typescript-eslint line that admits 7 (§27AQ).
 **Testing:** the L-17 mail leg, owner-assisted; and a dated test baseline for this section.
@@ -6876,11 +6876,11 @@ before P0–P2 are clear.
 ISS-08 (done 2026-10-10). *Exit:* every corrected figure re-read from its source at edit time.
 
 **P2 — the security-relevant native layer, before the next native build.** ~~ISS-02~~ (**remediated 2026-10-10, §27AJ** —
-native confirmation rides with the SDK 58 device pass) and ~~the advisory queue~~ (**dispositioned 2026-10-10, §27AK** —
-2 of 7 fixed, 5 accepted with reasons), then ISS-06 and issue #32's upgrade train. *Exit:* CI green at each step; one device
+**artifact-verified from a real build 2026-10-12 — §27AZ**; only its device logcat read remains) and ~~the advisory queue~~ (**dispositioned 2026-10-10, §27AK** —
+2 of 7 fixed, 5 accepted with reasons), then ~~ISS-06~~ (**CLOSED 2026-10-12, §27AZ** — measured from the built APK: 36 / 24 / 36) and issue #32's upgrade train. *Exit:* CI green at each step; one device
 build launched and used per native change. *Dependency:* P2's ISS-01 pattern is established (#36).
 
-**P3 — decisions and housekeeping (owner input required).** ~~Define or remove **Phase 30B** and assign ISS-13 to it;~~ — **clear as of 2026-10-11:** Phase 30B **defined** as Native & Device Acceptance (**§27AW**, ISS-07 resolved; ISS-13 stopped waiting on it in §27AM); `docs/freebuff/*` **decided, retained** (§27AL); the device guide **committed** (2026-10-10); the stale WIP branch **retained with a recorded no-action** (§27AL); CI **declared the single test-count source** (ISS-15, §27AL). *Why it mattered:* phase discipline is unenforceable while a "phase" has no scope and three documents disagree — which is what §27AW ends. **One new decision replaces them: ISS-20** (§27AV).
+**P3 — decisions and housekeeping (owner input required).** ~~Define or remove **Phase 30B** and assign ISS-13 to it;~~ — **clear as of 2026-10-11:** Phase 30B **defined** as Native & Device Acceptance (**§27AW**, ISS-07 resolved; ISS-13 stopped waiting on it in §27AM); `docs/freebuff/*` **decided, retained** (§27AL); the device guide **committed** (2026-10-10); the stale WIP branch **retained with a recorded no-action** (§27AL); CI **declared the single test-count source** (ISS-15, §27AL). *Why it mattered:* phase discipline is unenforceable while a "phase" has no scope and three documents disagree — which is what §27AW ends. **That section's one new decision, ISS-20, was taken the same day and is closed** (§27AV — the `.env` line repointed at `inventoryai_dev_db`).
 
 **P4 — deferred and accepted debt.** B1's residual, B2 / E3 / OD-10, L-17, O-5 / O-6 / O-10 / O-11, and the iOS gates
 (environment-blocked — no progress is possible on this host). Revisit only when P0–P3 are clear or a disposition changes.
@@ -6907,11 +6907,11 @@ build launched and used per native change. *Dependency:* P2's ISS-01 pattern is 
    upstream-blocked on two different lines** — `server/`'s declared `typescript-eslint` meta package and the
    parser `mobile/`'s SDK-pinned `eslint-config-expo` resolves both read `typescript >=4.8.4 <6.1.0`, and no
    published release admits 7. When `latest` moves to 58, execute §27AI.
-4. **Carry the two build-time confirmations into the next native build** — Phase 30B's opening items (§27AW) — the remediated PII line absent
-   from logcat (ISS-02) and the generated `compileSdk`/`targetSdk` values read and recorded (ISS-06). Neither
-   can be closed without one, and neither is claimed as closed today. **F-26 sharpens this:** the client on the
-   phone was built 2026-10-03 and so **predates** the ISS-02 patch, which means the device under test is *known*
-   to still carry the unpatched logging — a fresh `development` build is the only way to close it (§27AT).
+4. **The two build-time confirmations — one CLOSED, one half-closed at the artifact level (2026-10-12, §27AZ).** Phase 30B's opening items were the remediated PII line absent
+   from logcat (ISS-02) and the generated `compileSdk`/`targetSdk` values read and recorded (ISS-06). **Both now have artifact-level answers:** §27AZ reads the generated
+   values out of the built APK's merged manifest — ISS-06 **closed** at 36 / 24 / 36, nothing to raise — and proves the PII literal absent from the built dex and
+   present in a pre-patch build of the same variant, 1 → 0 with four controls unchanged (ISS-02 artifact-verified). **What remains is device-side only: install the APK and read logcat.** **F-26 still applies, but only to the phone:** its client was built
+   2026-10-03 and **predates** the patch, so the device carries the unpatched logging until the new build replaces it (§27AT).
 
 **Do not:** start any V2/V3/V4 feature, write to production, or push directly to `main`. PRs #34 (ISS-16) and #38 (ISS-17)
 are closed with their reasons; those versions arrive only with the SDK 58 upgrade.
@@ -6953,9 +6953,9 @@ are closed with their reasons; those versions arrive only with the SDK 58 upgrad
 - [x] **P0-1** ISS-01 four `null`-typed prop values fixed — **merged (#36, `aadab04`)**, tsc/eslint/jest 644 tests
 - [x] **P0-2** ISS-16 **PR #34 closed**; Dependabot carve-out **merged (#37, `bf0c915`)**
 - [x] **P1** ISS-03 / ISS-04 / ISS-05 / ISS-08 / ISS-09 / ISS-10 / ISS-11 corrections *(done 2026-10-10)*
-- [x] **P2-1** ISS-02 RNFirebase PII remediation — **implemented, artifact-verified and merged (#40, 2026-10-10, §27AJ)**; device re-check rides with the SDK 58 pass
+- [~] **P2-1** ISS-02 RNFirebase PII remediation — **implemented and merged (#40, 2026-10-10, §27AJ)**, then **artifact-verified against a real build** (2026-10-12, §27AZ: the PII literal is absent from the shipped dex and present pre-patch, 1 → 0 with controls). **The logcat re-check is the last piece and no longer waits for SDK 58** — it needs the §27AZ build installed on the phone
 - [x] **P2-4** the 7 dependency advisories **dispositioned** — 2 fixed, 5 accepted with reasons, SDK 57 rollup declined (§27AK); Dependabot #38 closed
-- [ ] **P2-2** ISS-06 P-3 SDK alignment — **`[⛔]` corrected to `[~]` on 2026-10-10** (library values, expected-benign); confirmation needs the next native build
+- [x] **P2-2** ISS-06 P-3 SDK alignment — **`[⛔]` corrected to `[~]` on 2026-10-10 and now `[✓]`** (2026-10-12, §27AZ): the generated app values are `compileSdk` 36 / `minSdk` 24 / `targetSdk` 36, read from the built APK, so no level needs raising and `expo-build-properties` stays uninstalled
 - [ ] **P2-3** issue #32 upgrade train — **partly taken 2026-10-11:** the two action re-pins (§27AO, ISS-12 resolved) and the server pair (§27AP: `dotenv` 18 taken with its preload path measured; `@types/bcryptjs` removed — its 3.0.0 is a deprecated stub); what remains is **gated, not pending** — SDK 58 on Gate 0, jest 30 with that promotion, TypeScript 7 upstream (§27AQ, `scripts/check-upgrade-watches.mjs` — whose `jest-expo` `READY` was wrong and is now corrected with controls, **ISS-19 / §27AU**)
 - [ ] **P2-5** ISS-18: the `~/.npmrc` `allow-scripts` line — **owner-side**, workaround recorded (§27AK)
 - [x] **P2-6** the Expo pin set is held in CI — ISS-16's detection gap closed by a guard suite against the installed SDK's own table, positive control included (§27AN)
@@ -7043,8 +7043,8 @@ five** (RN and safe-area). Everything else the SDK pins follows `expo install --
    do not bump them by hand. Since §27AL the carve-out covers **every** package the installed SDK pins, so
    the excluded set and the set `--fix` is expected to move are the same set by construction.
 4. **Doctor.** `npx expo-doctor` → triage every finding. Expected guest: RNFirebase's
-   `compileSdk`/`targetSdk` 34 vs 36 (**ISS-06 / P-3** — re-read 2026-10-10: 34 is RNFirebase's own
-   **library** value and a library may compile below the app. Read and **record the generated app values**
+   `compileSdk`/`targetSdk` 34 vs 36 (**ISS-06 / P-3 — closed 2026-10-12, §27AZ: the generated app values are 36 / 24 / 36** — re-read 2026-10-10: 34 is RNFirebase's own
+   **library** value and a library may compile below the app. The generated app values were **recorded in §27AZ**; re-read them out of the new APK's merged manifest after the upgrade
    here, and raise the **app's** levels through `expo-build-properties` if Play policy requires it).
    Any warning left standing needs a dated record; none may be ignored silently.
 5. **Type pass.** `npx tsc --noEmit`. The four ISS-01 sites are already fixed (#36); **any new error
@@ -7091,7 +7091,7 @@ Record the reason and reopen issue #32's entry.
 
 - **First real RN 0.88 native build** — JS CI cannot prove it; only step 9 can.
 - **Pre-release pins** — the RN RC is exactly what Gate 0 exists for.
-- **`compileSdk` (P-3 / ISS-06)** — the upgrade is where it gets *read*: record the generated app values and any
+- **`compileSdk` (P-3 / ISS-06 — closed 2026-10-12, §27AZ)** — the upgrade is where it gets *re-read*: record the generated app values and any
   Gradle warning. A library compiling below the app is not itself a blocker (see §27AH ISS-06).
 - **ISS-02 PII** — remediated at the artifact level (§27AJ); this pass is where the fix is finally observed on a device.
 - **Advisories drift** — re-read the count at execution (7 on 2026-10-10); some may change with the
@@ -7489,8 +7489,8 @@ mistyped `npm install`.
 
 ## What it does not prove
 
-That the set **builds** — that is still a native build's job, and ISS-02's and ISS-06's confirmations ride with
-it. Nothing about transitive resolutions inside the lockfile, and nothing about patch-level currency against
+That the set **builds** — that was a native build's job, and one has since run (§27AZ): the pinned pair shipped as `libreanimated.so` + `libworklets.so` on all four ABIs, ISS-06 is closed from that APK's merged manifest and ISS-02 is artifact-verified from its dex, so those two confirmations no longer ride on it. Outside the guard's reach:
+nothing about transitive resolutions inside the lockfile, and nothing about patch-level currency against
 Expo's remote table.
 
 ## Evidence
@@ -7931,7 +7931,7 @@ themselves worth testing).
 so, note §27AV:** that registration writes into `inventoryai_test_db`, the same database `npm test` writes to and
 `npm run cleanup:test-mongodb` empties, because `server/.env` overrides the development database name. The account
 can therefore be deleted by a test run or a cleanup, and which database the local server should serve is an open
-owner decision (§27AV, **ISS-20**).
+open owner decision — **resolved the same day: the server was repointed at `inventoryai_dev_db`** (§27AV, **ISS-20**).
 
 ---
 
@@ -8197,8 +8197,8 @@ that can only be closed with one — or record them as blocked with their reason
 
 | Item | What has to be **measured** | Why CI cannot do it |
 | --- | --- | --- |
-| **ISS-02** — the RNFirebase Auth PII log | on a `development` build made **after** the `patch-package` patch, drive an auth state change and confirm the `addAuthStateListener:eventBody …` line is **absent** from logcat | the line is emitted by native code in a release-shaped binary; no JS test can read logcat |
-| **ISS-06** — SDK level alignment | read the **generated** `minSdk` / `compileSdk` / `targetSdk` out of the build and record them; `expo-build-properties` enters only if the app's own levels need raising | resolvable only by Gradle, at build time |
+| **ISS-02** — the RNFirebase Auth PII log | on a `development` build made **after** the `patch-package` patch, drive an auth state change and confirm the `addAuthStateListener:eventBody …` line is **absent** from logcat | the line is emitted by native code in a release-shaped binary; no JS test can read logcat. **The binary half is done (2026-10-12, §27AZ):** the literal is absent from the shipped dex and present pre-patch — what remains is the **in-situ logcat read** |
+| **ISS-06** — SDK level alignment | read the **generated** `minSdk` / `compileSdk` / `targetSdk` out of the build and record them; `expo-build-properties` enters only if the app's own levels need raising | **DONE 2026-10-12 — §27AZ:** the generated values are `compileSdk` 36 / `minSdk` 24 / `targetSdk` 36, read from a built APK; nothing needs raising and `expo-build-properties` stays uninstalled. **It needed a build, not a device** — AGP writes `compileSdk` into the merged manifest (**F-44**) |
 | **ISS-13** — the PDF label geometry | print a label from the app and **scan it back** | needs a printer and a scanner on real hardware; the fix's code half is already unit-guarded (§27AM) |
 | **the authenticated device run** | everything behind login: Firebase-first sign-in → AUTH-04 verification → tenant creation → dashboard, inventory, locations, stock in/out, transfers, suppliers, purchase orders, AI assistant, audit trail | it crosses Firebase, the mail provider, MongoDB and the phone's transport in one flow |
 | **iOS** | the same acceptance pass on iOS | **environment-blocked** — this host has no macOS, and the iOS gates are already recorded as blocked |
@@ -8390,7 +8390,7 @@ banner on a "Current state" whose HEAD is not an ancestor of `main`).
 ## Still open, and not closed here
 
 **L-17** (mail delivery never inspected end to end), **B1**, **B2 / E3 / OD-10**, the owner decisions
-**O-5 / O-6 / O-10 / O-11**, **ISS-02 / ISS-06 / ISS-13** and the whole of **Phase 30B** — the native build
+**O-5 / O-6 / O-10 / O-11**, **ISS-02 / ISS-13** (ISS-06 **closed** 2026-10-12, §27AZ) and the whole of **Phase 30B** — the native build
 and the authenticated device run remain the project's real blocker, and no documentation change alters
 that. **D-1's remediation is an owner decision** and remains untaken. The `refs/original` refs stay.
 
@@ -8511,9 +8511,9 @@ restored. Neither is vacuous.
 
 ## Still open, and not closed here
 
-**L-17**, **B1**, **B2 / E3 / OD-10** and the owner decisions are untouched. **ISS-02 / ISS-06 / ISS-13** and
+**L-17**, **B1**, **B2 / E3 / OD-10** and the owner decisions are untouched. **ISS-02 / ISS-13** and
 **Phase 30B** still need the device: this entry makes the *build inputs* correct and does not claim a build,
-an install or a device run — no EAS build was attempted, and the §27AT unauthenticated device result stands.
+an install or a device run — no EAS build was attempted **at the time**, and the §27AT unauthenticated device result stands. *(Superseded 2026-10-12: a `development` build was then run at `da9c401` and its APK read — §27AZ. **ISS-06 closed**; ISS-02's logcat read and ISS-13's round trip remain device-gated, and §27AT's unauthenticated result is unchanged.)*
 **ISS-20** (which database the device run writes into) and the build path were put to the owner the same session
 and **both are decided**: the device run writes into the **development database**, and the Phase 30B build is an
 **EAS cloud `development` build** the owner runs under their own Expo login. The `~/.npmrc` decision is closed
@@ -8559,11 +8559,11 @@ so nothing was added. **This build will be the first to carry §27AY's dependenc
 native-build verification of that change as well as the ISS-02 logcat re-check (F-26) — two things this entry
 cannot claim, because neither a build nor an install was performed here.
 
-## ISS-06, narrowed without a build
+## ISS-06, narrowed without a build *(superseded 2026-10-12 — the build was run; see §27AZ)*
 
 ISS-06 wants the **generated** `minSdk` / `compileSdk` / `targetSdk` read out of a build. No build was run, so it
-stays **open** — but the pre-build expectation is now measured rather than guessed, and the reason the generated
-values cannot be read offline is established rather than assumed.
+**stayed open when this was written** — the build since run closed it (§27AZ). It is kept for its pre-build reasoning, which was measured rather than guessed, and for the reason the generated
+values could not be read offline at the time — established rather than assumed, and since made moot: they are in the APK.
 
 - **What the installed toolchain declares.** `node_modules/expo-modules-core/android/ExpoModulesCorePlugin.gradle`,
   in `ext.useDefaultAndroidSdkVersions` (lines 65–69), sets `compileSdkVersion` **36**, `minSdkVersion` **24** and
@@ -8580,8 +8580,171 @@ values cannot be read offline is established rather than assumed.
   shows they do. Adding it now would be a dependency with no identified need.
 - **How to capture them from the owner's cloud build.** `minSdk` and `targetSdk` are recorded **in the installed
   APK**, so `adb shell dumpsys package com.inventoryai.app` on the connected phone reports both with no local
-  prebuild — this is the recommended capture. **`compileSdk` is not in the APK** (it is build-time only), so it
-  has to come from the build log first, and from a throwaway prebuild only if the log does not show it.
+  prebuild — this is the recommended capture. ~~**`compileSdk` is not in the APK** (it is build-time only)~~ — **WRONG, corrected 2026-10-12 (§27AZ, F-44):** AGP writes `android:compileSdkVersion` into the merged
+  manifest, so `aapt` reads **all three** values out of the single downloaded APK. No connected device is
+  needed, and no build log: that is exactly how §27AZ closed ISS-06. The superseded reading was that
+  `compileSdk` had to come from the build log first, and from a throwaway prebuild only if the log did not
+  show it.
+
+# 27AZ. The Phase 30B build — ISS-06 closed, ISS-02 verified at the artifact level, and the dependency fix proved natively (2026-10-12)
+
+## What was run
+
+One command, from `mobile/`, on the owner's authorization:
+
+```text
+eas build --profile development --platform android
+```
+
+| | |
+| --- | --- |
+| Build | `436b2942-ff18-428b-8942-01583c3b47c2`, profile `development`, platform `ANDROID` |
+| Commit | `da9c401e468be59700672e476ea550e52f889160` — exactly the merged `main` this record sits on |
+| Result | **FINISHED**, 2026-10-11T19:27:54Z → 19:47:03Z (19 min 9 s), SDK 57.0.0 |
+| Artifact | `https://expo.dev/artifacts/eas/4NIbPXMQ9-C6Q_aH_UtdGxe8gU69tNqzznbw2-EBHRg.apk` — 257,826,975 bytes, sha256 `d823f90d8f9cddf1b1ea51ad04930f1438c1570bc77f16dbc7c7c5ace49795e4`, staged locally as `C:\Users\jeffe\Downloads\inventoryai-dev-da9c401.apk` |
+| Variant | `developmentClient: true`, `distribution: internal`, `android.buildType: apk` — a **debug** variant, so R8 strips nothing and a dex scan is meaningful |
+
+**Read from the artifact, not from a device.** Everything below comes from the APK itself — its merged manifest
+(`aapt dump badging`, `aapt dump xmltree AndroidManifest.xml`) and its nine `classes*.dex` files. **No phone was
+connected** (`adb devices` was empty), nothing was installed, and **no device claim is made here.**
+
+## ISS-06 — CLOSED, measured
+
+`compileSdk` and `minSdk`/`targetSdk`, read out of the built APK's merged `AndroidManifest.xml`:
+
+| Value | Measured | How |
+| --- | --- | --- |
+| `compileSdkVersion` | **36** (codename `16`) | `aapt dump badging` → `compileSdkVersion='36'` **and** `xmltree` → `android:compileSdkVersion(0x01010572)=0x24` |
+| `minSdkVersion` | **24** (`0x18`) | `xmltree` → `android:minSdkVersion(0x0101020c)=0x18` |
+| `targetSdkVersion` | **36** (`0x24`) | `xmltree` → `android:targetSdkVersion(0x01010270)=0x24` |
+
+**How this reads against §27AW's definition of done.** That definition requires a *device-measured* observation
+for Phase 30B's items and forbids closing an item from a non-device read. ISS-06 is closed here **without a
+device because its own item is worded that way** — "the **generated** `minSdk`/`compileSdk`/`targetSdk` read out
+of the **build**": the APK *is* the build's output, and the values inside it are the generated ones rather than
+a template default inferred from the SDK. **ISS-02 is deliberately treated the opposite way** and stays `[~]`
+below, because its item names **logcat** specifically. The rule is being applied, not waived — which is why the
+distinction is written down here instead of left to the reader.
+
+Also read: package `com.inventoryai.app`, `versionCode` 1, `versionName` 1.0.0, label `Inventory AI`, Android
+Gradle Plugin **8.12.0** (`META-INF/com/android/build/gradle/app-metadata.properties`), and all four ABIs built
+(`arm64-v8a`, `armeabi-v7a`, `x86`, `x86_64` — 26 native libraries each).
+
+**The expectation held, and nothing needs raising.** RNFirebase declares `minSdk 23` in its own `package.json`,
+which 24 satisfies; the generated levels are the installed SDK's own declared defaults (`compileSdk` 36 /
+`minSdk` 24 / `targetSdk` 36). So **`expo-build-properties` is not needed** — the condition ISS-06 attached to
+installing it ("only if the app's own levels need raising") is not met, and §27AY's decision not to add it up
+front is confirmed by measurement rather than by reasoning about defaults. The package stays **uninstalled**.
+
+**F-44 — the APK does carry `compileSdk`, and §27AY said it did not.** §27AY's capture procedure recommended
+`adb shell dumpsys package` for `minSdk`/`targetSdk` and stated *"`compileSdk` is not in the APK (it is
+build-time only), so it has to come from the build log first"*. That is **false**: AGP writes
+`android:compileSdkVersion` into the merged manifest and `aapt` reads it. All three values therefore come from
+**one file**, with no phone, no prebuild and no build-log scraping — which is why ISS-06 closed here at all. The
+claim is corrected in place in §27AY.
+
+## ISS-02 — the artifact-level half, proved differentially
+
+§27AJ's `patch-package` patch removes exactly one statement from
+`@react-native-firebase/auth/android/src/main/java/io/invertase/firebase/auth/NativeRNFBTurboAuth.java`:
+
+```java
+-  Log.d(TAG, "addAuthStateListener:eventBody " + eventBody.toString());
+```
+
+That literal is unique to the removed statement, and the variant is a **debug** build in which R8 strips
+nothing — so its presence or absence in the shipped dex is a direct test of whether the patch reached the
+**built binary** through the real pipeline (cloud `npm install` → `postinstall: patch-package
+--error-on-fail` → Gradle → dex). Two artifacts, same variant, one before the patch and one after:
+
+| Literal searched in all nine dex files | Pre-patch `8cd4392c` (2026-10-03) | Post-patch `436b2942` (`da9c401`) |
+| --- | --- | --- |
+| `addAuthStateListener:eventBody` — **the PII log** | **1** | **0** |
+| `addAuthStateListener` — its plain sibling `Log.d` | 5 | 4 |
+| `removeIdTokenListener` | 2 | 2 |
+| `signInAnonymously:onComplete:success` | 1 | 1 |
+| `configureAuthDomain - app ` | 1 | 1 |
+
+**The check can fail, and that was proved rather than asserted.** The pre-patch build is the same
+`development` variant built four days earlier and it **contains** the literal, so the scan is not a search that
+cannot fail. The counts move by exactly one, in exactly the right literal: the plain `addAuthStateListener` log
+in the *same method* drops 5 → 4 because the patched statement was one of them, while three unrelated RNFirebase
+logs are unchanged at 1 / 1 / 2. That pattern is what a one-line removal looks like, and it is **not** what
+log-stripping looks like — stripping would have emptied every row.
+
+**What this does and does not close.** The finding was that RNFirebase's PII log "is **not** build-gated" and
+therefore **reaches release builds**. A statement absent from the compiled dex **cannot print to logcat on any
+device, in any build of this commit** — strictly stronger evidence than a device read, and it removes F-26's
+premise that the device under test is *known* to carry the unpatched logging. **ISS-02 nevertheless stays
+`[~]`, not `[✓]`**, because Phase 30B's definition of done (§27AW) requires a **device-measured** observation
+and says explicitly that no item is closed from a non-device read. The remaining step is narrow and mechanical:
+install this APK, exercise sign-in, read logcat.
+
+## §27AY's dependency fix, verified natively
+
+The same artifact proves what §27AY could previously only guard statically. `react-native-reanimated` **4.5.1**
+and `react-native-worklets` **0.10.1** are now declared directly at the installed SDK's own pins, replacing a
+resolution that had produced `react-native-worklets@0.13.0` — **invalid** against `expo-modules-core`'s peer
+range — and the pair **links and ships**:
+
+```text
+lib/arm64-v8a/libreanimated.so      8,280,856 B
+lib/arm64-v8a/libworklets.so        4,629,920 B
+```
+
+…with both present for **all four** ABIs. A native build that compiles and packages both libraries is the
+strongest evidence available short of a device run that the pairing is coherent, and it is evidence the §27AN
+pin guard and `expo-doctor` cannot produce: they compare **declared** versions, this compares what was actually
+**built**.
+
+## The artifact is a usable dev client
+
+The device run in `docs/DEVELOPING_ON_A_PHYSICAL_DEVICE.md` §6a depends on this, so it is checked here rather
+than discovered on the phone:
+
+- `expo.modules.devlauncher.launcher.DevLauncherActivity` is declared, with the `expo-dev-launcher` scheme.
+- `launchable-activity` is `com.inventoryai.app.MainActivity`.
+- No JS bundle is embedded — expected for a `developmentClient` build, which loads JS from Metro.
+- `app.json`'s `scheme` is still exactly `["inventoryai"]`. The manifest additionally carries
+  **`exp+inventory-ai`**, which is **`expo-dev-client`'s own slug-derived deep link** (`slug` is
+  `inventory-ai`), added at build time for a dev build. **It is not a Phase F2 regression** and needs no
+action — recorded so a future session does not "fix" it.
+
+## Findings
+
+- **F-44 — a documented "impossible" was merely inconvenient.** §27AY declared `compileSdk` unavailable from
+the APK and built a workaround around that belief; it is in the merged manifest and one `aapt` call reads it.
+The cost was a planned two-source capture (device **and** build log) where one file suffices.
+- **F-45 — a build settles more than the thing it was built for.** One EAS build, launched for Phase 30B's
+device item, closed ISS-06, upgraded ISS-02 from "patch applied on disk" to "absent from the shipped binary,
+with a failing control", and proved the §27AY native pairing — three open items from one artifact. The artifact
+deserves to be **read**, not merely installed.
+- **F-46 — an absence needs a comparator.** "The literal is not in the dex" was worth little on its own: it is
+equally consistent with a patch that never reached the build, with log stripping, and with a broken scan. Only
+the pre-patch build of the same variant turned it into a measurement. The discipline this project already
+applies to `scripts/check-secrets.mjs` and `scripts/check-upgrade-watches.mjs` applies to an artifact scan too.
+
+## Still open, and not closed here
+
+**ISS-02's logcat read, ISS-13's print→scan round trip, the authenticated device run and iOS** all remain
+exactly as §27AW defines them — **device-gated, and none is claimed**. **The phone was not connected** (`adb
+devices` empty), nothing was installed, and **no runtime claim is made about the app**. **L-17**, **B1**,
+**B2 / E3 / OD-10** and the owner decisions are untouched. No source, test, route, schema, permission,
+dependency, workflow or configuration changed — the only repository change is this record and the corrections
+it carries.
+
+## Next
+
+Install the staged APK and read logcat (§27AW item 1), which closes ISS-02's last half:
+
+```text
+adb install -r C:\Users\jeffe\Downloads\inventoryai-dev-da9c401.apk
+adb shell am start -n com.inventoryai.app/.MainActivity
+adb logcat -c && adb logcat | grep -i "addAuthStateListener"
+```
+
+Expected: **no line at all** from the removed statement. The plain `Log.d(TAG, "addAuthStateListener")` **is**
+expected to still appear — which is the in-situ confirmation that the tag is being watched at all.
 
 # 28. Phase Gate System
 

@@ -720,7 +720,7 @@ are missing.
 | `[✓]` | **Provider credential protection** | Not exposed to mobile; server-only. |
 | `[✓]` | **Audit redaction** | Whitelisted DTO; uid/`jti` omitted. |
 | `[✓]` | **No application-side sensitive logging** | No `console.*`, `Log.d`, or `setLogLevel` calls exist in `mobile/lib`, `mobile/app`, or `mobile/components`. |
-| `[~]` | **Firebase Auth SDK PII logging (dependency-level)** | `@react-native-firebase/auth` **v26.4.0** logs the Firebase user object via `Log.d` in `NativeRNFBTurboAuth.java`. **Not build-gated → reachable in release builds.** Lands only in device logcat (never sent by the app); exposes account-identity PII (uid/email/displayName/provider metadata) but **no authentication credentials** (no token, password, or hash). No supported config toggle exists, and 26.4.0 **is** the latest published version, so no bump fixes it. **Remediated 2026-10-10** by a `patch-package` patch applied on `postinstall` (§43) — artifact-level verified; **then BINARY-VERIFIED 2026-10-12:** the literal is **absent from the shipped dex** and present in a pre-patch build of the same variant (0 vs 1, with controls), so nothing can print it (§43, roadmap §27AZ). **Not closed:** §27AW requires a device-measured logcat read |
+| `[✓]` | **Firebase Auth SDK PII logging (dependency-level)** | `@react-native-firebase/auth` **v26.4.0** logs the Firebase user object via `Log.d` in `NativeRNFBTurboAuth.java`. **Not build-gated → reachable in release builds.** Lands only in device logcat (never sent by the app); exposes account-identity PII (uid/email/displayName/provider metadata) but **no authentication credentials** (no token, password, or hash). No supported config toggle exists, and 26.4.0 **is** the latest published version, so no bump fixes it. **Remediated 2026-10-10** by a `patch-package` patch applied on `postinstall` (§43) — artifact-level verified; **then BINARY-VERIFIED 2026-10-12:** the literal is **absent from the shipped dex** and present in a pre-patch build of the same variant (0 vs 1, with controls), so nothing can print it (§43, roadmap §27AZ). **CLOSED 2026-10-12 (§27BA):** the zero is confirmed **on hardware** — the app ran on the OPPO CPH1969, on that exact build with a byte-identical APK, and the `Auth` tag's neighbours (`addAuthStateListener`, then `addIdTokenListener` 2 ms later) fired while the PII statement printed nothing |
 
 ---
 
@@ -772,7 +772,7 @@ are missing.
 | `[~]` | **External verification** | §25 — live project + server-side Admin config done; iOS and new-identity path open. |
 | `[⛔]` | **iOS verification** | P-6. |
 | `[~]` | **Android verification** | F2 surface verified; **Google existing-account E2E verified (§5a)**; new-identity path env-blocked (§5b). |
-| `[~]` | **Dependency-level PII logging** | `@react-native-firebase/auth` v26.4.0 logs the Firebase user object via `Log.d`; release-reachable; no credentials; **remediated 2026-10-10** by a `patch-package` patch (§24, §28, §43) and **artifact-verified 2026-10-12** — the literal is absent from the shipped dex (§43, roadmap §27AZ). Device confirmation still owed, by Phase 30B's DoD. |
+| `[✓]` | **Dependency-level PII logging** | `@react-native-firebase/auth` v26.4.0 logs the Firebase user object via `Log.d`; release-reachable; no credentials; **remediated 2026-10-10** by a `patch-package` patch (§24, §28, §43) and **artifact-verified 2026-10-12** — the literal is absent from the shipped dex (§43, roadmap §27AZ). **Device-confirmed 2026-10-12 (§27BA):** zero occurrences in a full logcat capture, with the surrounding `Auth` logs proving the tag was live at that moment. |
 
 ---
 
@@ -815,7 +815,7 @@ Open findings, distinct from deferred work — neither scheduled nor closed.
 
 | Finding | Status | Detail |
 | --- | --- | --- |
-| **Firebase Auth SDK PII logging** | `[~]` **REMEDIATED AND BINARY-VERIFIED / DEVICE VERIFICATION OWED** | `@react-native-firebase/auth` **v26.4.0** logs the Firebase user object via `Log.d` in `NativeRNFBTurboAuth.java`; not build-gated, so it is **reachable in release builds**, and it lands only in device logcat. It exposes account-identity PII but **no credentials/tokens**. **Implemented 2026-10-10:** the recommended `patch-package` patch, applied by `postinstall --error-on-fail` and held by an 8-case guard suite (§43). The broader R8/ProGuard `Log.d` stripping was **not** taken (reserved for the SDK 58 train) and an upstream report is still **recommended, not filed**. See §24 and §43. |
+| **Firebase Auth SDK PII logging** | `[✓]` **REMEDIATED, VERIFIED AND CLOSED** | `@react-native-firebase/auth` **v26.4.0** logs the Firebase user object via `Log.d` in `NativeRNFBTurboAuth.java`; not build-gated, so it is **reachable in release builds**, and it lands only in device logcat. It exposes account-identity PII but **no credentials/tokens**. **Implemented 2026-10-10:** the recommended `patch-package` patch, applied by `postinstall --error-on-fail` and held by an 8-case guard suite (§43). The broader R8/ProGuard `Log.d` stripping was **not** taken (reserved for the SDK 58 train) and an upstream report is still **recommended, not filed**. See §24 and §43. |
 | **New-identity `REGISTRATION_REQUIRED` verification** | `[~]` **UNVERIFIED / ENVIRONMENT-BLOCKED** | Not a finding and **not deferred** — the device / Google Play Services consent cache prevents exercising the new-identity path (§5b). |
 | **Render CLI credential exposure** | `[✓]` **RESOLVED** | The exposed development-tooling credential was invalidated (old credential now answers `401`) and a fresh credential issued (new credential answers `200`); **no key value is recorded or reproduced anywhere**. |
 
@@ -865,7 +865,7 @@ Chronological. **History is not rewritten.**
 | **AUTH-03** | Inventory session renewal — server boundary + mobile client | `[✓]` | `phaseAUTH03-session-renewal.test.mjs`; `phaseAUTH03-*` mobile suites | `3085e3f`, `5da0692` |
 | **AUTH-04** | Custom 6-digit email-verification code (A…H; G passed live on Brevo 2026-10-04) | `[✓]` | §40; live acceptance reported there | `56a3f84` … `0972948` |
 | **CI quality gates** | `.github/workflows/ci.yml` — `server` + `mobile` jobs on every PR and on `main` | `[✓]` | first green run on PR #7 | `9f4c5c1`, `d415335` |
-| **ISS-02** | RNFirebase Auth PII log remediated (dependency-local `patch-package` patch + `postinstall --error-on-fail`, LF-pinned by `.gitattributes`, held by a guard suite) | `[~]` | patch content + end-to-end reinstall + 8-case guard + mobile 48/652; **then artifact-verified 2026-10-12** — the PII literal is **absent from the shipped dex** (0 vs 1 pre-patch, with controls) in build `436b2942` at `da9c401` | PR #40 · roadmap §27AZ |
+| **ISS-02** | RNFirebase Auth PII log remediated (dependency-local `patch-package` patch + `postinstall --error-on-fail`, LF-pinned by `.gitattributes`, held by a guard suite) | `[✓]` | patch content + end-to-end reinstall + 8-case guard + mobile 48/652; **artifact-verified 2026-10-12** — the PII literal is **absent from the shipped dex** (0 vs 1 pre-patch, with controls) in build `436b2942` at `da9c401`; **and device-measured the same day** — zero occurrences in a full logcat capture on the OPPO CPH1969 running that exact build, with the `Auth` tag's neighbours proving liveness | PR #40 · roadmap §27AZ · **§27BA** |
 | **Dependency advisories** | Per-alert disposition: 2 of 7 fixed by an override, 5 accepted with written reasons, the SDK 57 patch rollup declined as un-installable upstream | `[✓]` | chains from `npm ls`; the fix verified by install + 48/652; the decline reproduced from `main` | §27AK |
 | **Expo pin guard** | ISS-16's detection gap closed — every Expo-managed dependency is held to the installed SDK's own pin table, with a positive control and a measured mutation of the real manifest | `[✓]` | `mobile/__tests__/expo-sdk-pins.test.ts` (6 cases, 50/666); the guard failed on the recorded PR #34 moves | §45 · roadmap §27AN |
 
@@ -886,7 +886,7 @@ is corrected here rather than left to imply those increments never happened.)*
 | Dependencies | — |
 | Blockers | iOS build host (P-6); new-identity path ENVIRONMENT-BLOCKED (§5b); P-4 and Gates 1/2; **P-3 is expected-benign and unverified (§25)**; owner decisions (§27). |
 | Acceptance criteria | — |
-| Verification state | Server full suite **185 suites / 1312 tests, 0 failures**; mobile **50 suites / 666 tests, 0 failures** (2026-10-11, after the ISS-13 label suite and the §45 pin guard); CI runs `server` + `mobile` + `secret-guard`. Android Google existing-account E2E VERIFIED (§5a); Render Firebase Admin config verified live; dependency-level PII finding **remediated and binary-verified, device confirmation owed** (§24/§28/§43, roadmap §27AZ). |
+| Verification state | Server full suite **185 suites / 1312 tests, 0 failures**; mobile **50 suites / 666 tests, 0 failures** (2026-10-11, after the ISS-13 label suite and the §45 pin guard); CI runs `server` + `mobile` + `secret-guard`. Android Google existing-account E2E VERIFIED (§5a); Render Firebase Admin config verified live; dependency-level PII finding **remediated, binary-verified and closed on hardware** (§24/§28/§43, roadmap §27AZ · §27BA). |
 | Git/branch state | `main` @ `da9c401` (re-read 2026-10-12; **PRs #40–#67 merged** (ISS-02 PII patch, advisory disposition, P-3 gate correction, Dependabot scope, `mongoose` patch, ISS-13, the Expo pin guard, the actions v7 re-pin, the server dependency pair); **PR #49** carries this revision (§27AQ); CI runs `server` + `mobile` + `secret-guard`. |
 
 ---
@@ -1034,7 +1034,7 @@ MFA future scope.
   not broken, not deferred.
 * **Render CLI credential exposure — `[✓]` RESOLVED**; old credential `401`, new credential `200`; no
   value recorded (§28).
-* **Firebase Auth SDK PII logging — `[~]` REMEDIATED, BINARY-VERIFIED / DEVICE VERIFICATION OWED** (dependency-level,
+* **Firebase Auth SDK PII logging — `[✓]` REMEDIATED AND CLOSED** (dependency-level,
   `@react-native-firebase/auth` v26.4.0; release-reachable; no credentials; **patched 2026-10-10**,
   §43) (§24, §28).
 * **No account was created, modified, linked, unlinked, deleted, or otherwise mutated** during the
@@ -2159,7 +2159,7 @@ closed by this record.
 
 ---
 
-## 43. ISS-02 — RNFIREBASE AUTH PII LOG REMEDIATED (2026-10-10; **artifact-verified 2026-10-12**)
+## 43. ISS-02 — RNFIREBASE AUTH PII LOG REMEDIATED AND CLOSED (2026-10-10; verified at the artifact level **and on hardware** 2026-10-12)
 
 The §24/§28 dependency-level finding is **remediated in the repository**. Recorded here because it changes
 what a release build ships; the full engineering record is roadmap **§27AJ**.
@@ -2169,13 +2169,13 @@ what a release build ships; the full engineering record is roadmap **§27AJ**.
 | Finding | `@react-native-firebase/auth` **26.4.0** logs the Firebase user object — uid, email, display name, provider metadata — via `Log.d` in `NativeRNFBTurboAuth.java`; **not** `BuildConfig.DEBUG`-gated, so it is release-reachable and lands in device logcat only. **No credential is in it** (no token, password or hash) and the app never transmits it |
 | Source re-read (2026-10-10) | **One** logging line, `addAuthStateListener:eventBody`; the **id-token listener logs nothing**; the **iOS side of the package logs nothing**; our own `mobile/lib`, `mobile/app` and `mobile/components` contain **zero** `console.*` calls |
 | **Artifact verification (2026-10-12)** | **The PII literal is absent from the shipped binary.** The removed statement is `Log.d(TAG, "addAuthStateListener:eventBody " + …)`, and that string was searched across all nine `classes*.dex` files of the built APK (build `436b2942`, commit `da9c401`, **debug** variant, so nothing is R8-stripped): **0 occurrences post-patch vs 1 in the pre-patch build `8cd4392c` (2026-10-03) of the same variant** — and the sibling `addAuthStateListener` log drops 5 → 4 while three unrelated RNFirebase logs stay at 1 / 1 / 2, which is what a one-line removal looks like. A statement absent from the dex **cannot print to logcat on any device in any build of this commit**, so the "release-reachable" part of the finding is closed at the artifact level. It ran the real pipeline: cloud `npm install` → `postinstall --error-on-fail` → Gradle → dex. Full record roadmap **§27AZ**; the failed-control discipline is **F-46** |
-| Device confirmation | **Still owed, by design** — Phase 30B's DoD (§27AW) requires a **device-measured** observation, so this row stays `[~]` until the §27AZ APK is installed and logcat is read. The residual step is install → sign in → read, and the phone still carries the 2026-10-03 pre-patch build (F-26) |
+| **Device confirmation — DONE (2026-10-12, §27BA)** | Cleared logcat, app launched through the dev-client deep link on the **OPPO CPH1969**, full buffer captured: `addAuthStateListener:eventBody` occurs **0** times and bare `eventBody` **0** times, while the plain `addAuthStateListener` sibling appears once and `addIdTokenListener` follows **2 ms later**. Firebase emits an auth listener's initial state on registration, so the removed statement would have printed between those two lines in that very run. The installed APK's sha256 is **byte-identical** to the verified artifact `436b2942`, so the device under test is the patched build — **F-26 retired** |
 | Fixability | **Not bump-fixable** — 26.4.0 is the latest published version of the package |
 | Remediation | Dependency-local `patch-package` patch removing that single call (`Log.e` diagnostics kept), applied by `postinstall` on every install, so a fresh clone, CI's `npm ci` and an EAS build all patch before compiling. The patch name is version-derived, and the hook passes **`--error-on-fail`** because the tool exits **0** on a failed apply unless it is passed (the flag is default-on only when `CI` is set — measured three ways) — so a dependency bump fails the install **and** the guard suite rather than losing the patch silently. `.gitattributes` pins the patch to LF so it is byte-identical on every platform |
 | Not taken | R8/ProGuard `Log.d` stripping (build-wide, diagnostic risk — reserved for the SDK 58 train); the upstream report is **recommended, not filed** |
 | Evidence | Patch content re-read; package deleted and `npm install` re-applied it through `postinstall` (`@react-native-firebase/auth@26.4.0 ✔`, exit 0) with the line absent and all 38 `Log.e` diagnostics intact; a fresh checkout restores the patch as **933 bytes of LF**; `mobile/__tests__/iss-02-rnfirebase-auth-pii-patch.test.ts` — **8 cases**; mobile **48 suites / 652 tests, 0 failures**; `tsc`/`eslint` clean; lockfile untouched by the reinstall |
-| **Status change** | §24 `[!]` → `[~]`; §26 `[!]` → `[~]`; §28 → **REMEDIATED IN THE REPOSITORY / DEVICE VERIFICATION OWED** |
-| **Still open** | **No native Android build of the patched source has been run and the log has not been observed absent on a device** — that confirmation belongs to the SDK 58 device pass (roadmap §27AI step 9). The finding is therefore **not closed** |
+| **Status change** | §24 `[!]` → `[~]`; §26 `[!]` → `[~]`; §28 → **REMEDIATED IN THE REPOSITORY / DEVICE VERIFICATION OWED** *(**superseded 2026-10-12:** all three are now `[✓]` — roadmap §27AZ, §27BA)* |
+| **Closed 2026-10-12 — this row is superseded** | ~~**No native Android build of the patched source has been run and the log has not been observed absent on a device** — that confirmation belongs to the SDK 58 device pass (roadmap §27AI step 9). The finding is therefore **not closed**~~ — **both are now done:** the shipped dex carries no such statement (roadmap §27AZ) and the logcat read on the OPPO CPH1969 observed it absent, with the surrounding `Auth` logs proving liveness (roadmap §27BA). Note the confirmation did **not** wait for SDK 58 |
 
 ---
 

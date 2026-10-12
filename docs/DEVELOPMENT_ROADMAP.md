@@ -6778,7 +6778,7 @@ update its tracking boxes, status rows and heading date at the end of a session 
 | Open on GitHub | **Nothing at all** but **issue #32** (deferred majors) — re-read 2026-10-11 (late): `gh pr list --state open` is empty and one issue is open (**re-read 2026-10-12: still exactly one, #32**), **PRs #46–#63 merged** (§27AL–§27AY — #60 the documentation truth pass, #61 the advisory re-confirmation, #62 §27AY, #63 a routine Dependabot minor); #34 (ISS-16) and #38 (ISS-17) closed with their reasons |
 | Open advisories | **5** — 2 high, 3 medium, 0 critical (all mobile; re-read 2026-10-11 from the alerts API after §27AK's disposition, and **verified again** the same evening — the count drifts, and did). **Re-read 2026-10-12: still exactly 5**, confirmed independently by `npm audit --json`; `server` reports **0**; and a plain `npm audit` on `mobile/` prints **71 (55 high, 16 moderate)** for the same five advisories, because it also counts the **61 packages that merely depend on them** — see §27AK's re-confirmation before treating that larger number as a second wave. All five now have a **named fix path, all through the SDK 58 train**. Re-read once more after §27AY's dependency change: **still 5, unchanged** |
 | Production | Render auto-deploy from `main`; `https://ai-inventory-l1mi.onrender.com` reachable and serving the AUTH-04 endpoints |
-| Device | **First physical-device run performed 2026-10-11** (§27AT): dev client `0972948` installed on the OPPO CPH1969 over USB, app launched and rendered, the USB backend path proved, the §27R register validation confirmed on hardware.  **Unauthenticated only** — nothing behind the login was reachable, so sign-in, verification, inventory and the AI assistant remain **not device-verified**. *(Corrected 2026-10-11 — §27AV: the database is not empty; it is the **test** database and holds 1,815 unusable fixture accounts. The device-run account decision is **taken** — register a fresh test account — and the database it will write into is **decided — `inventoryai_dev_db`** (ISS-20 **resolved** 2026-10-11, §27AV). A `development` APK at `da9c401` now exists and is **staged but not installed** (§27AZ, build `436b2942`).)* |
+| Device | **First physical-device run performed 2026-10-11** (§27AT): dev client `0972948` installed on the OPPO CPH1969 over USB, app launched and rendered, the USB backend path proved, the §27R register validation confirmed on hardware.  **Unauthenticated only** — nothing behind the login was reachable, so sign-in, verification, inventory and the AI assistant remain **not device-verified**. *(Corrected 2026-10-11 — §27AV: the database is not empty; it is the **test** database and holds 1,815 unusable fixture accounts. The device-run account decision is **taken** — register a fresh test account — and the database it will write into is **decided — `inventoryai_dev_db`** (ISS-20 **resolved** 2026-10-11, §27AV). The `da9c401` APK is now **installed on the phone, byte-identical to `436b2942`** — the app launches and renders, the USB path is proved from the device, and **ISS-02 is CLOSED, device-measured** (§27BA). The authenticated run remains to do.)* |
 
 ## Verified complete — with evidence
 
@@ -6830,7 +6830,7 @@ Next: **both owner decisions this section was waiting on are taken (2026-10-11)*
 | ID | Sev | Issue | Evidence | Fix |
 | --- | --- | --- | --- | --- |
 | **ISS-01** | High | PR #34 fails the `mobile` job with four `TS2322`: `Type 'null' is not assignable to type 'Element \| ComponentType<any> \| undefined'` at `components/ListScreen.tsx(102,10)` and `(109,8)`, `components/RefManage.tsx(265,9)`, `components/SelectField.tsx(147,13)` | CI run `37899073322` (reproduced twice) | Fix the `null`-typed prop values — `ListScreen.tsx:86` (`?? null`), `RefManage.tsx:266` and `SelectField.tsx:150` (`: null`) → `undefined`. **Done, verified locally — PR #36** (`npx tsc --noEmit`, `npx eslint .`, `npx jest`: 47 suites / 644 tests); **not** a check to relax |
-| **ISS-02** | High → **`[~]`** | **RNFirebase PII logging reaches release builds**: `@react-native-firebase/auth` 26.4.0 logs the Firebase user object via `Log.d`, **not build-gated**; logcat only; uid/email/displayName/provider metadata, no credentials; no supported toggle | Checklist §24/§28; source re-read 2026-10-10 (one line; the id-token listener logs nothing; iOS side logs nothing) | **Remediated 2026-10-10 — `patch-package` patch + `postinstall --error-on-fail`, §27AJ.** Artifact-level verified (patch content, end-to-end reinstall applies it, 8-case guard, mobile 48/652, LF-pinned by `.gitattributes`). **Artifact-verified 2026-10-12 — §27AZ:** the literal the patch removes is **absent from the built APK's dex** and **present in a pre-patch build of the same variant** (1 → 0, four sibling log literals unchanged as controls), so this commit ships no PII-printing statement to log at all. **Still `[~]` and not `[✓]`:** §27AW requires a **device-measured** observation, so the logcat read on a phone running this build remains — narrowly, install + sign in + read |
+| **ISS-02** | High → **`[✓]`** | **RNFirebase PII logging reaches release builds**: `@react-native-firebase/auth` 26.4.0 logs the Firebase user object via `Log.d`, **not build-gated**; logcat only; uid/email/displayName/provider metadata, no credentials; no supported toggle | Checklist §24/§28; source re-read 2026-10-10 (one line; the id-token listener logs nothing; iOS side logs nothing) | **Remediated 2026-10-10 — `patch-package` patch + `postinstall --error-on-fail`, §27AJ.** Artifact-level verified (patch content, end-to-end reinstall applies it, 8-case guard, mobile 48/652, LF-pinned by `.gitattributes`). **Artifact-verified 2026-10-12 — §27AZ:** the literal the patch removes is **absent from the built APK's dex** and **present in a pre-patch build of the same variant** (1 → 0, four sibling log literals unchanged as controls), so this commit ships no PII-printing statement to log at all. **CLOSED 2026-10-12 — device-measured (§27BA):** on the OPPO CPH1969 running **that exact build** (installed APK sha256 byte-identical to the artifact), logcat shows the `Auth` tag live — `instance-initialized`, then `addAuthStateListener`, then `addIdTokenListener` 2 ms later — while `addAuthStateListener:eventBody` occurs **zero** times in the whole capture, and `eventBody` in any form also zero. The removed statement would have printed between those two bracketing lines, because Firebase emits an auth listener's initial state on registration. **F-26 retired:** the phone already carried this build |
 | **ISS-03** | Medium | Documents claim **9 open advisories** (1 critical, 4 high, 3 moderate, 1 low) | CLAUDE.md, checklist §42, this file's §27AE, issue #32 | Live value was **7** (3 high, 3 medium, 1 low, 0 critical) — corrected in place on 2026-10-10; **5 remain open** after the per-alert disposition (§27AK) |
 | **ISS-04** | Medium | `README.md` calls the mobile app "written in **JavaScript**" and starts it with **Expo Go** | README:379, README:391 | It is 129 `.ts`/`.tsx` / 0 `.js`, and it needs a **development build** (RNFirebase + dev client). Corrected 2026-10-10 |
 | **ISS-05** | Medium | §35 stated Google Sign-In was "approved, not implemented" with "no provider SDK installed" and the first dev build still a prerequisite | §35 | Corrected 2026-10-10 (see §35) |
@@ -6910,8 +6910,8 @@ build launched and used per native change. *Dependency:* P2's ISS-01 pattern is 
 4. **The two build-time confirmations — one CLOSED, one half-closed at the artifact level (2026-10-12, §27AZ).** Phase 30B's opening items were the remediated PII line absent
    from logcat (ISS-02) and the generated `compileSdk`/`targetSdk` values read and recorded (ISS-06). **Both now have artifact-level answers:** §27AZ reads the generated
    values out of the built APK's merged manifest — ISS-06 **closed** at 36 / 24 / 36, nothing to raise — and proves the PII literal absent from the built dex and
-   present in a pre-patch build of the same variant, 1 → 0 with four controls unchanged (ISS-02 artifact-verified). **What remains is device-side only: install the APK and read logcat.** **F-26 still applies, but only to the phone:** its client was built
-   2026-10-03 and **predates** the patch, so the device carries the unpatched logging until the new build replaces it (§27AT).
+   present in a pre-patch build of the same variant, 1 → 0 with four controls unchanged. **Done the same day on hardware — ISS-02 is CLOSED, device-measured (§27BA).** **F-26 is retired:** the phone already carried this very build (byte-identical APK), so the device step became a read rather than an install. Its client was built
+   2026-10-03 at the time of §27AT and no longer does — the correction §27BA records.
 
 **Do not:** start any V2/V3/V4 feature, write to production, or push directly to `main`. PRs #34 (ISS-16) and #38 (ISS-17)
 are closed with their reasons; those versions arrive only with the SDK 58 upgrade.
@@ -6942,7 +6942,7 @@ are closed with their reasons; those versions arrive only with the SDK 58 upgrad
   guide no longer presents it as the alternative — §7b is titled **"The USB tunnels (verified)"** and leads with
   them, so the promotion this note asked for is done.)* Also: a **`development`** client is mandatory and its **native**
   layer ages silently, so check `eas build:list` for the newest `development` build and rebuild if the change
-  under test is native (F-26).
+  under test is native (F-26 — **retired 2026-10-12, §27BA:** the phone now carries the newest `development` build, byte-identical to it).
 - **Baseline.** CI is the **single source of truth** (ISS-15); dated local counts are kept here only as
   snapshots. Latest: **2026-10-11 — mobile 50 suites / 666 tests, 0 failures** (49/660 at `3beaf85`, plus the
   pin guard); server at that date **185 suites / 1312 tests, 0 failures** (`3beaf85`). Re-read the numbers at
@@ -6953,7 +6953,7 @@ are closed with their reasons; those versions arrive only with the SDK 58 upgrad
 - [x] **P0-1** ISS-01 four `null`-typed prop values fixed — **merged (#36, `aadab04`)**, tsc/eslint/jest 644 tests
 - [x] **P0-2** ISS-16 **PR #34 closed**; Dependabot carve-out **merged (#37, `bf0c915`)**
 - [x] **P1** ISS-03 / ISS-04 / ISS-05 / ISS-08 / ISS-09 / ISS-10 / ISS-11 corrections *(done 2026-10-10)*
-- [~] **P2-1** ISS-02 RNFirebase PII remediation — **implemented and merged (#40, 2026-10-10, §27AJ)**, then **artifact-verified against a real build** (2026-10-12, §27AZ: the PII literal is absent from the shipped dex and present pre-patch, 1 → 0 with controls). **The logcat re-check is the last piece and no longer waits for SDK 58** — it needs the §27AZ build installed on the phone
+- [x] **P2-1** ISS-02 RNFirebase PII remediation — **implemented and merged (#40, 2026-10-10, §27AJ)**, **artifact-verified against a real build** (§27AZ: absent from the shipped dex, present pre-patch, 1 → 0 with controls) and **CLOSED device-measured** (§27BA: zero occurrences on the OPPO CPH1969 running that exact build, with the `Auth` tag's neighbours confirming liveness)
 - [x] **P2-4** the 7 dependency advisories **dispositioned** — 2 fixed, 5 accepted with reasons, SDK 57 rollup declined (§27AK); Dependabot #38 closed
 - [x] **P2-2** ISS-06 P-3 SDK alignment — **`[⛔]` corrected to `[~]` on 2026-10-10 and now `[✓]`** (2026-10-12, §27AZ): the generated app values are `compileSdk` 36 / `minSdk` 24 / `targetSdk` 36, read from the built APK, so no level needs raising and `expo-build-properties` stays uninstalled
 - [ ] **P2-3** issue #32 upgrade train — **partly taken 2026-10-11:** the two action re-pins (§27AO, ISS-12 resolved) and the server pair (§27AP: `dotenv` 18 taken with its preload path measured; `@types/bcryptjs` removed — its 3.0.0 is a deprecated stub); what remains is **gated, not pending** — SDK 58 on Gate 0, jest 30 with that promotion, TypeScript 7 upstream (§27AQ, `scripts/check-upgrade-watches.mjs` — whose `jest-expo` `READY` was wrong and is now corrected with controls, **ISS-19 / §27AU**)
@@ -7811,6 +7811,11 @@ ISS-02 native patch** (`mobile/patches/@react-native-firebase+auth+26.4.0.patch`
 logcat is **not** patch-clean. Everything JavaScript-level is current, because Metro serves it. **ISS-02's
 device re-check (§27AI step 9) is not closed by this run** and still needs a native build made after the patch.
 
+> **RESOLVED 2026-10-12 — §27BA, and this caveat is retired.** A `development` build was then made at
+> `da9c401` (`436b2942`, post-patch) and the phone was found to **already carry it, byte-identical** — so the
+> install is now patch-clean, ISS-02's device re-check **is closed**, and it did not wait for SDK 58. The
+> caveat above is kept because it was correct for the binary this run actually measured.
+
 ## How it was wired — USB only, no Wi-Fi dependency
 
 - **USB tunnels:** `adb reverse tcp:8081 tcp:8081` and `adb reverse tcp:4000 tcp:4000`, so the phone's `localhost`
@@ -7882,7 +7887,9 @@ passwords nobody holds and there are 0 inventories. The conclusion stands; the r
 build was made last and **its native layer silently ages**. Evidence: `eas build:list` (the table above), plus an
 empty package list on the device, which forced a 253 MB re-download before any device work could start. Remedy:
 build a `development` client at the commit being tested whenever the native layer matters — and say so in the
-guide, instead of discovering it at the phone.
+guide, instead of discovering it at the phone. **(Retired 2026-10-12 — §27BA:** the phone now carries a
+`development` client byte-identical to `436b2942` at `da9c401`, installed five minutes after that build
+finished. The advice stands; the stale premise does not.)**
 
 **F-27 (Low — configuration).** `mobile/app.json` sets `android.googleServicesFile: "./google-services.json"` and
 `ios.googleServicesFile: "./GoogleService-Info.plist"`, and **neither file exists in the checkout** (they are
@@ -8203,8 +8210,9 @@ that can only be closed with one — or record them as blocked with their reason
 | **the authenticated device run** | everything behind login: Firebase-first sign-in → AUTH-04 verification → tenant creation → dashboard, inventory, locations, stock in/out, transfers, suppliers, purchase orders, AI assistant, audit trail | it crosses Firebase, the mail provider, MongoDB and the phone's transport in one flow |
 | **iOS** | the same acceptance pass on iOS | **environment-blocked** — this host has no macOS, and the iOS gates are already recorded as blocked |
 
-**One constraint governs the whole phase (F-26).** The `development` client installed on the phone was
-built 2026-10-03, before the ISS-02 patch, so its native layer is *known* stale. Any item whose subject is
+**One constraint governs the whole phase (F-26 — retired 2026-10-12, §27BA).** The `development` client
+installed on the phone was built 2026-10-03 when this was written, before the ISS-02 patch; it **now carries the
+§27AZ build instead**, so the constraint is satisfied rather than outstanding. Any item whose subject is
 native must be measured on a build made **after** the change under test — the JS half is current because
 Metro serves it, and that is exactly what makes the distinction easy to get wrong.
 
@@ -8678,7 +8686,7 @@ device, in any build of this commit** — strictly stronger evidence than a devi
 premise that the device under test is *known* to carry the unpatched logging. **ISS-02 nevertheless stays
 `[~]`, not `[✓]`**, because Phase 30B's definition of done (§27AW) requires a **device-measured** observation
 and says explicitly that no item is closed from a non-device read. The remaining step is narrow and mechanical:
-install this APK, exercise sign-in, read logcat.
+install this APK, exercise sign-in, read logcat. *(Done the same day — **ISS-02 is CLOSED, device-measured, in §27BA**. The phone already carried this very build, so the step became a read rather than an install.)*
 
 ## §27AY's dependency fix, verified natively
 
@@ -8745,6 +8753,92 @@ adb logcat -c && adb logcat | grep -i "addAuthStateListener"
 
 Expected: **no line at all** from the removed statement. The plain `Log.d(TAG, "addAuthStateListener")` **is**
 expected to still appear — which is the in-situ confirmation that the tag is being watched at all.
+
+# 27BA. The Phase 30B device run — ISS-02 closed on hardware (2026-10-12)
+
+The first Phase 30B item to complete. **ISS-02's device-measured observation is taken**, and the thing that made
+it cheap is that the phone already carried the right build.
+
+## Pre-flight — what "ready to test" actually meant
+
+| Check | Result |
+| --- | --- |
+| adb sees the phone | `PV4DDMIZZLTCIVSK device product:CPH1969 model:CPH1969 device:OP4863` — **after** a server restart (**F-47**) |
+| Device | OPPO **CPH1969**, Android **11** (API **30**), **arm64-v8a** |
+| Installed app | `com.inventoryai.app` `versionCode` 1 / `versionName` 1.0.0, `minSdk` **24** / `targetSdk` **36** |
+| Which build | **sha256 `d823f90d…95e4`** — **byte-identical** to §27AZ's artifact `436b2942` at `da9c401` |
+| Backend | `[db] connected to MongoDB (database: inventoryai_dev_db)`; `/api/health/ready` → `200` |
+| Metro | `Android Bundled 12001ms node_modules\expo-router\entry.js (1592 modules)` |
+| Tunnels | `UsbFfs tcp:8081 tcp:8081`, `UsbFfs tcp:4000 tcp:4000` — **USB, not Wi-Fi** |
+| Deep link resolves | `com.inventoryai.app/.MainActivity` (it is a real dev client) |
+| App renders | `uiautomator` reads the login screen: *"Inventory AI"*, *"Welcome back"*, *"Sign In"*, *"Continue with Google"*, *"Forgot password?"* |
+| Phone → laptop | opening `http://localhost:4000/api/health/ready` **on the device** produced `GET /api/health/ready` **200** and `GET /favicon.ico` **404** in this laptop's log |
+
+**F-26 is retired.** §27AT recorded that the client on the phone was built 2026-10-03 and therefore **predated**
+the ISS-02 patch, making a fresh install the only way to close it. That is no longer true and was never
+re-checked before being relied on: the installed APK is **byte-identical** to the build this session produced,
+with `lastUpdateTime` `2026-10-12 03:52` — five minutes after `436b2942` finished (19:47Z = 03:47 +08:00). So
+the device under test **is** the patched build, and the device step was **read, not reinstall**.
+
+## ISS-02 — CLOSED, device-measured
+
+`adb logcat` was cleared, the app was force-stopped and launched through the dev-client deep link, and the full
+buffer was captured. Every `Auth` line in it, in execution order, same pid/tid:
+
+```text
+18:04:38.669  6816  6910 D Auth    : instance-initialized
+18:04:43.240  6816  6910 D Auth    : addAuthStateListener        <- line 178, the sibling of the patched statement
+18:04:43.242  6816  6910 D Auth    : addIdTokenListener          <- JS moved past it
+18:04:43.243  6816  6910 D Auth    : configureAuthDomain
+18:04:43.244  6816  6910 D Auth    : configureAuthDomain - app [DEFAULT] domain? null
+```
+
+| Searched in the capture | Occurrences |
+| --- | --- |
+| `addAuthStateListener:eventBody` — **the PII log** | **0** |
+| `addAuthStateListener` — its plain sibling `Log.d` | **1** |
+| `eventBody` (any form) | **0** |
+
+**Why the zero is meaningful, and not merely quiet.** The removed statement sat inside the auth-state listener
+*body*, and Firebase invokes an auth-state listener **immediately on registration** with the current user — so
+unpatched it would have printed between the two bracketing lines at `.240` and `.242`, in this very run. The
+plain sibling at `.240` proves the `Auth` tag is live and that this method executed; `addIdTokenListener` at
+`.242`, two milliseconds later, proves the JS side continued past the point where the removed line used to sit.
+The zero is a statement that is missing while its neighbours speak, which is the same pattern the dex
+differential showed at the byte level (§27AZ) — now observed **in situ, on hardware**.
+
+This satisfies §27AW's definition of done for this item: a **device-measured observation with its date**.
+
+## Findings
+
+- **F-47 — a device can be present, healthy and invisible at the same time.** `adb devices` returned an empty
+list while Windows' own device tree showed the phone all along, with `Android Composite ADB Interface`
+(`VID_18D1&PID_2D03&MI_02`) in status **OK**. The adb *transport* was stale, not the cable, the driver, the USB
+mode or the authorization. `adb kill-server` + `start-server` + `reconnect offline` fixed it immediately. The
+tempting misdiagnosis — "USB debugging is off, tell the user to re-enable it" — would have been wrong and would
+have wasted the owner's time. **Read the OS device tree before asking a human to touch the phone.**
+- **F-48 — `dumpsys package` prints `minSdk`/`targetSdk` but not `compileSdk`.** The on-device cross-check read
+`minSdk=24 targetSdk=36` and stopped there, which is exactly the gap that made §27AY plan a *second* source. It
+also independently confirms §27AZ's manifest reading from a different mechanism. Two sources agreed; only one
+was needed, and it was the one §27AY had ruled out (**F-44**).
+- **F-49 — a local Metro run warns about files that only exist at build time, and that is correct.**
+`Could not parse Expo config: android.googleServicesFile: "./google-services.json"` (and the iOS twin)
+appears on every local `expo start`, because those two files are EAS **file variables** and are never in the
+working tree. The dev client already has them baked in from the build, so nothing is missing at runtime. A
+future session should not "fix" this by adding the files to the repository — that would commit
+environment-specific Firebase configuration.
+
+## Still open
+
+**The authenticated run** (Firebase-first sign-in → AUTH-04 verification → tenant creation → dashboard,
+inventory, transfers, suppliers, purchase orders, AI assistant, audit trail) is the one item this entry does
+**not** claim: it needs a mailbox the owner can read a 6-digit code from, so it is owner-assisted and paused at
+that decision. **ISS-13's print → scan round trip** needs a printer and a scanner. **iOS** is
+environment-blocked (no macOS on this host). None of the three is claimed as passing, and **nothing behind the
+login has been device-verified** — the app was launched unauthenticated and no API call was made from the UI.
+
+**Process note:** the backend and Metro were started for this run and are still running; nothing was installed,
+no Firebase project state and no database row was written, and the only repository change is this record.
 
 # 28. Phase Gate System
 

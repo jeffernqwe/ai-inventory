@@ -8874,6 +8874,66 @@ test account — because an address that already owns a tenant can never registe
 the design, not a defect, and it is why this attempt is recorded as a **pass of the refusal path** rather than a
 failure of registration.
 
+# 27BB. The test-data reset, and the orphaned-identity finding it exposed (2026-10-12)
+
+Requested by the owner before the device acceptance run: clear the accumulated test data so the run starts from a
+known-empty database. Done as an owner-authorised data operation, and it surfaced a defect class worth a record.
+
+## What was removed
+
+`inventoryai_dev_db` only, guarded in code against every other database name:
+
+| Collection | Before | After |
+| --- | --- | --- |
+| `users` | 11 | **0** |
+| `businesses` | 11 | **0** |
+| `sessions` | 23 | **0** |
+| `audit_logs` | 45 | **0** |
+| `ai_conversations` | 1 | **0** |
+| `ai_messages` | 2 | **0** |
+| `email_verification_challenges` / `password_reset_tokens` | 0 / 0 | 0 / 0 |
+| **Firebase Auth users** | **4** | **0** (4 deleted, 0 failures) |
+
+**Scope discipline.** `inventoryai_prod_db` (0 users / 0 businesses — already empty) and `inventoryai_test_db`
+(1,845 users / 12,479 businesses, the suite's own sandbox that `npm test` recreates) were **read but never
+touched**. A full reversible backup was taken **before** any deletion, outside the repository so it cannot be
+committed, as Extended JSON (ObjectIds and dates preserved) plus complete Firebase user records:
+`C:\Users\jeffe\inventory-ai-backups\20261012-183640\`. The backend stayed healthy throughout (`/ready` → `ready`).
+
+## F-50 — a MongoDB user can outlive its Firebase identity, and that is a one-way lockout
+
+The reset exposed a state nobody had looked for: **11 MongoDB users, but only 4 Firebase accounts.** Seven users
+carried a `firebaseUid` whose Firebase account **no longer existed**.
+
+Those seven addresses were in a trap with **no exit through the application**:
+
+- **They could not register** — `registerBusinessFromFirebase` pre-checks `User.exists({ email })` and refuses with
+  `409 EMAIL_IN_USE` (§27BA).
+- **They could not sign in** — the Firebase identity the exchange needs had been deleted, so no verified ID token
+  could ever be produced for them.
+
+Registering is the obvious remedy for a lost identity, and `EMAIL_IN_USE` is exactly what blocks it, so the two
+failure modes close off each other's escape route. **Nothing in the application can repair this** — no route, no
+retry, no admin screen reaches it. Only an operator-side data operation does, which is what this entry is.
+
+**How the state arises:** deleting a Firebase user (in the console, by a cleanup script, or by an environment
+reset) **without** deleting its MongoDB counterpart. The mapping is one-directional in practice — Mongo records a
+`firebaseUid`, Firebase records nothing about Mongo — so the two can only drift apart silently.
+
+**What makes it easy to miss:** both halves look healthy in isolation. Firebase reports the project's users
+correctly, MongoDB reports its users correctly, and neither side has a query that reveals the gap. The inventory
+that found it had to read **both** stores and join them on email — nothing in CI, and no existing guard, does that.
+
+**A second thing the same measurement established, which narrows the damage:** clearing MongoDB **alone** frees
+every address, because the collision check reads MongoDB and never consults Firebase. So the lockout is repairable
+by a Mongo-side operation even when the Firebase side is left alone — but it still requires an operator, and the
+run that needs it has already failed by then.
+
+**Not fixed here, and deliberately not:** repairing the drift automatically would mean inventing a reconciliation
+policy (re-point, re-create the Firebase user, or tombstone the Mongo user) that the specification does not state,
+and `firebaseUid` is a **linkage field** whose silent rewrite is precisely what Phase 32H refuses to do. The finding
+is recorded so the decision is taken deliberately rather than by a cleanup script.
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

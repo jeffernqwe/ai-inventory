@@ -6893,7 +6893,7 @@ build launched and used per native change. *Dependency:* P2's ISS-01 pattern is 
 
 ## Immediate next actions
 
-**As of 2026-10-13 the live action is to land AI-1 (§27BD/§27BE) as a pull request** — complete, device-verified, uncommitted. **The same uncommitted set now also carries AI-2 (§27BF), AI-3 (§27BG), AI-4 (§27BH) and AI-5 (§27BI)** — together with the measurement tooling (`seed:perf`, `cleanup:perf`, `perf:measure`, `perf:golden`, `perf:turns`), which is what makes their claims reproducible rather than quoted. AI-5 is the one that closes the loop on the provider question: **a turn now reports its own split per turn** (`providerMs` vs `toolMs`), measured at **95–97 % provider against 3–5 % tools**, so the model-choice decision no longer requires a harness run. Items 1–2 below are decisions that have since been **executed** (§27BA–§27BE); item 3 is a standing watch; item 4 is closed. The **newly open** items are **ISS-22** and **ISS-23** (see *Known issues*).
+**As of 2026-10-13 the live action is to land AI-1 (§27BD/§27BE) as a pull request** — complete, device-verified, uncommitted. **The same uncommitted set now also carries AI-2 (§27BF), AI-3 (§27BG), AI-4 (§27BH), AI-5 (§27BI) and Index integrity (§27BJ)** — together with the measurement tooling (`seed:perf`, `cleanup:perf`, `perf:measure`, `perf:golden`, `perf:turns`), which is what makes their claims reproducible rather than quoted. AI-5 is the one that closes the loop on the provider question: **a turn now reports its own split per turn** (`providerMs` vs `toolMs`), measured at **95–97 % provider against 3–5 % tools**, so the model-choice decision no longer requires a harness run. Items 1–2 below are decisions that have since been **executed** (§27BA–§27BE); item 3 is a standing watch; item 4 is closed. The **newly open** items are **ISS-22** and **ISS-23** (see *Known issues*).
 
 1. **DECIDED 2026-10-11 — the device run's account is a fresh registration through the app** (exercises
    AUTH-04 end to end; needs a mailbox the owner can read the 6-digit code from). The other two routes
@@ -9727,6 +9727,88 @@ than in a `finally`, for that reason, stated in place.
   change that: it makes the next such run cheaper to read, not shorter to perform.
 * **Timing is wall clock on one process.** `providerMs` includes the provider's queueing and its own network
   latency, which is exactly what the member waits for, but it is not a breakdown *within* a provider call.
+
+# 27BJ. Index integrity (IDX-1) — the guards proved the index was DECLARED and nothing anywhere could tell whether it was BUILT (2026-10-14)
+
+Five increments rest on a database index for their entire benefit: Phase 20G/20H (the list-sort keys),
+Phase 22/AI-3 (the inventory page sort `{ businessId: 1, updatedAt: -1, _id: -1 }`, measured at **6.3 s per 25-row
+page** without it at 10 000 products), and the TTL keys on `sessions`, `password_reset_tokens` and
+`email_verification_challenges` (which are the only thing that actually *deletes* an expired row — AUTH-02 bounds a
+session's lifetime in code, but the collection still grows without the key).
+
+Every one of those has a suite. **Not one of them could fail if the database never built the index**, because they
+all read the model source: they can prove a declaration and nothing else. And the thing that turns a declaration
+into an index — Mongoose's default `autoIndex`, which runs in the background at connect time — was asserted
+nowhere at all: `grep -rn "autoIndex\|syncIndexes\|createIndexes" src/ scripts/` returned **nothing**. That is the
+shape of a perfect silent regression: the application keeps working, every test stays green, and the only symptom
+is a slow query or a collection that grows forever.
+
+## What this increment found
+
+**1. A real coverage gap, not a hypothetical one.** `grep -rln "updatedAt: -1" test/` matched **no test at all**.
+Deleting the single line `inventorySchema.index({ businessId: 1, updatedAt: -1, _id: -1 });` from
+`inventory.model.ts` left the whole suite green while the AI-3 page window silently stopped being index-provided —
+the exact 6.3 s-per-page path AI-3 was written to fix. It is now guarded on **both** halves: that the model
+DECLARES the key and that the database HAS it.
+
+**2. A false green in this increment's own first draft, which is the best argument for its comparison rule.** The
+audit tool compared index keys with the fields **sorted**. `{ a: 1, b: 1 }` and `{ b: 1, a: 1 }` are different
+indexes — a compound index can only serve a query whose equality/sort keys are a **prefix** of its own key layout —
+so sorting them made the tool report `ok` for an index that cannot answer the query it was added for, and it
+printed the AI-3 key as `_id:-1,businessId:1,updatedAt:-1` while the declaration read
+`businessId:1,updatedAt:-1,_id:-1`. **The order is the part that carries the meaning**, so both the tool and the
+suite now compare order-sensitively, and a test asserts they still do.
+
+**3. The good news, measured rather than assumed:** the dev database is in exact agreement — **60 declared indexes
+across 15 collections, 0 disagreements, 0 undeclared**, including the AI-3 page key in the declared order and the
+three TTL keys (`expiresAt:1`, `ttl 0s`). The mechanism works today; it was simply unverified.
+
+## What now exists
+
+* **`npm run audit:indexes`** (`server/scripts/audit-indexes.mjs`) — asks the DATABASE. Read-only: it never
+  creates, drops or modifies anything, and it deliberately does **not** call `syncIndexes()`, which can DROP
+  indexes it does not recognise, including one an operator added on purpose to a shared database. Drift is
+  reported for a human to resolve, and the exit code is 1 on any disagreement so it can gate a deploy check
+  without anyone parsing output. Coverage is by construction: it iterates `src/models/index.ts`'s own `models`
+  array, so a new model is audited without editing the tool.
+* **`server/test/phase-index-integrity.test.mjs`** (registered PURE_DB) — 8 cases: every declared index exists for
+  **every** model with the declared field order, uniqueness, sparsity and TTL; the AI-3 key and the three TTL keys
+  named explicitly and asserted on both the declaration and the database; the mechanism guards (no `autoIndex`
+  disabling anywhere in `src/`, no override at the one `mongoose.connect` call site); the barrel covers every
+  `.model.ts`; and the comparison rule itself.
+
+### The honest limit of the database half
+
+`Model.init()` is awaited before comparing, which is what makes a fresh CI database deterministic rather than a
+race against a background build — and it is also a **repair**: `init()` creates a missing index. So on a long-lived
+database a leftover index from an earlier boot can satisfy the existence check. What the suite really proves is
+that the mechanism **produces** the declared indexes (it fails loudly on a fresh database with the build path
+disabled, and it fails on a unique/sparse/TTL disagreement, which MongoDB refuses to reconcile), **not** that
+nobody dropped an index yesterday. Stated here rather than left for someone to discover by trusting it too far.
+
+## Verification
+
+* **The guard was watched failing, twice, in the directions that matter, with the tree restored byte-identical
+  both times:** deleting the AI-3 declaration reddened exactly that one case
+  (`no longer DECLARES the page-sort index businessId:1,updatedAt:-1,_id:-1 … declared: businessId:1 | …`) and
+  nothing else; adding `autoIndex: false` at the connect site reddened exactly the two mechanism cases. Both
+  mutations were confirmed to have applied before the run (a mutation that cannot apply is not evidence), and
+  both files were restored to their original SHA-256.
+* **The full suite is green: 1369 tests / 195 suites / 0 failures** (up from 1361 / 193), with `tsc` clean and
+  `eslint` clean on both new files. `eslint` earned its keep: it caught a useless assignment in the audit tool's
+  collection read.
+* `npm run audit:indexes` exits **0** against the dev database with 60/15/0.
+
+## What is NOT verified
+
+* **The production database has not been audited.** The tool is read-only and runs against whatever
+  `MONGODB_URI`/`MONGODB_DB_NAME` resolve to, but production credentials are not in this environment and nothing
+  here touches production. Running it once against each deployed environment is the follow-up — it is the only
+  way to know whether an index that exists locally also exists where members actually are.
+* **TTL semantics are asserted as declarations-and-keys, not observed as deletions.** That a session row is
+  actually removed at its expiry is MongoDB's behaviour, not this suite's claim.
+* **The audit is a manual tool, not a CI step.** CI's `mongo:7` container is a fresh database, so auditing it would
+  test index *creation* (already covered by the suite above) rather than drift against a database anyone uses.
 
 # 28. Phase Gate System
 

@@ -63,6 +63,7 @@ const PURE_DB = [
   'phase07a-inventory-compensation.test.mjs', // failure-injection hardening
   'phase07b-auth-security.test.mjs',  // business status + auth rate limiting
   'phase19-transfers.test.mjs',       // stock transfers between locations + compensation
+  'phase-index-integrity.test.mjs',   // index integrity: every DECLARED index exists in the DATABASE with the declared field ORDER (which is what makes a compound key usable for the query it was added for), plus unique/sparse/TTL agreement, the AI-3 inventory page-sort key named explicitly, the three TTL keys, and the mechanism guards that automatic index building is not disabled anywhere
   'phase20-pagination-order.test.mjs', // offset-pagination ordering determinism across the nine list paths
   'phase20-pagination-contract.test.mjs', // offset-pagination coercion contract (page/limit defaults, cap, empty past-end page)
   'phase20-filter-contract.test.mjs', // list filter contract (invalid status/supplierId/blank q rejected, valid filters still narrow)

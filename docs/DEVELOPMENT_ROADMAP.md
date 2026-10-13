@@ -6893,7 +6893,7 @@ build launched and used per native change. *Dependency:* P2's ISS-01 pattern is 
 
 ## Immediate next actions
 
-**As of 2026-10-13 the live action is to land AI-1 (§27BD/§27BE) as a pull request** — complete, device-verified, uncommitted. **The same uncommitted set now also carries AI-2 (§27BF) and AI-3 (§27BG)** — together with the measurement tooling (`seed:perf`, `cleanup:perf`, `perf:measure`, `perf:golden`, `perf:turns`), which is what makes their claims reproducible rather than quoted. Items 1–2 below are decisions that have since been **executed** (§27BA–§27BE); item 3 is a standing watch; item 4 is closed. The **newly open** items are **ISS-22** and **ISS-23** (see *Known issues*).
+**As of 2026-10-13 the live action is to land AI-1 (§27BD/§27BE) as a pull request** — complete, device-verified, uncommitted. **The same uncommitted set now also carries AI-2 (§27BF), AI-3 (§27BG), AI-4 (§27BH) and AI-5 (§27BI)** — together with the measurement tooling (`seed:perf`, `cleanup:perf`, `perf:measure`, `perf:golden`, `perf:turns`), which is what makes their claims reproducible rather than quoted. AI-5 is the one that closes the loop on the provider question: **a turn now reports its own split per turn** (`providerMs` vs `toolMs`), measured at **95–97 % provider against 3–5 % tools**, so the model-choice decision no longer requires a harness run. Items 1–2 below are decisions that have since been **executed** (§27BA–§27BE); item 3 is a standing watch; item 4 is closed. The **newly open** items are **ISS-22** and **ISS-23** (see *Known issues*).
 
 1. **DECIDED 2026-10-11 — the device run's account is a fresh registration through the app** (exercises
    AUTH-04 end to end; needs a mailbox the owner can read the 6-digit code from). The other two routes
@@ -9631,6 +9631,102 @@ recorded because it is the one number that went up.
    help), the honest place to fix that is the prompt — and only with the token cost measured first.
 2. **The on-device confirmation of ISS-25**, one question on the seeded tenant, then the phone handed back.
 3. **The residual `**` case** above, if real answers ever exercise it.
+
+# 27BI. AI-5 — the turn's own cost: one line per turn on every exit, because a healthy turn recorded nothing about itself (2026-10-13)
+
+AI-1 bounded a turn with one wall-clock deadline. AI-2 made a *degraded* turn visible and countable. Both were
+necessary and neither answered the question the owner's open provider decision actually rests on: **when an answer
+takes 21 seconds, what was the time spent on?** On a healthy turn the service could emit exactly two things — a
+provider failure and the degraded warning — so a turn that worked said **nothing at all** about itself. "Where did
+the minute go" could only be answered by re-running `perf:turns` against the seeded tenant, which spends provider
+quota (the deployed free tier allows roughly 50 requests a day IN TOTAL, §27BF) and only ever describes a
+controlled run rather than the real thing.
+
+## What now exists
+
+Five counters and **one formatter**, reported on every exit from `runAiChat` — including the paths that throw,
+which is why a failed turn states what it spent before it died:
+
+```text
+[ai] turn outcome=ok total=12598ms providerMs=11973ms calls=3 toolMs=625ms toolRuns=1 \
+         tools=getInventorySummary empty=1 in=3399 out=499 model=nvidia/nemotron-3-ultra-550b-a55b:free iterations=3
+```
+
+`grep -c '[ai] turn'` is now the turn count, `outcome=` splits healthy turns (`ok`, `degraded`) from the five ways
+one can end badly (`AI_TIMEOUT`, `AI_ABANDONED`, `AI_UNAVAILABLE`, `AI_NOT_CONFIGURED`, `ERROR`), and the body is
+the split. The vocabulary is deliberately the same as the error codes the controller returns, so a log line and an
+HTTP answer name the same thing. **No behaviour changed**: no new timing knob, no change to the deadline, the
+retry budget, the prompt, the tools, the schema or any response. A turn that took 21 seconds still takes 21
+seconds — it is merely legible.
+
+## The two measurements that earned it
+
+One real question — *"How is my inventory doing? Give me the headline numbers."* — asked over the real route
+against the 10 000-product seed tenant, twice, on the deployed free-tier model:
+
+| run | status | total | provider | calls | tools | tool time | grounded |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | 201 | 20 820 ms | **20 128 ms (96.7 %)** | 3 | 1 | 691 ms (3.3 %) | yes — all facts present |
+| 2 | 201 | 12 598 ms | **11 973 ms (95.0 %)** | 3 | 1 | 625 ms (5.0 %) | yes — all facts present |
+
+**The model is 95–97 % of what a member waits for and the tools are 3–5 %**, which turns §27BG's conclusion from
+an inference into a per-turn reading, and does it for the cost of asking a question rather than of running a
+harness. It also corroborates AI-3 independently: `getInventorySummary` at 10 000 products measured 0.63–0.69 s
+here against 0.41 s in the isolated tool benchmark, i.e. query time did not regress.
+
+## The finding the second run added, and why the line carries `empty=`
+
+Both turns took **three model calls for one tool round**. Three calls, one tool run, no second tool — so one of
+the three responses carried neither text nor a tool call and was retried by AI-2, and the member still received a
+grounded, numerically exact answer. The first run only *implied* that (you had to notice `calls=3` beside
+`toolRuns=1`); the second states it as **`empty=1`**. That distinction matters because a turn which **recovers**
+is `ok`, so no AI-2 warning fires and nothing previously recorded that the answer had cost a third more provider
+time than it needed. With `empty=` on every turn, **the free tier's empty-completion rate becomes countable across
+healthy turns rather than only across the degraded ones** — which is the actual evidence the deferred provider
+decision (ISS-22, *accepted for V1*) is waiting on. The counter is defined the way AI-2's warning line defines it:
+responses **seen**, not retries authorised, so the line cannot overstate what happened.
+
+## A defect in this increment, caught by its own test
+
+The first implementation reported from the `catch` and counted in the `finally` — so a call that **timed out** was
+reported as having made **zero calls**, because the count had not run yet when the line was written. The suite
+failed on exactly that (`'0' !== '1'`), and this is the case for asserting numbers rather than the line's shape: a
+shape check passes on a line of zeroes, which looks like instrumentation and diagnoses nothing. Both timing sites
+were restructured to count **before** reporting; the provider-call site now counts on both paths explicitly rather
+than in a `finally`, for that reason, stated in place.
+
+## Verification
+
+* **8 cases** in `server/test/AI5-ai-turn-cost.test.mjs`, registered in the runner's PURE_UNIT list (a suite outside
+  the classification is a suite that never runs). Written first and watched fail — no cost line existed yet. They
+  pin: exactly one line per healthy turn and that it stays one line; the request count and the tool-round count and
+  names; **provider time measured against a deliberate 40 ms provider delay** (so a zero-filled line cannot pass) and
+  the split never exceeding the total; a turn that died reporting what it spent; an abandoned turn reporting zero
+  spend rather than staying silent; the degraded turn keeping its AI-2 warning *beside* the cost line; the
+  provider-failure path intact; and the recovered-retry case above.
+* **Exercised on real routes, not only in unit calls:** the AI-1 DB suite emits the line from real `POST
+  /api/ai/chat` requests (3 lines from 3 turn-performing tests), read out of the server's own output rather than
+  asserted in-process.
+* **Suite: 1361 tests / 193 suites / 0 failures** (up from 1353 / 192) across `npm test`, with `tsc` and `eslint`
+  clean on every changed file. Unit mode 728 pass / 0 fail / 35 DB-skips; DB mode 622 pass / 0 fail / 59
+  unit-skips. The known Atlas `MongoDB connection lost` transient appeared once mid-run and recovered, with **0
+  failures and 0 skipped** — recorded rather than smoothed over.
+* **`perf:turns` gained `--only=<n>`** so re-checking one question no longer costs the other three: the same probe
+  that measured a 60 s turn is the one that showed the split, and quota is the scarce resource.
+
+## What is NOT verified
+
+* **Not device-verified, and the phone's server must be restarted first.** The measurement above is a real turn
+  through the real route against a real server process, but the server the phone talks to (port 4000) was started
+  **before** this change, so it does not yet emit the line. Nothing is broken by that — it simply needs a restart
+  to become live. The one item outstanding is therefore a device-side reading, which by then costs nothing extra:
+  ask the assistant one question from the phone and read the line already in the log.
+* **A single question, asked twice — not a sample.** Two turns on one model cannot state a distribution, and the
+  `empty=1` in both runs says the empty-completion rate is high enough to be visible at n=2, nothing more.
+* **The ≥50 000-product measurement is still open** (§27BG's recorded next step), and this increment does not
+  change that: it makes the next such run cheaper to read, not shorter to perform.
+* **Timing is wall clock on one process.** `providerMs` includes the provider's queueing and its own network
+  latency, which is exactly what the member waits for, but it is not a breakdown *within* a provider call.
 
 # 28. Phase Gate System
 

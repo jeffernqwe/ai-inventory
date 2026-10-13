@@ -182,6 +182,39 @@ export async function runAiChat({ businessId, userId, role, history = [], messag
   let emptyResponses = 0;
   let lastWasEmpty = false;
 
+  // AI-5 — the turn's own cost.
+  //
+  // WHY THIS EXISTS. AI-1 bounded a turn and AI-2 made a DEGRADED one visible, but
+  // a turn that SUCCEEDED recorded nothing about itself, so the one question the
+  // provider decision rests on — how much of a slow answer is the model, how much
+  // is the tools, and how many model round-trips it took — was unanswerable from a
+  // running server. It had to be re-measured by a script against a seeded tenant,
+  // which spends provider quota and only ever describes a controlled run. These
+  // counters are that answer, and `reportTurn` is the ONE place the line is
+  // formatted, so its shape cannot drift between the exits below.
+  const turnStartedAt = Date.now();
+  let providerMs = 0;
+  let toolMs = 0;
+  let providerCalls = 0;
+  let toolRuns = 0;
+
+  /**
+   * The turn's one cost line. Emitted from every exit below — including the paths
+   * that throw, which is why a failed turn reports what it spent before it died.
+   * `outcome` uses the same vocabulary as the error codes the controller returns,
+   * so a log line and an HTTP answer name the same thing.
+   */
+  const reportTurn = (outcome: string): void => {
+    console.log(
+      `[ai] turn outcome=${outcome} total=${Date.now() - turnStartedAt}ms` +
+        ` providerMs=${providerMs}ms calls=${providerCalls}` +
+        ` toolMs=${toolMs}ms toolRuns=${toolRuns} tools=${[...toolsUsed].join(',') || 'none'}` +
+        ` empty=${emptyResponses}` +
+        ` in=${usage?.inputTokens ?? 0} out=${usage?.outputTokens ?? 0}` +
+        ` model=${model ?? 'unknown'} iterations=${steps}`,
+    );
+  };
+
   // ONE deadline for the whole turn (AI-1). It is derived once, here, and every
   // provider call below is clamped to the time REMAINING against it — so the
   // ceiling is stated in one place and cannot be the product of two unrelated
@@ -192,10 +225,24 @@ export async function runAiChat({ businessId, userId, role, history = [], messag
     steps = i + 1;
     // Checked before the budget: a caller who has already gone needs no work done
     // at all, and every tool round below costs a model call.
-    if (signal?.aborted) throw new AiAbandoned();
+    if (signal?.aborted) {
+      reportTurn('AI_ABANDONED');
+      throw new AiAbandoned();
+    }
     const remaining = deadlineAt - Date.now();
-    if (remaining <= 0) throw new AiTimeout();
+    if (remaining <= 0) {
+      reportTurn('AI_TIMEOUT');
+      throw new AiTimeout();
+    }
     let response: ProviderResponse;
+    const callStartedAt = Date.now();
+    // Counted on BOTH paths — and on the failure path BEFORE the report, because a
+    // call that timed out is exactly the call whose cost the line most needs to
+    // show, and a `finally` would run after the line had already been written.
+    const countCall = (): void => {
+      providerMs += Date.now() - callStartedAt;
+      providerCalls += 1;
+    };
     try {
       // AI_TOOL_DEFS is the frozen tool catalog; the provider contract wants the
       // neutral `ToolDefinition` shape, which the frozen entries already satisfy
@@ -213,10 +260,16 @@ export async function runAiChat({ businessId, userId, role, history = [], messag
         signal,
       );
     } catch (err) {
-      if (isAiError(err)) throw err;
+      countCall();
+      if (isAiError(err)) {
+        reportTurn((err as { code?: string }).code ?? 'AI_ERROR');
+        throw err;
+      }
       console.error('[ai] provider call failed', (err as { message?: unknown })?.message ?? err);
+      reportTurn('AI_UNAVAILABLE');
       throw new AiProviderError('The AI service failed unexpectedly. Please try again.');
     }
+    countCall();
 
     model = response?.model || model;
     usage = response?.usage || usage;
@@ -263,7 +316,24 @@ export async function runAiChat({ businessId, userId, role, history = [], messag
       const call = calls[i];
       const name = String(call?.name ?? '');
       if (name) toolsUsed.add(name);
-      const output = await executeTool(name, call?.input, { businessId, userId, role });
+      const toolStartedAt = Date.now();
+      const countTool = (): void => {
+        toolMs += Date.now() - toolStartedAt;
+        toolRuns += 1;
+      };
+      let output: unknown;
+      try {
+        output = await executeTool(name, call?.input, { businessId, userId, role });
+      } catch (err) {
+        // The one exit none of the explicit sites covers: a tool that THROWS
+        // rather than returning an error result. It reports and rethrows, so a
+        // future failure mode cannot become a silent gap in the log — and it counts
+        // the attempt before reporting, for the same reason the provider call does.
+        countTool();
+        reportTurn('ERROR');
+        throw err;
+      }
+      countTool();
       const payload = truncate(JSON.stringify(output), cfg.maxToolResultChars);
       messages.push({
         role: 'tool',
@@ -291,6 +361,10 @@ export async function runAiChat({ businessId, userId, role, history = [], messag
         ` model=${model ?? 'unknown'} tools=${[...toolsUsed].join(',') || 'none'}`,
     );
   }
+  // The healthy path's report, and the last of the six: a turn that answered, or
+  // one that degraded into a canned sentence (which keeps its own AI-2 warning
+  // above, so a degraded turn stays countable exactly as it was).
+  reportTurn(degraded ? 'degraded' : 'ok');
   finalText = truncate(finalText, cfg.maxMessageChars);
 
   return {

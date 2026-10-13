@@ -25,7 +25,11 @@
 //
 // COST. Every turn spends provider quota (the deployed free tier allows roughly 50
 // requests a day IN TOTAL, roadmap §27BF), and a turn with tool iterations spends
-// more than one request. Keep the question list short.
+// more than one request. Keep the question list short — and when you only need ONE
+// of them (`--only=1`, or `--only=1,3`), say so: re-checking a single question
+// should not cost the other three. The turn's own split now arrives in the SERVER's
+// log (`[ai] turn outcome=… providerMs=… calls=… toolMs=…`, AI-5), so a single
+// question is often all that is needed to see where the time went.
 
 import 'dotenv/config';
 import fs from 'node:fs';
@@ -110,13 +114,23 @@ async function main() {
   });
   await mongoose.disconnect();
 
+  const only = (argValue('--only') ?? '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const picked = questions.filter((_question, i) => only.length === 0 || only.includes(String(i + 1)));
+  if (picked.length === 0) {
+    throw new Error(`--only=${only.join(',')} matched no question (the list has 1..${questions.length})`);
+  }
+
   console.log(`[turns] tenant ${business.name}`);
   console.log(`[turns] base   ${base}`);
   console.log('');
 
   const results = [];
   let conversationId;
-  for (const [index, question] of questions.entries()) {
+  for (const question of picked) {
+    const index = questions.indexOf(question);
     const body = { message: question.message };
     if (conversationId) body.conversationId = conversationId;
 

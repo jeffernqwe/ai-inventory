@@ -38,12 +38,32 @@ import Supplier from '../src/models/supplier.model.ts';
 import User from '../src/models/user.model.ts';
 
 const email = process.argv.find((a) => a.startsWith('--email='))?.slice('--email='.length) ?? process.argv[2];
-await mongoose.connect(env.mongodbUri, { dbName: env.mongodbDbName });
+
+// THE EXIT CODE IS A CONTRACT, and conflating two very different outcomes is how a
+// network blip sends someone hunting for a data bug. That happened twice while this
+// file was being written — an Atlas `ETIMEDOUT` exited 1, exactly like a broken row:
+//
+//   0  verified — the dataset is what the seeder claimed
+//   1  a VIOLATION was found — the data is wrong
+//   2  NOT VERIFIED — the database could not be reached, or the account does not
+//      exist. Nothing is known about the data, and nothing is claimed about it.
+//
+// An exit 2 is the honest answer to "we could not look"; only 1 means "we looked and
+// it is broken".
+try {
+  await mongoose.connect(env.mongodbUri, { dbName: env.mongodbDbName });
+} catch (err) {
+  console.error(`[verify:demo] could not reach MongoDB: ${err?.message ?? err}`);
+  console.error('[verify:demo] NOT VERIFIED (exit 2) — this is not a data violation.');
+  process.exit(2);
+}
 
 const user = await User.findOne({ email }).select('_id businessId role status emailVerified firebaseUid').lean();
 if (!user) {
-  console.log(`no MongoDB user for ${email}`);
-  process.exit(1);
+  // Also not a violation: asking about an account that is not there says nothing about
+  // the seeded rows.
+  console.error(`[verify:demo] no MongoDB user for ${email} — NOT VERIFIED (exit 2).`);
+  process.exit(2);
 }
 const businessId = user.businessId;
 const filter = { businessId };
@@ -86,7 +106,8 @@ console.log(`  checked          ${tx.length}`);
 console.log(`  STOCK_IN  bad    ${bad.STOCK_IN}`);
 console.log(`  STOCK_OUT bad    ${bad.STOCK_OUT}`);
 console.log(`  ADJUSTMENT bad   ${bad.ADJUSTMENT}`);
-console.log(`  negative stock   ${tx.filter((t) => t.newQuantity < 0 || t.previousQuantity < 0).length}`);
+const negative = tx.filter((t) => t.newQuantity < 0 || t.previousQuantity < 0).length;
+console.log(`  negative stock   ${negative}`);
 
 // ---- referential integrity of what was written
 const productIds = new Set((await Product.find(filter).select('_id').lean()).map((d) => String(d._id)));
@@ -150,4 +171,25 @@ console.log(`  products                       ${products.length}`);
 console.log(`  at or below minimum (restock)   ${low}`);
 console.log(`  zero on hand                    ${zero}`);
 
+// ---- the verdict, and the only path that exits 1
+const problems = [
+  ['STOCK_IN movements whose arithmetic does not hold', bad.STOCK_IN],
+  ['STOCK_OUT movements whose arithmetic does not hold', bad.STOCK_OUT],
+  ['ADJUSTMENT movements whose arithmetic does not hold', bad.ADJUSTMENT],
+  ['movements of an unrecognised type', bad.other],
+  ['movements leaving a negative quantity', negative],
+  ['inventory rows pointing at a missing product or location', invOrphans],
+  ['purchase-order items pointing at a missing product', poOrphanProduct],
+  ['purchase orders pointing at a missing supplier', poOrphanSupplier],
+  ['receipt lines pointing at a missing transaction', poOrphanTx],
+].filter(([, count]) => count > 0);
+
 await mongoose.disconnect();
+
+if (problems.length > 0) {
+  console.error('\n[verify:demo] VIOLATIONS FOUND (exit 1):');
+  for (const [label, count] of problems) console.error(`  - ${label}: ${count}`);
+  process.exit(1);
+}
+console.log('\n[verify:demo] OK (exit 0) — counts, ledger and referential integrity all hold.');
+process.exit(0);

@@ -180,64 +180,42 @@ export const dashboardService = {
     const bizOid = oid(businessId);
     const matchActive = { businessId: bizOid, status: 'ACTIVE' };
 
-    const [totalProducts, qtyAgg, stockFacets, recent] = await Promise.all([
+    // The health counts are computed from ONE grouped pass over inventory plus a
+    // projection-only read of the catalogue, instead of a `$lookup` into inventory
+    // executed once per ACTIVE product.
+    //
+    // Measured 2026-10-13 on a synthetic 10 000-product tenant (20 105 inventory
+    // rows): `explain('executionStats')` showed that per-product join running 10 000
+    // times and examining 20 105 rows, 1.98 s of the dashboard's 2.06 s — to produce
+    // four integers. The per-product join is an INDEX lookup, so no index can help:
+    // the cost is the number of executions. Both reads below are single passes, and
+    // the join itself is a Map lookup.
+    //
+    // `available` is summed the same way either shape computes it: per product,
+    // (sum of quantity) - (sum of reservedQuantity), with a product that has no
+    // inventory row at all counting as 0 — §19's rule that a missing row is zero
+    // stock rather than missing stock.
+    const [totalProducts, qtyAgg, invByProduct, activeCatalogue, recent] = await Promise.all([
       Product.countDocuments(matchActive),
       Inventory.aggregate([
         { $match: { businessId: bizOid } },
         { $group: { _id: null, total: { $sum: '$quantity' } } },
       ]),
-      Product.aggregate([
-        { $match: matchActive },
+      Inventory.aggregate([
+        { $match: { businessId: bizOid } },
         {
-          $lookup: {
-            from: 'inventory',
-            let: { pid: '$_id' },
-            pipeline: [
-              {
-                $match: {
-                  $expr: {
-                    $and: [
-                      { $eq: ['$businessId', bizOid] },
-                      { $eq: ['$productId', '$$pid'] },
-                    ],
-                  },
-                },
-              },
-              {
-                $group: {
-                  _id: null,
-                  quantity: { $sum: '$quantity' },
-                  reserved: { $sum: '$reservedQuantity' },
-                },
-              },
-            ],
-            as: 'inv',
-          },
-        },
-        { $addFields: { invRow: { $arrayElemAt: ['$inv', 0] } } },
-        {
-          $addFields: {
-            available: {
-              $subtract: [
-                { $ifNull: ['$invRow.quantity', 0] },
-                { $ifNull: ['$invRow.reserved', 0] },
-              ],
-            },
-          },
-        },
-        {
-          $facet: {
-            low: [
-              { $match: { $expr: { $lte: ['$available', '$minimumStock'] } } },
-              { $count: 'count' },
-            ],
-            out: [
-              { $match: { $expr: { $lte: ['$available', 0] } } },
-              { $count: 'count' },
-            ],
+          $group: {
+            _id: '$productId',
+            quantity: { $sum: '$quantity' },
+            reserved: { $sum: '$reservedQuantity' },
           },
         },
       ]),
+      // Only the two fields these counts need, and only for the products they are
+      // counted over. One row per ACTIVE product; at 100 000 products this is a few
+      // megabytes, which is the trade this shape makes for not running 100 000
+      // queries — the same trade the availability merge in product.service.ts makes.
+      Product.find(matchActive).select('_id minimumStock').lean(),
       InventoryTransaction.find({ businessId: bizOid })
         .populate('productId', 'name')
         .populate('locationId', 'name')
@@ -247,8 +225,21 @@ export const dashboardService = {
         .limit(RECENT_WINDOW),
     ]);
 
-    const facet = stockFacets[0] ?? {};
-    const lowStockProducts = facet.low?.[0]?.count ?? 0;
+    const availableByProduct = new Map<string, number>();
+    for (const row of invByProduct) {
+      availableByProduct.set(String(row._id), row.quantity - row.reserved);
+    }
+
+    // Counted over ACTIVE products only, as before: the old pipeline `$match`ed
+    // `status: 'ACTIVE'` before it joined anything.
+    let lowStockProducts = 0;
+    let outOfStockProducts = 0;
+    for (const product of activeCatalogue) {
+      const available = availableByProduct.get(String(product._id)) ?? 0;
+      if (available <= (product.minimumStock ?? 0)) lowStockProducts += 1;
+      if (available <= 0) outOfStockProducts += 1;
+    }
+
     return {
       totalProducts,
       totalInventoryQuantity: qtyAgg[0]?.total ?? 0,
@@ -257,7 +248,7 @@ export const dashboardService = {
       // above this is exactly the complement of the low-stock set (§19), so it
       // needs no extra query and can never disagree with lowStockProducts.
       inStockProducts: totalProducts - lowStockProducts,
-      outOfStockProducts: facet.out?.[0]?.count ?? 0,
+      outOfStockProducts,
       recentActivity: recentActivities(recent),
     };
   },

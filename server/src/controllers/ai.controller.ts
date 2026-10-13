@@ -17,7 +17,7 @@ import { optionalObjectId, requiredString, isObjectId } from '../utils/validate.
 import { invalidId, notFound, throwValidation } from '../utils/errors.ts';
 import ApiError from '../utils/ApiError.ts';
 import { aiConfig } from '../services/ai/aiConfig.ts';
-import { AiNotConfigured, AiProviderError } from '../services/ai/aiErrors.ts';
+import { AiAbandoned, AiNotConfigured, AiProviderError, AiTimeout } from '../services/ai/aiErrors.ts';
 import { runAiChat, type ChatTurn } from '../services/ai/ai.service.ts';
 
 /**
@@ -87,6 +87,21 @@ function mapAiFailure(err: unknown) {
       'The AI assistant is not configured on this server yet. Ask an administrator to enable it.',
       'AI_NOT_CONFIGURED'
     );
+  }
+  // AI-1 — the turn outlasted its own deadline. Deliberately its own status and
+  // code: before this, a turn cut short and a provider outage were reported to
+  // the user as the same thing. 504 rather than 502 because nothing upstream
+  // failed — we stopped waiting, and the client should retry rather than
+  // investigate a service it cannot see.
+  if (err instanceof AiTimeout) {
+    return new ApiError(504, 'The assistant took too long to answer. Please try again.', 'AI_TIMEOUT');
+  }
+  // AI-1 — the caller left. 499 is the conventional "client closed request", and
+  // it is deliberately NOT a 502: nothing failed, and the socket this would be
+  // written to is already gone. Its reason for existing is the log line, since a
+  // request the client aborted used to leave no server-side trace whatsoever.
+  if (err instanceof AiAbandoned) {
+    return new ApiError(499, 'The request was cancelled before the assistant answered.', 'AI_ABANDONED');
   }
   if (err instanceof AiProviderError) {
     return new ApiError(502, 'The AI service is temporarily unavailable. Please try again in a moment.', 'AI_UNAVAILABLE');
@@ -198,14 +213,38 @@ const aiController = {
       history = await priorTurnHistory(conversation._id, cfg.contextMessages);
     }
 
+    // AI-1 — the caller's continued interest, as a signal the model call can be
+    // cancelled with.
+    //
+    // `close` on the RESPONSE fires both when a response has finished normally
+    // and when the connection was dropped before it could, so `writableEnded` is
+    // what tells the two apart — and only the second means the client is gone.
+    // (`req.on('close')` cannot be used for this: since Node 16 it also fires on
+    // ordinary completion, which would abort every successful turn.)
+    const clientGone = new AbortController();
+    const onResponseClose = () => {
+      if (!res.writableEnded) clientGone.abort();
+    };
+    res.on('close', onResponseClose);
+    // The caller may ALREADY be gone: a connection can be dropped while auth and
+    // validation are still running, before this listener exists, and 'close' is
+    // not replayed for a response that has already closed. Measured, not
+    // assumed — `res close (writableEnded=false, destroyed=true)` is what an
+    // abort looks like when the listener is attached in time, and the listener
+    // simply never fires when it is not. Without this check that turn would run
+    // to its deadline and pay for a model call nobody will ever read.
+    if (res.destroyed) clientGone.abort();
+
     let result;
     try {
-      result = await runAiChat({ businessId, userId, role, history, message });
+      result = await runAiChat({ businessId, userId, role, history, message, signal: clientGone.signal });
     } catch (err) {
       // Nothing was persisted yet, so a failed request leaves no trace and a
       // retry is deterministic — the same conversation is reused when an id was
       // given, or a fresh attempt starts cleanly when there was none.
       throw mapAiFailure(err);
+    } finally {
+      res.off('close', onResponseClose);
     }
 
     // Provider succeeded — persist the turn durably now.
@@ -234,6 +273,14 @@ const aiController = {
       conversation: conversationPublic(conversation),
       userMessage: messagePublic(userMessage),
       assistantMessage: messagePublic(assistantMessage),
+      // AI-2 — a degraded turn is a COMPLETED turn: the member did read an answer,
+      // so it stays a 201 and is marked rather than turned into an error. The mark
+      // is what makes the failure countable at the boundary for the first time.
+      // Deliberately NOT persisted: it describes this turn's provider behaviour,
+      // not the stored message, and adding a field to AIMessage would be a schema
+      // change this increment does not have. `JSON.stringify` drops `undefined`, so
+      // a healthy turn carries no `degraded` key at all rather than a null.
+      degraded: result.degraded,
     });
   },
 };

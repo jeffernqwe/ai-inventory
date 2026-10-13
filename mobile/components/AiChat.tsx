@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
+import AssistantMarkdown from './AssistantMarkdown';
 import Button from './Button';
 import { Icon } from './icons';
 import { CenterLoader, ErrorState, errorText } from './ListState';
@@ -31,11 +32,29 @@ interface SendErrorLike {
 }
 
 /**
- * Maps a failed send onto a friendly, secret-free client message. The server
- * may answer 503 (AI not configured), 502 (provider down) or 429 (rate limit)
- * — all normal for an assistant that reads data through the backend.
+ * The two codes that mean "we waited as long as we agreed to, then stopped".
+ *
+ * `NETWORK_TIMEOUT` is this client giving up on its own budget;
+ * `AI_TIMEOUT` is the server reporting that a whole turn outlasted
+ * `AI_TURN_DEADLINE_MS` (AI-1's 504). From the user's side these are the same
+ * fact — the assistant was slow — and neither is a connectivity problem.
  */
-function sendErrorMessage(err: unknown): string {
+const TIMEOUT_CODES = ['NETWORK_TIMEOUT', 'AI_TIMEOUT'];
+
+/**
+ * Maps a failed send onto a friendly, secret-free client message. The server
+ * may answer 503 (AI not configured), 504 (turn deadline), 502 (provider down)
+ * or 429 (rate limit) — all normal for an assistant that reads data through the
+ * backend.
+ *
+ * Exported because the ordering below is the fix, not an implementation detail:
+ * a timeout is ALSO a `status === 0` error, so the previous code — which tested
+ * `e.isNetwork` before it looked at `e.code` — reported every slow answer as
+ * "Cannot reach the server" and sent the user to check a connection that was
+ * working (ISS-21 / RC-3). `__tests__/ai1-timeout-copy.test.ts` pins both
+ * directions of that distinction.
+ */
+export function sendErrorMessage(err: unknown): string {
   const e = (err ?? {}) as SendErrorLike;
   if (e.code === 'AI_NOT_CONFIGURED') {
     return 'The AI assistant is not enabled on this server yet. Ask an administrator to turn it on.';
@@ -45,6 +64,10 @@ function sendErrorMessage(err: unknown): string {
   }
   if (e.code === 'AI_RATE_LIMITED') {
     return "You're sending messages too quickly — wait a moment and try again.";
+  }
+  // Checked BEFORE `isNetwork` on purpose — see this function's doc comment.
+  if (e.code && TIMEOUT_CODES.includes(e.code)) {
+    return 'The assistant took too long to answer. Please try again.';
   }
   if (e.isNetwork) {
     return 'Cannot reach the server. Check your connection and try again.';
@@ -79,7 +102,15 @@ function MessageBubble({ item }: { item: ChatRow }) {
   return (
     <View style={[styles.bubbleRow, user ? styles.rowUser : styles.rowAssistant]}>
       <View style={[styles.bubble, user ? styles.bubbleUser : styles.bubbleAssistant]}>
-        <Text style={[styles.bubbleText, user && styles.bubbleTextUser]}>{item.content}</Text>
+        {/* The member's own words are shown exactly as typed. The model's answer
+            is RENDERED (AI-4): headings, lists and tables become real layout
+            instead of a wall of markers — see components/AssistantMarkdown. One
+            path for both loaded history and the live reply. */}
+        {user ? (
+          <Text style={[styles.bubbleText, styles.bubbleTextUser]}>{item.content}</Text>
+        ) : (
+          <AssistantMarkdown content={item.content} />
+        )}
         {!user && item.toolsUsed?.length ? (
           <Text style={styles.tools} numberOfLines={2}>
             Read: {item.toolsUsed.join(' · ')}

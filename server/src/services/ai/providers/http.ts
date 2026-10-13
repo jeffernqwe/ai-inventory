@@ -5,7 +5,7 @@
  * bodies and statuses are logged server-side, never returned to the client.
  */
 
-import { AiProviderError } from '../aiErrors.ts';
+import { AiAbandoned, AiProviderError } from '../aiErrors.ts';
 
 /**
  * The upstream JSON body, as far as anything here is allowed to assume: an
@@ -30,6 +30,12 @@ export interface PostJsonOptions {
   body: unknown;
   timeoutMs?: number;
   providerName?: string;
+  /**
+   * Aborted when the CALLER has gone away (AI-1). Combined with this layer's own
+   * timeout so either can end the request, and told apart in the catch below so
+   * an abandoned call is neither logged as a timeout nor reported as one.
+   */
+  signal?: AbortSignal;
 }
 
 /**
@@ -123,9 +129,11 @@ function logUpstreamDiagnostics({
   );
 }
 
-export async function postJson({ url, headers = {}, body, timeoutMs = 60000, providerName = 'ai' }: PostJsonOptions): Promise<UpstreamJsonBody> {
+export async function postJson({ url, headers = {}, body, timeoutMs = 60000, providerName = 'ai', signal }: PostJsonOptions): Promise<UpstreamJsonBody> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  // Either this layer's own timeout or the caller disappearing ends the request.
+  const abortSignal = signal ? AbortSignal.any([controller.signal, signal]) : controller.signal;
 
   // The definite-assignment assertion replaces the untyped `let res;` without
   // touching the flow: every path reaching the read below has either assigned a
@@ -140,7 +148,7 @@ export async function postJson({ url, headers = {}, body, timeoutMs = 60000, pro
         ...headers,
       },
       body: JSON.stringify(body),
-      signal: controller.signal,
+      signal: abortSignal,
     });
   } catch (err) {
     clearTimeout(timer);
@@ -148,6 +156,15 @@ export async function postJson({ url, headers = {}, body, timeoutMs = 60000, pro
     // the assertion is the erasable way to read the properties this check has
     // always read. Nothing is attached to the error that leaves.
     if ((err as { name?: unknown })?.name === 'AbortError') {
+      // AI-1 — WHO aborted decides what this is. A caller that has gone away is
+      // not a timeout: logging it as one would hide the abandonment, and
+      // throwing a timeout would become a 502 written to a closed socket. The
+      // caller's own signal is what tells the two apart, because this layer's
+      // controller is only ever aborted by its own timer.
+      if (signal?.aborted) {
+        console.error(`[ai:${providerName}] caller went away; the upstream call was cancelled`);
+        throw new AiAbandoned();
+      }
       console.error(`[ai:${providerName}] request timed out after ${timeoutMs}ms`);
       throw new AiProviderError('The AI service took too long to respond. Please try again.');
     }

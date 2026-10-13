@@ -147,12 +147,15 @@ export function createGeminiProvider(): AIProvider {
   return {
     name: 'gemini',
 
-    async complete({ system, messages, tools }) {
+    async complete({ system, messages, tools, timeoutMs, signal }) {
       const cfg = aiConfig();
       const data = await postJson({
         url: geminiEndpoint(cfg.geminiModel),
         providerName: 'gemini',
-        timeoutMs: cfg.requestTimeoutMs,
+        // The turn's remaining budget when the orchestrator supplied one, so a
+        // call can never outlive the turn's single deadline (AI-1).
+        timeoutMs: timeoutMs ?? cfg.requestTimeoutMs,
+        signal,
         headers: { 'x-goog-api-key': apiKey },
         body: {
           system_instruction: { parts: [{ text: system }] },

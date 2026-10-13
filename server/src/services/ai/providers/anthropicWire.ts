@@ -170,13 +170,16 @@ export function createAnthropicCompatibleProvider(opts: AnthropicCompatibleOptio
   return {
     name,
 
-    async complete({ system, messages, tools }) {
+    async complete({ system, messages, tools, timeoutMs, signal }) {
       const cfg = aiConfig();
       const model = cfg[modelKey] || defaultModel;
       const data = await postJson({
         url: messagesUrl,
         providerName: name,
-        timeoutMs: cfg.requestTimeoutMs,
+        // The turn's remaining budget when the orchestrator supplied one, so a
+        // call can never outlive the turn's single deadline (AI-1).
+        timeoutMs: timeoutMs ?? cfg.requestTimeoutMs,
+        signal,
         headers: { ...(authHeaders ? authHeaders(apiKey) : {}), ...extraHeaders },
         body: {
           model,

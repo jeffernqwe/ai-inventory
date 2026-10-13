@@ -2252,6 +2252,24 @@ Recorded here because two of its findings are security-relevant; the full engine
 
 ---
 
+## 48. AI-2 — THE AI TOOL TABLE'S READ-ONLY INVARIANT NOW HAS A GUARD, AND A DEGRADED TURN IS NO LONGER INVISIBLE (2026-10-13)
+
+Recorded here because one half of it is security-relevant; the full engineering record is roadmap **§27BF**.
+
+| Field | Value |
+| --- | --- |
+| **The invariant that had no enforcement** | CLAUDE.md §4 and SYSTEM_SPECIFICATION §22–§24 make the AI assistant's V1 read-only scope mandatory, and it **was** true — 9 tools, every one calling a read service, `businessId` only ever taken from the session, `additionalProperties: false` on every argument schema. But **nothing in the repository could fail if a write capability were added to the tool table.** The invariant held because every contributor remembered it, which is exactly the class of gap this project already closed for the RBAC mirror, the route inventory and the Expo pin set |
+| **What now enforces it** | `server/test/AI2-ai-readonly-tools.test.mjs`, DB-free, four independent ways: every tool's permission pinned to the four **read** capabilities with those four asserted not write-shaped; the table's **own source** scanned for any service call outside a read-only allow-list; **every** tool required to refuse a smuggled `businessId`/`$where`/`role` argument; and the nine write-tool names a model actually invents all required to answer `TOOL_NOT_FOUND`. A role lacking a tool's permission is refused **before it runs**, with the mirror test proving the denial is a permission decision rather than a table that refuses everyone |
+| **Why the guard carries a control** | A guard that cannot fail is decoration. The source scan mutates the source twice and must report both, and its **sightline** is asserted too (it must find the reads that are genuinely there), so an empty result cannot mean a blind regex. Proven able to fail end to end: clean exit **0**, a write call injected into an executor exit **1**, a tool gated on `INVENTORY_MANAGE` exit **1**, restored exit **0** and **byte-identical** |
+| **What it does not prove** | That a tool's **query** is business-scoped. That remains a property of the services the table calls (Phase 04/09, measured over HTTP against a real database by `phase06-ai-security.test.mjs`). This suite proves the table cannot be reached for anything but reading |
+| **The invisible failure, and why it is recorded here** | A `200` carrying no usable content — F-52's `thinking`-only body and F-54's **zero-length** one — ended a turn as an ordinary **HTTP 201** whose content was a canned sentence, with **no log line anywhere**: a repository-wide grep for that sentence found exactly one occurrence, its own assignment. Measured at **three defect-class turns in five** on 2026-10-12 (§27BE). An operation whose failures leave no record cannot be audited, and *"we cannot tell whether it failed"* is a security posture, not a UX bug |
+| **Action** | A content-less `200` is **retried once** (`AI_EMPTY_RETRY_MAX`, default 1), inside the turn's existing deadline and iteration budget; a turn that exhausts the budget is **marked** (`degraded` on the result and on the 201, absent rather than null on a healthy turn) and logged as one greppable line, `[ai] degraded turn reason=… attempts=… empty=… model=… tools=…`, where `empty` counts responses **seen** rather than retries **authorised** so the line cannot overstate what happened |
+| **No new attack surface** | No route, permission, schema, session, JWT, limiter or dependency change; the model and provider are untouched. The retry reaches the same provider with the **same request** and applies **only** to an empty completion — **a provider failure is never retried**, so an outage cannot be answered by paying for it twice while its cause is hidden |
+| **Open / limitations** | **ISS-22 stays open** as the provider-tier decision it was recorded as — the owner **declined a paid model on 2026-10-13**, so the residual is accepted for V1 and the retry is the whole mitigation. **Not device-verified:** the failure rate is not yet re-measured. A *deterministic* failure is not helped by re-sending an identical request; only an intermittent one is |
+| **Nothing removed** | `L-17`, `B1`, `B2`, `E3`, `OD-10` and the owner decisions all stay exactly as they were |
+
+---
+
 > **MAINTENANCE.** This is a living navigation document. On any authentication/security change:
 > reconcile against evidence, update only evidence-supported statuses, record newly completed and
 > remaining work, preserve unresolved decisions and deferred items, update external-verification

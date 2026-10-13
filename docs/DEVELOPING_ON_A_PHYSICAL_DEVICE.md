@@ -313,7 +313,7 @@ adb reverse tcp:4000 tcp:4000     # phone's localhost:4000 -> your backend
 1. **Metro served the bundle:** its terminal prints
    `Android Bundled 2930ms node_modules\expo-router\entry.js (1602 modules)`.
 2. **The app is on the screen:** you see it in the scrcpy window. For text you can read
-   mechanically: `adb shell uiautomator dump /sdcard/w.xml` then `adb exec-out cat /sdcard/w.xml` — **this can fail with `ERROR: null root node returned by UiTestAutomationBridge`** (see 7e).
+   mechanically: `adb shell uiautomator dump /sdcard/w.xml` then `adb exec-out cat /sdcard/w.xml` — **in Git Bash prefix it with `MSYS_NO_PATHCONV=1`, or MSYS silently rewrites the `/sdcard/` argument to a Windows path; it can also fail with `ERROR: null root node returned by UiTestAutomationBridge`, and a failed dump leaves a STALE file behind** (see 7e).
 3. **It is talking to your laptop:** the terminal from 6b logs lines such as
    `{"ts":"...","type":"http","method":"GET","path":"/api/auth/me","status":401}`.
 
@@ -557,10 +557,23 @@ Two reading traps worth knowing:
 
 - `curl` from **this laptop** and requests from the **phone** land in the same log. A request you
   made yourself is not evidence the app is connected; that is why 7b uses the phone's own browser.
-- On this device `adb shell uiautomator dump` can fail with
-  **`ERROR: null root node returned by UiTestAutomationBridge`**, which leaves you unable to read
-  the screen mechanically even though it renders fine. Fall back to the scrcpy window and to
-  `dumpsys activity activities` for which activity is in front.
+- **In Git Bash the documented one-liner is silently sabotaged.** MSYS rewrites the `/sdcard/...`
+  argument into a Windows path — `uiautomator dump /sdcard/w.xml` answers
+  `UI hierchary dumped to: /Files/Git/sdcard/w.xml`, a location nothing reads. Set
+  **`MSYS_NO_PATHCONV=1`** (or write `//sdcard/w.xml`) and it works. Measured 2026-10-12: with the
+  flag the hierarchy dumped on the first attempt; the same command without it targeted the mangled
+  path. PowerShell never had this problem, which is why the guide did not see it.
+- **`uiautomator dump` is also genuinely intermittent on this device, flag or no flag.** In the
+  2026-10-12 run it succeeded twice and then failed four consecutive times with
+  **`ERROR: null root node returned by UiTestAutomationBridge`**. Treat it as a best-effort reader
+  with a fallback, not a dependable one: fall back to the scrcpy window, to
+  `dumpsys activity activities` for which activity is in front, and to OCR over
+  `adb exec-out screencap -p`.
+- **A FAILED dump leaves the PREVIOUS file in place, so a naive reader returns a STALE screen.**
+  This is the trap that actually bites: on 2026-10-12 a stale dump showed the **Login** screen while
+  the app was signed in and sitting on the dashboard — the server log (`firebase/exchange 200`,
+  `dashboard 304`) is what caught it. Delete `/sdcard/w.xml` *and* your local copy before every
+  dump, and treat a 0-byte read as a failure rather than as a screen.
 
 ### 7f. Failure → log line → cause → fix
 
@@ -618,7 +631,8 @@ receiving mailbox files the code as spam. Neither is a code defect.
 | Metro: port 8081 in use | A previous Metro is still running | Close it, or answer its "use another port" prompt |
 | Stale UI after changing `.env` | `EXPO_PUBLIC_*` is inlined at bundle time | `npx expo start --dev-client --clear` |
 | `adb devices` returns `unauthorized` after it worked before | The adb server restarted (reboot, `adb kill-server`, USB hiccup) and the phone wants re-approval | Unlock and accept the prompt; if none appears, revoke authorizations in Developer options and replug |
-| `uiautomator dump` prints `ERROR: null root node returned by UiTestAutomationBridge` | The shell cannot read this window's accessibility tree (seen here on Android 11 with the RN surface up) | Read the scrcpy window instead; `dumpsys activity activities` still names the foreground activity — see 7e |
+| `uiautomator dump` writes to `/Files/Git/sdcard/w.xml` | **Git Bash rewrote the path**, not a device fault | prefix with `MSYS_NO_PATHCONV=1` (or use `//sdcard/...`) — see 7e |
+| `uiautomator dump` prints `ERROR: null root node returned by UiTestAutomationBridge` | Intermittent: the shell could not read this window's accessibility tree on that attempt (seen here on Android 11 with the RN surface up) | **retry**, then fall back to the scrcpy window; `dumpsys activity activities` still names the foreground activity. Never trust the file left behind by a failed dump — delete it first — see 7e |
 | The app reports a network error while the backend is healthy | The `adb reverse` tunnels were lost — they do not survive an adb server restart or a replug | Re-run both `adb reverse` commands; confirm with `adb -s $serial reverse --list` |
 | *"Cannot reach the sign-in service"* while the API is reachable | Firebase Auth goes over the phone's **internet**, not the USB tunnel | Reconnect the phone's data/Wi-Fi |
 
@@ -633,15 +647,45 @@ adb devices                                  # must say "device"
 # 2. mirror it
 scrcpy -s PV4DDMIZZLTCIVSK -m 1024 --window-title "Inventory AI"
 
-# 3. terminal 1 — backend
+# 3. THE TUNNELS — required, and the step most often missed (see below)
+adb reverse tcp:8081 tcp:8081                # phone's localhost:8081 -> Metro
+adb reverse tcp:4000 tcp:4000                # phone's localhost:4000 -> backend
+adb reverse --list                           # must list BOTH before you go on
+
+# 4. terminal 1 — backend
 cd C:\Users\jeffe\inventory-ai\server; npm start
 
-# 4. terminal 2 — Metro, then press "a" to open the dev client on the phone
+# 5. terminal 2 — Metro, then press "a" to open the dev client on the phone
 cd C:\Users\jeffe\inventory-ai\mobile; npx expo start --dev-client
 ```
 
 Three windows: the phone mirror, the backend log, the Metro log. Edit code → the phone reloads;
 if you change `.env`, restart Metro with `--clear`.
+
+### Why step 3 exists, and why it bites
+
+`mobile/.env` sets `EXPO_PUBLIC_API_URL=http://localhost:4000`. On the phone, `localhost` is the
+**phone**, not your laptop — so without the `tcp:4000` tunnel the app loads fine (Metro works, because
+`tcp:8081` *is* there) and then **every API call fails with** *"Cannot reach the server. Check your
+connection and try again."*
+
+The reason it is easy to miss: **Expo creates the 8081 tunnel for you, but nothing creates 4000.**
+The dev client shows a running app, so the connection looks healthy — the only thing broken is the
+one tunnel no tool bothered to add.
+
+A reverse tunnel is bound to the **current ADB connection**, so it is lost on every replug, every
+`adb` restart and every cable bump. Recreate both whenever `adb reverse --list` does not list them.
+Two checks, in this order, tell you which half is broken:
+
+```powershell
+curl http://localhost:4000/api/health/ready   # on the laptop: must answer 200
+adb reverse --list                            # must list tcp:8081 AND tcp:4000
+```
+
+A tunnel to a port nothing is listening on fails exactly like a missing tunnel, which is why the
+`curl` comes first — it separates a dead backend from a missing tunnel. If you would rather not use
+tunnels at all, set `EXPO_PUBLIC_API_URL` to the laptop's LAN address instead (Section 6) and put the
+phone on the same Wi-Fi; the tunnel route needs no Wi-Fi at all and is the default here.
 
 ---
 

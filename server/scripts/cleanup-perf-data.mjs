@@ -19,13 +19,7 @@ import 'dotenv/config';
 import mongoose from 'mongoose';
 
 import env from '../src/config/env.ts';
-import Category from '../src/models/category.model.ts';
-import Inventory from '../src/models/inventory.model.ts';
-import InventoryTransaction from '../src/models/inventoryTransaction.model.ts';
-import Location from '../src/models/location.model.ts';
-import Product from '../src/models/product.model.ts';
-import User from '../src/models/user.model.ts';
-import { SeedSafetyError, assertSafeTarget, findSeedTenantIds, removeTenant } from './perf/lib.mjs';
+import { SeedSafetyError, assertSafeTarget, countTenantLeftovers, findSeedTenantIds, removeTenant } from './perf/lib.mjs';
 
 const COMMAND = 'cleanup:perf';
 
@@ -54,16 +48,11 @@ async function main() {
     console.log(`[${COMMAND}]   ${collection.padEnd(24)} ${count}`);
   }
 
-  // Prove it, do not assert it: re-count anything still carrying those ids.
-  const filter = { businessId: { $in: ids.map((id) => new mongoose.Types.ObjectId(String(id))) } };
-  const leftovers = [
-    await Inventory.countDocuments(filter),
-    await InventoryTransaction.countDocuments(filter),
-    await Product.countDocuments(filter),
-    await Category.countDocuments(filter),
-    await Location.countDocuments(filter),
-    await User.countDocuments(filter),
-  ].reduce((a, b) => a + b, 0);
+  // Prove it, do not assert it: re-count anything still carrying those ids — over
+  // the SAME collection list the removal used, so a collection that was deleted is
+  // necessarily also verified. (Before this, both halves named six collections by
+  // hand and `suppliers`/`purchase_orders` appeared in neither.)
+  const leftovers = await countTenantLeftovers(ids);
 
   if (leftovers !== 0) {
     fail(`verification failed: ${leftovers} document(s) still reference the seed tenant.`);

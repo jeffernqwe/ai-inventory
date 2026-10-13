@@ -19,6 +19,8 @@ import Inventory from '../../src/models/inventory.model.ts';
 import InventoryTransaction from '../../src/models/inventoryTransaction.model.ts';
 import Location from '../../src/models/location.model.ts';
 import Product from '../../src/models/product.model.ts';
+import PurchaseOrder from '../../src/models/purchaseOrder.model.ts';
+import Supplier from '../../src/models/supplier.model.ts';
 import User from '../../src/models/user.model.ts';
 
 /** The confirmation phrase both commands require in the environment. */
@@ -39,7 +41,7 @@ export class SeedSafetyError extends Error {}
  * `npm run cleanup:test-mongodb` clear it, so seeded rows there would vanish
  * mid-experiment and the measurement would be of an empty tenant.
  */
-export function assertSafeTarget(env, command) {
+export function assertSafeTarget(env, command, { confirmPhrase = SEED_CONFIRM_PHRASE } = {}) {
   if (process.env.NODE_ENV === 'production') {
     throw new SeedSafetyError('NODE_ENV=production. Refusing. Nothing was written or deleted.');
   }
@@ -53,10 +55,35 @@ export function assertSafeTarget(env, command) {
         '`npm test`). Nothing was written or deleted.',
     );
   }
-  if (process.env.SEED_CONFIRM !== SEED_CONFIRM_PHRASE) {
-    throw new SeedSafetyError(`set SEED_CONFIRM=${SEED_CONFIRM_PHRASE} to proceed. [${command}]`);
+  // The phrase is passed in so a second seeder (the demo-account one) can share this
+  // single target guard instead of copying it — the copy is how two seeders drift
+  // apart on what "safe" means.
+  if (process.env.SEED_CONFIRM !== confirmPhrase) {
+    throw new SeedSafetyError(`set SEED_CONFIRM=${confirmPhrase} to proceed. [${command}]`);
   }
 }
+
+/**
+ * Every DATA collection that belongs to a tenant, in the order they must be removed:
+ * child rows before the rows they point at, so a partially-completed removal never
+ * leaves inventory referencing a product that is already gone.
+ *
+ * There is exactly ONE list. The performance teardown and the demo-data teardown
+ * both read it, because a second copy is how a cleanup eventually deletes less than
+ * the seed created — which is precisely what happened here: `suppliers` and
+ * `purchase_orders` were missing from the original list, harmless only because the
+ * performance seeder never wrote those two collections. The demo seeder DOES, so the
+ * omission would have left orphaned rows behind on every reset.
+ */
+export const TENANT_DATA_COLLECTIONS = [
+  ['inventory', Inventory],
+  ['inventory_transactions', InventoryTransaction],
+  ['purchase_orders', PurchaseOrder],
+  ['products', Product],
+  ['categories', Category],
+  ['locations', Location],
+  ['suppliers', Supplier],
+];
 
 /** Every businessId that belongs to the seed tenant, by BOTH fingerprints. */
 export async function findSeedTenantIds() {
@@ -69,32 +96,63 @@ export async function findSeedTenantIds() {
 }
 
 /**
- * Delete every document belonging to the given tenants, and NOTHING else.
+ * Delete every DATA document belonging to the given tenants, and NOTHING else.
  *
- * Every filter is `{ businessId: { $in: ids } }` (plus the business rows by `_id`),
- * so no other tenant's data can be reached from here even if this is called with a
- * wrong id — a wrong id simply matches nothing. Returns per-collection counts so a
- * caller can prove the tenant is gone rather than assume it.
+ * Every filter is `{ businessId: { $in: ids } }`, so no other tenant's data can be
+ * reached from here even if this is called with a wrong id — a wrong id simply
+ * matches nothing. The account rows (`users`, `businesses`) are deliberately NOT
+ * touched here: a caller that means to remove a whole tenant says so by calling
+ * `removeTenant`, and a caller that only wants the tenant's data reset (the demo
+ * seeder) never risks an account's identity linkage as a side effect.
  */
-export async function removeTenant(businessIds) {
+export async function clearTenantData(businessIds) {
   const ids = businessIds.map((id) => new mongoose.Types.ObjectId(String(id)));
   const filter = { businessId: { $in: ids } };
   const counts = {};
   let removed = 0;
-  for (const [name, model] of [
-    ['inventory', Inventory],
-    ['inventory_transactions', InventoryTransaction],
-    ['products', Product],
-    ['categories', Category],
-    ['locations', Location],
-    ['users', User],
-  ]) {
+  for (const [name, model] of TENANT_DATA_COLLECTIONS) {
     const res = await model.deleteMany(filter);
     counts[name] = res.deletedCount ?? 0;
     removed += counts[name];
   }
+  return { removed, counts };
+}
+
+/**
+ * Delete a WHOLE tenant: its data, then its users and the business row itself.
+ *
+ * Returns per-collection counts so a caller can prove the tenant is gone rather
+ * than assume it.
+ */
+export async function removeTenant(businessIds) {
+  const ids = businessIds.map((id) => new mongoose.Types.ObjectId(String(id)));
+  const filter = { businessId: { $in: ids } };
+
+  const { removed: dataRemoved, counts } = await clearTenantData(businessIds);
+  let removed = dataRemoved;
+
+  const users = await User.deleteMany(filter);
+  counts.users = users.deletedCount ?? 0;
+  removed += counts.users;
+
   const businesses = await Business.deleteMany({ _id: { $in: ids } });
   counts.businesses = businesses.deletedCount ?? 0;
   removed += counts.businesses;
   return { removed, counts };
+}
+
+/**
+ * Count anything still carrying the given tenant ids — the verification half of a
+ * removal, over the SAME collection list the removal uses, so a collection that is
+ * deleted is necessarily also verified. Includes the account rows.
+ */
+export async function countTenantLeftovers(businessIds) {
+  const ids = businessIds.map((id) => new mongoose.Types.ObjectId(String(id)));
+  const filter = { businessId: { $in: ids } };
+  let total = 0;
+  for (const [, model] of TENANT_DATA_COLLECTIONS) {
+    total += await model.countDocuments(filter);
+  }
+  total += await User.countDocuments(filter);
+  return total;
 }

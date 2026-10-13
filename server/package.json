@@ -25,6 +25,8 @@
     "cleanup:test-firebase": "node scripts/cleanup-test-firebase.mjs",
     "audit:indexes": "node scripts/audit-indexes.mjs",
     "seed:perf": "node scripts/seed-perf-data.mjs",
+    "seed:demo": "node scripts/seed-demo-account.mjs",
+    "verify:demo": "node scripts/verify-demo-data.mjs",
     "cleanup:perf": "node scripts/cleanup-perf-data.mjs",
     "perf:measure": "node scripts/measure-ai-tools.mjs",
     "perf:golden": "node scripts/capture-ai-golden.mjs",

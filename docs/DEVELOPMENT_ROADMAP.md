@@ -9810,6 +9810,137 @@ nobody dropped an index yesterday. Stated here rather than left for someone to d
 * **The audit is a manual tool, not a CI step.** CI's `mongo:7` container is a fresh database, so auditing it would
   test index *creation* (already covered by the suite above) rather than drift against a database anyone uses.
 
+# 27BK. The owner's account seeded at 80 000 records, and the Firebase cleanup that was refused (2026-10-14)
+
+The owner asked for their personal account to be given mock inventory data — **~80 000 records across
+`categories`, `inventory`, `inventory_transactions`, `locations`, `products`, `purchase_orders` and `suppliers`** — so
+the AI assistant could be tested reading and processing a large amount of inventory data; and, before that, to
+"clean up both the development database **and Firebase Authentication users**" to start fresh.
+
+## The half of that request which was NOT done, and why
+
+**No Firebase identity was deleted.** §27BB (F-50) is the record of doing this: a MongoDB user whose Firebase
+identity is gone can **neither sign in** (no identity to produce an ID token) **nor register** (`registerBusinessFromFirebase`
+pre-checks `User.exists({ email })` and answers `409 EMAIL_IN_USE`), and **nothing in the application can repair
+it**. The owner's own working login was one of the identities at risk, and it must survive for any of this to be
+usable.
+
+§27BB also establishes the safe direction, and it is the one taken: **clearing MongoDB alone frees every address**
+(the collision check reads MongoDB and never consults Firebase), so a Mongo-side clear achieves a fresh start while
+orphaning nothing. The measured state before this increment was healthy on exactly that question — **2 MongoDB users,
+both pointing at Firebase identities that exist** — so there was no F-50 orphan to repair, and none was created.
+
+What remains in Firebase is therefore: the owner's identity (required), and `perf-seed-ai@example.invalid`, which
+became a Firebase-only identity when its MongoDB tenant was removed. A Firebase-only identity is **not** the F-50
+trap — it cannot sign in to anything, and the address is free to register again — so it is inert rather than
+dangerous. Deleting it was offered and not taken: it holds no MongoDB user, so removal is risk-free, but it also
+frees nothing that anyone needs. The third identity, an **unverified** `jefferndullamalinao@gmail.com` with no
+MongoDB user, was left untouched for a different reason: it is plausibly also the owner's, and deleting it is not
+reversible from here.
+
+**The owner's credential was verified, not changed.** Before anything destructive, the password was checked against
+the identity provider with a read-only sign-in: **HTTP 200, idToken issued**. So no credential was ever rewritten,
+which is why the run could not become "seeded but unable to log in".
+
+## What was actually cleared, and the backup taken first
+
+A full read-only dump of `inventoryai_dev_db` was written **outside the repository** (so it can never be committed)
+as Extended JSON plus the Firebase identities: `C:\Users\jeffe\inventory-ai-backups\20261013-181410\` —
+**50 188 documents, 24.7 MB, 3 identities**. Then, using the **existing guarded tools** (`npm run cleanup:perf`,
+`assertSafeTarget`: refuses production, refuses the test database, requires `SEED_CONFIRM`):
+
+* the leftover **performance-seed tenant** was removed — **50 066 documents**, verification re-queried and found
+  **0 remaining**;
+* the owner's tenant was then **reset and re-seeded** by the new script.
+
+The owner's `User` and `Business` rows were never deleted. That is the point of the design: the account's identity
+linkage is not a thing a data-reset script should be able to touch as a side effect.
+
+## What was added
+
+* **`npm run seed:demo -- --email=<address> [--total=80000] [--seed=1]`** — resolves the **Firebase uid from Firebase**
+  (the identity authority; nothing here looks a user up by email in MongoDB, because the application joins on
+  `firebaseUid` only), reuses that account's tenant if it exists or creates one in exactly the shape registration
+  writes (OWNER, ACTIVE, linked by uid), **resets only that tenant's DATA**, and seeds the seven collections to an
+  **exact** total. Idempotent: a re-run resets what it wrote. Deterministic PRNG, so two runs are the same dataset.
+  It creates a Firebase identity **only** when the requested one does not exist, taking the initial password from
+  `DEMO_ACCOUNT_PASSWORD` in the environment — never from a file, and never printed.
+* **`npm run verify:demo -- --email=<address>`** — reads the rows back and checks **counts, ledger consistency and
+  referential integrity** rather than believing the seeder's own report. Read-only; exit 1 on any violation.
+* **A latent teardown gap, fixed at its single definition.** The tenant-removal helper deleted six collections and
+  **not** `suppliers` or `purchase_orders` — harmless only because the performance seeder never wrote those two. The
+  demo seeder does, so both the removal and its verification now read **one** shared collection list
+  (`TENANT_DATA_COLLECTIONS`), and a collection that is deleted is necessarily also verified.
+
+## The result, measured
+
+Seeded into the owner's existing tenant (`6accbaf8f3e7c9079ea6f769`), **exactly 80 000 documents** in 142 s:
+
+| collection | count |
+| --- | --- |
+| categories | 24 |
+| locations | 6 |
+| suppliers | 300 |
+| products | 18 000 |
+| inventory | 36 104 |
+| inventory_transactions | 23 966 |
+| purchase_orders | 1 600 |
+| **total** | **80 000** |
+
+Independently verified from the database: **ledger consistency 0 violations** of 23 966 movements (`STOCK_IN`,
+`STOCK_OUT` and `ADJUSTMENT` each holding its own arithmetic, 0 negative quantities); **referential integrity 0
+orphans** (inventory→product/location, PO→supplier, PO item→product, and all **842** receipt lines pointing at real
+inventory transactions — a receipt is backed by the movement it claims); stock health **2 777 at or below minimum**,
+**1 109 at zero**.
+
+**The login path end to end, on the real route:** Firebase sign-in → `POST /api/auth/firebase/exchange` **200** →
+`GET /api/dashboard` **200** reporting `totalProducts 18000`, `totalInventoryQuantity 4452207`, `lowStockProducts 2777`,
+`outOfStockProducts 1109` — every figure equal to the independent count. `GET /api/products?limit=1` → `total=18000`.
+
+**The AI at this scale, tool layer first (zero model calls, so no quota spent):** all nine tools measured over
+18 000 products, 36 104 inventory rows and 23 966 transactions — **worst median 662 ms** (`getInventorySummary`),
+worst p95 **799 ms**, with `getInventory` **78.5 ms** and `getInventoryHistory` **77.4 ms**, and **no payload
+exceeding** the 12 000-char cap. The AI-3 page-window fix therefore holds at this size, and the tool cost stays
+sub-second against turns measured in tens of seconds.
+
+**One real turn** — *"Which products need restocking, and how many are there in total?"* — answered **201 in
+28 450 ms**, with `getReorderNeededProducts`, and the figure it reported was **2 777, exactly the dashboard's and the
+independent count's**, laid out with real product rows. The AI-5 line beside it:
+
+```text
+[ai] turn outcome=ok total=28072ms providerMs=27528ms calls=2 toolMs=544ms toolRuns=1 \
+         tools=getReorderNeededProducts empty=0 in=7981 out=486 model=… iterations=2
+```
+
+**98 % of that turn was the provider and 1.9 % was the database**, which reproduces AI-5's finding at 80 000
+records rather than restating it — and `empty=0` shows this turn needed no retry, where both of AI-5's earlier turns
+did.
+
+## Two bugs found by RUNNING it, both in this increment's own code
+
+1. **`insertChunked` returned a count where its callers needed documents.** The inventory rows were built from
+   `undefined._id` and the very first real run died with "Cannot read properties of undefined (reading '_id')" — after
+   it had already written 18 330 products. It now returns the inserted documents and callers take `.length`; the
+   failure was cheap only because the script resets the tenant it owns before it writes.
+2. **Two false alarms in the first verifier**, each of which a reader could have mistaken for a fixture defect: a
+   `select()` that omitted `supplierId` made **all 1 600** purchase orders look like orphans, and comparing an
+   inventory **row count** (1–3) against a minimum stock (5–100) reported **all 18 000** products as low on stock.
+   Both are recorded in the file, because "the checker was wrong" and "the data was wrong" look identical from the
+   outside and only one of them is a problem.
+
+## What is NOT verified
+
+* **Not device-verified.** The login path, the dashboard figures and one assistant turn were exercised over the real
+  routes with a real ID token, but nobody has looked at the phone. The server on port 4000 is also still running the
+  pre-AI-5 code, so it serves this data but does not emit the cost line until it is restarted.
+* **The ≥50 000-PRODUCT measurement AI-3 recorded as its next step is still open.** This dataset is 80 000 documents
+  but **18 000 products** — above the 10 000 benchmark and below that target — so the merged tools' partition scans
+  are measured to 18 000, not 50 000.
+* **`audit_logs` and `ai_conversations` were deliberately not cleared** (17 and 44 rows at the time): they are
+  history rather than the inventory fixture, and `clearTenantData` covers the seven data collections only.
+* **The Firebase cleanup the owner asked for was refused**, as above. It can be done on request for the single
+  `@example.invalid` identity, which is the only one that is unambiguously disposable.
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

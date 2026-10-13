@@ -9928,6 +9928,15 @@ did.
    Both are recorded in the file, because "the checker was wrong" and "the data was wrong" look identical from the
    outside and only one of them is a problem.
 
+3. **The verifier's exit code conflated "broken" with "could not look".** An Atlas `ETIMEDOUT` — the connection
+   transient this project already documents — exited **1**, which is the same code as a data violation, and it sent
+   someone (me) hunting a data bug twice. A network blip and a corrupt row are different facts and now carry
+   different codes: **0** verified, **1** a violation was found, **2** not verified (unreachable, or no such
+   account — nothing claimed either way). All three paths were then exercised rather than asserted: 0 on this
+   dataset, 2 on an unreachable URI and on an unknown account, and 1 against a **planted contradictory
+   `STOCK_OUT` row** in the *disposable test database*, created and removed by a scratch harness, so the owner's
+   data was never part of the proof.
+
 ## What is NOT verified
 
 * **Not device-verified.** The login path, the dashboard figures and one assistant turn were exercised over the real

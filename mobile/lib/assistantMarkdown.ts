@@ -109,8 +109,42 @@ const LATEX_SYMBOLS: [RegExp, string][] = [
 const LATEX_WRAPPERS =
   /\\(?:mathbf|textbf|textit|text|mathrm|mathit|operatorname|mbox|textnormal)\s*\{([^{}]*)\}/g;
 
-/** `\frac{a}{b}` is a division once read as text. */
+/**
+ * `\frac{a}{b}` is a division once read as text.
+ *
+ * A SIDE CARRYING AN OPERATOR KEEPS ITS BRACKETS, and that is a correctness rule
+ * rather than a cosmetic one. Measured on the phone during the 2026-10-14 AI-4 device
+ * pass: asked what percentage of products were low on stock, the assistant answered
+ * `\frac{17 + 5}{113}` — "17 plus 5, over 113" — which the plain `a/b` rule decoded to
+ * `17+ 5/113`, a string that reads as `17 + (5/113)` and therefore as a DIFFERENT
+ * number from the one the model computed (0.044% instead of 19.5%). `(17+5)/113`
+ * cannot be misread, so a side carrying any operator keeps its brackets.
+ *
+ * THE MULTIPLICATIVE SIDES ARE THE SAME DEFECT, AND WORSE FOR BEING QUIET. `+` and `-`
+ * are the ones the phone happened to show, but the bar binds tighter than `×` and `÷`
+ * exactly as it does than `+`, so `\frac{1}{2 \times 3}` — one sixth — used to decode to
+ * `1/2 × 3`, which reads left to right as one and a half. A wrong number is the failure
+ * this module exists to prevent, so the rule covers `+ - − × · ÷ /` and their LaTeX
+ * spellings (`\times`, `\cdot`, `\div`, `\pm`, `\mp`) rather than the operators one
+ * screenshot happened to show.
+ *
+ * A SINGLE TERM IS UNTOUCHED, which is what keeps this rule away from the answers already
+ * stored: `\frac{620}{10,000}` still decodes to `620/10,000` — the form both the earlier
+ * device fixture and the existing cases pin.
+ */
 const LATEX_FRAC = /\\frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g;
+
+/**
+ * Anything that would interact with the `/` were the bar dropped for nothing: the
+ * arithmetic signs, in the plain and the LaTeX spelling the model uses interchangeably.
+ * `\pm` and `\mp` are here for the same reason as `×` — they change what the side is.
+ */
+const FRACTION_OPERATOR = /[+\-−×·÷\/]|\\times|\\cdot|\\div|\\pm|\\mp/;
+
+/** One side of a fraction, bracketed only when dropping the bar could change its meaning. */
+function fractionTerm(side: string): string {
+  return FRACTION_OPERATOR.test(side) ? `(${side})` : side;
+}
 
 /**
  * Decode the LaTeX this assistant writes into plain, readable text (ISS-26).
@@ -121,7 +155,7 @@ const LATEX_FRAC = /\\frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g;
  * a prompt change: that would cost tokens on every turn forever and would leave
  * every answer already stored unreadable.
  *
- * TWO BOUNDARIES, BOTH DELIBERATE:
+ * THREE BOUNDARIES, ALL DELIBERATE:
  *
  *  * A single `$…$` is NOT a maths delimiter here. A dollar sign in these answers
  *    is currency far more often than it is markup, so treating `$1,200` as a span
@@ -131,6 +165,10 @@ const LATEX_FRAC = /\\frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g;
  *  * An UNRECOGNISED command is LEFT ALONE. Nothing is removed that is not
  *    recognised, because dropping stray backslashes would eat the separator out of
  *    a Windows path (`C:\Users\…`) to tidy up a marker that was never there.
+ *  * A SUPERSEDED structural marker becomes brackets, not nothing: `\frac` turns
+ *    into a division sign, and a side that carries an operator of its own is wrapped so
+ *    the division still means what the model meant. See {@link LATEX_FRAC} for the
+ *    device measurement that made this a rule instead of a nicety.
  *
  * Runs once per rendered bubble over a string already in memory, so it costs
  * nothing in tokens and nothing in latency a member can notice.
@@ -143,7 +181,13 @@ export function stripLatex(raw: string): string {
   // out; the bound stops a pathological input from looping.
   for (let pass = 0; pass < 4; pass += 1) {
     const before = out;
-    out = out.replace(LATEX_WRAPPERS, '$1').replace(LATEX_FRAC, '$1/$2');
+    out = out
+      .replace(LATEX_WRAPPERS, '$1')
+      .replace(
+        LATEX_FRAC,
+        (_match, numerator: string, denominator: string) =>
+          `${fractionTerm(numerator)}/${fractionTerm(denominator)}`,
+      );
     if (out === before) break;
   }
 

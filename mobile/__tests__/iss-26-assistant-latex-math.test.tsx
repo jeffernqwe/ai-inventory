@@ -101,6 +101,36 @@ describe('ISS-26 — LaTeX maths is decoded, not shown', () => {
     expect(stripMarkdown('100\\%')).toBe('100%');
   });
 
+  it('★ brackets a fraction side that carries an operator, because dropping them changes the number', () => {
+    // FOUND ON THE PHONE, 2026-10-14 (the AI-4 device pass, §27BR's session): asked what
+    // percentage of products were low on stock, the assistant wrote
+    // `\frac{17 + 5}{113} \times 100 \approx \mathbf{19.5\%}` and the plain `a/b` rule
+    // rendered `17+ 5/113 × 100 ≈ 19.5%` on the screen. Read as written that is
+    // `17 + (5/113)`, a different number from the 19.5% the model computed — the answer
+    // looked like an answer while saying something else, the same failure class as the
+    // deleted characters the AI-4 word boundary fixed.
+    expect(stripMarkdown('\\( \\frac{17 + 5}{113} \\times 100 \\approx \\mathbf{19.5\\%} \\)')).toBe(
+      '(17 + 5)/113 × 100 ≈ 19.5%',
+    );
+    expect(stripMarkdown('\\frac{17+5}{113}')).toBe('(17+5)/113');
+    // Both sides, and a subtraction on the denominator.
+    expect(stripMarkdown('\\frac{n - 1}{2 + k}')).toBe('(n - 1)/(2 + k)');
+    // THE MULTIPLICATIVE SIDES ARE THE SAME DEFECT AND A QUIETER ONE: the bar binds
+    // tighter than `×` exactly as it does than `+`, so the un-bracketed form of
+    // `\frac{1}{2 \times 3}` (one sixth) reads as `1/2 × 3`, one and a half. The rule
+    // covers the whole operator family rather than the two signs the phone showed.
+    expect(stripMarkdown('\\frac{1}{2 \\times 3}')).toBe('1/(2 × 3)');
+    expect(stripMarkdown('\\frac{a \\times b}{c}')).toBe('(a × b)/c');
+    expect(stripMarkdown('\\frac{6}{2 \\div 3}')).toBe('6/(2 ÷ 3)');
+    expect(stripMarkdown('\\frac{x \\cdot y}{z}')).toBe('(x · y)/z');
+    expect(stripMarkdown('\\frac{a}{b/c}')).toBe('a/(b/c)');
+    // THE SINGLE-TERM FORM IS UNCHANGED, so this rule cannot regress the stored answers
+    // the case above and the earlier device fixture already pin.
+    expect(stripMarkdown('\\( \\frac{620}{10,000} \\times 100 = \\mathbf{6.2\\%} \\)')).toBe(
+      '620/10,000 × 100 = 6.2%',
+    );
+  });
+
   it('decodes a wrapped multiplication percentage, in any order the model picks', () => {
     expect(stripMarkdown('\\(\\frac{620}{10,000} \\times 100 = 6.2\\%\\)')).toBe(
       '620/10,000 × 100 = 6.2%',

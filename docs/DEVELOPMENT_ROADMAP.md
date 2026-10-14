@@ -6859,7 +6859,7 @@ Next: **both owner decisions this section was waiting on are taken (2026-10-11)*
 | **ISS-23** | Low | **The assistant's answer reaches the screen with raw Markdown** — `**no products that need restocking**` renders **with the asterisks visible** | Seen on the device 2026-10-12 (**§27BE, F-55**), sample 4 | **FIXED 2026-10-13 — AI-2 (§27BF).** `stripMarkdown` in `components/AiChat.tsx` strips bold/italic markers, backticks, fences and heading hashes, applied at the assistant bubble only and deliberately **not** a Markdown renderer (no new dependency). 13 cases in `mobile/__tests__/ai2-assistant-markdown.test.ts` include two deliberate limits: single underscores are never emphasis (`SKU_123_AB`, `MIN_STOCK_LEVEL` are data, not formatting) and a lone asterisk counts only when a non-space follows it, so `12 * 3 = 36` survives as arithmetic. Applied at the single render point, so loaded history and the live reply are treated alike |
 | **ISS-25** | Low | **Markdown TABLES in an assistant answer render literally** — the `| Product | SKU | … |` rows and the `|---|` separator appear on screen as text | Found **on the device** 2026-10-13 (§27BG), in **all three** successful answers of the large-catalogue run: asked for a 20-row list, the model answers with a table, and the OCR of the phone screen shows the pipes. AI-2's `stripMarkdown` (ISS-23) covers bold/italic/backticks/fences/headings and deliberately nothing more, so this is **not a regression** — it is a gap that only a long list exposes | **FIXED 2026-10-13 — AI-4 (§27BH), mobile only.** The answer is **rendered**, not de-markered: a dependency-free parser (`mobile/lib/assistantMarkdown.ts`) turns the structures the model already emits into real layout (`mobile/components/AssistantMarkdown.tsx`), with headings, bullet/numbered lists and **tables** — a grid at ≤ 3 columns, one card per row above that, because five to seven columns cannot fit a phone's width. `stripMarkdown` is retained as the residual pass over spans the parser does not model, so no marker can reach the screen (pinned as a property over both real answers). Cost: **+0.148 ms** of parsing per answer against turns of 12–40 s; **the server and the prompt are untouched, so latency and token usage are unchanged**. **29 new cases** (plus the 13 AI-2 cases re-pointed at the new module and unchanged), suite **55 / 731 / 0**, three mutations each reddening the right cases. **Not yet confirmed on the device.** |
 | **ISS-24** | High | **The assistant's tool queries scaled with the TENANT, not the page** — a 15–25 row page ran a `$lookup` **once per tenant row** before its `$skip`/`$limit` (which sat at the bottom inside a `$facet` that cannot run without everything above it), so at 10 000 products `getInventory` took **5 665 ms**, `getInventoryHistory` **5 520**, `getProductsByLocation` **3 555** and the restock/dashboard family **1 983–2 281**; at 100 products the same calls were 86–199 ms. Each join was an **index** lookup — the COUNT was the cost, and no index can fix a fan-out of one query per row | Measured 2026-10-13 (§27BG) with `npm run seed:perf` + `npm run perf:measure` at **100 / 1 000 / 10 000 products** (the 10 000-tenant carries 20 105 inventory rows and 19 944 transactions): **seven of nine tools grew ~8–9× for 10× the data** while `searchProducts`/`getProduct` stayed flat, and payloads stayed flat, ruling paging out. `explain('executionStats')` showed nReturned **20 105** at each of two joins for the inventory page (+3.1 s, +3.2 s), **19 944** at each of two for history (+3.0 s, +2.8 s), and **10 000** for the availability join (+2.0–2.2 s) — keys examined = documents examined throughout, i.e. indexed per-row lookups, just far too many of them | **FIXED 2026-10-13 — AI-3 (§27BG), server only.** The page window moved **above** the joins wherever nothing between them filters (`transactions.list`, `inventory.listRows`, both counting with a parallel `$count` over the same `$match`), `inventory` gained `{ businessId: 1, updatedAt: -1, _id: -1 }` so the page sort is index-provided, and where the predicate genuinely needs the join it was **turned around**: one grouped `$unionWith` pass merged by key with a single `$group` (`$max`), plus the same idea for the dashboard summary. **9 of 9 tools ≤ 650 ms at 10 000 products** (75 / 68 / 258 / 259 / 265 / 268 / 214 / 212 / 413 ms), the seven slow ones **23.4 s → 1.6 s**. **Proven output-identical:** `perf:golden` compared **17** tool/argument combinations before and after and all matched **byte-for-byte** (payload hash + total), and the harness now gates on it. Suite **1353 / 192 / 0**, `tsc`/`eslint`/both module-graph checks clean. **Not device-verified; not measured above 10 000 products** — the merged family still scans the partition (0.26–0.65 s at 10 k) and a ≥50 k measurement is the recorded next step. A 3-question real run at 10 k answered **2/3**, both grounded and numerically exact, with the third a **`504 AI_TIMEOUT` at 60.3 s** from **provider** latency — query time is 0.2–0.4 s per turn, model time 31–60 s |
-| **ISS-26** | Low | **The assistant's LaTeX maths reached the screen as source** — asked for a percentage at catalogue scale, the model answered with a formula and the bubble rendered the backslashes and braces | Found **on the device** 2026-10-13 (§27BG): the string is stored **verbatim** in `ai_messages.content` (confirmed by code point) and the bubble renders the stored message — the same class as ISS-25, for the one marker family AI-4's census never saw, because no stored answer had contained maths. The identifier `ISS-26` was in the test file from the start, but **no issue-table row and no §27 section were ever written**, so a defect that was found, fixed, tested and committed had **no record anywhere** | **FIXED 2026-10-13, recorded retrospectively 2026-10-14 — §27BQ (mobile only).** `stripLatex` in `mobile/lib/assistantMarkdown.ts` decodes the forms this assistant emits — `\frac{a}{b}` → `a/b`, the symbol and wrapper commands, and the `\(…\)` / `\[…\]` / `$$…$$` delimiters — inside the **existing residual pass**, so **no dependency, no renderer and no prompt change**, and therefore no per-turn token cost. 10 cases in `mobile/__tests__/iss-26-assistant-latex-math.test.tsx`, one fixture being the **real stored answer**, so it repairs history as well as new replies; mobile **59 suites / 801 tests / 0 failures**, `tsc`/`eslint` clean. **Not device-verified.** |
+| **ISS-26** | Low | **The assistant's LaTeX maths reached the screen as source** — asked for a percentage at catalogue scale, the model answered with a formula and the bubble rendered the backslashes and braces | Found **on the device** 2026-10-13 (§27BG): the string is stored **verbatim** in `ai_messages.content` (confirmed by code point) and the bubble renders the stored message — the same class as ISS-25, for the one marker family AI-4's census never saw, because no stored answer had contained maths. The identifier `ISS-26` was in the test file from the start, but **no issue-table row and no §27 section were ever written**, so a defect that was found, fixed, tested and committed had **no record anywhere** | **FIXED 2026-10-13, recorded retrospectively 2026-10-14 — §27BQ (mobile only).** `stripLatex` in `mobile/lib/assistantMarkdown.ts` decodes the forms this assistant emits — `\frac{a}{b}` → `a/b`, the symbol and wrapper commands, and the `\(…\)` / `\[…\]` / `$$…$$` delimiters — inside the **existing residual pass**, so **no dependency, no renderer and no prompt change**, and therefore no per-turn token cost. 10 cases in `mobile/__tests__/iss-26-assistant-latex-math.test.tsx`, one fixture being the **real stored answer**, so it repairs history as well as new replies; mobile **59 suites / 801 tests / 0 failures**, `tsc`/`eslint` clean. **DEVICE-VERIFIED 2026-10-14 — §27BS**, and the device found a defect the fixtures could not: the decode worked (the backslashes and braces are gone from the screen), but `\frac{17 + 5}{113}` decoded to `17+ 5/113`, which reads as **17 + (5/113) = 17.04** — a different number from the 19.5% printed after it, because the model meant *"17 plus 5, over 113"*. A fraction side carrying an operator now keeps its brackets (`(17 + 5)/113`), and the rule covers the whole operator family because the same code decoded `\frac{1}{2 \times 3}` — **one sixth** — as `1/2 × 3`, **one and a half**. The single-term form is untouched, so `\frac{620}{10,000}` still decodes to `620/10,000`; 11 cases (up from 10), the narrowed rule **watched failing first**, mobile **59 suites / 802 tests / 0 failures**, and the corrected line re-rendered on the phone at **zero provider quota** because it reads a stored answer. |
 
 **Correctly recorded as open or deferred — not issues:** L-17 (recovery-mail delivery never inspected end-to-end),
 B1's residual timing term, B2 / E3 / OD-10 (V4), owner decisions O-5 / O-6 / O-10 / O-11, P-4 (device-time),
@@ -6867,7 +6867,7 @@ P-6 + Gate 1 + iOS app registration (environment-blocked), and the new-identity 
 
 ## Pending
 
-**Fixes:** ~~ISS-21~~ (**FIXED and device-verified 2026-10-12 — §27BD/§27BE**: the 15 s client abort against the AI path's 60 s budget; only **AI-1's abandoned-turn cancellation remains unmeasured on hardware**) · ~~ISS-23~~ (**FIXED 2026-10-13 — AI-2, §27BF**: raw Markdown stripped at the assistant bubble) · ~~ISS-24~~ (**FIXED 2026-10-13 — AI-3, §27BG**: the assistant's tool queries no longer pay for the whole tenant partition — 9 of 9 tools ≤ 650 ms at 10 000 products, with the answers proven **byte-identical** by `perf:golden`) · **ISS-22** (**code half complete 2026-10-14 — §27BF + §27BL**: the zero-length `200` is retried once and a degraded turn is marked and logged, so it is countable, **and** a reached limit is now its own `429 AI_QUOTA_EXCEEDED` with its own sentence instead of a `502` outage — the distinct code and sentence this row asked for; **still open as the provider-tier decision alone**, which the owner declined to spend on) · ~~ISS-06~~ (**CLOSED 2026-10-12 — §27AZ**, measured from the built APK: `compileSdk` 36 / `minSdk` 24 / `targetSdk` 36, no raise needed) · ~~ISS-25~~ (**FIXED 2026-10-13 — AI-4, §27BH**: the answer is now rendered rather than de-markered — tables, headings and lists become real layout with no marker on screen; the server and the prompt are untouched, so latency and token cost are unchanged; device confirmation outstanding) · ISS-17/ISS-18 (decided and recorded, no action pending) · ISS-13 (**fixed, §27AM** — its device half rides with the same pass) · ~~ISS-26~~ (**FIXED 2026-10-13, recorded §27BQ**: the assistant's LaTeX now decodes into plain text instead of reaching the screen as source — no dependency, no renderer, no prompt change, so no per-turn token cost; **device confirmation outstanding**). *(ISS-01 fixed in #36; ISS-16 disposed in #37; ISS-02 remediated — §27AJ; the 7 advisories dispositioned — §27AK; all 2026-10-10.)*
+**Fixes:** ~~ISS-21~~ (**FIXED and device-verified 2026-10-12 — §27BD/§27BE**: the 15 s client abort against the AI path's 60 s budget; only **AI-1's abandoned-turn cancellation remains unmeasured on hardware**) · ~~ISS-23~~ (**FIXED 2026-10-13 — AI-2, §27BF**: raw Markdown stripped at the assistant bubble) · ~~ISS-24~~ (**FIXED 2026-10-13 — AI-3, §27BG**: the assistant's tool queries no longer pay for the whole tenant partition — 9 of 9 tools ≤ 650 ms at 10 000 products, with the answers proven **byte-identical** by `perf:golden`) · **ISS-22** (**code half complete 2026-10-14 — §27BF + §27BL**: the zero-length `200` is retried once and a degraded turn is marked and logged, so it is countable, **and** a reached limit is now its own `429 AI_QUOTA_EXCEEDED` with its own sentence instead of a `502` outage — the distinct code and sentence this row asked for; **still open as the provider-tier decision alone**, which the owner declined to spend on) · ~~ISS-06~~ (**CLOSED 2026-10-12 — §27AZ**, measured from the built APK: `compileSdk` 36 / `minSdk` 24 / `targetSdk` 36, no raise needed) · ~~ISS-25~~ (**FIXED 2026-10-13 — AI-4, §27BH**: the answer is now rendered rather than de-markered — tables, headings and lists become real layout with no marker on screen; the server and the prompt are untouched, so latency and token cost are unchanged; **partially device-checked 2026-10-14 — §27BS**: a real stored answer was read on the phone and **no marker reached the screen**, which is the guarantee AI-4 exists to give, while the **table→card form was not exercised** because that answer contained no table, so the *"does it read well"* judgement this row asked for is still open) (decided and recorded, no action pending) · ISS-13 (**fixed, §27AM** — its device half rides with the same pass) · ~~ISS-26~~ (**FIXED 2026-10-13, recorded §27BQ**: the assistant's LaTeX now decodes into plain text instead of reaching the screen as source — no dependency, no renderer, no prompt change, so no per-turn token cost; **device-verified 2026-10-14, and the device found the decoder hiding a different number — §27BS**: `\frac{17 + 5}{113}` rendered as `17+ 5/113` (17.04 instead of the 19.5% the model computed), so a fraction side carrying an operator now keeps its brackets, and the same rule covers `× · ÷ /` because `\frac{1}{2 \times 3}` decoded to `1/2 × 3` — one and a half instead of one sixth). *(ISS-01 fixed in #36; ISS-16 disposed in #37; ISS-02 remediated — §27AJ; the 7 advisories dispositioned — §27AK; all 2026-10-10.)*
 **Upgrades, in issue #32's order:** Expo SDK 58 — **deferred by Gate 0 until Expo promotes it to `latest`** (§27AI records the decision and the runbook; the pins differ from PR #34's set — RN 0.88 family, not 0.87.1) → the React 19 type fixes (ISS-01 is the first of them) → TypeScript 7 →
 jest 30 → ~~the `actions/*` v7 re-pin~~ (**taken early 2026-10-11 — ISS-12 resolved, §27AO**) → ~~`dotenv` 18 and `@types/bcryptjs` 3~~ (**taken 2026-10-11 — §27AP**: `dotenv` 18 taken with the preload path measured; the `@types/bcryptjs` row's premise was wrong — 3.0.0 is a deprecated stub, so the dependency was **removed** instead and `tsc` proves it). **The two that remain are now measured, not pending:** jest 30 arrives *with* the SDK 58 promotion (`jest-expo@58.0.9`), and TypeScript 7 is upstream-blocked on a typescript-eslint line that admits 7 (§27AQ).
 **Testing:** the L-17 mail leg, owner-assisted; and a dated test baseline for this section.
@@ -10563,6 +10563,86 @@ on a forbidden trailer. Four decisions are load-bearing:
   message, and it says nothing about files, branches or pull-request text.
 * The branch's PR was force-pushed to carry the rewrite; anyone holding the old SHAs has a stale
   checkout, which is the ordinary consequence of rewriting a published branch.
+
+# 27BS. ISS-26's device half: the decoder was right, and it was still hiding a different number (2026-10-14)
+
+## Why this entry exists
+
+§27BQ closed the **record** gap around ISS-26 and ended with the sentence that made this pass necessary: **nothing
+here was device-checked**. Its decoder had been proven through React Native's own component tree with the real
+stored answer as a fixture, and *"does it read well"* is the one question a test cannot settle. So the answer
+was put back on the phone, and the phone found something the tests could not.
+
+## The device pass
+
+The stored 2026-10-13 answer was re-opened on the OPPO CPH1969 — the F2.9 `development` APK driven by Metro,
+over the USB tunnels, with no new turn and therefore **no provider quota spent**. The decoder itself works: the
+fraction in the first line came back as `17/113 × 100 ≈ 15.0%`, with no backslash, brace or command anywhere on
+the screen. That part of ISS-26 is now **device-verified**, not merely fixture-verified.
+
+The second line, though, read:
+
+    17+ 5/113 × 100 ≈ 19.5%
+
+which, as written, is **17 + (5 ÷ 113) = 17.04** — a different number from the 19.5% printed at the end of it. The
+stored message was then read straight out of `ai_messages` to establish ground truth rather than infer it, and
+the model had written `\frac{17 + 5}{113}`: **"17 plus 5, over 113"**, which is 19.5%. The renderer, not the
+model, introduced the wrong reading. It is the same failure class AI-4's word boundary fixed (a marker that
+quietly edits the answer) and it is worse in one respect — the answer still *looks* like an answer.
+
+## The fix, and the operator family the two signs stood for
+
+`fractionTerm` in `mobile/lib/assistantMarkdown.ts`: a fraction side that carries an operator keeps its
+brackets, so `\frac{17 + 5}{113}` decodes to `(17 + 5)/113`. A single term is untouched, which is precisely what
+keeps the rule away from the answers already stored — `\frac{620}{10,000}` still decodes to `620/10,000`.
+
+**The rule covers the operator family, not the two signs one screenshot happened to show**, and that decision came
+from a measurement rather than from tidiness. `+` and `-` were what the phone displayed, but the fraction bar binds
+tighter than `×` and `÷` exactly as it does than `+`, so the same code decoded
+
+    \frac{1}{2 \times 3}    (one sixth)   →   1/2 × 3    (one and a half)
+
+`FRACTION_OPERATOR` therefore matches `+ - − × · ÷ /` and the LaTeX spellings `\times`, `\cdot`, `\div`, `\pm`,
+`\mp`. A wrong number is the failure this module exists to prevent, and shipping the narrow version would have
+left the quieter half of the defect in place.
+
+## Verification
+
+* **`mobile/__tests__/iss-26-assistant-latex-math.test.tsx` grew the assertions in place** (11 cases, the suite's
+  count unchanged): `(17 + 5)/113 × 100 ≈ 19.5%` for the real stored formula, `(17+5)/113` without spacing,
+  `(n - 1)/(2 + k)` with both sides operator-carrying, **the four multiplicative cases** above, and the
+  single-term forms re-pinned so this rule cannot regress the stored answers.
+* **The new rule was watched failing first.** The operator family was narrowed back to `/[+-]/` by a
+  line-based mutator that **prints the before and after line and exits non-zero if the edit did not apply**
+  (§27BP's lesson: a mutation that cannot apply is not evidence), and the suite answered
+  `Expected: "1/(2 × 3)" / Received: "1/2 × 3"` — the exact wrong number, one failed case out of eleven. The
+  file was then restored and re-run green.
+* Mobile **59 suites / 802 tests / 0 failures** (up from 801), `tsc --noEmit` and `eslint .` clean.
+* **Device-verified after the fix, at zero quota:** the same stored answer was re-rendered on the phone and the
+  line now reads `(17+ 5)/113 × 100 ≈ 19.5%` — the brackets are present, and the reading is now the one the model
+  computed. Checked twice, on the raw screen dump and on a 3× crop of the line, because the first reading of the
+  pre-fix screen was an OCR artifact and a second instrument was worth the minute.
+* **The same pass also looked at AI-4's rendering, which had been outstanding since §27BH.** The answer on the phone
+  contains **no `**`, no `|` and no `---`** — the markers AI-4 exists to keep off the screen — and its list structure
+  renders as separate lines. That is a genuine device observation of AI-4's guarantee, and it is recorded as a
+  **partial** one in the ISS-25 row: this answer contains no table, so the wide-table→card form and the "does it read
+  well" judgement that §27BH explicitly left to a screen both remain unexercised.
+
+## What is NOT verified, and the limits stated rather than glossed
+
+* **The observation rests on OCR of a 1080-px screenshot.** The reliability limit is real and was measured in this
+  same pass: the *pre-fix* line was first read as `17/113 x` and looked like a truncation until the crop showed the
+  full string. Brackets are a single glyph pair and were confirmed on an upscaled crop, but this is a screen-reading
+  method, not a DOM read — the accessibility tree could not be dumped (`uiautomator` will not idle past a blinking
+  caret, and the one digest it returned was stale).
+* **One stored answer contains a fraction with an operator.** The multiplicative branch of the new rule is proven by
+  test and by mutation, **not** by anything the model has actually written to the database — no stored answer has yet
+  needed it.
+* **The `+`/`-` case is verified on the device; the `×`/`÷`/`·` cases are not**, for the same reason.
+* **Deeply nested fractions** (a fraction inside a fraction side) are covered by the inward-out pass and its four-pass
+  bound, but no device screen has shown one.
+* `stripMarkdown`'s **`**` rule keeps the limit §27BH recorded** — a hypothetical `4**5**6` would still be shortened;
+  that was recorded rather than fixed there and this entry does not change it.
 
 # 28. Phase Gate System
 

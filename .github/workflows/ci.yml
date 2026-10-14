@@ -1,6 +1,6 @@
 name: ci
 
-# Phase 0 — CI gate. One workflow, three jobs, identical on every trigger.
+# Phase 0 — CI gate. One workflow, four jobs, identical on every trigger.
 #
 # Design constraints, all verified against the repository before implementation:
 #   * Node version comes from .nvmrc (repo root) — never hardcoded. setup-node's
@@ -27,6 +27,17 @@ name: ci
 #     (roadmap §27AE). `scripts/check-secrets.mjs` is dependency-free, so the job needs
 #     no install step and finishes in seconds. It is a net for the common shapes of a
 #     leaked credential, not a proof a commit is clean — see docs/SOURCE_PROTECTION.md.
+#   * The fourth job, `attribution-guard`, exists because CLAUDE.md's attribution rules (1,
+#     2 and 7) forbade the trailers and NOTHING in the repository could fail when one was
+#     added anyway: six commits on the AI-1..AI-6 branch arrived carrying them, including the
+#     published head of PR #74, while `main` stayed clean — so a normal merge would have
+#     written them into the permanent history. The guard reads the commit messages the event
+#     introduces and needs the base commit present, which is why it is the only job that
+#     checks out the full history (`fetch-depth: 0`); a shallow clone makes it exit 2 — "not
+#     verified" — rather than pass on commits it never read. The owner's own identity and
+#     Dependabot's bot trailer are deliberately allowed, and the patterns are line-anchored
+#     so a message that merely discusses the rule is not a violation (the failure §27BP
+#     records in another guard).
 #   * Both actions are pinned to a full-length commit SHA, not to a moving tag, so an
 #     upstream tag re-point cannot change what this pipeline executes. Each pin is the
 #     exact commit the floating `v7` tag resolved to at the moment of the change — on
@@ -196,6 +207,32 @@ jobs:
 
       - name: Prove the guard can still fail, then scan tracked files for credential-shaped content
         run: node scripts/check-secrets.mjs # the self-test runs first, on every invocation
+
+  attribution-guard:
+    runs-on: ubuntu-latest
+    # No `defaults.run.working-directory`: the guard runs from the repository root, and needs no
+    # `npm ci` — the script imports only Node built-ins, and it self-tests before it reports.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # THE ONE JOB THAT NEEDS HISTORY. The guard reads the commit messages this event
+          # introduces, so the base commit has to BE in the checkout. A shallow clone would
+          # leave it unable to look, and it exits 2 rather than reporting a clean branch it
+          # never read.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Check this event's commit messages for a forbidden attribution trailer
+        env:
+          # A pull request supplies its base commit, a push supplies `before`, and a manual run
+          # has neither — in which case the guard checks HEAD and says so, rather than implying
+          # the whole branch was read. An all-zero `before` (a branch's first push) is treated
+          # the same way by the script.
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: node scripts/check-commit-attribution.mjs
 
   mobile:
     runs-on: ubuntu-latest

@@ -107,13 +107,41 @@ function toRows(serverMessages: ApiResponse[]): ChatRow[] {
   }));
 }
 
-function MessageBubble({ item }: { item: ChatRow }) {
+/**
+ * Does this answer contain a table? A table-bearing bubble takes the full bubble
+ * width, because a shrink-wrapped bubble collapses a table's columns.
+ *
+ * FOUND ON THE DEVICE 2026-10-14 (ISS-27). A **2-column** table answer rendered as a
+ * narrow strip: the accessibility tree measured its cells at **48 px wide and up to
+ * 1 452 px tall**, and the whole answer sat in a ~200 px column with nothing else on
+ * the screen. The cause is width, not content — a `flexDirection: 'row'` grid inside a
+ * bubble whose width is its own content's intrinsic width has nothing to stretch
+ * against, so the `flex: 1` cells shrink to their minimum and every value wraps to a
+ * character or two per line, exploding the height and pushing the question above the
+ * viewport. The **card** path (4+ columns) escaped it only because its row titles are
+ * long enough to give the bubble a wide intrinsic width — luck, not design, so both
+ * paths take the wide bubble when a table is present.
+ *
+ * The test is `includes('|')` rather than a parse: it is O(n) with no allocation, which
+ * matters because this runs on every re-render the composer's keystrokes cause, and it
+ * is a **superset** of the parser's own table detection (a pipe-free line cannot be a
+ * table), so the only cost of a false positive is a slightly wider bubble.
+ */
+export function isTableAnswer(content: string): boolean {
+  return content.includes('|');
+}
+
+export function MessageBubble({ item }: { item: ChatRow }) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const user = item.role === 'user';
+  const wide = !user && isTableAnswer(item.content);
   return (
     <View style={[styles.bubbleRow, user ? styles.rowUser : styles.rowAssistant]}>
-      <View style={[styles.bubble, user ? styles.bubbleUser : styles.bubbleAssistant]}>
+      <View
+        testID={user ? 'chat-bubble-user' : 'chat-bubble-assistant'}
+        style={[styles.bubble, user ? styles.bubbleUser : styles.bubbleAssistant, wide ? styles.bubbleWide : null]}
+      >
         {/* The member's own words are shown exactly as typed. The model's answer
             is RENDERED (AI-4): headings, lists and tables become real layout
             instead of a wall of markers — see components/AssistantMarkdown. One
@@ -355,6 +383,11 @@ const createStyles = (colors: Palette) =>
       borderColor: colors.border,
       borderBottomLeftRadius: radius.sm,
     },
+    // ISS-27 — a table needs a width it can fill. `flex: 1` grows the bubble to the
+    // row (`maxWidth: '84%'` above still caps it), which gives the grid's `flex: 1`
+    // columns a real width to share instead of their minimum content width. Applied
+    // to table answers only, so a short prose reply keeps its natural bubble.
+    bubbleWide: { flex: 1 },
     bubbleText: { ...type.body, color: colors.text },
     bubbleTextUser: { color: colors.textOnPrimary },
     tools: { ...type.caption, color: colors.textMuted, marginTop: spacing.sm },

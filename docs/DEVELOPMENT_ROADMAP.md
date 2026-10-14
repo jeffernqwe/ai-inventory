@@ -6861,13 +6861,15 @@ Next: **both owner decisions this section was waiting on are taken (2026-10-11)*
 | **ISS-24** | High | **The assistant's tool queries scaled with the TENANT, not the page** — a 15–25 row page ran a `$lookup` **once per tenant row** before its `$skip`/`$limit` (which sat at the bottom inside a `$facet` that cannot run without everything above it), so at 10 000 products `getInventory` took **5 665 ms**, `getInventoryHistory` **5 520**, `getProductsByLocation` **3 555** and the restock/dashboard family **1 983–2 281**; at 100 products the same calls were 86–199 ms. Each join was an **index** lookup — the COUNT was the cost, and no index can fix a fan-out of one query per row | Measured 2026-10-13 (§27BG) with `npm run seed:perf` + `npm run perf:measure` at **100 / 1 000 / 10 000 products** (the 10 000-tenant carries 20 105 inventory rows and 19 944 transactions): **seven of nine tools grew ~8–9× for 10× the data** while `searchProducts`/`getProduct` stayed flat, and payloads stayed flat, ruling paging out. `explain('executionStats')` showed nReturned **20 105** at each of two joins for the inventory page (+3.1 s, +3.2 s), **19 944** at each of two for history (+3.0 s, +2.8 s), and **10 000** for the availability join (+2.0–2.2 s) — keys examined = documents examined throughout, i.e. indexed per-row lookups, just far too many of them | **FIXED 2026-10-13 — AI-3 (§27BG), server only.** The page window moved **above** the joins wherever nothing between them filters (`transactions.list`, `inventory.listRows`, both counting with a parallel `$count` over the same `$match`), `inventory` gained `{ businessId: 1, updatedAt: -1, _id: -1 }` so the page sort is index-provided, and where the predicate genuinely needs the join it was **turned around**: one grouped `$unionWith` pass merged by key with a single `$group` (`$max`), plus the same idea for the dashboard summary. **9 of 9 tools ≤ 650 ms at 10 000 products** (75 / 68 / 258 / 259 / 265 / 268 / 214 / 212 / 413 ms), the seven slow ones **23.4 s → 1.6 s**. **Proven output-identical:** `perf:golden` compared **17** tool/argument combinations before and after and all matched **byte-for-byte** (payload hash + total), and the harness now gates on it. Suite **1353 / 192 / 0**, `tsc`/`eslint`/both module-graph checks clean. **Not device-verified; not measured above 10 000 products** — the merged family still scans the partition (0.26–0.65 s at 10 k) and a ≥50 k measurement is the recorded next step. A 3-question real run at 10 k answered **2/3**, both grounded and numerically exact, with the third a **`504 AI_TIMEOUT` at 60.3 s** from **provider** latency — query time is 0.2–0.4 s per turn, model time 31–60 s |
 | **ISS-26** | Low | **The assistant's LaTeX maths reached the screen as source** — asked for a percentage at catalogue scale, the model answered with a formula and the bubble rendered the backslashes and braces | Found **on the device** 2026-10-13 (§27BG): the string is stored **verbatim** in `ai_messages.content` (confirmed by code point) and the bubble renders the stored message — the same class as ISS-25, for the one marker family AI-4's census never saw, because no stored answer had contained maths. The identifier `ISS-26` was in the test file from the start, but **no issue-table row and no §27 section were ever written**, so a defect that was found, fixed, tested and committed had **no record anywhere** | **FIXED 2026-10-13, recorded retrospectively 2026-10-14 — §27BQ (mobile only).** `stripLatex` in `mobile/lib/assistantMarkdown.ts` decodes the forms this assistant emits — `\frac{a}{b}` → `a/b`, the symbol and wrapper commands, and the `\(…\)` / `\[…\]` / `$$…$$` delimiters — inside the **existing residual pass**, so **no dependency, no renderer and no prompt change**, and therefore no per-turn token cost. 10 cases in `mobile/__tests__/iss-26-assistant-latex-math.test.tsx`, one fixture being the **real stored answer**, so it repairs history as well as new replies; mobile **59 suites / 801 tests / 0 failures**, `tsc`/`eslint` clean. **DEVICE-VERIFIED 2026-10-14 — §27BS**, and the device found a defect the fixtures could not: the decode worked (the backslashes and braces are gone from the screen), but `\frac{17 + 5}{113}` decoded to `17+ 5/113`, which reads as **17 + (5/113) = 17.04** — a different number from the 19.5% printed after it, because the model meant *"17 plus 5, over 113"*. A fraction side carrying an operator now keeps its brackets (`(17 + 5)/113`), and the rule covers the whole operator family because the same code decoded `\frac{1}{2 \times 3}` — **one sixth** — as `1/2 × 3`, **one and a half**. The single-term form is untouched, so `\frac{620}{10,000}` still decodes to `620/10,000`; 11 cases (up from 10), the narrowed rule **watched failing first**, mobile **59 suites / 802 tests / 0 failures**, and the corrected line re-rendered on the phone at **zero provider quota** because it reads a stored answer. |
 
+| **ISS-27** | **High** | **A table with three columns or fewer renders as a collapsed strip — the answer is unreadable and the message area looks empty** — the assistant was asked for a two-column table; the answer was stored correctly and returned by the API, but on the phone its cells measured **48 px wide and up to 1 452 px tall**, the whole answer sat in a ~200 px column, the question was pushed above the viewport, and the screen presented as **blank** | Found **on the device 2026-10-14**, minutes after §27BS verified the four-column card path: the accessibility tree (`uiautomator`) showed real `android.widget.TextView` cells of the stored answer carrying those bounds, while a pixel scan at threshold 40 found **no ink at all** — it was a threshold lowered to 20 that turned *"nothing is drawn"* into *"a collapsed column is drawn"*. The **card** path escaped the same defect only because a card title is long enough to give the bubble a wide intrinsic width | **FIXED 2026-10-14 — §27BT (mobile only).** A table-bearing answer now takes the full bubble width (`bubbleWide: { flex: 1 }`, still capped by `maxWidth: '84%'`), so the grid's `flex: 1` columns have a width to share; applied to **both** rendering paths, because the card path's escape was luck rather than design. `isTableAnswer` is an O(n) `includes('|')` — a superset of the parser's own detection, so the keystroke-driven render path pays nothing. **5 cases** in `mobile/__tests__/iss-27-narrow-table-width.test.tsx`, the ★ case **watched failing first** (`Expected: 1 / Received: undefined`); mobile **60 suites / 807 tests / 0 failures**, `tsc`/`eslint` clean. **DEVICE-VERIFIED:** the same stored answer re-rendered after the fix and the tree now measures `Product Name [102,1086][566,1182]` and `Quantity [565,1086][821,1182]` — **464 × 96** and **256 × 96** — with all five rows on screen, every `0` present, and the card answer unchanged |
+
 **Correctly recorded as open or deferred — not issues:** L-17 (recovery-mail delivery never inspected end-to-end),
 B1's residual timing term, B2 / E3 / OD-10 (V4), owner decisions O-5 / O-6 / O-10 / O-11, P-4 (device-time),
 P-6 + Gate 1 + iOS app registration (environment-blocked), and the new-identity `REGISTRATION_REQUIRED` path.
 
 ## Pending
 
-**Fixes:** ~~ISS-21~~ (**FIXED and device-verified 2026-10-12 — §27BD/§27BE**: the 15 s client abort against the AI path's 60 s budget; only **AI-1's abandoned-turn cancellation remains unmeasured on hardware**) · ~~ISS-23~~ (**FIXED 2026-10-13 — AI-2, §27BF**: raw Markdown stripped at the assistant bubble) · ~~ISS-24~~ (**FIXED 2026-10-13 — AI-3, §27BG**: the assistant's tool queries no longer pay for the whole tenant partition — 9 of 9 tools ≤ 650 ms at 10 000 products, with the answers proven **byte-identical** by `perf:golden`) · **ISS-22** (**code half complete 2026-10-14 — §27BF + §27BL**: the zero-length `200` is retried once and a degraded turn is marked and logged, so it is countable, **and** a reached limit is now its own `429 AI_QUOTA_EXCEEDED` with its own sentence instead of a `502` outage — the distinct code and sentence this row asked for; **still open as the provider-tier decision alone**, which the owner declined to spend on) · ~~ISS-06~~ (**CLOSED 2026-10-12 — §27AZ**, measured from the built APK: `compileSdk` 36 / `minSdk` 24 / `targetSdk` 36, no raise needed) · ~~ISS-25~~ (**FIXED 2026-10-13 — AI-4, §27BH**: the answer is now rendered rather than de-markered — tables, headings and lists become real layout with no marker on screen; the server and the prompt are untouched, so latency and token cost are unchanged; **partially device-checked 2026-10-14 — §27BS**: a real stored answer was read on the phone and **no marker reached the screen**, which is the guarantee AI-4 exists to give, while the **table→card form was not exercised** because that answer contained no table, so the *"does it read well"* judgement this row asked for is still open) (decided and recorded, no action pending) · ISS-13 (**fixed, §27AM** — its device half rides with the same pass) · ~~ISS-26~~ (**FIXED 2026-10-13, recorded §27BQ**: the assistant's LaTeX now decodes into plain text instead of reaching the screen as source — no dependency, no renderer, no prompt change, so no per-turn token cost; **device-verified 2026-10-14, and the device found the decoder hiding a different number — §27BS**: `\frac{17 + 5}{113}` rendered as `17+ 5/113` (17.04 instead of the 19.5% the model computed), so a fraction side carrying an operator now keeps its brackets, and the same rule covers `× · ÷ /` because `\frac{1}{2 \times 3}` decoded to `1/2 × 3` — one and a half instead of one sixth). *(ISS-01 fixed in #36; ISS-16 disposed in #37; ISS-02 remediated — §27AJ; the 7 advisories dispositioned — §27AK; all 2026-10-10.)*
+**Fixes:** ~~ISS-21~~ (**FIXED and device-verified 2026-10-12 — §27BD/§27BE**: the 15 s client abort against the AI path's 60 s budget; only **AI-1's abandoned-turn cancellation remains unmeasured on hardware**) · ~~ISS-23~~ (**FIXED 2026-10-13 — AI-2, §27BF**: raw Markdown stripped at the assistant bubble) · ~~ISS-24~~ (**FIXED 2026-10-13 — AI-3, §27BG**: the assistant's tool queries no longer pay for the whole tenant partition — 9 of 9 tools ≤ 650 ms at 10 000 products, with the answers proven **byte-identical** by `perf:golden`) · **ISS-22** (**code half complete 2026-10-14 — §27BF + §27BL**: the zero-length `200` is retried once and a degraded turn is marked and logged, so it is countable, **and** a reached limit is now its own `429 AI_QUOTA_EXCEEDED` with its own sentence instead of a `502` outage — the distinct code and sentence this row asked for; **still open as the provider-tier decision alone**, which the owner declined to spend on) · ~~ISS-06~~ (**CLOSED 2026-10-12 — §27AZ**, measured from the built APK: `compileSdk` 36 / `minSdk` 24 / `targetSdk` 36, no raise needed) · ~~ISS-25~~ (**FIXED 2026-10-13 — AI-4, §27BH**: the answer is now rendered rather than de-markered — tables, headings and lists become real layout with no marker on screen; the server and the prompt are untouched, so latency and token cost are unchanged; **DEVICE-VERIFIED 2026-10-14 — §27BS**: two real stored answers were read on the phone, one of them a **4-column, 5-row table** the assistant was asked for directly — rendered as **one card per row**, the row's own name as the title and the header's other columns as label/value lines, with the header row not drawn as a row, **no `|`, no `------` and no `**` anywhere on the screen**, the closing sentence as prose, and the one-character `0` measured **drawn on all five cards** (267 ink pixels, bbox `428..445`, the same glyph signature five times). What stays open is the judgement and the sample, not the behaviour: *"does it read well"* is the owner's call, and the **grid** path (≤ 3 columns) plus the stored **6-column** table — which belongs to another business, so the phone cannot see it — have not been seen on hardware) · ISS-17/ISS-18 (decided and recorded, no action pending) · ISS-13 (**fixed, §27AM** — its device half rides with the same pass) · ~~ISS-27~~ (**FIXED and device-verified 2026-10-14 — §27BT**: a two- or three-column table collapsed to **48 px cells** and made the whole message area look empty; a table answer now takes the full bubble width, and the same stored answer re-rendered as a **464 × 96 / 256 × 96** two-column grid with every value on screen) · ~~ISS-26~~ (**FIXED 2026-10-13, recorded §27BQ**: the assistant's LaTeX now decodes into plain text instead of reaching the screen as source — no dependency, no renderer, no prompt change, so no per-turn token cost; **device-verified 2026-10-14, and the device found the decoder hiding a different number — §27BS**: `\frac{17 + 5}{113}` rendered as `17+ 5/113` (17.04 instead of the 19.5% the model computed), so a fraction side carrying an operator now keeps its brackets, and the same rule covers `× · ÷ /` because `\frac{1}{2 \times 3}` decoded to `1/2 × 3` — one and a half instead of one sixth). *(ISS-01 fixed in #36; ISS-16 disposed in #37; ISS-02 remediated — §27AJ; the 7 advisories dispositioned — §27AK; all 2026-10-10.)*
 **Upgrades, in issue #32's order:** Expo SDK 58 — **deferred by Gate 0 until Expo promotes it to `latest`** (§27AI records the decision and the runbook; the pins differ from PR #34's set — RN 0.88 family, not 0.87.1) → the React 19 type fixes (ISS-01 is the first of them) → TypeScript 7 →
 jest 30 → ~~the `actions/*` v7 re-pin~~ (**taken early 2026-10-11 — ISS-12 resolved, §27AO**) → ~~`dotenv` 18 and `@types/bcryptjs` 3~~ (**taken 2026-10-11 — §27AP**: `dotenv` 18 taken with the preload path measured; the `@types/bcryptjs` row's premise was wrong — 3.0.0 is a deprecated stub, so the dependency was **removed** instead and `tsc` proves it). **The two that remain are now measured, not pending:** jest 30 arrives *with* the SDK 58 promotion (`jest-expo@58.0.9`), and TypeScript 7 is upstream-blocked on a typescript-eslint line that admits 7 (§27AQ).
 **Testing:** the L-17 mail leg, owner-assisted; and a dated test baseline for this section.
@@ -10622,20 +10624,111 @@ left the quieter half of the defect in place.
   line now reads `(17+ 5)/113 × 100 ≈ 19.5%` — the brackets are present, and the reading is now the one the model
   computed. Checked twice, on the raw screen dump and on a 3× crop of the line, because the first reading of the
   pre-fix screen was an OCR artifact and a second instrument was worth the minute.
-* **The same pass also looked at AI-4's rendering, which had been outstanding since §27BH.** The answer on the phone
-  contains **no `**`, no `|` and no `---`** — the markers AI-4 exists to keep off the screen — and its list structure
-  renders as separate lines. That is a genuine device observation of AI-4's guarantee, and it is recorded as a
-  **partial** one in the ISS-25 row: this answer contains no table, so the wide-table→card form and the "does it read
-  well" judgement that §27BH explicitly left to a screen both remain unexercised.
+* **The same pass also looked at AI-4's rendering, which had been outstanding since §27BH**, and the wide-table→card
+  form it was really asking about is verified in the next subsection.
+
+## The wide-table→card form, seen on the device at last (the same pass, one turn later)
+
+§27BH shipped AI-4 and left exactly one question to a screen: what a **table** — the structure that made ISS-25 worth
+fixing — actually looks like on a phone. A first read of the database said **no stored answer contained a table at all**,
+on the strength of a probe that returned `assistant messages containing a pipe: 0` — and **that reading was wrong twice
+over**, which is the third false finding this entry records rather than buries:
+
+* the probe connected with the URI alone, while the database name lives in **`MONGODB_DB_NAME`** (`inventoryai_dev_db`),
+  so it queried a different, empty database where every filter answers "nothing";
+* it filtered on `role: 'assistant'`, and the enum is **UPPERCASE** (`ASSISTANT`), so against the correct database it
+  would still have matched nothing.
+
+Each bug alone was enough to return an empty set, both were silent, and the conclusion drawn from them was acted on —
+**a provider turn was spent asking a question whose answer was already in the database.** Read correctly, the live
+database holds **4** assistant messages across **4** conversations in **2** businesses, and **two of them are tables**:
+
+* business **`gamdias`**, conversation *"Is anything out of stock?"* (07:04 today) — a **6-column, 20-row** table
+  (Product / SKU / Category / Unit / Minimum Stock / Selling Price) with a separator row, from the 80 000-record
+  dataset the §27BK seed produced. It is **still stored**, and the phone signed in to this pass cannot see it at all,
+  because it belongs to a different business — tenant isolation, incidentally, demonstrated on the device;
+* the business the phone *is* signed in to, conversation *"Show me a table of out-of-stock products, with columns
+  name, SKU, category and quantity."* (09:02 today) — the **4-column, 5-row** answer this section is about.
+
+That second one is ground truth from the database, not from the screen:
+
+    | Name | SKU | Category | Quantity |
+    |------|-----|----------|----------|
+    | Mini Sponge 10074 | DEMOSKU-74 | Household | 0 |
+    … four more rows, then: All five products are currently out of stock (available quantity = 0).
+
+A **four-column table with five data rows and a separator row** — above AI-4's three-column grid threshold, so this is
+precisely the path that renders **one card per row**. What the screen shows, at every scroll position:
+
+* five cards, each **titled with the row's own name** (`Mini Sponge 10074`, `Premium Tape 10069`, …) and followed by
+  **label/value lines** — `SKU DEMOSKU-74`, `Category Household`, `Quantity 0` — with the labels taken from the header
+  row and the labels aligned in one column;
+* **zero `|`, zero `------`, zero `**`** anywhere in the answer, and the header row itself is not rendered as a row —
+  its names become the labels, which is what makes a four-column row readable at ~400 px;
+* the trailing paragraph as ordinary prose, then the existing tool footer (`Read: getOutOfStockProducts`) and the
+  timestamp. Nothing is dropped: **five rows in, five cards plus the closing sentence out.**
+
+**The same turn is also the first device sighting of AI-5's cost line.** The phone's turn answered `201` at
+**18 135 ms** and the server wrote
+
+    [ai] turn outcome=ok total=17599ms providerMs=17510ms calls=2 toolMs=89ms toolRuns=1 tools=getOutOfStockProducts empty=0 in=3272 out=228 model=nvidia/nemotron-3-ultra-550b-a55b:free iterations=2
+
+— **99.5 % provider time (17 510 ms) against 0.5 % tools (89 ms)**, the same split AI-5 measured over HTTP, now read off
+a real member's turn; **`calls=2` for `toolRuns=1` with `empty=0`**, which is a clean turn — a useful contrast with the
+two turns earlier in the same session that needed `calls=3` and an AI-2 retry (`empty=1`), and the first evidence that
+the empty-completion rate is not a constant. The line was reported as **unseen on the phone** when AI-5 shipped, because
+the server running at the time predated it; that is now closed.
+
+## Three false findings this pass produced, and the instruments that caught them
+
+All three are recorded because each would have been written up as a defect — two in the answer renderer, one in the
+database — and **none of them was real**:
+
+* **OCR ignored the lone digit.** Every card's `Quantity` value is the single character `0`, and the OCR pass returned
+  the `Quantity` label with **no value** on all five cards — which reads exactly like a renderer dropping the last
+  column. It was not: measured in pixels, each card carries the identical glyph at the identical place —
+  **267 ink pixels, bounding box `428,987 .. 445,1015`**, an 18×28 px mark, the same signature on all five cards at
+  the same x. A one-character value is where an OCR-only screen reading is weakest, and "missing" and "unread" look
+  identical in a text dump.
+* **The scan window started to the RIGHT of the column.** A pixel scan of the value column found **zero ink** in the
+  Quantity row — three separate windows agreed, and the `0` was still drawn: the value column begins at **x ≈ 428**
+  and the windows began at 460. The measurement that caught it was the **positive control** (the `SKU` and `Category`
+  values on the same row, which had ink) plus a **horizontal profile** of the row instead of one window's verdict —
+  the same discipline §27BP records after a deploy gate lied about a network blip.
+* **The database probe that could not see a table said there were none** (the two bugs at the top of this section), and
+  the cost of believing it was a provider turn. The lesson is the same one §27BP records for a deploy gate that lied
+  about a network blip: **an empty result from a selector that cannot match anything is not evidence of absence.** Both
+  bugs were caught the same way — by asking a question whose answer cannot depend on the filter that was wrong. The first
+  was `countDocuments()` with **no filter**, which returned **8** for a collection the pipe search had just called empty
+  (4 assistant + 4 user) and pointed straight at the database name; the second was the same contradiction one layer in,
+  where `role: 'assistant'` still matched nothing while the messages were visibly there — the enum is `ASSISTANT`.
+* One more instrument bug, kept because it is the same class: the first version of the ink-measuring script named its
+  loop counters `$x`/`$y` and its parameters `$X`/`$Y`, and **PowerShell variables are case-insensitive**, so the
+  counters silently overwrote the parameters. The tool then reported `region 1080,2340 … inkPixels=0 bbox=none` for a
+  region that had plenty of ink — the coordinates in its own output were the screen's edge, which is the one clue that
+  it had scanned somewhere it was never asked to. A checking tool that cannot be wrong is not a checking tool; the fix
+  was to name the variables apart and to re-run the three controls (a title that must have ink, a value that must have
+  ink, an empty area that must not) before believing a single "zero" — and those controls are what turned the other two
+  findings around.
 
 ## What is NOT verified, and the limits stated rather than glossed
 
 * **The observation rests on OCR of a 1080-px screenshot.** The reliability limit is real and was measured in this
-  same pass: the *pre-fix* line was first read as `17/113 x` and looked like a truncation until the crop showed the
-  full string. Brackets are a single glyph pair and were confirmed on an upscaled crop, but this is a screen-reading
-  method, not a DOM read — the accessibility tree could not be dumped (`uiautomator` will not idle past a blinking
-  caret, and the one digest it returned was stale).
-* **One stored answer contains a fraction with an operator.** The multiplicative branch of the new rule is proven by
+  same pass twice: the *pre-fix* line was first read as `17/113 x` and looked like a truncation until the crop showed
+  the full string, and a lone `0` was missed entirely until pixels were counted. Brackets and card structure were
+  confirmed on upscaled crops and pixel bounding boxes, but this is a screen-reading method, not a DOM read — the
+  accessibility tree could not be dumped (`uiautomator` will not idle past a blinking caret, and the one digest it
+  returned was stale).
+* **One device turn is one device turn.** The table→card path is now *observed*, not *sampled*: one answer, one shape,
+  one screen size, and a model that happened to write four columns. The **6-column, 20-row** table that is already
+  stored would be a stronger sample and **could not be used**, because it belongs to another business and the phone is
+  not signed in to it — so that one stays unrendered until someone signs in there. A two- or three-column table (the
+  **grid** path) has still never been seen on hardware either, and neither has a row that the provider wrapped across
+  lines or an answer whose separator row is not the second line.
+* **"Does it read well" is still a judgement only a person can make.** What is verified is narrower and mechanical:
+  nothing was dropped, nothing was clipped, no marker reached the screen, and every value — including a one-character
+  `0` — is drawn. Whether five stacked cards are nicer than a cramped grid is the owner's call, not this record's.
+* **One stored answer contains a fraction with an operator.** The multiplicative branch of the ISS-26 rule is proven by
   test and by mutation, **not** by anything the model has actually written to the database — no stored answer has yet
   needed it.
 * **The `+`/`-` case is verified on the device; the `×`/`÷`/`·` cases are not**, for the same reason.
@@ -10643,6 +10736,106 @@ left the quieter half of the defect in place.
   bound, but no device screen has shown one.
 * `stripMarkdown`'s **`**` rule keeps the limit §27BH recorded** — a hypothetical `4**5**6` would still be shortened;
   that was recorded rather than fixed there and this entry does not change it.
+
+# 27BT. ISS-27 — the narrow table collapsed, and the screen looked empty (2026-10-14)
+
+## What happened, and how quickly
+
+§27BS had just verified the **four-column** table path on the phone — one card per row, every value drawn, no marker on
+screen. The obvious next question was the other branch: AI-4 renders a table of **three columns or fewer** as an
+aligned grid, and that branch had never been seen on hardware either. So the phone was asked for one, in the same
+conversation:
+
+> *"Give me a table with two columns - product name and quantity - for the products out of stock."*
+
+The turn was fine — `201` in 7.6 s, and the stored message is exactly what was asked for:
+
+    | Product Name | Quantity |
+    |--------------|----------|
+    | Mini Sponge 10074 | 0 |
+    … four more rows
+
+What the phone showed was **nothing**. The message area was blank from the header to the composer, the answer to the
+previous turn was gone with it, and the only thing drawn was a timestamp. Re-opening the conversation from the list
+changed nothing, so it was not a stale screen.
+
+## The two instruments disagreed, and one of them was wrong
+
+The accessibility tree settled it. `uiautomator` reported the real `android.widget.TextView` nodes of that stored
+answer — `Heavy Duty Detergent 10057`, `0`, `Professional Battery 10051`, `0`, … — with bounds that explain the whole
+appearance:
+
+    Mini Sponge 10074    [102,360][150,436]      →  48 px wide,  76 px tall
+    0                   [150,360][198,436]      →  48 px wide,  76 px tall
+    Professional…       [102,437][150,1889]      →  48 px wide, 1452 px tall
+
+**48 px wide and up to 1 452 px tall.** The grid had no width to share, so its `flex: 1` columns fell back to their
+minimum, every value wrapped to a character or two per line, the height exploded to ~1 600 px, and `justifyContent:
+'flex-end'` plus scroll-to-end pinned the viewport to the bottom of that column — which is why the *question* was
+pushed off the top of the screen and the whole thing read as an empty conversation.
+
+The pixel scan had reported **zero ink** across a 1080 × 1500 band. That was the instrument being wrong: the collapsed
+answer sits on the bubble's `surface` (`#1B1E26`) and the only colour it draws is the grid's `border` (`#2A2F3B`) — a
+luminance difference of about **20**, under the tool's threshold of 40. Lowering it to 20 found 516 ink pixels in the
+exact cell the tree had described, and a colour census of the strip returned exactly two colours: `surface` for the
+background and `border` for the marks. **A blank-looking region is not evidence of a blank screen** — the second
+instance of that lesson in one afternoon, after the database probe that could not see a table said there were none
+(§27BS).
+
+## Why the four-column path escaped it
+
+AI-4 sends a table with more than three columns down the **card** path, and those cards measured correctly on the
+phone. They only did so because a card is **titled with the row's own name** — `Heavy Duty Detergent 10057` is a long
+string, its intrinsic width is wide, and the bubble therefore shrink-wraps to something that fills the row. A grid of
+two short columns has no such string to inherit a width from. So the escape was an accident of content, not a property
+of the design, and the fix covers **both** paths rather than only the one the screenshot showed.
+
+## The fix
+
+`mobile/components/AiChat.tsx`: a table-bearing answer now takes the full bubble width — `bubbleWide: { flex: 1 }`,
+still capped by the existing `maxWidth: '84%'` — so a grid's `flex: 1` columns have a real width to divide. The test is
+`isTableAnswer(content)` (`content.includes('|')`), chosen for the keystroke path: it is O(n) with no allocation, and
+it is a **superset** of the parser's own table detection (a pipe-free line cannot be a table), so the only cost of a
+false positive is a slightly wider bubble. A prose reply, a heading-and-list reply and the member's own bubble are all
+left exactly as they were.
+
+## Verification
+
+* **5 cases** in `mobile/__tests__/iss-27-narrow-table-width.test.tsx`, using the **real stored two-column answer** as
+  a fixture: the wide bubble for a table, no wide bubble for prose, none for a heading-and-list answer, never for the
+  member's own bubble (even with a pipe typed into it), and the table's structure and **all five `0` values** intact.
+* **The ★ case was watched failing first.** `const wide = …` was mutated to `false` by a script that asserts the edit
+  applied, and the suite answered `Expected: 1 / Received: undefined` — one failed case, four passing, file restored
+  byte-identical and re-run green.
+* Mobile **60 suites / 807 tests / 0 failures** (up from 59 / 802), `tsc --noEmit` and `eslint .` clean.
+* **DEVICE-VERIFIED — the same stored answer, re-rendered after the fix**, because it needs no new turn and therefore
+  no provider quota. The accessibility tree now reports a real two-column grid inside the bubble:
+
+      Product Name              [102,1086][566,1182]   → 464 ×  96
+      Quantity                  [565,1086][821,1182]   → 256 ×  96
+      Mini Sponge 10074         [102,1183][566,1285]   → 464 × 102
+      0                         [565,1183][821,1285]   → 256 × 102
+
+  — **48 px → 464 px** per name column, **1 452 px → 102 px** per row, the answer back inside the viewport with its
+  question, all five rows and all five `0`s present, and the OCR of the screen reading the header and every product
+  name. The four-column **card** answer in the same conversation was checked again after the change and is unchanged.
+
+## What is NOT verified, and the honest limits
+
+* **Jest cannot catch this class of defect, and this entry is the reason to say so out loud.** Every AI-4 case passed
+  while the phone rendered a 48 px column: a layout collapse is invisible to a renderer that does not lay out. The new
+  suite pins the **wiring** (table → wide bubble) and the values; the *layout* is verified only by the device
+  measurement above.
+* **One width, one screen, two tables.** This is verified for a two-column and a four-column table on one 1080 × 2340
+  device. A seven-column table (the card path's real target), a very long single-line cell, a table inside a nested
+  block, and landscape orientation have not been measured.
+* **The threshold that hid the defect is still 40 by default** in the ad-hoc ink tool used for these passes. It is
+  fine for bright text on dark surfaces, which is what it was written for, and it is *not* a project tool — but the
+  lesson is recorded here so a future pass does not repeat the reading.
+* **The conversation-list timestamp is stale after a new turn** (it showed 17:02 for a turn at 17:14 until the list was
+  re-entered). Seen twice in this pass, **not investigated and not fixed** — recorded so it is not rediscovered as a
+  mystery, and left out of this increment deliberately because it is a different surface with its own refresh
+  semantics.
 
 # 28. Phase Gate System
 

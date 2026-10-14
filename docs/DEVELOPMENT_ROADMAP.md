@@ -6862,6 +6862,8 @@ Next: **both owner decisions this section was waiting on are taken (2026-10-11)*
 | **ISS-26** | Low | **The assistant's LaTeX maths reached the screen as source** — asked for a percentage at catalogue scale, the model answered with a formula and the bubble rendered the backslashes and braces | Found **on the device** 2026-10-13 (§27BG): the string is stored **verbatim** in `ai_messages.content` (confirmed by code point) and the bubble renders the stored message — the same class as ISS-25, for the one marker family AI-4's census never saw, because no stored answer had contained maths. The identifier `ISS-26` was in the test file from the start, but **no issue-table row and no §27 section were ever written**, so a defect that was found, fixed, tested and committed had **no record anywhere** | **FIXED 2026-10-13, recorded retrospectively 2026-10-14 — §27BQ (mobile only).** `stripLatex` in `mobile/lib/assistantMarkdown.ts` decodes the forms this assistant emits — `\frac{a}{b}` → `a/b`, the symbol and wrapper commands, and the `\(…\)` / `\[…\]` / `$$…$$` delimiters — inside the **existing residual pass**, so **no dependency, no renderer and no prompt change**, and therefore no per-turn token cost. 10 cases in `mobile/__tests__/iss-26-assistant-latex-math.test.tsx`, one fixture being the **real stored answer**, so it repairs history as well as new replies; mobile **59 suites / 801 tests / 0 failures**, `tsc`/`eslint` clean. **DEVICE-VERIFIED 2026-10-14 — §27BS**, and the device found a defect the fixtures could not: the decode worked (the backslashes and braces are gone from the screen), but `\frac{17 + 5}{113}` decoded to `17+ 5/113`, which reads as **17 + (5/113) = 17.04** — a different number from the 19.5% printed after it, because the model meant *"17 plus 5, over 113"*. A fraction side carrying an operator now keeps its brackets (`(17 + 5)/113`), and the rule covers the whole operator family because the same code decoded `\frac{1}{2 \times 3}` — **one sixth** — as `1/2 × 3`, **one and a half**. The single-term form is untouched, so `\frac{620}{10,000}` still decodes to `620/10,000`; 11 cases (up from 10), the narrowed rule **watched failing first**, mobile **59 suites / 802 tests / 0 failures**, and the corrected line re-rendered on the phone at **zero provider quota** because it reads a stored answer. |
 
 | **ISS-27** | **High** | **A table with three columns or fewer renders as a collapsed strip — the answer is unreadable and the message area looks empty** — the assistant was asked for a two-column table; the answer was stored correctly and returned by the API, but on the phone its cells measured **48 px wide and up to 1 452 px tall**, the whole answer sat in a ~200 px column, the question was pushed above the viewport, and the screen presented as **blank** | Found **on the device 2026-10-14**, minutes after §27BS verified the four-column card path: the accessibility tree (`uiautomator`) showed real `android.widget.TextView` cells of the stored answer carrying those bounds, while a pixel scan at threshold 40 found **no ink at all** — it was a threshold lowered to 20 that turned *"nothing is drawn"* into *"a collapsed column is drawn"*. The **card** path escaped the same defect only because a card title is long enough to give the bubble a wide intrinsic width | **FIXED 2026-10-14 — §27BT (mobile only).** A table-bearing answer now takes the full bubble width (`bubbleWide: { flex: 1 }`, still capped by `maxWidth: '84%'`), so the grid's `flex: 1` columns have a width to share; applied to **both** rendering paths, because the card path's escape was luck rather than design. `isTableAnswer` is an O(n) `includes('|')` — a superset of the parser's own detection, so the keystroke-driven render path pays nothing. **5 cases** in `mobile/__tests__/iss-27-narrow-table-width.test.tsx`, the ★ case **watched failing first** (`Expected: 1 / Received: undefined`); mobile **60 suites / 807 tests / 0 failures**, `tsc`/`eslint` clean. **DEVICE-VERIFIED:** the same stored answer re-rendered after the fix and the tree now measures `Product Name [102,1086][566,1182]` and `Quantity [565,1086][821,1182]` — **464 × 96** and **256 × 96** — with all five rows on screen, every `0` present, and the card answer unchanged |
+| **ISS-28** | Low → **`[✓]`** | **A continued conversation never moved up the list, and its displayed time never advanced** — the conversation list is sorted on `updatedAt` and each row renders it, but no write path touched a conversation when a message was added, so `updatedAt` was frozen at creation and "newest first" was in practice "newest *created* first" | Found **on the device 2026-10-14** (§27BT: a conversation continued at 17:14 was still listed as 17:02) and traced to the missing update path on `AIConversation`; the Phase 20F index comment had already anticipated it | **FIXED 2026-10-14 — AI-7 (§27BU), server only:** a persisted turn now advances the conversation's `updatedAt`, on the success path only, because a failed turn persists nothing. 4 cases in `server/test/AI7-conversation-activity.test.mjs`, the ★ case watched failing first; CI green. **DEVICE-VERIFIED:** continuing the oldest of four conversations moved it from last to first with its time advanced **16:22 → 18:11**, and continuing the third did it again **17:02 → 18:17** |
+| **ISS-29** | Medium | **An answer cut off by `AI_MAX_OUTPUT_TOKENS` is stored and served as a complete one** — the turn reaches its cap, the text stops mid-list, and nothing marks it: the member cannot tell a truncated answer from a finished one, and neither the log nor the HTTP response says so | Found **on the device 2026-10-14** (§27BU): the low-stock answer's `out=800` is exactly the default cap and its body ends mid-list (`3. Ultra Sponge 18982 - available 2`), yet it was stored and rendered as an answer. The guard in `parseAnthropicResponse` throws only when `stop_reason === 'max_tokens'` **and there is no text**, so a truncation that carries text passes through by construction. The very next answer used `out=788` and finished, so the frequency is unmeasured | **OPEN — recorded, not fixed (§27BU).** The remedy is a decision rather than a patch: widen the guard into a third degraded reason with its own sentence, or raise the cap and accept the added latency and cost |
 
 **Correctly recorded as open or deferred — not issues:** L-17 (recovery-mail delivery never inspected end-to-end),
 B1's residual timing term, B2 / E3 / OD-10 (V4), owner decisions O-5 / O-6 / O-10 / O-11, P-4 (device-time),
@@ -6869,7 +6871,7 @@ P-6 + Gate 1 + iOS app registration (environment-blocked), and the new-identity 
 
 ## Pending
 
-**Fixes:** ~~ISS-21~~ (**FIXED and device-verified 2026-10-12 — §27BD/§27BE**: the 15 s client abort against the AI path's 60 s budget; only **AI-1's abandoned-turn cancellation remains unmeasured on hardware**) · ~~ISS-23~~ (**FIXED 2026-10-13 — AI-2, §27BF**: raw Markdown stripped at the assistant bubble) · ~~ISS-24~~ (**FIXED 2026-10-13 — AI-3, §27BG**: the assistant's tool queries no longer pay for the whole tenant partition — 9 of 9 tools ≤ 650 ms at 10 000 products, with the answers proven **byte-identical** by `perf:golden`) · **ISS-22** (**code half complete 2026-10-14 — §27BF + §27BL**: the zero-length `200` is retried once and a degraded turn is marked and logged, so it is countable, **and** a reached limit is now its own `429 AI_QUOTA_EXCEEDED` with its own sentence instead of a `502` outage — the distinct code and sentence this row asked for; **still open as the provider-tier decision alone**, which the owner declined to spend on) · ~~ISS-06~~ (**CLOSED 2026-10-12 — §27AZ**, measured from the built APK: `compileSdk` 36 / `minSdk` 24 / `targetSdk` 36, no raise needed) · ~~ISS-25~~ (**FIXED 2026-10-13 — AI-4, §27BH**: the answer is now rendered rather than de-markered — tables, headings and lists become real layout with no marker on screen; the server and the prompt are untouched, so latency and token cost are unchanged; **DEVICE-VERIFIED 2026-10-14 — §27BS**: two real stored answers were read on the phone, one of them a **4-column, 5-row table** the assistant was asked for directly — rendered as **one card per row**, the row's own name as the title and the header's other columns as label/value lines, with the header row not drawn as a row, **no `|`, no `------` and no `**` anywhere on the screen**, the closing sentence as prose, and the one-character `0` measured **drawn on all five cards** (267 ink pixels, bbox `428..445`, the same glyph signature five times). What stays open is the judgement and the sample, not the behaviour: *"does it read well"* is the owner's call, and the **grid** path (≤ 3 columns) plus the stored **6-column** table — which belongs to another business, so the phone cannot see it — have not been seen on hardware) · ISS-17/ISS-18 (decided and recorded, no action pending) · ISS-13 (**fixed, §27AM** — its device half rides with the same pass) · ~~ISS-27~~ (**FIXED and device-verified 2026-10-14 — §27BT**: a two- or three-column table collapsed to **48 px cells** and made the whole message area look empty; a table answer now takes the full bubble width, and the same stored answer re-rendered as a **464 × 96 / 256 × 96** two-column grid with every value on screen) · ~~ISS-26~~ (**FIXED 2026-10-13, recorded §27BQ**: the assistant's LaTeX now decodes into plain text instead of reaching the screen as source — no dependency, no renderer, no prompt change, so no per-turn token cost; **device-verified 2026-10-14, and the device found the decoder hiding a different number — §27BS**: `\frac{17 + 5}{113}` rendered as `17+ 5/113` (17.04 instead of the 19.5% the model computed), so a fraction side carrying an operator now keeps its brackets, and the same rule covers `× · ÷ /` because `\frac{1}{2 \times 3}` decoded to `1/2 × 3` — one and a half instead of one sixth). *(ISS-01 fixed in #36; ISS-16 disposed in #37; ISS-02 remediated — §27AJ; the 7 advisories dispositioned — §27AK; all 2026-10-10.)*
+**Fixes:** ~~ISS-21~~ (**FIXED and device-verified 2026-10-12 — §27BD/§27BE**: the 15 s client abort against the AI path's 60 s budget; only **AI-1's abandoned-turn cancellation remains unmeasured on hardware**) · ~~ISS-23~~ (**FIXED 2026-10-13 — AI-2, §27BF**: raw Markdown stripped at the assistant bubble) · ~~ISS-24~~ (**FIXED 2026-10-13 — AI-3, §27BG**: the assistant's tool queries no longer pay for the whole tenant partition — 9 of 9 tools ≤ 650 ms at 10 000 products, with the answers proven **byte-identical** by `perf:golden`) · **ISS-22** (**code half complete 2026-10-14 — §27BF + §27BL**: the zero-length `200` is retried once and a degraded turn is marked and logged, so it is countable, **and** a reached limit is now its own `429 AI_QUOTA_EXCEEDED` with its own sentence instead of a `502` outage — the distinct code and sentence this row asked for; **still open as the provider-tier decision alone**, which the owner declined to spend on) · ~~ISS-06~~ (**CLOSED 2026-10-12 — §27AZ**, measured from the built APK: `compileSdk` 36 / `minSdk` 24 / `targetSdk` 36, no raise needed) · ~~ISS-25~~ (**FIXED 2026-10-13 — AI-4, §27BH**: the answer is now rendered rather than de-markered — tables, headings and lists become real layout with no marker on screen; the server and the prompt are untouched, so latency and token cost are unchanged; **DEVICE-VERIFIED 2026-10-14 — §27BS**: two real stored answers were read on the phone, one of them a **4-column, 5-row table** the assistant was asked for directly — rendered as **one card per row**, the row's own name as the title and the header's other columns as label/value lines, with the header row not drawn as a row, **no `|`, no `------` and no `**` anywhere on the screen**, the closing sentence as prose, and the one-character `0` measured **drawn on all five cards** (267 ink pixels, bbox `428..445`, the same glyph signature five times). What stays open is the judgement and the sample, not the behaviour: *"does it read well"* is the owner's call, and the **grid** path (≤ 3 columns) plus the stored **6-column** table — which belongs to another business, so the phone cannot see it — have not been seen on hardware) · ~~ISS-28~~ (**FIXED and device-verified 2026-10-14 — AI-7, §27BU**: a continued conversation now rises to the top of the list and its displayed time advances — observed twice on the phone, **16:22 → 18:11** and **17:02 → 18:17**) · **ISS-29** (**OPEN, recorded 2026-10-14 — §27BU**: an answer truncated by the 800-token cap is served as a complete one, because the existing `max_tokens` guard fires only when the response carries no text; the remedy is a decision, not a patch) · ISS-17/ISS-18 (decided and recorded, no action pending) · ISS-13 (**fixed, §27AM** — its device half rides with the same pass) · ~~ISS-27~~ (**FIXED and device-verified 2026-10-14 — §27BT**: a two- or three-column table collapsed to **48 px cells** and made the whole message area look empty; a table answer now takes the full bubble width, and the same stored answer re-rendered as a **464 × 96 / 256 × 96** two-column grid with every value on screen) · ~~ISS-26~~ (**FIXED 2026-10-13, recorded §27BQ**: the assistant's LaTeX now decodes into plain text instead of reaching the screen as source — no dependency, no renderer, no prompt change, so no per-turn token cost; **device-verified 2026-10-14, and the device found the decoder hiding a different number — §27BS**: `\frac{17 + 5}{113}` rendered as `17+ 5/113` (17.04 instead of the 19.5% the model computed), so a fraction side carrying an operator now keeps its brackets, and the same rule covers `× · ÷ /` because `\frac{1}{2 \times 3}` decoded to `1/2 × 3` — one and a half instead of one sixth). *(ISS-01 fixed in #36; ISS-16 disposed in #37; ISS-02 remediated — §27AJ; the 7 advisories dispositioned — §27AK; all 2026-10-10.)*
 **Upgrades, in issue #32's order:** Expo SDK 58 — **deferred by Gate 0 until Expo promotes it to `latest`** (§27AI records the decision and the runbook; the pins differ from PR #34's set — RN 0.88 family, not 0.87.1) → the React 19 type fixes (ISS-01 is the first of them) → TypeScript 7 →
 jest 30 → ~~the `actions/*` v7 re-pin~~ (**taken early 2026-10-11 — ISS-12 resolved, §27AO**) → ~~`dotenv` 18 and `@types/bcryptjs` 3~~ (**taken 2026-10-11 — §27AP**: `dotenv` 18 taken with the preload path measured; the `@types/bcryptjs` row's premise was wrong — 3.0.0 is a deprecated stub, so the dependency was **removed** instead and `tsc` proves it). **The two that remain are now measured, not pending:** jest 30 arrives *with* the SDK 58 promotion (`jest-expo@58.0.9`), and TypeScript 7 is upstream-blocked on a typescript-eslint line that admits 7 (§27AQ).
 **Testing:** the L-17 mail leg, owner-assisted; and a dated test baseline for this section.
@@ -10839,9 +10841,169 @@ left exactly as they were.
   writes are `AIConversation.create(...)`, so `updatedAt` is frozen at creation and "newest first" is in practice
   "newest *created* first". The Phase 20F index comment (§20F/M-5) already anticipated the difference: *"the two fields
   hold equal values today only because a conversation is written once and never updated; the first update path would
-  make that difference real."* **Deliberately NOT fixed here** — it is a server-side behaviour change (advancing
-  `updatedAt` on a turn) with its own decision to make about ordering semantics, and this increment is mobile-only.
+  make that difference real."* **FIXED 2026-10-14 — AI-7 (§27BU, server only):** a persisted turn now advances the conversation's `updatedAt`,
+  so a continued conversation rises to the top of the list and its displayed time advances — decided, implemented,
+  suite-guarded and **device-verified** there. The mechanism described above is otherwise unchanged: the update path
+  the Phase 20F index comment anticipated now exists, which is all this bullet asked for.
 
+
+# 27BU. AI-7 — the conversation list ordered by creation, fixed and device-measured (2026-10-14)
+
+## Why this entry exists
+
+§27BT ended by naming a defect and deliberately not fixing it: *"A continued conversation never moves up the list,
+and its displayed time never advances"* — seen on the phone (a conversation continued at 17:14 still listed as
+17:02) and traced to its mechanism at source. `AIConversation` carries `timestamps: true`, `listConversations`
+sorts on `{ updatedAt: -1, _id: -1 }`, the mobile row renders `formatDateTime(item.updatedAt)`, and **no write
+path touched a conversation when a message was added** — the only writes to that collection were
+`AIConversation.create(...)` — so `updatedAt` was frozen at creation and "newest first" was in practice "newest
+*created* first". It was left unfixed because advancing the timestamp is a **server-side behaviour change**, not
+the mobile-only increment that section was. The Phase 20F index comment had already anticipated the difference:
+*"the two fields hold equal values today only because a conversation is written once and never updated; the first
+update path would make that difference real."* This increment is that update path, and it is also the device pass
+that measured it.
+
+## The fix — one write, on the success path only
+
+`server/src/controllers/ai.controller.ts`, immediately after the turn is durable (conversation and both messages
+written) and before the response: the conversation's `updatedAt` is set to now and saved. Nothing else changes —
+no schema field, no route, no sort, no client change, because both ends were already built for a value nothing
+wrote.
+
+It sits deliberately on the **success path only**: a failed turn persists nothing at all (Phase 07E / M7), so the
+activity time can move only when a member actually received an answer, and a turn that times out or is abandoned
+cannot make a conversation look busy.
+
+## Verification, local
+
+* `server/test/AI7-conversation-activity.test.mjs` (4 cases, DB suite). The ★ case continues an **older**
+  conversation and asserts both halves: it becomes `items[0]` **and** its `updatedAt` is later than the turn that
+  created the other conversation. `createdAt` is asserted never to move (creation is a fact, activity is a
+  timestamp). A conversation created **by** a turn reports activity at or after creation — deliberately **not**
+  `updatedAt === createdAt`, because always-equal is precisely what hid the defect; that wrong expectation was
+  written first and failed against the fix by ~136 ms. The negative case forces a turn past its deadline and
+  asserts the conversation still holds **one** message pair with its `updatedAt` **unchanged**.
+* **The ★ case was watched failing first** by reverting the three added lines — the suite then reported the old
+  first element, i.e. the defect itself — after which the file was restored and re-run green.
+* CI green on the pushed head (`6948418`): `server` 3m29s, `mobile` 1m31s, `attribution-guard` and `secret-guard`
+  both pass.
+
+## The device pass — 2026-10-14, OPPO CPH1969 over the USB tunnels
+
+The backend was **restarted first, on purpose**: the server the phone had been talking to started at 16:13 and
+predated the fix, so the pass would otherwise have measured the old code. `[db] connected … inventoryai_dev_db`
+and `[server] … listening on http://localhost:4000` are the boot lines everything below is measured against.
+
+### The tenant, identified rather than assumed
+
+`seed:demo` had created a fresh tenant for this pass (`device-check-1@example.com`, *"AI SCALE TEST — 80k seeded
+dataset"*), and the question "is the phone signed into it?" was settled from the database rather than by
+inference: `sessions` held exactly **one active** record, created 08:19Z for that user, with four conversations
+following it (08:22–09:47Z). Ground truth was then computed **independently of the app** — raw aggregation over
+the collections, with the definitions read from the models — giving **9 000 active products, 17 918 inventory
+rows, 12 106 transactions, 1 377 products at or below their minimum stock, 560 of those at zero, 7 623 healthy
+and 2 217 981 units on hand**.
+
+### The ordering property, observed twice
+
+The list before the first turn read, newest first: **17:47 / 17:40 / 17:02 / 16:22**.
+
+* Continuing the **oldest** conversation (16:22) and returning to the list put it **first**, its row now reading
+  **18:11**.
+* Continuing the **third** (17:02) did the same: it then led at **18:17**, above 18:11.
+
+Both halves §27BT recorded as missing are therefore observed: the conversation rises, and the time beside it is
+the time it was last used.
+
+### Five turns, three of them defective — each one a sighting, not a story
+
+| # | question | outcome | HTTP | calls | tools | empty | in/out |
+|---|----------|---------|------|-------|-------|-------|--------|
+| 1 | *Which products are low on stock?* | **degraded `EMPTY_COMPLETION`** | 201 in 1 447 ms | 2 | none | 2 | 0/0 |
+| 2 | *Which products are low on stock right now?* (retry) | `ok` | 201 in **49 899.9 ms** | 3 | getReorderNeededProducts, getLowStockProducts | 0 | 14 044/800 |
+| 3 | *Make a table of 5 products that are out of stock with columns: name, SKU, category, unit, minimum stock, selling price and quantity.* | `ok` | 201 in 13 856.3 ms | 2 | getOutOfStockProducts | 0 | 3 643/343 |
+| 4 | *Is anything out of stock?* (the app's own suggested prompt) | **`AI_TIMEOUT`** | 504, turn deadline | 1 | none | 0 | 0/0 |
+| 5 | *Is anything out of stock?* (retry) | `ok` | 201 in ~28 300 ms | 3 | getOutOfStockProducts | **1** | 5 279/788 |
+
+* **Turn 1 is the degraded path's first device sighting.** The gateway answered **twice** with a valid,
+  content-less response — no `[ai:openrouter]` diagnostic line, so it was not an error, and `in=0 out=0` is what
+  an absent `usage` reports — and the member read *"I could not generate a response right now. Please try
+  again."* A direct probe of the same endpoint from this host, with the key never printed, answered `200` and
+  `pong` in 1 827 ms: the gateway was healthy while the turn failed, so this is intermittent, not an outage.
+* **Turn 2 is where AI-1's client budget earned its keep**: 49.9 s of provider time on a 60 s turn deadline —
+  exactly the request the old fixed 15 s client abort would have killed and reported as *"Cannot reach the
+  server"*.
+* **Turn 4 is the second failure shape**: the provider call consumed the entire 60 s deadline
+  (`providerMs=60 003`), the turn answered `504 AI_TIMEOUT`, and the phone showed **"The assistant took too long
+  to answer. Please try again."** with *"Cannot reach the server"* **absent from the screen** — AI-1's copy,
+  confirmed again on hardware.
+* **Turn 5 shows AI-5's `empty=` field doing its job**: `calls=3 toolRuns=1 empty=1` is an empty completion that
+  AI-2's retry **rescued inside a turn that still reported `ok`** — the same shape as turn 1, one retry away from
+  being an answer, and countable only because that field exists.
+
+### The answers, judged against that ground truth
+
+* **Accuracy was exact wherever it was checkable.** Turn 5 opened *"Yes — there are **560 active products** that
+  currently have zero available stock across all locations"* — the independently computed 560 — then listed 20
+  rows with correct SKUs. Turn 2's tool result carried the computed **1 377** total. Turn 3's seven-column table
+  matched the six values of the row whose pixels were measured (`DEMOSKU-8966`, `Household`, `L`, `17`, `$14.43`,
+  `0`).
+* **Speed is the provider's, and it is 13–50 s for a good answer** (13.9 s, 28.3 s, 49.9 s) against **0.3–0.6 s
+  of tools**, with one turn failing at the 60 s deadline. That is the free tier the owner chose, measured again
+  rather than asserted.
+* **Readability held.** Turn 5's four-column answer renders as **one card per row**, the row's name as the title,
+  label/value lines, and the closing sentence as ordinary prose — no `|`, no `---`, no `**` anywhere on the
+  screen — and a 20-row answer scrolls correctly.
+
+### The two shapes §27BT left unmeasured, now measured
+
+* **A seven-column table.** Turn 3 asked for one and got exactly that (header plus five rows, `out=343`, not
+  truncated). On the phone it renders down the **card** path: one card per row, the product name as the title and
+  the other six columns as label/value lines. All six values were then confirmed **drawn**, not read — the value
+  column begins at **x ≈ 428** and OCR reliably reports only the wide strings, so the region was scanned for ink
+  by pixel: `L` at `428..445`, `17` at `429..468`, `$14.43` at `428..543`, `0` at `428..445`, each on its own
+  label's row. **That is the same false-finding trap §27BS and §27BT both record, met a third time**: the first
+  scan of this pass used threshold 40 and reported **39 % of the card as ink**, because the card's own surface
+  is `#242834` — luminance **39.7**, i.e. the threshold itself — in a theme that is dark all the way down
+  (`#12141A` page, `#1B1E26` bubble). Text measures ≥ 100, so the scan was re-run at 100.
+* **Landscape is not a reachable state in the shipped app.** `mobile/app.json` declares
+  `"orientation": "portrait"`, and forcing the display to rotate (`wm set-user-rotation lock 1`) left the layout
+  **identical to the pixel** — same coordinates, still portrait — with auto-rotate restored to `free` afterwards.
+  §27BT's *"landscape has not been measured"* therefore resolves to *"the app does not render landscape"*,
+  established from the configuration **and** from the device rather than from either alone.
+
+## Two findings this pass produced
+
+* **ISS-29 — a truncated answer is served as a complete one.** Turn 2's body ends mid-list (`3. Ultra Sponge
+  18982 - available 2`) and its `out=800` is exactly `AI_MAX_OUTPUT_TOKENS`'s default. The guard in
+  `parseAnthropicResponse` fires only when `stop_reason === 'max_tokens'` **and there is no text**, so a
+  truncation that carries text passes through, is stored, and renders with no mark. The member cannot tell a
+  cut-off answer from a finished one, and nothing in the log or the HTTP response says so either. **Recorded, not
+  fixed** — the remedy is a decision (widen the guard into a third degraded reason with its own sentence, or
+  raise the cap), and this increment is the ordering fix.
+* **F-57 — the answer body was the model's own deliberation, and a stale history is what it deliberated about.**
+  Turn 2 stored 3 178 characters of scratchpad (*"The user asked … I need to clarify … Let me check …"*) rather
+  than an answer, and most of it is spent reconciling a contradiction: the conversation's earlier answer had been
+  computed when this tenant held **113** products (17 low, 5 out) while the tools now report **1 377**. The tools
+  were right both times and the model noticed — but it burned its whole output budget noticing, which is why the
+  answer is both a monologue and truncated. The provider-quality half is the owner's accepted free tier; the
+  product half is worth stating plainly: **a conversation that outlives a data change carries numbers that no
+  longer hold, and the model may try to reconcile them instead of answering.**
+
+## What is NOT verified, and the limits stated rather than glossed
+
+* **Five turns is not a failure rate.** Two of five failed and one more was rescued by the retry — consistent
+  with the ~3-in-5 measured on 2026-10-12, but far too small to replace it.
+* **Turn 2's truncation is one observation.** The mechanism is read at source and the numbers line up exactly,
+  but the cap was reached once; whether this model normally finishes under 800 tokens is unknown.
+* **The ordering fix is verified for continuation only.** No archive, rename or delete path exists today, and any
+  future write to a conversation's meaning would need the same treatment — recorded rather than guessed at.
+* **ISS-29 is recorded, not fixed**, so a truncated answer can still reach a member as though it were complete.
+* **Landscape is settled by configuration, not by a design review.** Should the app ever be allowed to rotate, the
+  card, grid and bubble widths all need re-measuring at the wider aspect; this entry says the state is unreachable
+  today, not that landscape would read well.
+* **The device was left as found** — auto-rotate `free`, no lock persisted, no app state altered — and the two
+  `scratch-*.mjs` probes used for the ground truth were deleted rather than committed.
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

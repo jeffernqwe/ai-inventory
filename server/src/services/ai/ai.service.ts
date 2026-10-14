@@ -53,10 +53,21 @@ interface ChatParams {
  * passes it through to the client unchanged and the tests assert the exact value:
  * it is a contract, not an internal detail.
  */
-export type DegradedReason = 'EMPTY_COMPLETION' | 'ITERATION_LIMIT';
+export type DegradedReason = CannedReason | 'OUTPUT_LIMIT';
 
 /**
- * The two degraded outcomes, each with the sentence the member reads.
+ * The degraded outcomes whose COPY IS THE ANSWER, because there is no answer.
+ *
+ * AI-8 — `OUTPUT_LIMIT` is deliberately NOT one of these, and that is the whole shape of
+ * the fix: a truncated turn produced a real answer that is worth reading (the first rows
+ * of a list are what was asked for), so replacing it with a sentence would throw the
+ * useful half away. It is marked instead, and the mark is drawn as an annotation beside
+ * the answer rather than in place of it.
+ */
+type CannedReason = 'EMPTY_COMPLETION' | 'ITERATION_LIMIT';
+
+/**
+ * The canned outcomes, each with the sentence the member reads.
  *
  * Kept in ONE table because the reason and its copy must not drift apart: the
  * reason is what the log and the API report, the sentence is what the user sees,
@@ -64,7 +75,7 @@ export type DegradedReason = 'EMPTY_COMPLETION' | 'ITERATION_LIMIT';
  * signal at all. Before AI-2 the sentence was inlined at two separate exits with
  * nothing recorded beside it.
  */
-const DEGRADED: Record<DegradedReason, string> = {
+const DEGRADED: Record<CannedReason, string> = {
   EMPTY_COMPLETION: 'I could not generate a response right now. Please try again.',
   ITERATION_LIMIT:
     'I could not finish that request within the allowed number of steps. Please try a more specific question.',
@@ -288,6 +299,12 @@ export async function runAiChat({ businessId, userId, role, history = [], messag
       lastWasEmpty = !text;
       if (text) {
         finalText = text;
+        // AI-8 — the answer is here, and the provider may have STOPPED mid-sentence to
+        // produce it. That case used to be indistinguishable from a complete answer at
+        // every layer: same 201, same stored content, nothing in the log (ISS-29, found
+        // on the device 2026-10-14, where `out=800` was exactly the cap and the body end
+        // mid-list). The text is kept — it is a real answer — and the turn is marked.
+        if (response?.truncated) degraded = 'OUTPUT_LIMIT';
         break;
       }
       // Counted as SEEN, never as "authorised": the log line then reports how many

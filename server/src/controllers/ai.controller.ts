@@ -75,6 +75,10 @@ function messagePublic(msg: MessageDoc) {
     model: msg.model || undefined,
     toolsUsed: Array.isArray(msg.toolsUsed) && msg.toolsUsed.length ? msg.toolsUsed : undefined,
     usage,
+    // AI-8 — the mark travels with the message, so a conversation read back from the
+    // database says the same thing about a truncated answer as the screen that received
+    // it did. Absent, not null, on every turn that was not degraded.
+    degraded: msg.degraded || undefined,
     createdAt: msg.createdAt,
   };
 }
@@ -290,6 +294,10 @@ const aiController = {
       model: result.model || undefined,
       toolsUsed: result.toolsUsed?.length ? result.toolsUsed : undefined,
       usage: result.usage || undefined,
+      // AI-8 — a degraded turn is still a completed turn (AI-2), so it is still stored;
+      // what is new is that the STORE now knows it was degraded. Only the reason is kept,
+      // never a sentence: the partial answer in `content` is what the member read.
+      degraded: result.degraded || undefined,
     });
 
     // AI-7 — the conversation is now the most recently ACTIVE one.

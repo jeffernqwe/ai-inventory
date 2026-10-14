@@ -103,9 +103,18 @@ export function parseAnthropicResponse(data: AnthropicResponse, fallbackModel = 
   if (data.stop_reason === 'max_tokens' && toolCalls.length === 0 && !text) {
     throw new AiProviderError('The AI service response was cut off. Please try a shorter question.');
   }
+  // AI-8 — the stop reason is REPORTED, not merely tested. The throw above covers the
+  // case where the cap left nothing usable; this covers every other one, where the cap
+  // left a partial answer that used to arrive looking complete.
   // `?? fallbackModel` is the only guard on `model`, exactly as before; the
   // assertion is what says the neutral contract reports it as a string.
-  return { model: data.model as string ?? fallbackModel, text, toolCalls, usage };
+  return {
+    model: data.model as string ?? fallbackModel,
+    text,
+    toolCalls,
+    usage,
+    truncated: data.stop_reason === 'max_tokens',
+  };
 }
 
 /**

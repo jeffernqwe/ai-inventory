@@ -89,22 +89,44 @@ export function sendErrorMessage(err: unknown): string {
 }
 
 /** One rendered bubble. */
-interface ChatRow {
+export interface ChatRow {
   key: string;
   role: 'user' | 'assistant';
   content: string;
   createdAt?: string;
   toolsUsed?: string[];
+  /**
+   * AI-8 — the server's mark on a turn that did not finish cleanly. Only
+   * `'OUTPUT_LIMIT'` (an answer cut off by the output cap) is drawn as a note; the two
+   * canned reasons already say the turn failed, so a second warning under them would be
+   * noise. Absent on a healthy answer.
+   */
+  degraded?: string;
 }
 
-function toRows(serverMessages: ApiResponse[]): ChatRow[] {
-  return serverMessages.map((m) => ({
+/**
+ * ONE server message -> one row, in one place.
+ *
+ * AI-8 — this is a function rather than two inline object literals because the live
+ * reply and a reloaded thread are two different arrival paths for the same message, and
+ * a field carried by one but not the other is exactly the drift that would make a thread
+ * read more confidently than the screen that produced it. The mark is the first field
+ * where that would be a correctness problem rather than a cosmetic one, so both paths go
+ * through here.
+ */
+export function toRow(m: ApiResponse): ChatRow {
+  return {
     key: m.id,
     role: m.role === 'USER' ? 'user' : 'assistant',
     content: m.content,
     createdAt: m.createdAt,
     toolsUsed: m.toolsUsed,
-  }));
+    degraded: m.degraded,
+  };
+}
+
+function toRows(serverMessages: ApiResponse[]): ChatRow[] {
+  return serverMessages.map(toRow);
 }
 
 /**
@@ -151,6 +173,16 @@ export function MessageBubble({ item }: { item: ChatRow }) {
         ) : (
           <AssistantMarkdown content={item.content} />
         )}
+        {/* AI-8 — the answer is kept and ANNOTATED, rather than replaced. `OUTPUT_LIMIT`
+            is the one reason where there is a usable answer and the member still needs to
+            know it stops early: the model reached the output cap mid-list. The other two
+            reasons put their copy in the content itself, so they are deliberately not
+            repeated here. */}
+        {!user && item.degraded === 'OUTPUT_LIMIT' ? (
+          <Text testID="chat-incomplete-note" style={styles.incomplete}>
+            This answer hit the length limit, so it may be incomplete — ask a narrower question to see the rest.
+          </Text>
+        ) : null}
         {!user && item.toolsUsed?.length ? (
           <Text style={styles.tools} numberOfLines={2}>
             Read: {item.toolsUsed.join(' · ')}
@@ -296,10 +328,10 @@ export default function AiChat({ conversationId = null }: AiChatProps) {
       if (!convId) setConvId(res?.conversation?.id ?? null);
       const reply = res?.assistantMessage;
       if (!reply?.content) throw new Error('The assistant returned no answer.');
-      setRows((prev) => [
-        ...prev,
-        { key: reply.id, role: 'assistant', content: reply.content, createdAt: reply.createdAt, toolsUsed: reply.toolsUsed },
-      ]);
+      // AI-8 — mapped through `toRow`, the same function a reloaded thread uses, so the
+      // live reply cannot carry a field the stored one does not (or the reverse). The
+      // mark on a truncated answer arrives on this response and would be lost here.
+      setRows((prev) => [...prev, toRow(reply)]);
     } catch (err) {
       if (isSessionError(err)) {
         await signOut();
@@ -391,6 +423,10 @@ const createStyles = (colors: Palette) =>
     bubbleText: { ...type.body, color: colors.text },
     bubbleTextUser: { color: colors.textOnPrimary },
     tools: { ...type.caption, color: colors.textMuted, marginTop: spacing.sm },
+    // AI-8 — a caveat inside the assistant bubble, in the warning colour so it reads as
+    // one. `marginTop` keeps it clear of the answer's last line, which it qualifies.
+    incomplete: { ...type.caption, color: colors.warning, marginTop: spacing.sm },
+
     time: { ...type.caption, color: colors.textMuted, marginTop: 4, textAlign: 'right' },
     // On the primary-filled user bubble: readable in both themes without a
     // hardcoded white, which would vanish against the dark theme's light blue.

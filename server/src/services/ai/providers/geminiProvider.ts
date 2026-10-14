@@ -132,9 +132,17 @@ function parseResponse(data: GeminiResponse): ProviderResponse {
   if (finishReason === 'MAX_TOKENS' && toolCalls.length === 0 && !text) {
     throw new AiProviderError('The AI service response was cut off. Please try a shorter question.');
   }
+  // AI-8 — as in the Anthropic wire: `MAX_TOKENS` is the same cap under a different
+  // name, and it is reported so a partial answer cannot arrive looking complete.
   // `?? 'gemini'` is the only guard on the model label, exactly as before; the
   // assertion is what says the neutral contract reports it as a string.
-  return { model: data?.modelVersion as string ?? 'gemini', text, toolCalls, usage };
+  return {
+    model: data?.modelVersion as string ?? 'gemini',
+    text,
+    toolCalls,
+    usage,
+    truncated: finishReason === 'MAX_TOKENS',
+  };
 }
 
 /** Create a Gemini provider instance. Throws AiNotConfigured when the key is missing. */

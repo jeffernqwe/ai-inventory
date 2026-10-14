@@ -1,0 +1,471 @@
+// Shared seeding core for the account seeders (`seed:demo` and `seed:accounts`).
+//
+// WHY THIS MODULE EXISTS. Both seeders write the same seven collections in the same
+// shape, and they differ in exactly three things: WHICH accounts, HOW BIG, and
+// whether products carry a generated `sku`/`barcode`. A second copy of the dataset
+// shape is how two seeders drift apart — the same reason `perf/lib.mjs` keeps ONE
+// `TENANT_DATA_COLLECTIONS` list. There is one implementation here and the two CLIs
+// are thin shells over it, so a fix to the fixture benefits both.
+//
+// NOTHING HERE RUNS ON IMPORT: no `main()`, no connection, no write. A library that
+// acts when you read it is how a "seed" script writes to a database by accident.
+//
+// SAFETY lives in the CALLERS (`assertSafeTarget` from ../perf/lib.mjs), before a
+// connection is opened. This module only ever writes rows belonging to the
+// `businessId` it is handed, and it never deletes a Firebase identity.
+
+import mongoose from 'mongoose';
+
+import Business from '../../src/models/business.model.ts';
+import Category from '../../src/models/category.model.ts';
+import Inventory from '../../src/models/inventory.model.ts';
+import InventoryTransaction from '../../src/models/inventoryTransaction.model.ts';
+import Location from '../../src/models/location.model.ts';
+import Product from '../../src/models/product.model.ts';
+import PurchaseOrder from '../../src/models/purchaseOrder.model.ts';
+import Supplier from '../../src/models/supplier.model.ts';
+import User from '../../src/models/user.model.ts';
+import { SeedSafetyError } from '../perf/lib.mjs';
+
+const LOCATION_NAMES = [
+  'Main Warehouse', 'Shop Front', 'Overflow Store', 'Cold Room', 'Returns Bay', 'Transit Hub',
+];
+const CATEGORY_NAMES = [
+  'Beverages', 'Snacks', 'Household', 'Personal Care', 'Stationery', 'Hardware',
+  'Electrical', 'Kitchen', 'Pet Supplies', 'Toys', 'Clothing', 'Garden',
+  'Automotive', 'Baby', 'Sports', 'Office', 'Cleaning', 'Seasonal',
+  'Bakery', 'Frozen', 'Dairy', 'Produce', 'Butcher', 'Deli',
+];
+const UNITS = ['pcs', 'box', 'pack', 'kg', 'L'];
+const ADJECTIVES = [
+  'Premium', 'Classic', 'Compact', 'Heavy Duty', 'Everyday', 'Deluxe', 'Eco',
+  'Professional', 'Mini', 'Ultra', 'Value', 'Pro',
+];
+const NOUNS = [
+  'Kettle', 'Notebook', 'Detergent', 'Torch', 'Cable', 'Mug', 'Tape', 'Battery',
+  'Brush', 'Gloves', 'Lamp', 'Bottle', 'Padlock', 'Sponge', 'Clips', 'Towel',
+];
+const SUPPLIER_SUFFIX = ['Supplies', 'Trading', 'Distributors', 'Wholesale', 'Industries'];
+const PO_STATUSES = ['DRAFT', 'OPEN', 'RECEIVED', 'CANCELED'];
+const TX_TYPES = ['STOCK_IN', 'STOCK_OUT', 'ADJUSTMENT'];
+
+/** Small deterministic PRNG (mulberry32) — same seed, same dataset, everywhere. */
+export function makeRandom(seed) {
+  let a = seed >>> 0;
+  return function next() {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+export const intBetween = (rand, min, max) => Math.floor(rand() * (max - min + 1)) + min;
+export const pick = (rand, list) => list[Math.floor(rand() * list.length)];
+
+/**
+ * Insert in bounded chunks: one 30 000-document batch would approach the 16 MB
+ * command limit. Re-exported so both CLIs share the bound.
+ */
+export const DEFAULT_CHUNK_SIZE = 2000;
+
+/**
+ * Insert in bounded chunks.
+ *
+ * Returns the INSERTED DOCUMENTS, not a count — callers need the `_id` of every row
+ * they just wrote to build the rows that reference it. The first draft returned a
+ * number and the next collection's rows were built from `undefined._id`, which is how
+ * this script failed on its very first real run: a count is only ever useful to a
+ * caller that does not have to point anything at what it wrote, so callers here take
+ * `.length` where they want the number.
+ */
+export async function insertChunked(model, docs, chunkSize = DEFAULT_CHUNK_SIZE) {
+  const inserted = [];
+  for (let i = 0; i < docs.length; i += chunkSize) {
+    const result = await model.insertMany(docs.slice(i, i + chunkSize), { ordered: false });
+    inserted.push(...result);
+  }
+  return inserted;
+}
+
+/**
+ * Resolve the Firebase identity for an email, creating it only if it is absent.
+ *
+ * The application joins Firebase to MongoDB on `firebaseUid` ONLY (never email), so
+ * the honest way to hand an existing login a seeded tenant is to read the uid from
+ * FIREBASE — the identity authority — and then create or reuse the MongoDB User that
+ * carries it. Nothing in this module looks a user up by email in MongoDB.
+ *
+ * This never DELETES an identity. `docs/DEVELOPMENT_ROADMAP.md` §27BB records what
+ * happens when the two stores are cleaned in the wrong relationship: a MongoDB user
+ * whose Firebase identity was deleted can neither sign in nor register
+ * (`409 EMAIL_IN_USE`), and nothing in the application can repair it.
+ */
+export async function resolveIdentity(email) {
+  const { getFirebaseAdminApp } = await import('../../src/services/firebase/adminApp.ts');
+  const { getAuth } = await import('firebase-admin/auth');
+  const auth = getAuth(getFirebaseAdminApp());
+
+  try {
+    const existing = await auth.getUserByEmail(email);
+    return { uid: existing.uid, created: false, emailVerified: existing.emailVerified };
+  } catch (err) {
+    if (err?.code !== 'auth/user-not-found') throw err;
+  }
+
+  const password = process.env.DEMO_ACCOUNT_PASSWORD;
+  if (!password) {
+    throw new SeedSafetyError(
+      `no Firebase identity exists for ${email}, and DEMO_ACCOUNT_PASSWORD is not set. ` +
+        'Set it in the environment to create the identity (it is never written to a file or printed).',
+    );
+  }
+  const created = await auth.createUser({ email, password, emailVerified: true });
+  return { uid: created.uid, created: true, emailVerified: true };
+}
+
+/**
+ * Find — or create — the tenant that belongs to an already-resolved identity.
+ *
+ * Reuse is the normal path: the owner registers through the app, and the seeder then
+ * attaches to the tenant registration created. Creation is the fallback for an
+ * identity that exists in Firebase but has no MongoDB account yet (which is exactly
+ * the state the app itself calls `REGISTRATION_REQUIRED`), and it writes the same
+ * shape the registration flow writes: OWNER, ACTIVE, linked by `firebaseUid` only.
+ *
+ * The account rows are only ever CREATED here, never deleted and never re-linked: a
+ * data seeder has no business touching an account's identity linkage.
+ */
+export async function ensureTenantForIdentity({ email, identity, businessName }) {
+  const user = await User.findOne({ firebaseUid: identity.uid })
+    .select('_id businessId email')
+    .lean();
+
+  if (user && user.businessId) {
+    const business = await Business.findById(user.businessId).select('name status').lean();
+    if (!business) {
+      throw new SeedSafetyError(
+        `the account's business ${String(user.businessId)} does not exist. Refusing to guess ` +
+          'at a repair — fix the linkage deliberately. Nothing was written.',
+      );
+    }
+    if (business.status !== 'ACTIVE') {
+      throw new SeedSafetyError(
+        `the account's business status is ${business.status}. Nothing was written.`,
+      );
+    }
+    return {
+      businessId: business._id,
+      businessName: business.name,
+      userId: user._id,
+      accountCreated: false,
+      reused: true,
+    };
+  }
+
+  const business = await Business.create({ name: businessName, status: 'ACTIVE' });
+  const created = await User.create({
+    businessId: business._id,
+    name: 'AI Test Owner',
+    email,
+    role: 'OWNER',
+    status: 'ACTIVE',
+    firebaseUid: identity.uid,
+    emailVerified: identity.emailVerified === true,
+  });
+  return {
+    businessId: business._id,
+    businessName,
+    userId: created._id,
+    accountCreated: true,
+    reused: false,
+  };
+}
+
+/**
+ * Write a full, self-consistent dataset into ONE tenant.
+ *
+ * Every count scales with `total`, so the knob means what it says at any size. A
+ * FIXED supplier/PO count was the first draft, and at `--total=300` the "fixed"
+ * collections alone produced 666 documents for a 300-document request — a target the
+ * script then reported as if it had hit it.
+ *
+ * `includeSkuBarcode: false` omits `sku`/`barcode` on products (and the `sku`
+ * snapshot on PO lines, which is optional in the schema). Both fields are optional in
+ * the Product schema and are uniquely indexed with a `partialFilterExpression`, so any
+ * number of products may omit them — which is what leaves the app's own barcode
+ * generation as the thing that first assigns them.
+ *
+ * Returns per-collection counts. It does NOT reset pre-existing data first; the
+ * caller does that with `clearTenantData`, because "reset then seed" is a tenant
+ * lifecycle decision rather than part of writing a dataset.
+ */
+export async function seedTenant({
+  businessId,
+  userId = null,
+  total,
+  rand,
+  includeSkuBarcode = true,
+  label = 'DEMO',
+}) {
+  const business = businessId;
+
+  const scale = (share, min, max) => Math.max(min, Math.min(max, Math.round(total * share)));
+  const categoryCount = Math.min(CATEGORY_NAMES.length, scale(0.0003, 4, 24));
+  const locationCount = scale(0.0001, 2, 6);
+  const supplierCount = scale(0.004, 5, 300);
+  const poCount = scale(0.02, 5, 1600);
+  const productCount = Math.max(5, Math.round(total * 0.225));
+
+  const categories = await Category.insertMany(
+    CATEGORY_NAMES.slice(0, categoryCount).map((name) => ({ businessId: business, name, status: 'ACTIVE' })),
+    { ordered: false },
+  );
+  const locations = await Location.insertMany(
+    LOCATION_NAMES.slice(0, locationCount).map((name) => ({ businessId: business, name, status: 'ACTIVE' })),
+    { ordered: false },
+  );
+  const suppliers = await Supplier.insertMany(
+    Array.from({ length: supplierCount }, (_, i) => ({
+      businessId: business,
+      name: `${pick(rand, ADJECTIVES)} ${pick(rand, SUPPLIER_SUFFIX)} ${1000 + i}`,
+      contactName: `Contact ${i}`,
+      phone: `+63 900 ${String(1000000 + i).slice(-7)}`,
+      email: `supplier${i}@example.invalid`,
+      description: 'Seeded supplier for AI scale testing',
+      status: 'ACTIVE',
+    })),
+    { ordered: false },
+  );
+
+  // ---- products, with a realistic spread of stock health ----
+  // A share sits at or below its minimum so the restock path returns a full page; a
+  // tenant where nothing is ever low would leave that query's cost unmeasured.
+  const productDocs = [];
+  for (let i = 0; i < productCount; i += 1) {
+    const minimumStock = intBetween(rand, 5, 100);
+    const low = rand() < 0.15;
+    const available = low
+      ? (rand() < 0.4 ? 0 : intBetween(rand, 1, minimumStock))
+      : Math.round(minimumStock * (1.5 + rand() * 8));
+    const doc = {
+      businessId: business,
+      name: `${pick(rand, ADJECTIVES)} ${pick(rand, NOUNS)} ${10000 + i}`,
+      description: `Seeded row ${i} for AI scale testing`,
+      categoryId: categories[i % categories.length]._id,
+      costPrice: Number((1 + rand() * 40).toFixed(2)),
+      sellingPrice: Number((2 + rand() * 80).toFixed(2)),
+      unit: pick(rand, UNITS),
+      minimumStock,
+      status: 'ACTIVE',
+      _availableTotal: available,
+    };
+    if (includeSkuBarcode) {
+      doc.sku = `${label}SKU-${i}`;
+      doc.barcode = `${label}BC${i}`;
+    }
+    productDocs.push(doc);
+  }
+  const products = await insertChunked(
+    Product,
+    productDocs.map((doc) => {
+      const clean = { ...doc };
+      delete clean._availableTotal;
+      return clean;
+    }),
+  );
+
+  // ---- inventory: each product stocked at 1..3 locations ----
+  const inventoryDocs = [];
+  productDocs.forEach((doc, i) => {
+    const totalQty = doc._availableTotal;
+    const spread = intBetween(rand, 1, Math.min(3, locations.length));
+    let remaining = totalQty;
+    for (let l = 0; l < spread; l += 1) {
+      const isLast = l === spread - 1;
+      const qty = isLast ? remaining : Math.floor(totalQty / spread);
+      remaining -= qty;
+      inventoryDocs.push({
+        businessId: business,
+        productId: products[i]._id,
+        locationId: locations[l]._id,
+        quantity: Math.max(0, qty),
+        reservedQuantity: 0,
+      });
+    }
+  });
+  const inventoryInserted = (await insertChunked(Inventory, inventoryDocs)).length;
+
+  // ---- purchase orders ----
+  // Status spread with receipts that are BACKED BY REAL TRANSACTIONS: a receipt line
+  // requires an `inventoryTransactionId`, and pointing one at an id that was never
+  // written would be a fixture that contradicts itself. The ids are pre-generated so
+  // the transactions and the lines that reference them can be inserted in either
+  // order. A self-contradicting ledger reads exactly like a wrong answer.
+  const poDocs = [];
+  const receiptTxDocs = [];
+  const receivingUser = userId;
+
+  for (let i = 0; i < poCount; i += 1) {
+    const status = PO_STATUSES[i % PO_STATUSES.length];
+    const itemCount = intBetween(rand, 1, 3);
+    const items = [];
+    for (let k = 0; k < itemCount; k += 1) {
+      const productIndex = intBetween(rand, 0, products.length - 1);
+      const ordered = intBetween(rand, 5, 100);
+      const fullyReceived = status === 'RECEIVED';
+      items.push({
+        productId: products[productIndex]._id,
+        productName: productDocs[productIndex].name,
+        // Optional in the schema. Omitted with the product's own sku, so the PO line
+        // never claims a code the product does not have.
+        sku: productDocs[productIndex].sku,
+        quantityOrdered: ordered,
+        quantityReceived: fullyReceived ? ordered : 0,
+        quantityCommitted: fullyReceived ? ordered : 0,
+        unitCost: productDocs[productIndex].costPrice,
+      });
+    }
+
+    const receipts = [];
+    if (status === 'RECEIVED' && receivingUser) {
+      const lines = items.map((item) => {
+        const txId = new mongoose.Types.ObjectId();
+        const previous = intBetween(rand, 0, 400);
+        receiptTxDocs.push({
+          _id: txId,
+          businessId: business,
+          productId: item.productId,
+          locationId: locations[i % locations.length]._id,
+          type: 'STOCK_IN',
+          quantity: item.quantityReceived,
+          previousQuantity: previous,
+          newQuantity: previous + item.quantityReceived,
+          reason: 'Purchase order receipt',
+          reference: `PO-${label}-${String(i + 1).padStart(5, '0')}`,
+          userId: receivingUser,
+          createdAt: new Date(Date.now() - rand() * 30 * 86400000),
+        });
+        return {
+          productId: item.productId,
+          quantity: item.quantityReceived,
+          inventoryTransactionId: txId,
+          previousQuantity: previous,
+          newQuantity: previous + item.quantityReceived,
+        };
+      });
+      receipts.push({
+        receivedAt: new Date(Date.now() - rand() * 30 * 86400000),
+        userId: receivingUser,
+        reference: `DR-${1000 + i}`,
+        lines,
+      });
+    }
+
+    poDocs.push({
+      businessId: business,
+      number: `PO-${label}-${String(i + 1).padStart(5, '0')}`,
+      supplierId: suppliers[intBetween(rand, 0, suppliers.length - 1)]._id,
+      locationId: locations[i % locations.length]._id,
+      status,
+      expectedAt: new Date(Date.now() - rand() * 30 * 86400000),
+      notes: 'Seeded purchase order for AI scale testing',
+      items,
+      receipts,
+      claims: [],
+    });
+  }
+  const poInserted = (await insertChunked(PurchaseOrder, poDocs, 500)).length;
+
+  // ---- transactions: the remainder of the budget, so the total is exact ----
+  // Every row satisfies the invariant its OWN type implies — `newQuantity =
+  // previousQuantity + quantity` for STOCK_IN, `- quantity` for STOCK_OUT, and
+  // `quantity = |target - previousQuantity|` for an ADJUSTMENT — never merely two
+  // plausible numbers. The first version of the performance seeder always ADDED, and
+  // 6 615 of 6 616 STOCK_OUT rows ended up claiming stock went UP; the assistant then
+  // reported that faithfully. Fixture consistency is part of answer trustworthiness.
+  const historyDocs = [];
+  // The PO receipt movements are ALREADY written and count toward the budget, so they
+  // are subtracted here rather than added on top of it. Without that the first full run
+  // reported 80 842 documents for an 80 000 target — a 1 % overshoot that the script
+  // displayed as if the target had been met.
+  const historyTarget = Math.max(
+    productCount,
+    total -
+      categoryCount -
+      locationCount -
+      supplierCount -
+      poInserted -
+      productCount -
+      inventoryInserted -
+      receiptTxDocs.length,
+  );
+
+  for (let i = 0; i < historyTarget; i += 1) {
+    const productIndex = i % productCount;
+    const type = pick(rand, TX_TYPES);
+    const when = new Date(Date.now() - rand() * 90 * 86400000);
+    let quantity;
+    let previous;
+    let target;
+    if (type === 'STOCK_OUT') {
+      // Stock must exist for stock to leave: a stock-out from an empty shelf is
+      // impossible and would write the negative `newQuantity` the model forbids.
+      previous = intBetween(rand, 1, 500);
+      quantity = intBetween(rand, 1, previous);
+      target = previous - quantity;
+    } else if (type === 'ADJUSTMENT') {
+      // An adjustment records a TARGET and its `quantity` is the absolute delta,
+      // which is why the other two shapes' arithmetic does not apply to it.
+      previous = intBetween(rand, 0, 500);
+      target = intBetween(rand, 0, 500);
+      if (target === previous) target = previous + 1;
+      quantity = Math.abs(target - previous);
+    } else {
+      previous = intBetween(rand, 0, 500);
+      quantity = intBetween(rand, 1, 50);
+      target = previous + quantity;
+    }
+    historyDocs.push({
+      businessId: business,
+      productId: products[productIndex]._id,
+      locationId: pick(rand, locations)._id,
+      type,
+      quantity,
+      previousQuantity: previous,
+      newQuantity: target,
+      reason: 'Seeded movement',
+      reference: `${label}-${productIndex}-${i}`,
+      userId: receivingUser,
+      createdAt: when,
+      updatedAt: when,
+    });
+  }
+
+  const allTxDocs = [...historyDocs, ...receiptTxDocs];
+  const txInserted = (await insertChunked(InventoryTransaction, allTxDocs, DEFAULT_CHUNK_SIZE)).length;
+
+  const counts = {
+    categories: categoryCount,
+    locations: locationCount,
+    suppliers: supplierCount,
+    products: products.length,
+    inventory: inventoryInserted,
+    inventory_transactions: txInserted,
+    purchase_orders: poInserted,
+  };
+  const achieved = Object.values(counts).reduce((sum, n) => sum + n, 0);
+
+  return { counts, achieved, receiptTransactions: receiptTxDocs.length, productDocs };
+}
+
+export default {
+  makeRandom,
+  intBetween,
+  pick,
+  insertChunked,
+  resolveIdentity,
+  ensureTenantForIdentity,
+  seedTenant,
+};

@@ -6858,12 +6858,13 @@ Next: **both owner decisions this section was waiting on are taken (2026-10-11)*
 | **ISS-22** | Medium | **The gateway can answer `200` with a zero-length body, turning a turn into a `502 AI_UNAVAILABLE` for the user** — a different failure shape from ISS-21's F-52 sibling (a 200 carrying only `thinking` and no text) but the same family of unreliable free-tier responses | Measured 2026-10-12 (**§27BE, F-54**): `[ai:openrouter] upstream non-JSON diagnostics` recorded `status=200`, `contentType=application/json`, **`bodyLength=0`**, `classification=EMPTY`, so `JSON.parse('')` throws. **Once in five turns.** The Phase 31D.3 diagnostics are what made it visible at all | **Code half delivered 2026-10-13 — AI-2 (§27BF):** a content-less `200` is now retried once (`AI_EMPTY_RETRY_MAX`, default 1) and a turn that exhausts that budget is marked `degraded=EMPTY_COMPLETION` on the 201 and logged as `[ai] degraded turn reason=… attempts=…`, so the failure rate is countable for the first time. **STILL OPEN — a provider-tier decision, not a code defect.** The shape is still handled as a clean 502 with no crash; what remains unresolved is whether the retry should grow beyond one and whether the free tier is acceptable at all. **The owner declined a paid model on 2026-10-13**, so the residual is accepted for V1 and the retry is the whole mitigation. **Re-measured on hardware the same day: the dominant failure is now a `429 free-models-per-day` QUOTA limit, not a body shape** — the retry was never exercised and could not have helped, which re-scopes this row rather than closing it. A **distinct code and sentence for a quota limit** is the follow-up the measurement now argues for (roadmap §27BF) — **DELIVERED 2026-10-14 by AI-6 (§27BL):** the gateway's `429` (and its `402` sibling) is now `429 AI_QUOTA_EXCEEDED` with its own sentence, raised from exactly one place, **never retried**, and kept apart from the route's own `429 AI_RATE_LIMITED`; every other non-2xx, **5xx included**, still answers `502 AI_UNAVAILABLE`. The code half this row was waiting on is therefore complete, and **what remains open is the provider-tier question alone** — which the owner has already answered (*stay on the free tier*). **Not device-verified** |
 | **ISS-23** | Low | **The assistant's answer reaches the screen with raw Markdown** — `**no products that need restocking**` renders **with the asterisks visible** | Seen on the device 2026-10-12 (**§27BE, F-55**), sample 4 | **FIXED 2026-10-13 — AI-2 (§27BF).** `stripMarkdown` in `components/AiChat.tsx` strips bold/italic markers, backticks, fences and heading hashes, applied at the assistant bubble only and deliberately **not** a Markdown renderer (no new dependency). 13 cases in `mobile/__tests__/ai2-assistant-markdown.test.ts` include two deliberate limits: single underscores are never emphasis (`SKU_123_AB`, `MIN_STOCK_LEVEL` are data, not formatting) and a lone asterisk counts only when a non-space follows it, so `12 * 3 = 36` survives as arithmetic. Applied at the single render point, so loaded history and the live reply are treated alike |
 | **ISS-25** | Low | **Markdown TABLES in an assistant answer render literally** — the `| Product | SKU | … |` rows and the `|---|` separator appear on screen as text | Found **on the device** 2026-10-13 (§27BG), in **all three** successful answers of the large-catalogue run: asked for a 20-row list, the model answers with a table, and the OCR of the phone screen shows the pipes. AI-2's `stripMarkdown` (ISS-23) covers bold/italic/backticks/fences/headings and deliberately nothing more, so this is **not a regression** — it is a gap that only a long list exposes | **FIXED 2026-10-13 — AI-4 (§27BH), mobile only.** The answer is **rendered**, not de-markered: a dependency-free parser (`mobile/lib/assistantMarkdown.ts`) turns the structures the model already emits into real layout (`mobile/components/AssistantMarkdown.tsx`), with headings, bullet/numbered lists and **tables** — a grid at ≤ 3 columns, one card per row above that, because five to seven columns cannot fit a phone's width. `stripMarkdown` is retained as the residual pass over spans the parser does not model, so no marker can reach the screen (pinned as a property over both real answers). Cost: **+0.148 ms** of parsing per answer against turns of 12–40 s; **the server and the prompt are untouched, so latency and token usage are unchanged**. **29 new cases** (plus the 13 AI-2 cases re-pointed at the new module and unchanged), suite **55 / 731 / 0**, three mutations each reddening the right cases. **Not yet confirmed on the device.** |
-| **ISS-24** | High | **The assistant's tool queries scaled with the TENANT, not the page** — a 15–25 row page ran a `$lookup` **once per tenant row** before its `$skip`/`$limit` (which sat at the bottom inside a `$facet` that cannot run without everything above it), so at 10 000 products `getInventory` took **5 665 ms**, `getInventoryHistory` **5 520**, `getProductsByLocation` **3 555** and the restock/dashboard family **1 983–2 281**; at 100 products the same calls were 86–199 ms. Each join was an **index** lookup — the COUNT was the cost, and no index can fix a fan-out of one query per row | Measured 2026-10-13 (§27BG) with `npm run seed:perf` + `npm run perf:measure` at **100 / 1 000 / 10 000 products** (the 10 000-tenant carries 20 105 inventory rows and 19 944 transactions): **seven of nine tools grew ~8–9× for 10× the data** while `searchProducts`/`getProduct` stayed flat, and payloads stayed flat, ruling paging out. `explain('executionStats')` showed nReturned **20 105** at each of two joins for the inventory page (+3.1 s, +3.2 s), **19 944** at each of two for history (+3.0 s, +2.8 s), and **10 000** for the availability join (+2.0–2.2 s) — keys examined = documents examined throughout, i.e. indexed per-row lookups, just far too many of them | **FIXED 2026-10-13 — AI-3 (§27BG), server only.** The page window moved **above** the joins wherever nothing between them filters (`transactions.list`, `inventory.listRows`, both counting with a parallel `$count` over the same `$match`), `inventory` gained `{ businessId: 1, updatedAt: -1, _id: -1 }` so the page sort is index-provided, and where the predicate genuinely needs the join it was **turned around**: one grouped `$unionWith` pass merged by key with a single `$group` (`$max`), plus the same idea for the dashboard summary. **9 of 9 tools ≤ 650 ms at 10 000 products** (75 / 68 / 258 / 259 / 265 / 268 / 214 / 212 / 413 ms), the seven slow ones **23.4 s → 1.6 s**. **Proven output-identical:** `perf:golden` compared **17** tool/argument combinations before and after and all matched **byte-for-byte** (payload hash + total), and the harness now gates on it. Suite **1353 / 192 / 0**, `tsc`/`eslint`/both module-graph checks clean. **Not device-verified; not measured above 10 000 products** — the merged family still scans the partition (0.26–0.65 s at 10 k) and a ≥50 k measurement is the recorded next step. A 3-question real run at 10 k answered **2/3**, both grounded and numerically exact, with the third a **`504 AI_TIMEOUT` at 60.3 s** from **provider** latency — query time is 0.2–0.4 s per turn, model time 31–60 s |
+| **ISS-30** | **High → `[✓]`** | **The keyboard covered the field being typed in** — tapping an input near the bottom of a form opened the keyboard over it, so the field and the text being entered were invisible, and the AI chat's composer and Send button sat underneath it too, which made sending require dismissing the keyboard first | Reported by the owner 2026-10-15 and reproduced on the OPPO CPH1969 the same day: the app's window frame stayed `[0,0][1080,2340]` with the IME reported over `[0,1443][1080,2340]`, so the window never resizes for the keyboard; the platform does not scroll the focused input into view either (the Adjust Stock form's fields sat at exactly their pre-keyboard coordinates, Reference at y1650 and its submit at y1823 both underneath); and the shell was asking for nothing — `behavior={Platform.OS === 'ios' ? 'padding' : undefined}` is "do nothing" on Android | **FIXED 2026-10-15 (§27BW), mobile only.** One measured number with three uses: the keyboard's **height** lifts bottom-anchored content, its **top edge** is the boundary a focused field is scrolled above, and the scroll **content** gains room beyond it so the last field on a form can be reached at all. `KeyboardAvoidingView` was tried first with `padding` on both platforms and measured **inert** on this build (**F-58**), so the shell applies the measured height itself. **Device-verified across six surfaces** — the register form, login, New Product, the AI chat composer (**Send from y2102 to y1337**), the New category sheet, and a list search field — each with the focused field and its typed text above the keyboard's edge and the submit reachable without dismissing it. `keyboard-avoidance.test.tsx` adds **19 cases**, three of which redden if the old platform-conditional shape is reintroduced (restored byte-identically). **iOS is unverified** — no macOS on this host, and the manual scroll is Android-only by design |
+| **ISS-24** | High | **The assistant's tool queries scaled with the TENANT, not the page** — a 15–25 row page ran a `$lookup` **once per tenant row** before its `$skip`/`$limit` (which sat at the bottom inside a `$facet` that cannot run without everything above it), so at 10 000 products `getInventory` took **5 665 ms**, `getInventoryHistory` **5 520**, `getProductsByLocation` **3 555** and the restock/dashboard family **1 983–2 281**; at 100 products the same calls were 86–199 ms. Each join was an **index** lookup — the COUNT was the cost, and no index can fix a fan-out of one query per row | Measured 2026-10-13 (§27BG) with `npm run seed:perf` + `npm run perf:measure` at **100 / 1 000 / 10 000 products** (the 10 000-tenant carries 20 105 inventory rows and 19 944 transactions): **seven of nine tools grew ~8–9× for 10× the data** while `searchProducts`/`getProduct` stayed flat, and payloads stayed flat, ruling paging out. `explain('executionStats')` showed nReturned **20 105** at each of two joins for the inventory page (+3.1 s, +3.2 s), **19 944** at each of two for history (+3.0 s, +2.8 s), and **10 000** for the availability join (+2.0–2.2 s) — keys examined = documents examined throughout, i.e. indexed per-row lookups, just far too many of them | **FIXED 2026-10-13 — AI-3 (§27BG), server only.** The page window moved **above** the joins wherever nothing between them filters (`transactions.list`, `inventory.listRows`, both counting with a parallel `$count` over the same `$match`), `inventory` gained `{ businessId: 1, updatedAt: -1, _id: -1 }` so the page sort is index-provided, and where the predicate genuinely needs the join it was **turned around**: one grouped `$unionWith` pass merged by key with a single `$group` (`$max`), plus the same idea for the dashboard summary. **9 of 9 tools ≤ 650 ms at 10 000 products** (75 / 68 / 258 / 259 / 265 / 268 / 214 / 212 / 413 ms), the seven slow ones **23.4 s → 1.6 s**. **Proven output-identical:** `perf:golden` compared **17** tool/argument combinations before and after and all matched **byte-for-byte** (payload hash + total), and the harness now gates on it. Suite **1353 / 192 / 0**, `tsc`/`eslint`/both module-graph checks clean. **Not device-verified; not measured above 10 000 products** — the merged family still scans the partition (0.26–0.65 s at 10 k) and a ≥50 k measurement is the recorded next step. A 3-question real run at 10 k answered **2/3**, both grounded and numerically exact, with the third a **`504 AI_TIMEOUT` at 60.3 s** from **provider** latency — query time is 0.2–0.4 s per turn, model time 31–60 s. **Measured above 10 k 2026-10-15 (§27BX):** the **dashboard summary** on a 50 625-product / 101 374-inventory-row tenant took **3 983–5 422 ms**, because it pulled the entire catalogue into the API process to count six integers in JavaScript; one `$unionWith` merge that returns a single document took it to **~1.0–1.3 s server-side**, proved output-identical by `perf:golden` (17/17 byte-for-byte) and pinned by `SCALE-dashboard-counts.test.mjs` (numbers on a hand-counted dataset, shape by guard with a positive control). **Device-verified:** the dashboard renders 42 909 in stock / 3 077 out and the Total On-Hand tile opens Inventory with no error. **The merged TOOLS themselves remain measured only to 10 k** |
 | **ISS-26** | Low | **The assistant's LaTeX maths reached the screen as source** — asked for a percentage at catalogue scale, the model answered with a formula and the bubble rendered the backslashes and braces | Found **on the device** 2026-10-13 (§27BG): the string is stored **verbatim** in `ai_messages.content` (confirmed by code point) and the bubble renders the stored message — the same class as ISS-25, for the one marker family AI-4's census never saw, because no stored answer had contained maths. The identifier `ISS-26` was in the test file from the start, but **no issue-table row and no §27 section were ever written**, so a defect that was found, fixed, tested and committed had **no record anywhere** | **FIXED 2026-10-13, recorded retrospectively 2026-10-14 — §27BQ (mobile only).** `stripLatex` in `mobile/lib/assistantMarkdown.ts` decodes the forms this assistant emits — `\frac{a}{b}` → `a/b`, the symbol and wrapper commands, and the `\(…\)` / `\[…\]` / `$$…$$` delimiters — inside the **existing residual pass**, so **no dependency, no renderer and no prompt change**, and therefore no per-turn token cost. 10 cases in `mobile/__tests__/iss-26-assistant-latex-math.test.tsx`, one fixture being the **real stored answer**, so it repairs history as well as new replies; mobile **59 suites / 801 tests / 0 failures**, `tsc`/`eslint` clean. **DEVICE-VERIFIED 2026-10-14 — §27BS**, and the device found a defect the fixtures could not: the decode worked (the backslashes and braces are gone from the screen), but `\frac{17 + 5}{113}` decoded to `17+ 5/113`, which reads as **17 + (5/113) = 17.04** — a different number from the 19.5% printed after it, because the model meant *"17 plus 5, over 113"*. A fraction side carrying an operator now keeps its brackets (`(17 + 5)/113`), and the rule covers the whole operator family because the same code decoded `\frac{1}{2 \times 3}` — **one sixth** — as `1/2 × 3`, **one and a half**. The single-term form is untouched, so `\frac{620}{10,000}` still decodes to `620/10,000`; 11 cases (up from 10), the narrowed rule **watched failing first**, mobile **59 suites / 802 tests / 0 failures**, and the corrected line re-rendered on the phone at **zero provider quota** because it reads a stored answer. |
 
 | **ISS-27** | **High** | **A table with three columns or fewer renders as a collapsed strip — the answer is unreadable and the message area looks empty** — the assistant was asked for a two-column table; the answer was stored correctly and returned by the API, but on the phone its cells measured **48 px wide and up to 1 452 px tall**, the whole answer sat in a ~200 px column, the question was pushed above the viewport, and the screen presented as **blank** | Found **on the device 2026-10-14**, minutes after §27BS verified the four-column card path: the accessibility tree (`uiautomator`) showed real `android.widget.TextView` cells of the stored answer carrying those bounds, while a pixel scan at threshold 40 found **no ink at all** — it was a threshold lowered to 20 that turned *"nothing is drawn"* into *"a collapsed column is drawn"*. The **card** path escaped the same defect only because a card title is long enough to give the bubble a wide intrinsic width | **FIXED 2026-10-14 — §27BT (mobile only).** A table-bearing answer now takes the full bubble width (`bubbleWide: { flex: 1 }`, still capped by `maxWidth: '84%'`), so the grid's `flex: 1` columns have a width to share; applied to **both** rendering paths, because the card path's escape was luck rather than design. `isTableAnswer` is an O(n) `includes('|')` — a superset of the parser's own detection, so the keystroke-driven render path pays nothing. **5 cases** in `mobile/__tests__/iss-27-narrow-table-width.test.tsx`, the ★ case **watched failing first** (`Expected: 1 / Received: undefined`); mobile **60 suites / 807 tests / 0 failures**, `tsc`/`eslint` clean. **DEVICE-VERIFIED:** the same stored answer re-rendered after the fix and the tree now measures `Product Name [102,1086][566,1182]` and `Quantity [565,1086][821,1182]` — **464 × 96** and **256 × 96** — with all five rows on screen, every `0` present, and the card answer unchanged |
 | **ISS-28** | Low → **`[✓]`** | **A continued conversation never moved up the list, and its displayed time never advanced** — the conversation list is sorted on `updatedAt` and each row renders it, but no write path touched a conversation when a message was added, so `updatedAt` was frozen at creation and "newest first" was in practice "newest *created* first" | Found **on the device 2026-10-14** (§27BT: a conversation continued at 17:14 was still listed as 17:02) and traced to the missing update path on `AIConversation`; the Phase 20F index comment had already anticipated it | **FIXED 2026-10-14 — AI-7 (§27BU), server only:** a persisted turn now advances the conversation's `updatedAt`, on the success path only, because a failed turn persists nothing. 4 cases in `server/test/AI7-conversation-activity.test.mjs`, the ★ case watched failing first; CI green. **DEVICE-VERIFIED:** continuing the oldest of four conversations moved it from last to first with its time advanced **16:22 → 18:11**, and continuing the third did it again **17:02 → 18:17** |
-| **ISS-29** | Medium | **An answer cut off by `AI_MAX_OUTPUT_TOKENS` is stored and served as a complete one** — the turn reaches its cap, the text stops mid-list, and nothing marks it: the member cannot tell a truncated answer from a finished one, and neither the log nor the HTTP response says so | Found **on the device 2026-10-14** (§27BU): the low-stock answer's `out=800` is exactly the default cap and its body ends mid-list (`3. Ultra Sponge 18982 - available 2`), yet it was stored and rendered as an answer. The guard in `parseAnthropicResponse` throws only when `stop_reason === 'max_tokens'` **and there is no text**, so a truncation that carries text passes through by construction. The very next answer used `out=788` and finished, so the frequency is unmeasured | **OPEN — recorded, not fixed (§27BU).** The remedy is a decision rather than a patch: widen the guard into a third degraded reason with its own sentence, or raise the cap and accept the added latency and cost |
+| **ISS-29** | Medium → **`[✓]`** | **An answer cut off by `AI_MAX_OUTPUT_TOKENS` is stored and served as a complete one** — the turn reaches its cap, the text stops mid-list, and nothing marks it: the member cannot tell a truncated answer from a finished one, and neither the log nor the HTTP response says so | Found **on the device 2026-10-14** (§27BU): the low-stock answer's `out=800` is exactly the default cap and its body ends mid-list (`3. Ultra Sponge 18982 - available 2`), yet it was stored and rendered as an answer. The guard in `parseAnthropicResponse` throws only when `stop_reason === 'max_tokens'` **and there is no text**, so a truncation that carries text passes through by construction. The very next answer used `out=788` and finished, so the frequency is unmeasured | **OPEN — recorded, not fixed (§27BU).** The remedy is a decision rather than a patch: widen the guard into a third degraded reason with its own sentence, or raise the cap and accept the added latency and cost. **FIXED 2026-10-15 — AI-8 (§27BV), server + mobile.** The cap is now **reported by both provider wires** (`stop_reason === 'max_tokens'`, `finishReason === 'MAX_TOKENS'`) instead of only being tested for whether to throw, which is why a truncation carrying any text was invisible at every layer. The partial answer is **kept** and the turn marked `OUTPUT_LIMIT` — a third `DegradedReason` deliberately **not** in the canned-sentence table, because replacing a partial answer would throw away the useful half — and the mark is persisted on the message and returned on reload, so a reopened thread is never cleaner than the screen that produced it. The sentence lives on the client, beside the answer it qualifies, so the stored content stays the model's own words. 9 server cases + 6 mobile cases, each written first and watched failing; both halves proved able to fail by mutation with the files restored **byte-identically**. **DEVICE-VERIFIED 2026-10-15 (§27BV)** with a temporary 40-token cap: `out=40` exactly at the cap, `[ai] degraded turn reason=OUTPUT_LIMIT` beside `outcome=degraded … out=40`, the partial answer **and** the note on the phone, and the same note still there after reopening the thread from the hub — the store and the loaded-history path both keep the mark. The `.env` was restored byte-identically and the backend restarted, so the shipped cap of 800 is what is deployed. **The cap itself is unchanged**, which is the other half of the decision this row named, and **the frequency is still unmeasured** |
 
 **Correctly recorded as open or deferred — not issues:** L-17 (recovery-mail delivery never inspected end-to-end),
 B1's residual timing term, B2 / E3 / OD-10 (V4), owner decisions O-5 / O-6 / O-10 / O-11, P-4 (device-time),
@@ -11004,6 +11005,223 @@ the time it was last used.
   today, not that landscape would read well.
 * **The device was left as found** — auto-rotate `free`, no lock persisted, no app state altered — and the two
   `scratch-*.mjs` probes used for the ground truth were deleted rather than committed.
+
+# 27BV. AI-8 — the truncated answer is marked, not served as complete (2026-10-15)
+
+Closes **ISS-29**, the defect §27BU found and left open on purpose: `AI_MAX_OUTPUT_TOKENS` cut an answer
+mid-list (`3. Ultra Sponge 18982 - available 2`, with `out=800` exactly at the cap), and the turn was stored
+and rendered as a finished one. §27BU called the remedy "a decision rather than a patch" — this is the
+decision, made and implemented.
+
+## Why nothing could have caught it before
+
+`parseAnthropicResponse` read `stop_reason` **only to decide whether to throw**, and it threw only when the
+cap left `toolCalls.length === 0 && !text` — no text at all. A truncation that carried *any* text therefore
+discarded the fact at the wire layer, and there was nothing downstream for a guard, a log line or a test to
+notice. The information existed in every response and was thrown away in every response that mattered.
+
+## The decision: keep the answer, mark the turn
+
+The other two degraded reasons **replace** the answer with a sentence, because there is no answer.
+`OUTPUT_LIMIT` does not: the first rows of a list are exactly what was asked for, so replacing them would
+throw away the useful half of the reply. So the reason is a third member of `DegradedReason` and deliberately
+**not** a member of the canned-sentence table (`CannedReason`, a new name for the two that own their copy).
+
+The sentence for this reason lives on the **client**, beside the answer it qualifies, rather than in the
+content: the stored message stays the model's own words, and `degraded: 'OUTPUT_LIMIT'` is the
+machine-readable contract. That split is the whole shape of the fix.
+
+## The fix
+
+* `providers/index.ts` — `ProviderResponse.truncated?: boolean`, reported on **every** response including the
+  ones that carry text, because that is precisely the case that was invisible.
+* `providers/anthropicWire.ts` and `providers/geminiProvider.ts` — `stop_reason === 'max_tokens'` and its
+  Gemini spelling `finishReason === 'MAX_TOKENS'` are now *reported*, not merely tested. The existing throw for
+  a capped response with nothing usable is untouched.
+* `services/ai/ai.service.ts` — the final answer keeps its text and takes `degraded = 'OUTPUT_LIMIT'`, which
+  makes it appear in the one greppable line the AI-2 work established (`[ai] degraded turn reason=OUTPUT_LIMIT`)
+  and in the AI-5 turn line as `outcome=degraded`.
+* `models/aiMessage.model.ts` + `controllers/ai.controller.ts` — the mark is persisted and returned, so a thread
+  reopened tomorrow is not **more** trustworthy than the screen that produced it. Additive and optional; no
+  existing row is touched and a healthy turn still carries no key at all.
+* `mobile/components/AiChat.tsx` — the note under the bubble, and `toRow` extracted so the live reply and a
+  reloaded thread are mapped by the same function. That is not tidying: the mark is the first field where
+  losing it on one of the two paths is a correctness problem.
+
+## Verification
+
+* `server/test/AI8-ai-output-limit.test.mjs` — 7 DB-free cases + 2 over the real route, written first and
+  watched failing (`actual: undefined, expected: 'OUTPUT_LIMIT'`, `0 !== 1` degraded lines, and a missing
+  `truncated` flag before the wire change). It pins the headline case (the partial text survives **and** the
+  turn is marked), the greppable reason, a healthy turn carrying no mark, the two canned reasons unchanged, a
+  **truncated tool round not marking a completed answer** (the flag is about the answer, not about any response
+  in the turn), and the round trip: `201` with the reason, the partial answer stored, the mark read back from
+  the database.
+* `mobile/__tests__/ai8-incomplete-answer.test.tsx` — 6 cases, including that the **answer is still on screen
+  beside the note** and that the two canned reasons get no second warning (their copy is already the answer).
+* **Both halves were proved able to fail.** Removing the mark from the service reddens 2 server cases
+  (`pass 5 / fail 2`, the ★ and the log-line case); widening the bubble condition to `Boolean(item.degraded)`
+  reddens the mobile canned-reasons case. Both files were restored **byte-identically** (sha1 unchanged).
+
+## The device pass — 2026-10-15, OPPO CPH1969 over the USB tunnels
+
+Forced with a temporary `AI_MAX_OUTPUT_TOKENS=40` on the running server (the `.env` was restored
+**byte-identically** and the backend restarted immediately afterwards, so the shipped default of 800 is what is
+deployed). The question was the app's own first suggestion, *"Which products are low on stock?"*:
+
+* the server logged `out=40` **exactly at the cap**, `[ai] degraded turn reason=OUTPUT_LIMIT attempts=1 empty=0
+  model=nvidia/nemotron-3-ultra-550b-a55b:free tools=none`, and the AI-5 turn line
+  `outcome=degraded total=6298ms providerMs=6298ms calls=1 toolMs=0ms toolRuns=0 in=2575 out=40` — the mark is
+  visible in **both** instruments the last three increments built;
+* the phone showed the partial answer **and** the note beneath it: *"This answer hit the length limit, so it may be
+  incomplete — ask a narrower question to see the rest."*
+* **and the reload was checked separately**: the conversation was reopened from the assistant hub (newest first,
+  stamped `01:08`) and the note was still under the same partial answer, so the mark survives the store and the
+  loaded-history path really does map it.
+
+**F-60, about the forcing method rather than the product.** At a 40-token cap the model spent the whole budget
+*narrating its plan* (`The user is asking which products are low on stock. I should use the
+getReorderNeededProducts tool which returns…`) instead of calling the tool and answering — so the capped turn's
+"answer" was a leaked reasoning trace. At the shipped 800 the truncation §27BU saw was an ordinary list
+(`3. Ultra Sponge 18982`), so this is an artefact of the tiny cap used to force the path, **not** a behaviour of
+the default configuration, and it is recorded that way rather than as a defect.
+
+## What is NOT verified, and the limits stated rather than glossed
+
+* **The frequency is still unmeasured.** This makes the rate countable; it does not measure it, and the device
+  run above was a *forced* truncation — no naturally-capped answer has been observed since.
+* **The device observation used a 40-token cap**, chosen to reach the path quickly. The note's copy and placement
+  at the shipped cap were not observed; the mechanism is the same, the answer under it is not.
+* **A truncated tool round is detected but not treated.** The flag is ignored for a round that asks for data,
+  on the reasoning that the loop continues and the final answer is what the member reads. A malformed partial
+  tool call is therefore still possible in principle — recorded, not fixed.
+* **The cap itself is unchanged** (`AI_MAX_OUTPUT_TOKENS`, default 800). Raising it is the other half of the
+  decision §27BU named, and it costs latency and tokens on the free tier; it is the owner's call and is not
+  taken here.
+
+# 27BW. The keyboard stops covering the focused field (2026-10-15)
+
+Reported by the owner: "whenever I tap an input field and the keyboard appears, the field and the text I'm
+typing get covered by the keyboard". Recorded as **ISS-30**; the defect was reproduced, measured, fixed and
+verified on the phone.
+
+## The measurement that decided everything
+
+With the keyboard open on the OPPO CPH1969 (development build, Expo SDK 57 / React Native 0.86.3, edge-to-edge):
+
+* the app's **window frame stayed `[0,0][1080,2340]`** while the platform reported the IME over
+  `[0,1443][1080,2340]` — the keyboard overlays the app, and the window never resizes for it;
+* the platform does **not** scroll the focused input into view either: the Adjust Stock form's fields sat at
+  exactly the coordinates they had before the keyboard opened, so the field that had just been tapped
+  (Reference, y 1650) and its submit button (y 1823) were both underneath it;
+* and the shell was asking for nothing: `Screen` passed `behavior={Platform.OS === 'ios' ? 'padding' : undefined}`,
+  which on Android React Native treats as "the window resizes itself".
+
+**F-58.** `KeyboardAvoidingView` was then given `behavior="padding"` on **both** platforms, and on the device it
+lifted nothing: with the keyboard open on the AI chat screen, a colour scan of the screenshot found the app's
+full-width surface colour only at y 0–34, 64–172 and 204–264 while the IME occupied everything below y≈1560 —
+whereas the same scan with the keyboard closed found the composer at y≈1996–2208. The cause was not chased into
+React Native's internals; the measured outcome is what is recorded, and the fix stopped depending on it.
+
+## The fix — one measured number, three uses
+
+* `mobile/hooks/useKeyboardHeight.ts` — the keyboard's height **and its top edge**, from `keyboardDidShow`,
+  `keyboardDidHide` and `keyboardDidChangeFrame`, with a guard so an animation step that reports the geometry it
+  already has cannot re-render every screen using it.
+* `mobile/lib/keyboardScroll.ts` — the pure arithmetic of "is the field covered, and by how much", kept out of the
+  component so both ways it can be wrong are testable.
+* `mobile/components/KeyboardScrollView.tsx` — measures the focused field and scrolls it above the keyboard,
+  **only further down** (a visible field never jumps to the top) and only when it is actually covered. It uses
+  `min(keyboard top, the scroll view's own bottom)`, because the shell shortens itself and a field can be clipped
+  by its own scroll view rather than by the keyboard.
+* `mobile/components/Screen.tsx` — the shell gives up exactly the measured height at the bottom, so bottom-anchored
+  content (the AI chat composer) is lifted, and gives the scroll **content** room beyond it so the last field on a
+  form can be scrolled up at all.
+* `mobile/components/Input.tsx` reports its focus into that context, so a field added to an existing form inherits
+  the behaviour; `Sheet.tsx` is lifted by the same height and allowed to shrink; `RefManage.tsx`'s sheet form
+  scrolls itself. Android only gets a manual scroll — iOS scroll views already do it natively, and a second one
+  there would fight the platform.
+
+## Verification — on the phone, 2026-10-15
+
+| Surface | Observation with the keyboard open |
+|---|---|
+| Register (long form) | Confirm password scrolled to y1222, keyboard top ≈1568; typed text visible; **Create Account reachable** |
+| Login | Both fields and Submit stay visible; the content shifts as the viewport shrinks |
+| New Product (tapped **Cost price** at y1966, under the keyboard) | Scrolled to y1190 with the typed value `1234.56` at y1303; deeper fields and **Create product** at y1278 |
+| AI chat composer | Composer band y1408–1444 and **Send at y1337, from y2102** — lifted clear of the keyboard |
+| New category sheet | Sheet lifted (title 1034→484), typed text at y1033, **Create category** at y1355 |
+| Categories search field | Typing filters the list and stays visible |
+
+`mobile/__tests__/keyboard-avoidance.test.tsx` adds 19 cases: the scroll arithmetic, the hook exercised through
+React Native's own `Keyboard` emitter (the same-value guard asserted on a consumer's **effect**, because React
+documents that it may render once before bailing out), and 7 wiring guards each with an in-test positive control.
+Reintroducing the old platform-conditional `KeyboardAvoidingView` reddens **3** of them, and the file was
+restored byte-identically. One guard's expectation was wrong when first written (the margin arithmetic moves a
+field by 24+24, not by its own height) — the test was corrected, not the function.
+
+Mobile: **61 suites / 827 tests / 0 failures**, `tsc` and `eslint` clean.
+
+## What is NOT verified, and the limits stated rather than glossed
+
+* **iOS is unverified** — no macOS on this host, and the manual scroll is Android-only by design. The shell's
+  measured padding applies on both platforms.
+* **F-58's cause is not explained.** The component is inert in this build by measurement; the mechanism inside
+  React Native is not established, and this entry does not pretend otherwise.
+* **Six surfaces, one device, one build.** Tablet and landscape layouts are untouched and unreachable today.
+* **The keyboard closing does not scroll the view back.** The offset stays where the member left it, which is
+  standard and was left alone deliberately.
+
+# 27BX. The dashboard summary at 50 625 products — the catalogue stops crossing the wire (2026-10-15)
+
+Extends AI-3 (§27BG) to the dashboard, and answers the "≥ 50 k measurement" ISS-24 recorded as its next step
+**for this path**. The 50 625-product tenant holds 101 374 inventory rows.
+
+## The defect the 10 k measurement could not show
+
+AI-3 fixed the *tools* by moving the page window above the joins. The dashboard summary had the same class of
+problem in a different shape: two full inventory scans plus a `Product.find(...).select('_id minimumStock')`
+that pulled the **entire catalogue** into the API process to build a Map, then counted in JavaScript. Measured
+at 50 625 products it answered in **3 983–5 422 ms** (median 3 448 ms over five runs) against 413 ms at 10 000
+the day before — roughly **200 000 documents moved per dashboard load to produce six integers**.
+
+It was never *wrong*: every count was correct, so no existing test was red. That is why the fix had to be
+proved output-identical rather than merely tested.
+
+## The fix
+
+One aggregation in which the counting happens inside MongoDB and **one document crosses the wire**: the active
+catalogue stream stays in place, inventory arrives already grouped by product through `$unionWith`, and a single
+`$group` merges the two on their shared key. `$max` is the merge operator because it ignores missing values, so
+each accumulator takes the side of the union that carries it, and `__isProduct` preserves the semantics of the
+shape it replaces: an ARCHIVED product's stock still counts toward on-hand (the rule
+`phase11-intelligence.test.mjs` pins) while it is not counted as a product.
+
+## Verification
+
+* `perf:golden` compared **17** tool/argument combinations before and after and all matched **byte-for-byte**
+  (payload hash and total) — the same instrument AI-3 used.
+* `server/test/SCALE-dashboard-counts.test.mjs` pins the **numbers** on a hand-counted dataset that hits every
+  branch at once (no inventory row, empty row, healthy, low-not-out, reserved-driven, zero minimum, ARCHIVED with
+  stock) and pins the **shape** — the merge present, the document-moving reads absent — with an in-memory positive
+  control, because both shapes return identical numbers and no functional test can tell them apart.
+* **F-59, and it was found by running it:** the suite's two assertions passed while the *file* failed, because
+  `startServer()` returns a listening HTTP server and nothing closed it — the event loop stayed alive and
+  `node --test`, which waits for the child to exit, timed out at 420 s with a green suite inside it. Every DB
+  suite that calls `startServer()` owes that `close()`. Fixed; the file now runs in ~15 s.
+* Full DB suite **644 pass / 0 fail**, unit **742 pass / 0 fail**, `tsc`/`eslint`/both module-graph checks clean.
+* **On the phone:** the dashboard rendered **42 909 in stock / 3 077 out** on the large account and
+  `GET /api/dashboard` answered in **~1.0–1.3 s** server-side; tapping the Total On-Hand tile navigated to
+  Inventory with rows and **no error** — the interaction the owner reported as failing.
+
+## What is NOT verified, and the limits stated rather than glossed
+
+* **The merged tools were not re-measured above 10 k.** This entry measures the dashboard at 50 k; the tool
+  family ISS-24 lists still has 10 k as its highest data point.
+* **~1.0 s is the current floor for this tenant**, down from 3.4–5.4 s. The merged shape still scans the partition
+  by construction, so a larger tenant will cost more; no claim is made about 250 k.
+* **No index change was needed or made.** The new index builds on the next server boot through the same
+  `autoIndex` route the earlier phases used, so a stale deployment would run the old plan until it restarts.
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

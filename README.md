@@ -11,6 +11,12 @@ An AI-powered inventory management system for Android and iOS.
 > `docs/DEVELOPMENT_ROADMAP.md`). The system specification in
 > `docs/SYSTEM_SPECIFICATION.md` is the primary source of truth.
 
+**Not a programmer?** Start with the plain-English guides in
+[`docs/guides/`](docs/guides/README.md): running the app on a laptop, running it on a phone,
+mirroring the phone to a laptop, the test accounts and mock data, and a reference for every script
+and command the project ships. They explain the technical terms as they go, and they never contradict
+the documents above.
+
 ---
 
 ## Repository Structure

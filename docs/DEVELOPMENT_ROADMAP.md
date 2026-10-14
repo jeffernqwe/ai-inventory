@@ -6752,7 +6752,7 @@ nothing. `ci.yml` and its three jobs, `scripts/check-secrets.mjs`, the pinned ac
 
 ---
 
-# 27AH. Current status, known issues and the next-step order (2026-10-10, revised 2026-10-13)
+# 27AH. Current status, known issues and the next-step order (2026-10-10, revised 2026-10-14)
 
 ## Why this section exists
 
@@ -6800,7 +6800,9 @@ Facebook Login and Apple Sign-In remain unimplemented.
 
 ## In progress
 
-**AI-1 and AI-2 are complete, verified and UNCOMMITTED** (2026-10-12/13 — §27BD, §27BE, §27BF): the working tree on `feature/auth-03-session-renewal` carries both increments between them, so **landing them as a pull request is the immediate next action**. There is otherwise **no in-flight feature work**. P0 closed on 2026-10-10: #35/#36/#37 merged (`f2f6731`, `aadab04`,
+**AI-1 … AI-5 and Index integrity are complete, verified and committed on `feature/ai1-ai4-assistant-reliability-and-rendering`** (2026-10-12/14 — §27BD, §27BE, §27BF, §27BG, §27BH, §27BI, §27BJ), and **AI-6 (§27BL) is new, verified and uncommitted on that same branch**, so **landing the set as a pull request is the immediate next action**. (This row named `feature/auth-03-session-renewal` and called the set UNCOMMITTED; both had drifted.) **§27BN (2026-10-14) is also uncommitted on that same branch** — mobile-only, the five sign-in/auth
+copy defects the owner reported, **verified** (mobile 59 suites / 801 tests) but **not device-verified**.
+There is otherwise **no in-flight feature work**. P0 closed on 2026-10-10: #35/#36/#37 merged (`f2f6731`, `aadab04`,
 `bf0c915`), #34 closed (ISS-16), and the device guide committed (P3-3 resolved). SDK 58 execution is deferred by its
 recorded Gate 0 decision (§27AI). **ISS-02 closed out on 2026-10-10** (remediated — §27AJ, PR #40), the
 **advisories dispositioned** (§27AK, PR #41), and on 2026-10-11 the **Dependabot carve-out completed** with
@@ -6853,10 +6855,11 @@ Next: **both owner decisions this section was waiting on are taken (2026-10-11)*
 | **ISS-20** | **High → `[✓]`** | **The local development server serves the TEST database** — `server/.env` sets `MONGODB_DB_NAME=inventoryai_test_db`, which the resolver honours, so development and test share one database; `.env.example` names that combination as forbidden ("never to a value belonging to another environment"). `inventoryai_dev_db` (11 users / 11 businesses) is unused, and `npm test` / `npm run cleanup:test-mongodb` (`deleteMany({})` per collection) can therefore **delete data the local server is serving** — including the account the device run creates | Read at source 2026-10-11: `config/env.ts:52-111` (`DATABASE_NAMES`, `resolveDatabaseName`), `config/db.ts:165-169` (explicit `dbName`); the startup line `[db] connected to MongoDB (database: inventoryai_test_db)`; cluster `listDatabases()` → `inventoryai_dev_db`, `inventoryai_test_db`, `inventoryai_prod_db`, and **no `test`** | **RESOLVED 2026-10-11 by owner decision (§27AV):** `server/.env` repointed to `inventoryai_dev_db` — one line changed, previous file kept as a git-ignored backup, key sets verified identical with exactly one value differing. The restarted backend's boot line reads `database: inventoryai_dev_db`, and repointing revealed that the development database holds the owner's 11 **acceptance-test tenants** (all empty), which the misconfiguration had been hiding |
 
 | **ISS-21** | High | **The mobile client aborts every request at 15 s while the AI path is budgeted 60 s per model call and up to 6 tool iterations, so a slow assistant answer is aborted client-side and reported as a network failure** — `POST /api/ai/chat` is **never logged** *(corrected 2026-10-12: an aborted request is invisible to `httpLogger`, which emits on `res.on('finish')` only, so "never logged" does not mean "never sent" — see §27BC's correction and §27BD's probe)* and the user is told *"Cannot reach the server. Check your connection and try again."* The abort budget is **global to every route** (`apiFetch`), not just the assistant; and `sendErrorMessage` tested `isNetwork` before the code, so the transport's own `NETWORK_TIMEOUT`/`NETWORK_ERROR` distinction was discarded before it reached the screen | Discovered on the device 2026-10-12 (**§27BC, F-51**): `POST /api/ai/chat` appears **0** times in the server log (100 requests, boot → end of run) while the screen was provably talking to the right backend — `GET /api/ai/conversations` is logged, so the destination was never in doubt; `mobile/lib/config.ts` `REQUEST_TIMEOUT_MS = 15000` vs `server/src/services/ai/aiConfig.ts` `AI_REQUEST_TIMEOUT_MS` default **60000** and `AI_MAX_TOOL_ITERATIONS` default **6**; the shipped `runAiChat` measured **13 283 ms** for a working answer | **FIXED 2026-10-12 by AI-1 (§27BD):** one wall-clock deadline per turn (`AI_TURN_DEADLINE_MS`, 60 s) replaces the *product* of per-call cap × iterations; the assistant gets its own client budget (`AI_REQUEST_TIMEOUT_MS`, 75 s) that a guard keeps above the server's deadline; a timeout is now `504 AI_TIMEOUT` and its own sentence rather than *"cannot reach the server"*; and an abandoned turn is cancelled. **VERIFIED ON THE DEVICE 2026-10-12 (§27BE)** — measured over the real route: four `201`s at **6 185 / 8 212 / 10 302 / 19 388 ms**, the last running **4.4 s past the old 15 s client abort and still answering and rendering**, plus a forced-deadline `504` at **2 224 ms** whose on-screen copy was *"The assistant took too long to answer. Please try again."* with the old *"Cannot reach the server"* **absent from the screen**. The **AI-1 Task 5 cancellation remains unverified on hardware** (§27BE states why the attempt was inconclusive). Recorded with **F-52** (the deployed `nvidia/nemotron-3-ultra-550b-a55b:free` answers the app's own first suggested prompt with a tool call once and with neither text nor a tool call the next time) and **F-53** (the negative-stock guard is unreachable through the UI, so the device run cannot prove the server rule) |
-| **ISS-22** | Medium | **The gateway can answer `200` with a zero-length body, turning a turn into a `502 AI_UNAVAILABLE` for the user** — a different failure shape from ISS-21's F-52 sibling (a 200 carrying only `thinking` and no text) but the same family of unreliable free-tier responses | Measured 2026-10-12 (**§27BE, F-54**): `[ai:openrouter] upstream non-JSON diagnostics` recorded `status=200`, `contentType=application/json`, **`bodyLength=0`**, `classification=EMPTY`, so `JSON.parse('')` throws. **Once in five turns.** The Phase 31D.3 diagnostics are what made it visible at all | **Code half delivered 2026-10-13 — AI-2 (§27BF):** a content-less `200` is now retried once (`AI_EMPTY_RETRY_MAX`, default 1) and a turn that exhausts that budget is marked `degraded=EMPTY_COMPLETION` on the 201 and logged as `[ai] degraded turn reason=… attempts=…`, so the failure rate is countable for the first time. **STILL OPEN — a provider-tier decision, not a code defect.** The shape is still handled as a clean 502 with no crash; what remains unresolved is whether the retry should grow beyond one and whether the free tier is acceptable at all. **The owner declined a paid model on 2026-10-13**, so the residual is accepted for V1 and the retry is the whole mitigation. **Re-measured on hardware the same day: the dominant failure is now a `429 free-models-per-day` QUOTA limit, not a body shape** — the retry was never exercised and could not have helped, which re-scopes this row rather than closing it. A **distinct code and sentence for a quota limit** is the follow-up the measurement now argues for (roadmap §27BF) |
+| **ISS-22** | Medium | **The gateway can answer `200` with a zero-length body, turning a turn into a `502 AI_UNAVAILABLE` for the user** — a different failure shape from ISS-21's F-52 sibling (a 200 carrying only `thinking` and no text) but the same family of unreliable free-tier responses | Measured 2026-10-12 (**§27BE, F-54**): `[ai:openrouter] upstream non-JSON diagnostics` recorded `status=200`, `contentType=application/json`, **`bodyLength=0`**, `classification=EMPTY`, so `JSON.parse('')` throws. **Once in five turns.** The Phase 31D.3 diagnostics are what made it visible at all | **Code half delivered 2026-10-13 — AI-2 (§27BF):** a content-less `200` is now retried once (`AI_EMPTY_RETRY_MAX`, default 1) and a turn that exhausts that budget is marked `degraded=EMPTY_COMPLETION` on the 201 and logged as `[ai] degraded turn reason=… attempts=…`, so the failure rate is countable for the first time. **STILL OPEN — a provider-tier decision, not a code defect.** The shape is still handled as a clean 502 with no crash; what remains unresolved is whether the retry should grow beyond one and whether the free tier is acceptable at all. **The owner declined a paid model on 2026-10-13**, so the residual is accepted for V1 and the retry is the whole mitigation. **Re-measured on hardware the same day: the dominant failure is now a `429 free-models-per-day` QUOTA limit, not a body shape** — the retry was never exercised and could not have helped, which re-scopes this row rather than closing it. A **distinct code and sentence for a quota limit** is the follow-up the measurement now argues for (roadmap §27BF) — **DELIVERED 2026-10-14 by AI-6 (§27BL):** the gateway's `429` (and its `402` sibling) is now `429 AI_QUOTA_EXCEEDED` with its own sentence, raised from exactly one place, **never retried**, and kept apart from the route's own `429 AI_RATE_LIMITED`; every other non-2xx, **5xx included**, still answers `502 AI_UNAVAILABLE`. The code half this row was waiting on is therefore complete, and **what remains open is the provider-tier question alone** — which the owner has already answered (*stay on the free tier*). **Not device-verified** |
 | **ISS-23** | Low | **The assistant's answer reaches the screen with raw Markdown** — `**no products that need restocking**` renders **with the asterisks visible** | Seen on the device 2026-10-12 (**§27BE, F-55**), sample 4 | **FIXED 2026-10-13 — AI-2 (§27BF).** `stripMarkdown` in `components/AiChat.tsx` strips bold/italic markers, backticks, fences and heading hashes, applied at the assistant bubble only and deliberately **not** a Markdown renderer (no new dependency). 13 cases in `mobile/__tests__/ai2-assistant-markdown.test.ts` include two deliberate limits: single underscores are never emphasis (`SKU_123_AB`, `MIN_STOCK_LEVEL` are data, not formatting) and a lone asterisk counts only when a non-space follows it, so `12 * 3 = 36` survives as arithmetic. Applied at the single render point, so loaded history and the live reply are treated alike |
 | **ISS-25** | Low | **Markdown TABLES in an assistant answer render literally** — the `| Product | SKU | … |` rows and the `|---|` separator appear on screen as text | Found **on the device** 2026-10-13 (§27BG), in **all three** successful answers of the large-catalogue run: asked for a 20-row list, the model answers with a table, and the OCR of the phone screen shows the pipes. AI-2's `stripMarkdown` (ISS-23) covers bold/italic/backticks/fences/headings and deliberately nothing more, so this is **not a regression** — it is a gap that only a long list exposes | **FIXED 2026-10-13 — AI-4 (§27BH), mobile only.** The answer is **rendered**, not de-markered: a dependency-free parser (`mobile/lib/assistantMarkdown.ts`) turns the structures the model already emits into real layout (`mobile/components/AssistantMarkdown.tsx`), with headings, bullet/numbered lists and **tables** — a grid at ≤ 3 columns, one card per row above that, because five to seven columns cannot fit a phone's width. `stripMarkdown` is retained as the residual pass over spans the parser does not model, so no marker can reach the screen (pinned as a property over both real answers). Cost: **+0.148 ms** of parsing per answer against turns of 12–40 s; **the server and the prompt are untouched, so latency and token usage are unchanged**. **29 new cases** (plus the 13 AI-2 cases re-pointed at the new module and unchanged), suite **55 / 731 / 0**, three mutations each reddening the right cases. **Not yet confirmed on the device.** |
 | **ISS-24** | High | **The assistant's tool queries scaled with the TENANT, not the page** — a 15–25 row page ran a `$lookup` **once per tenant row** before its `$skip`/`$limit` (which sat at the bottom inside a `$facet` that cannot run without everything above it), so at 10 000 products `getInventory` took **5 665 ms**, `getInventoryHistory` **5 520**, `getProductsByLocation` **3 555** and the restock/dashboard family **1 983–2 281**; at 100 products the same calls were 86–199 ms. Each join was an **index** lookup — the COUNT was the cost, and no index can fix a fan-out of one query per row | Measured 2026-10-13 (§27BG) with `npm run seed:perf` + `npm run perf:measure` at **100 / 1 000 / 10 000 products** (the 10 000-tenant carries 20 105 inventory rows and 19 944 transactions): **seven of nine tools grew ~8–9× for 10× the data** while `searchProducts`/`getProduct` stayed flat, and payloads stayed flat, ruling paging out. `explain('executionStats')` showed nReturned **20 105** at each of two joins for the inventory page (+3.1 s, +3.2 s), **19 944** at each of two for history (+3.0 s, +2.8 s), and **10 000** for the availability join (+2.0–2.2 s) — keys examined = documents examined throughout, i.e. indexed per-row lookups, just far too many of them | **FIXED 2026-10-13 — AI-3 (§27BG), server only.** The page window moved **above** the joins wherever nothing between them filters (`transactions.list`, `inventory.listRows`, both counting with a parallel `$count` over the same `$match`), `inventory` gained `{ businessId: 1, updatedAt: -1, _id: -1 }` so the page sort is index-provided, and where the predicate genuinely needs the join it was **turned around**: one grouped `$unionWith` pass merged by key with a single `$group` (`$max`), plus the same idea for the dashboard summary. **9 of 9 tools ≤ 650 ms at 10 000 products** (75 / 68 / 258 / 259 / 265 / 268 / 214 / 212 / 413 ms), the seven slow ones **23.4 s → 1.6 s**. **Proven output-identical:** `perf:golden` compared **17** tool/argument combinations before and after and all matched **byte-for-byte** (payload hash + total), and the harness now gates on it. Suite **1353 / 192 / 0**, `tsc`/`eslint`/both module-graph checks clean. **Not device-verified; not measured above 10 000 products** — the merged family still scans the partition (0.26–0.65 s at 10 k) and a ≥50 k measurement is the recorded next step. A 3-question real run at 10 k answered **2/3**, both grounded and numerically exact, with the third a **`504 AI_TIMEOUT` at 60.3 s** from **provider** latency — query time is 0.2–0.4 s per turn, model time 31–60 s |
+| **ISS-26** | Low | **The assistant's LaTeX maths reached the screen as source** — asked for a percentage at catalogue scale, the model answered with a formula and the bubble rendered the backslashes and braces | Found **on the device** 2026-10-13 (§27BG): the string is stored **verbatim** in `ai_messages.content` (confirmed by code point) and the bubble renders the stored message — the same class as ISS-25, for the one marker family AI-4's census never saw, because no stored answer had contained maths. The identifier `ISS-26` was in the test file from the start, but **no issue-table row and no §27 section were ever written**, so a defect that was found, fixed, tested and committed had **no record anywhere** | **FIXED 2026-10-13, recorded retrospectively 2026-10-14 — §27BQ (mobile only).** `stripLatex` in `mobile/lib/assistantMarkdown.ts` decodes the forms this assistant emits — `\frac{a}{b}` → `a/b`, the symbol and wrapper commands, and the `\(…\)` / `\[…\]` / `$$…$$` delimiters — inside the **existing residual pass**, so **no dependency, no renderer and no prompt change**, and therefore no per-turn token cost. 10 cases in `mobile/__tests__/iss-26-assistant-latex-math.test.tsx`, one fixture being the **real stored answer**, so it repairs history as well as new replies; mobile **59 suites / 801 tests / 0 failures**, `tsc`/`eslint` clean. **Not device-verified.** |
 
 **Correctly recorded as open or deferred — not issues:** L-17 (recovery-mail delivery never inspected end-to-end),
 B1's residual timing term, B2 / E3 / OD-10 (V4), owner decisions O-5 / O-6 / O-10 / O-11, P-4 (device-time),
@@ -6864,7 +6867,7 @@ P-6 + Gate 1 + iOS app registration (environment-blocked), and the new-identity 
 
 ## Pending
 
-**Fixes:** ~~ISS-21~~ (**FIXED and device-verified 2026-10-12 — §27BD/§27BE**: the 15 s client abort against the AI path's 60 s budget; only **AI-1's abandoned-turn cancellation remains unmeasured on hardware**) · ~~ISS-23~~ (**FIXED 2026-10-13 — AI-2, §27BF**: raw Markdown stripped at the assistant bubble) · ~~ISS-24~~ (**FIXED 2026-10-13 — AI-3, §27BG**: the assistant's tool queries no longer pay for the whole tenant partition — 9 of 9 tools ≤ 650 ms at 10 000 products, with the answers proven **byte-identical** by `perf:golden`) · **ISS-22** (**code half delivered 2026-10-13, §27BF** — the zero-length `200` is retried once and a degraded turn is marked and logged, so it is countable; **still open as the provider-tier decision**, which the owner declined to spend on) · ~~ISS-06~~ (**CLOSED 2026-10-12 — §27AZ**, measured from the built APK: `compileSdk` 36 / `minSdk` 24 / `targetSdk` 36, no raise needed) · ~~ISS-25~~ (**FIXED 2026-10-13 — AI-4, §27BH**: the answer is now rendered rather than de-markered — tables, headings and lists become real layout with no marker on screen; the server and the prompt are untouched, so latency and token cost are unchanged; device confirmation outstanding) · ISS-17/ISS-18 (decided and recorded, no action pending) · ISS-13 (**fixed, §27AM** — its device half rides with the same pass). *(ISS-01 fixed in #36; ISS-16 disposed in #37; ISS-02 remediated — §27AJ; the 7 advisories dispositioned — §27AK; all 2026-10-10.)*
+**Fixes:** ~~ISS-21~~ (**FIXED and device-verified 2026-10-12 — §27BD/§27BE**: the 15 s client abort against the AI path's 60 s budget; only **AI-1's abandoned-turn cancellation remains unmeasured on hardware**) · ~~ISS-23~~ (**FIXED 2026-10-13 — AI-2, §27BF**: raw Markdown stripped at the assistant bubble) · ~~ISS-24~~ (**FIXED 2026-10-13 — AI-3, §27BG**: the assistant's tool queries no longer pay for the whole tenant partition — 9 of 9 tools ≤ 650 ms at 10 000 products, with the answers proven **byte-identical** by `perf:golden`) · **ISS-22** (**code half complete 2026-10-14 — §27BF + §27BL**: the zero-length `200` is retried once and a degraded turn is marked and logged, so it is countable, **and** a reached limit is now its own `429 AI_QUOTA_EXCEEDED` with its own sentence instead of a `502` outage — the distinct code and sentence this row asked for; **still open as the provider-tier decision alone**, which the owner declined to spend on) · ~~ISS-06~~ (**CLOSED 2026-10-12 — §27AZ**, measured from the built APK: `compileSdk` 36 / `minSdk` 24 / `targetSdk` 36, no raise needed) · ~~ISS-25~~ (**FIXED 2026-10-13 — AI-4, §27BH**: the answer is now rendered rather than de-markered — tables, headings and lists become real layout with no marker on screen; the server and the prompt are untouched, so latency and token cost are unchanged; device confirmation outstanding) · ISS-17/ISS-18 (decided and recorded, no action pending) · ISS-13 (**fixed, §27AM** — its device half rides with the same pass) · ~~ISS-26~~ (**FIXED 2026-10-13, recorded §27BQ**: the assistant's LaTeX now decodes into plain text instead of reaching the screen as source — no dependency, no renderer, no prompt change, so no per-turn token cost; **device confirmation outstanding**). *(ISS-01 fixed in #36; ISS-16 disposed in #37; ISS-02 remediated — §27AJ; the 7 advisories dispositioned — §27AK; all 2026-10-10.)*
 **Upgrades, in issue #32's order:** Expo SDK 58 — **deferred by Gate 0 until Expo promotes it to `latest`** (§27AI records the decision and the runbook; the pins differ from PR #34's set — RN 0.88 family, not 0.87.1) → the React 19 type fixes (ISS-01 is the first of them) → TypeScript 7 →
 jest 30 → ~~the `actions/*` v7 re-pin~~ (**taken early 2026-10-11 — ISS-12 resolved, §27AO**) → ~~`dotenv` 18 and `@types/bcryptjs` 3~~ (**taken 2026-10-11 — §27AP**: `dotenv` 18 taken with the preload path measured; the `@types/bcryptjs` row's premise was wrong — 3.0.0 is a deprecated stub, so the dependency was **removed** instead and `tsc` proves it). **The two that remain are now measured, not pending:** jest 30 arrives *with* the SDK 58 promotion (`jest-expo@58.0.9`), and TypeScript 7 is upstream-blocked on a typescript-eslint line that admits 7 (§27AQ).
 **Testing:** the L-17 mail leg, owner-assisted; and a dated test baseline for this section.
@@ -6893,7 +6896,7 @@ build launched and used per native change. *Dependency:* P2's ISS-01 pattern is 
 
 ## Immediate next actions
 
-**As of 2026-10-13 the live action is to land AI-1 (§27BD/§27BE) as a pull request** — complete, device-verified, uncommitted. **The same uncommitted set now also carries AI-2 (§27BF), AI-3 (§27BG), AI-4 (§27BH), AI-5 (§27BI) and Index integrity (§27BJ)** — together with the measurement tooling (`seed:perf`, `cleanup:perf`, `perf:measure`, `perf:golden`, `perf:turns`), which is what makes their claims reproducible rather than quoted. AI-5 is the one that closes the loop on the provider question: **a turn now reports its own split per turn** (`providerMs` vs `toolMs`), measured at **95–97 % provider against 3–5 % tools**, so the model-choice decision no longer requires a harness run. Items 1–2 below are decisions that have since been **executed** (§27BA–§27BE); item 3 is a standing watch; item 4 is closed. The **newly open** items are **ISS-22** and **ISS-23** (see *Known issues*).
+**As of 2026-10-13 the live action is to land AI-1 (§27BD/§27BE) as a pull request** — complete, device-verified, uncommitted. **The same set now also carries AI-2 (§27BF), AI-3 (§27BG), AI-4 (§27BH), AI-5 (§27BI), Index integrity (§27BJ) and AI-6 (§27BL)** — together with the measurement tooling (`seed:perf`, `cleanup:perf`, `perf:measure`, `perf:golden`, `perf:turns`), which is what makes their claims reproducible rather than quoted. AI-5 is the one that closes the loop on the provider question: **a turn now reports its own split per turn** (`providerMs` vs `toolMs`), measured at **95–97 % provider against 3–5 % tools**, so the model-choice decision no longer requires a harness run. Items 1–2 below are decisions that have since been **executed** (§27BA–§27BE); item 3 is a standing watch; item 4 is closed. The **newly open** items are **ISS-22** and **ISS-23** (see *Known issues*).
 
 1. **DECIDED 2026-10-11 — the device run's account is a fresh registration through the app** (exercises
    AUTH-04 end to end; needs a mailbox the owner can read the 6-digit code from). The other two routes
@@ -9324,7 +9327,9 @@ unlock 1000 free model requests per day"*, under `X-RateLimit-Limit: 50`.
 2. **ISS-22 is re-scoped, not closed.** The dominant failure mode measured today is a **quota limit**, not a
    response-body shape. The 502 copy the member saw (*"The AI service is temporarily unavailable. Please try
    again in a moment."*) is at least honest, but "try again in a moment" is wrong for a cap that resets daily —
-   a **distinct code and sentence for a quota limit** is the follow-up this measurement now argues for.
+   a **distinct code and sentence for a quota limit** is the follow-up this measurement now argues for. *(Annotated
+   2026-10-14: this follow-up is **DELIVERED** — AI-6, §27BL — the limit is now its own `429 AI_QUOTA_EXCEEDED` with its
+   own sentence, and the row above is updated.)*
 3. **The owner's 2026-10-13 decision to stay on the free tier now has a measured cost:** roughly **50 free model
    requests per day, shared across all usage**, which **one device-testing session can consume**. Any strategy
    that tests the assistant end to end must budget turns against that cap, or measure the model-free half only.
@@ -9949,6 +9954,529 @@ did.
   history rather than the inventory fixture, and `clearTenantData` covers the seven data collections only.
 * **The Firebase cleanup the owner asked for was refused**, as above. It can be done on request for the single
   `@example.invalid` identity, which is the only one that is unambiguously disposable.
+
+# 27BL. AI-6 — the assistant's limit, named (2026-10-14)
+
+## Why this came first
+
+§27AH's ISS-22 row ends with the task, written by AI-5's own re-measurement, not by a wishlist: *"Re-measured on
+hardware the same day: the dominant failure is now a `429 free-models-per-day` QUOTA limit, not a body shape — the
+retry was never exercised and could not have helped, which re-scopes this row rather than closing it. A **distinct
+code and sentence for a quota limit** is the follow-up the measurement now argues for."*
+
+That is a measured defect with the fix already named, it needs no device, no mailbox and no macOS, and its cost is
+the whole of a member's experience when the free tier runs dry — so it went first.
+
+## The defect
+
+Every non-2xx from the AI gateway became **one** error class. `providers/http.ts` threw an `AiProviderError` for any
+non-OK status, the controller mapped that to `502 AI_UNAVAILABLE`, and the app rendered it as:
+
+> The AI service is temporarily unavailable. Please try again in a moment.
+
+For a spent daily allowance that sentence is wrong **twice**: nothing upstream is unavailable, and *"in a moment"*
+cannot refill a daily allowance — so it prescribed an action that could never work, and the member was sent round the
+same loop until the quota reset. `POST /api/ai/chat` was also, until now, the one failure the operator could not
+classify from the outside: a limit and an outage produced the same status, the same code and the same log line.
+
+## What changed
+
+**Server.** `AiQuotaExceeded` / `AI_QUOTA_EXCEEDED`, raised from exactly one place — a **429** in
+`providers/http.ts` — and mapped by the controller to **HTTP 429** with its own sentence (*"The AI assistant has
+reached its usage limit. Please try again later."*). Every other non-2xx keeps the `AiProviderError`/502 behaviour
+it had, **including every 5xx**, because a 5xx really is an outage and softening it into "you have hit your limit"
+would tell a member to wait for something that is broken. The direction of that boundary is pinned both ways.
+
+**402 is in the same class**, and that was not an invention: the pre-existing OpenRouter suite listed
+`402 insufficient credits` directly beside the 429 and still asserted a provider failure. It has the defining
+property — a healthy gateway refusing because an allowance is spent — so leaving it behind would have been knowingly
+keeping the sibling defect. (It had to be one class: telling a *rate* limit from a *quota* limit means reading the
+gateway's free-text body, which is provider-specific and opaque, so the code stays one and the copy stays true for
+both.)
+
+**Deliberately not an `AiProviderError` subclass** — the same choice `AiTimeout` made, and for the same reason: if it
+inherited, a later reordering of the controller's `instanceof` checks could silently re-report a limit as an outage
+without any test changing. It is in `isAiError`, so the turn loop's catch passes it through untouched and AI-5's cost
+line reports **`outcome=AI_QUOTA_EXCEEDED`** — the log line and the HTTP answer name the same thing, which is the
+vocabulary rule AI-5 established.
+
+**Never retried.** A limit is not more retryable than a failure: AI-2's rule is that a provider refusal is never
+answered by paying for it twice while the cause is hidden. Pinned at the loop, where a second call *would* have
+succeeded and so would have hidden the limit entirely.
+
+**The two 429s stay apart.** The route's own `429 AI_RATE_LIMITED` says *this member* is sending too fast and clears
+in seconds; `429 AI_QUOTA_EXCEEDED` says the allowance is spent and does not. Same status, different codes, opposite
+remedies — both pinned over the real route, in one test, because a client that could not tell them apart would tell a
+member to wait a moment for a daily allowance.
+
+**Mobile.** `sendErrorMessage` gets its own branch and its own sentence, checked with the other codes and therefore
+**before** the network fallback — the ordering rule AI-1 established when a timeout was being reported as an
+unreachable server.
+
+## What was considered and rejected
+
+**Plumbing the upstream `Retry-After` into the copy.** Tempting, and the client already parses the header into
+`ApiError.retryAfter`. Rejected because a quota resets on a schedule — daily — not after N seconds, while a per-minute
+rate limit resets after exactly that; and the two arrive as the same status, so a formatted duration would be a
+number the server cannot actually stand behind. A wrong duration is worse than no duration. Recorded here as a
+rejected option rather than an oversight.
+
+**A second code to separate rate from quota.** Rejected for the reason above — it would require trusting upstream body
+prose, which this layer deliberately only ever prefixes for a log line.
+
+## A pre-existing contract test had to move, and it grew
+
+`server/test/phase-openrouter-provider.test.mjs` asserted, in one loop, that **401 / 429 / 402 / 500 / non-JSON** all
+become an `AiProviderError`. Two of those five are the behaviour this increment exists to change, so the loop could
+not stay as it was. It was **split, not weakened** (the FB-006 precedent for a pre-existing test that genuinely
+fails against authorized work):
+
+* the remaining three statuses still assert `AiProviderError`, and gained a **new** negative assertion — `!(err
+  instanceof AiQuotaExceeded)` — so an outage can no longer be softened into a limit by accident;
+* a **new** test asserts 429 and 402 become `AiQuotaExceeded`, carry the exact code, still never echo the key, and
+  **do not** carry an *"in a moment"* sentence.
+
+Coverage went from **5 statuses under 1 assertion class** to **5 statuses under 2**, and no assertion was removed.
+The protected wire suite `server/test/phase06-ai-wire.test.mjs` was **not touched** and stays green — it pins the same
+contract for 401 and never sent a 429 or a 402.
+
+## Verification
+
+Changed: `aiErrors.ts`, `providers/http.ts`, `controllers/ai.controller.ts`, `mobile/components/AiChat.tsx`,
+`run-tests.mjs` (registration), the two new suites, and the pre-existing suite above. **No dependency, schema, route,
+permission, environment, session or prompt change.**
+
+* **Server full suite: 1383 tests / 198 suites / 0 failures** (`npm test`, exit 0); this increment contributes **13**
+  cases in `server/test/AI6-ai-quota-limit.test.mjs` (unit: the classification against a local stub gateway, the
+  500-is-not-a-limit control, every other status unchanged, the 429 body still read and logged with a credential
+  shape withheld, the one-call no-retry property, and the `outcome=AI_QUOTA_EXCEEDED` cost line; DB: the 429 wire
+  contract, its separation from `AI_RATE_LIMIT`, nothing persisted, and a 5xx still answering 502).
+* **Mobile full suite: 57 suites / 759 tests / 0 failures** (`npx jest`, exit 0); this increment contributes **14**
+  cases in `mobile/__tests__/ai6-assistant-quota-copy.test.ts`, including a guard that reads `AI_QUOTA_EXCEEDED` out
+  of the **server's own source** and feeds it to the client, so the two systems cannot drift onto different strings.
+* `tsc` / `eslint` / **both module-graph checks** clean on both sides (362 modules, 1 789 relative specifiers, 0
+  stale); `node scripts/check-secrets.mjs` exit 0 over 433 files with its 22 self-controls passing.
+* **Mutation pass, every mutation detected and the tree restored byte-identical** (sha256-verified): the http
+  classification emptied → **3** unit failures; the controller mapping removed → **3** DB failures; `isAiError`
+  without the new class → **3** unit failures; the mobile copy removed → **4** mobile failures.
+* **Recorded honestly, rather than smoothed over:**
+  * The tests were written alongside the implementation, not red-first, so *can this fail* was established by the
+    mutation pass rather than by watching red before green.
+  * The **first** mutation run's evidence was discarded: the summary extraction used a `.`-based pattern that cannot
+    consume the multibyte `ℹ` on this host, so three mutations reported nothing. A passing-looking empty result was
+    treated as no result and re-measured rather than read as success.
+  * The **first full-suite run exited 1 with 4 failures.** One was the real OpenRouter contract above. Three were the
+    **known Atlas `MongoDB connection lost` transient** — 65 occurrences in that log — in the purchase-order suite;
+    re-running that suite alone gave **11/11 pass**, which is what distinguishes an environment drop from a
+    regression. The final full run is the clean one.
+  * **Two bugs in this increment's own test code, found by running it:** `AI_RATE_LIMIT_MAX='0'` does not limit
+    anything — config's `positiveInt` treats a non-positive value as unset and falls back to 20, so the
+    distinguish-the-two-429s case had to set the limit **before** the first call instead; and the first attempt
+    asserted a state the harness had already reset.
+
+## What is NOT verified
+
+* **Not device-verified.** The measurement that motivated this came from the hardware, but **nobody has seen the new
+  sentence on the phone.** The DB-backed wire test proves the server answers `429 AI_QUOTA_EXCEEDED` with that
+  sentence; that the OPPO renders it is a screen's judgement.
+* **It does not make the free tier reliable, and it is not a quota fix.** It names the failure correctly and stops
+  prescribing an impossible remedy. ISS-22's actual provider-tier question is untouched and remains the owner's,
+  already answered once (*"the assistant stays on the free tier"*, 2026-10-13).
+* The rejected options above — a `Retry-After`-derived duration, a separate rate-vs-quota code — are **decisions, not
+  measurements**.
+
+# 27BM. One seeding core instead of two, and the three-account comparison setup (2026-10-14)
+
+## What the owner asked for
+
+Three Gmail accounts seeded with deliberately large amounts of inventory data, so the assistant's
+speed, accuracy and reliability can be compared **across accounts that hold very different amounts of
+data**; a new script that seeds all three; and documentation for running it. One constraint decides
+part of the design: **no SKUs and no barcodes**, because the point is to test the **app's own barcode
+generation** — a fixture that pre-fills every code leaves that feature nothing to do.
+
+## The refactor first, because it is what made the script small
+
+`seed:accounts` needs the same seven-collection dataset `seed:demo` already writes, minus two fields.
+The alternative was a second ~250-line copy of the seeding logic, which is how two seeders drift apart
+— the same failure `perf/lib.mjs` records for `TENANT_DATA_COLLECTIONS` ("a second copy is how a
+cleanup eventually deletes less than the seed created"). So the dataset shape moved into
+**`server/scripts/seed/lib.mjs`**, and `seed-demo-account.mjs` became a thin CLI over it.
+
+The only parameters are the ones that genuinely differ: `includeSkuBarcode` (true for `seed:demo`,
+false for `seed:accounts`) and a `label` used in PO numbers and ledger references (`DEMO` / `ACCT`).
+Everything else — the sizing arithmetic, the ledger invariants, the receipt↔transaction linkage — is
+the same code for both.
+
+**Behaviour preservation was proven against the record, not asserted.** `seed:demo --total=80000
+--seed=1` was re-run after the refactor and reproduced §27BK's documented dataset **exactly**: 24
+categories · 6 locations · 300 suppliers · 18,000 products · 36,104 inventory · 23,966 transactions
+(incl. **842** receipt movements) · 1,600 purchase orders = **80,000**. Every figure matches the
+recorded run.
+
+## What shipped
+
+* **`npm run seed:accounts`** — seeds an arbitrary list of accounts, each at its own size, in one
+  command. Default plan: the owner's three addresses at ≈5,000 / ≈44,000 / ≈225,000 documents.
+* `--dry-run` (prints the plan, writes nothing, **and still runs the safety guard**), `--accounts="a@x:5000,b@x:44000"`, `--include-sku`, `--seed`.
+* A new confirmation phrase (`SEED_CONFIRM=seed-accounts`) — each seeder keeps its own, so a pasted
+  phrase from another command does not satisfy it.
+
+**Three properties the script enforces rather than assumes:**
+
+1. **Identity-first.** Every Firebase identity is resolved **before** any tenant is reset, so a plan
+   that cannot be satisfied (an address with no identity) fails with **nothing written**. A
+   half-seeded suite would silently bias the comparison it exists to support.
+2. **Separation is checked.** Each account must resolve to a business **no other account in the plan
+   owns**; if two did, their data would mix and every number drawn from them would be void.
+3. **No SKU, no barcode.** Both are optional in the Product schema and are uniquely indexed only among
+   products that *have* them, so any number may omit them. Leaving them blank is what hands barcode
+   generation to the app.
+
+## Safety: what this deliberately does NOT do
+
+* It **never deletes a Firebase identity.** §27BB (F-50) is the record of that trap: a MongoDB user
+  whose Firebase identity is gone can neither sign in nor register (`409 EMAIL_IN_USE`), and nothing in
+  the application can repair it. The seeder only ever *creates* an identity, and only when
+  `DEMO_ACCOUNT_PASSWORD` is deliberately supplied.
+* It **never touches production or the test database.** `assertSafeTarget` (shared with `seed:demo` and
+  `seed:perf`) refuses `NODE_ENV=production`, refuses any database that is not `inventoryai_dev_db`,
+  and refuses before a connection is opened.
+* Account rows are only ever **created**; nothing here can re-link or delete one as a side effect.
+
+## A backup was taken before anything was touched
+
+`npm run cleanup:dev-mongodb` was the owner's first request, and the development database held the
+80,000-document dataset. Following §27BK's precedent, a read-only Extended-JSON dump was written
+**outside the repository** first — `C:\Users\jeffe\inventory-ai-backups\20261014042724\`,
+**80,166 documents across 15 collections**. It cannot be committed.
+
+## Verification
+
+* **The refactor reproduces §27BK's 80,000-document dataset exactly** (above) — the strongest available
+  behaviour-preservation evidence, and it makes that dataset reproducible in one command.
+* **A real two-account run**: `jefferndullamalinao@gmail.com:3000` → 3,000 documents (675 products) in
+  8.8 s, and `perf-seed-ai@example.invalid:800` → 800 documents (180 products) in 5.3 s, on **two
+  distinct businessIds**. (The second address was used precisely because its tenant is the explicitly
+  disposable one; `cleanup:perf` then removed it — **802 documents, verification found 0 remaining**.)
+* **The project's own verifier agrees, independently of the seeder's report**: `verify:demo` on the
+  seeded tenant exited **0** with 3,000 documents, **0** ledger violations of 1,263 movements, **0**
+  negative quantities, **0** orphans, and all **29** receipt lines backed by real transactions.
+* **The SKU/barcode requirement, measured on the database**: 675 and 180 products, **0** with an `sku`,
+  **0** with a `barcode`, and **0** duplicate `(businessId, sku)` groups — i.e. the partial unique index
+  tolerates any number of code-less products.
+* **Tenant separation, measured**: across all seven collections, **0** rows carry a `businessId` outside
+  the known businesses.
+* **Fail-closed, measured**: the guard refuses without the phrase (**exit 1**), and the default plan —
+  whose third address has no identity yet — stopped at that address with **nothing written**, confirmed
+  by re-reading the database (still 2 businesses / 18,000 products at that point).
+* `eslint` and **both module-graph checks** clean (364 modules, 1,794 relative specifiers, 0 stale).
+
+## What is NOT verified
+
+* **The three-account default plan has never been run.** Its third address has no Firebase identity, so
+  the script correctly refuses until that account exists — and creating an identity is deliberately not
+  something it does silently.
+* **The separation assertion was exercised with two accounts, not three.**
+* **Nothing was verified in the app.** No seeded product has been opened to generate a barcode through
+  the UI, and no sign-in has been performed against a seeded tenant. That is the owner's acceptance run.
+* **The ≥50,000-product measurement AI-3 recorded as its next step is still open.** The `large` tier is
+  sized to close it (~50,600 products) but has not been executed, so nothing here is a measurement of
+  the assistant at that scale.
+* The two verification runs left `jefferndullamalinao@gmail.com`'s tenant holding 3,000 documents and
+  created no other lasting state; the owner's 80,000-document dataset was **re-created identically**, so
+  the net change from all of this is the new tooling plus that one tenant's data.
+
+# 27BN. The sign-in form's silence, and five places the auth copy failed (2026-10-14)
+
+## What the owner reported
+
+Pressing **Sign In** on an empty form showed *"Unable to sign in. Please try again."* with both fields
+empty, and the question asked was the right one: shouldn't the app say which field is missing?
+
+## What was actually wrong — and there were two reasons, not one
+
+`login.tsx` was the ONLY auth screen in the app without a submit-time guard. `register.tsx`,
+`register-firebase.tsx`, `forgot-password.tsx`, `reset-password.tsx`, `verify-email.tsx` and
+`change-password.tsx` all validated before they called anything; Login called
+`signIn({ email, password })` with whatever its state held. Where the generic sentence then came from
+depended on the build:
+
+* **Firebase-configured build.** An empty address reaches Firebase and returns a code this app's
+  `FAILURE_MESSAGES` table had no entry for (`auth/missing-email`), so it took the table's generic
+  fallback — the exact sentence reported.
+* **Unconfigured build.** `signInWithEmail` answers `legacyFallback: 'not-configured'`, so the empty form
+  reached `POST /api/auth/login`, which correctly answers `400 VALIDATION_ERROR` carrying
+  `email is required` / `password is required` — **lowercase developer copy**, rendered under the inputs.
+
+So the screen was not merely showing a worse sentence than it should have. The sentence it showed was
+**different depending on how the app was built**, which is what made the fault hard to see from either
+side alone.
+
+## The other four defects the audit found
+
+1. **`auth/missing-email` was absent from the message table** while `auth/missing-password` was present —
+   one of the two empty-field codes was described and the other was not.
+2. **`auth/wrong-password` was absent too, and that one is a genuine fault rather than a wording choice.**
+   `auth/invalid-credential` is declared a LEGACY-FALLBACK code, so on a project with email-enumeration
+   protection ON — Firebase's default — a mistyped password never reaches the table at all and the server's
+   own 401 answers. With protection OFF the SDK reports `auth/wrong-password` instead, which is **not** a
+   fallback code, so it reached the table and found no entry. Whether the most common mistake in the app
+   got a clear sentence or the generic one therefore depended on **a Firebase Console setting** rather than
+   on anything the user did.
+3. **No screen validated the address's SHAPE.** `forgot-password.tsx` carried a recorded decision not to
+   duplicate the server's rule — *"the two copies would drift apart"* — which was right about the risk and
+   wrong about the only way to avoid it. `owner@company` therefore travelled as far as Firebase or the
+   server, and came back as `email must be a valid email address`.
+4. **No ceiling where a password is CHOSEN.** Four screens checked the minimum length, the
+   72-character maximum was the server's alone, so an over-long password was sent and refused in developer
+   copy — and on three of them an untouched confirmation field reported *"Passwords do not match"*, which
+   names the wrong problem. `register.tsx` had already established that an empty confirmation reports
+   **required**.
+
+The password MINIMUM is deliberately still absent at sign-in, and that is a decision rather than an
+oversight: a length rule there would be a guess about an existing account, and an account that predates
+the 8-character policy would be told its own correct password is too short. The server's `validateLogin`
+draws the same line — presence only — and the shared module says so in place.
+
+## What shipped (mobile only — no server, route, permission, schema or dependency change)
+
+* **`mobile/lib/validation.ts`** — one place for the four rules, with its own copy named in the comments.
+  The email rule is the server's, character for character (`/^[^\s@]+@[^\s@]+\.[^\s@]+$/`, 254)
+  because a client rule STRICTER than the server's would invent a refusal the backend never asked for.
+* **`login.tsx`** — required-field and shape validation before anything is sent, and the address is
+  TRIMMED on the way out: an invisible trailing space used to come back as `auth/invalid-email`. The
+  password is deliberately NOT trimmed, because spaces are legitimate password characters.
+* **`firebase-auth.ts`** — the two table entries above. The `wrong-password` sentence is the server's own
+  (*Invalid email or password*), following the principle the `user-disabled` entry already states: one
+  mistake must read the same way whichever layer caught it.
+* **`register.tsx` / `reset-password.tsx` / `change-password.tsx` / `disconnect-firebase.tsx`** — the
+  shared length rule (minimum **and** maximum) and an untouched confirmation reported as required.
+
+## A frozen-hash guard fired, and was moved rather than deleted
+
+`phase16-email-verification.test.tsx` pins `lib/firebase-auth.ts` by whole-file sha256, under *"the frozen
+modules stayed frozen"*. It fired. **The hash was not simply bumped.** The diff was read first: `+28 / −0`
+in one hunk, entirely inside `FAILURE_MESSAGES` — no outcome union, no code classification, no
+`LEGACY_FALLBACK_CODES` entry, no policy, and not the cached-token accessor the pin's own comment is
+about. Those remain pinned **by behaviour** in `firebase-auth.test.ts` (`the two codes that open the
+legacy route`, the unconfigured-build case, `currentFirebaseIdToken`), which is what leaves the whole-file
+hash as a scope tripwire that forces this deliberation rather than the thing protecting the module. The
+test now records what moved, why it was not Phase 16's business, and what did not move.
+
+## Verification
+
+* **Every new guard was watched failing.** Removing the login guard fails **11 of 15** cases in
+  `login-validation.test.tsx`; making the client rule stricter than the server's (a 20-character email
+  bound) fails **2 of 10** in `auth-validation-rules.test.ts`. The tree was restored **byte-identical**
+  (sha256 compared before and after).
+* **Two new suites, 29 cases** — `login-validation.test.tsx` (an empty form names both fields and never
+  calls `signIn`; five mistyped addresses refused; a valid form still calls it exactly once with the
+  address trimmed) and `auth-validation-rules.test.ts` (the client's email rule agrees with the pattern
+  **read out of the server's own source**, in both directions, with a live-ness control; the password
+  bounds are the server's; and no email-shaped pattern exists outside `lib/validation.ts`, scanned with a
+  positive control).
+* **41 cases added in all**; mobile **59 suites / 801 tests / 0 failures** (from **57 / 760**), `tsc` and
+  `eslint` clean, and the root `check-secrets` guard clean over **433 files** with its 22 controls passing.
+* **The server's own sentences were read rather than assumed.** Every auth code a user can meet —
+  `EMAIL_IN_USE`, `INVALID_CREDENTIALS`, `ACCOUNT_DISABLED`, `REGISTRATION_REQUIRED`, `BUSINESS_NOT_ACTIVE`,
+  `SESSION_EXPIRED` — already carries clear copy, which is why only the two Firebase-table omissions needed
+  fixing and why no server message was changed.
+
+## What is NOT verified
+
+* **Nothing was run on a device.** These suites render the real screens with the real components, but no
+  sign-in has been attempted on the phone against the F2.9 development APK. That is the owner's run, and
+  the empty-form case in particular should be pressed there first.
+* **The `auth/wrong-password` mapping is verified against a deliberately produced code, not against a live
+  project.** Whether this project reports that code or `auth/invalid-credential` depends on its
+  email-enumeration-protection setting, which this repository cannot see. Both are now described, so the
+  outcome no longer depends on the answer.
+* **`change-password.tsx` has no suite of its own.** It was fixed for consistency with the other three
+  screens that choose a password, and its behaviour is exercised only indirectly. (The suite named
+  `phaseA-change-password-screen` tests `disconnect-firebase.tsx`, not `change-password.tsx` — a naming
+  trap worth knowing before trusting either.)
+* **The audit found no defects in the verification flow itself.** `verify-email.tsx` already guards an
+  empty code, renders per-field errors, honours the server's `Retry-After`, and distinguishes "still
+  unverified" from failure; and the server's wrong-code sentence (*"That verification code is invalid or
+  has expired. Please request a new one."*) is already clear, actionable and enumeration-safe. Recording
+  that as a finding rather than inventing work is the point.
+
+# 27BP. A deploy gate that lied, and a measurement that reported a call it never made (2026-10-14)
+
+## Why these two, when the owner asked what to prioritise
+
+The owner asked for the most important improvements to stability, security and reliability. The
+honest answer, having read the project's own known-issue list, is that **almost nothing actionable
+remains in the app**: ISS-22 is an owner-decided provider-tier question (accepted for V1), L-17 and
+OD-10 are open by design, and the rest — Phase 30B, the AI-4/AI-1 hardware confirmations, ISS-25's
+device check — are all **device-gated**. So the search moved to the class this project has already
+shown pays off: *claims that can only be false in reality, not in code*. Two were found, both real,
+both fixed, both verified. Two non-findings are recorded below as well, so nobody re-opens them.
+
+## Defect 1 — `audit:indexes` reported a network blip as an index problem
+
+`audit:indexes` exists to **gate a deploy check on its exit code alone**, and its own header stated the
+contract: *"Exit code 1 when any declaration and the database disagree, so it can gate a check without
+anyone parsing output."* Its catch-all handler exited **1** as well — for a connection that could not be
+opened, a collection that could not be listed, and any internal fault. **Reproduced live: a
+`connect ETIMEDOUT` exited 1**, reading exactly like drift.
+
+That is the worst false report *this* tool can make, because the remedy a reader reaches for is
+`syncIndexes()` — which the script's own header explains can **DROP** an index an operator added on
+purpose. The wrong exit code could therefore point at the destructive repair. And the project already
+had the right convention, in two places: `verify:demo` exits **2** for *"NOT VERIFIED — the database
+could not be reached"* and says outright *"this is not a data violation"*, and `audit-access.mjs`
+exits 2 as well. This was the one check that did not follow it.
+
+**Fixed:** the three outcomes are now distinct and documented in place — **0** the audit ran and
+agrees, **1** the audit ran to completion and found a disagreement, **2** NOT VERIFIED, nothing was
+checked. Only the second is a claim about the database, and `main()` reaches its `process.exit(1)` only
+after every read succeeded and the drift summary printed.
+
+**Measured both ways:** an unroutable URI now exits **2** with `[indexes] NOT VERIFIED (exit 2)`; the
+real database exits **0** reporting **60 declared indexes across 15 collections, 0 disagreements** —
+which is itself the independent confirmation IDX-1 could never make from source alone, and it covers
+the AI-3 inventory page index the assistant's latency depends on.
+
+## Defect 2 — `perf:measure` printed a timing for a tool call that never ran
+
+The harness builds each tool's arguments from real rows, but `getProduct` was given `{ sku:
+product.sku }`. A tenant seeded by `seed:accounts` deliberately has **no SKUs and no barcodes** — that
+is what leaves the app's own barcode generation something to do — so on exactly the datasets the owner
+now uses to compare accounts, `getProduct` received `{ sku: undefined }`, answered
+`TOOL_INVALID_ARGUMENTS`, and the report showed **0.0 ms**: a meaningless number, in the one table the
+comparison is read from, for a call that never happened. (It went unnoticed because `seed:perf`, which
+AI-3's numbers came from, does generate codes.)
+
+**Fixed:** the sample row is read with `_id` as well as `sku` and `getProduct` is measured **by id**,
+which always exists — so the real single-product path (lookup plus its stock rows) is timed on any
+dataset, with or without codes. The harness's own opening rule — *"derive ids from real rows so the
+tool does its real work"* — is what the old form violated.
+
+## A guard that failed on its own documentation
+
+Case-guarding the exit contract, the new assertion **failed on its first run** with `['1','1','2']`
+instead of `['1','2']`: it scanned the whole file, and the handler's own explanatory comment contains
+the sentence *"`main()` reaches its `process.exit(1)`"*. The scan now reads **code lines only**, and
+the incident is recorded in the test because it is the property that matters — a scan of text has to
+say which text it means. With the defect deliberately restored, exactly the two contract assertions
+fail (**2 of 699**); restored to the fixed file, **0**. Both times the file was returned
+**byte-identical**.
+
+## Deliberately NOT changed (recorded so it is not re-investigated)
+
+* **Barcode collision handling already exists.** The concern was that generating codes for tens of
+  thousands of code-less products might collide on the partial unique index. `product.service.ts`
+  already fails safe — *"Could not allocate a unique internal barcode for this product"* — and already
+  answers a concurrent change with `409 PRODUCT_CONFLICT`. No defect; nothing changed.
+* **The mobile↔server API path set has no dedicated guard**, and this was considered and set aside:
+  building one means parsing both a route table and interpolated client paths, and a false-positive
+  contract check is worse than none. Recorded as a candidate rather than silently dropped.
+* **Nothing was committed.** Seven-plus verified increments are uncommitted on
+  `feature/ai1-ai4-assistant-reliability-and-rendering`, which the roadmap's own status row already
+  calls the immediate next action. That is a real risk to the project and it is an **owner decision**,
+  not something to do unattended.
+
+## Verification
+
+* `audit:indexes` — unreachable → **exit 2**; real database → **exit 0**, **60/60** declared indexes
+  present across 15 collections with correct field order.
+* Exit-contract guard — **green**, then **2 failures** with the original defect restored, then
+  byte-identical restore.
+* Server **unit 775 tests / 175 suites / 0 failures** and **db 699 tests / 122 suites / 0 failures**;
+  `eslint` and `tsc --noEmit` clean. Mobile untouched by this increment.
+* Guide 6 gained the three exit codes, and — a gap left by the seeding work — the
+  `cleanup:firebase-accounts` command it had never documented, including the order that makes it safe.
+
+## What is NOT verified
+
+* **Nothing here was device-checked**, and none of it changes app behaviour: both defects are in
+  developer tooling.
+* The `audit:indexes` exit-2 path is verified against an **unroutable address**, not against a real
+  Atlas outage mid-connection. The classification is the same code path either way, but the shape of a
+  half-open connection is not something this run produced.
+* The **≥50 000-product assistant measurement** remains open as a *turn-level* number: the tool times
+  were measured at 50 625 products (worst tool 1.32 s), but a real `perf:turns` run against the
+  owner's three accounts has to wait for those accounts to exist.
+
+# 27BQ. ISS-26 — the assistant's LaTeX maths reached the screen as source (2026-10-13, recorded retrospectively 2026-10-14)
+
+## Why this entry exists, and why it is late
+
+The LaTeX decoder shipped **inside the AI-4 commit** (`e5ca4f1`) and was named `ISS-26` in its own test
+file from the moment it was written — but **no issue-table row and no §27 section were ever written for
+it**. A search of the tracked documentation for `ISS-26` returned **nothing**, and the known-issue table
+ran ISS-25 → ISS-24 with no ISS-26 at all, so a defect that was found, fixed, tested and committed had
+**no record anywhere**. That, and not the code, is what this entry closes: the decoder was never the gap.
+It is written retrospectively for the same reason §27AA was (the commit predates the record), and it
+states what shipped rather than re-deciding it.
+
+## The defect
+
+On 2026-10-13 the assistant was re-run against the 10 000-product `seed:perf` tenant and the question that
+had previously timed out was answered in **10.0 s**. Its answer gave a percentage *as a formula*:
+
+    \( \frac{620}{10,000} \times 100 = \mathbf{6.2\%} \)
+
+The string is stored **verbatim** in `ai_messages.content` (confirmed by code point), and the bubble
+renders the stored message — so a member reads backslashes and braces where an answer should be. It is
+**the same class of defect as ISS-25**, markup reaching the screen, for the one marker family AI-4's
+census never saw: that census counted tables, headings, bullet lists and numbered steps across every
+stored answer and found **no maths**, because the model had not yet reached for a formula.
+
+## What shipped
+
+`stripLatex` in `mobile/lib/assistantMarkdown.ts`, called as the **first step** of `stripMarkdown` — that
+is, inside the residual pass AI-2 established and AI-4 kept, so the guarantee stays in one place: a marker
+nobody modelled still cannot reach the screen. It decodes exactly the forms this assistant emits:
+
+* `\frac{a}{b}` → `a/b`, resolved **inward-out** with a four-pass bound, so a wrapped numerator
+  (`\frac{\mathbf{a}}{b}`) decodes too, and the loop stops as soon as a pass changes nothing;
+* the symbol commands the model uses — `\times` → `×`, `\div` → `÷`, `\cdot` → `·`, `\le`/`\leq` → `≤`,
+  `\ge`/`\geq` → `≥`, `\neq`/`\ne` → `≠`, `\approx` → `≈`, `\pm` → `±`, `\to`/`\rightarrow` → `→`, and the
+  escaped punctuation (`\%`, `\$`, `\&`, `\#`, `\_`, `\{`, `\}`) — each with a trailing word boundary, so
+  `\le` cannot eat the `\leq` beside it and `\to` cannot eat a `\top`;
+* the wrapper commands (`\mathbf`, `\textbf`, `\textit`, `\text`, `\mathrm`, `\mathit`, `\operatorname`,
+  `\mbox`, `\textnormal`), which carry their argument and nothing else;
+* the delimiters `\(…\)`, `\[…\]` and `$$…$$`, each consuming the whitespace that hugged it, plus
+  `\quad`/`\qquad` and the thin-space escapes, so removing a delimiter cannot leave a double space behind.
+
+**No dependency, no renderer, no prompt change.** AI-4 had already rejected a formatting instruction in the
+system prompt — it would be paid for in tokens on every turn forever and would repair not one answer
+already stored — and this is the same trade made the same way: decoding is free, it runs once per rendered
+bubble over a string already in memory, and it **repairs history as well as new replies**.
+
+## The two boundaries, which are the part worth keeping
+
+* **A single `$…$` is never treated as maths.** A dollar sign in these answers is currency far more often
+  than it is a delimiter, so treating `$1,200` as a span would delete a real amount — the same
+  data-corruption failure the underscore rule exists to prevent. Only the **unambiguous** forms are
+  stripped.
+* **An unrecognised command is left alone.** Nothing is removed that is not recognised, because dropping
+  stray backslashes would eat the separator out of a Windows path (`C:\Users\…`) to tidy up a marker that
+  was never there.
+
+## Verification
+
+* **10 cases** in `mobile/__tests__/iss-26-assistant-latex-math.test.tsx`: the real formula decoded into
+  what a member can read, each command family, a wrapped multiplication percentage, the **real stored
+  answer rendered through the component with no maths source left on screen**, the plain-prose answer
+  beside it left intact, the formula still reading as one paragraph rather than a broken run of lines, and
+  the boundaries — a currency amount untouched, an unrecognised backslash untouched, **both AI-2
+  invariants preserved** (`12 * 3 = 36` is still arithmetic and a single underscore is still data), and the
+  markers `stripMarkdown` always removed still removed.
+* Re-run for this record on 2026-10-14: the suite passes in the current mobile tree — **59 suites / 801
+  tests / 0 failures**, with `tsc` and `eslint` clean.
+
+## What is NOT verified
+
+* **Nothing here was device-checked.** The decode is proven through React Native's own component tree with
+  the real stored answer as one of its fixtures, but nobody has looked at the assistant on the phone since
+  — and *"does it read well"* is the one question a test cannot settle, exactly as §27BH records for
+  ISS-25.
+* **It is a decoder, not typesetting.** `\frac{a}{b}` becomes `a/b`; a stacked fraction would mean a
+  dependency and a layout the bubble has no room for, and the measured need is a readable percentage.
 
 # 28. Phase Gate System
 

@@ -276,6 +276,75 @@ describe('signInWithEmail — what a user is allowed to read', () => {
 });
 
 // ---------------------------------------------------------------------------
+// The two repaired table entries
+// ---------------------------------------------------------------------------
+
+/**
+ * `auth/wrong-password` and `auth/missing-email` were both absent from the table,
+ * and one of those omissions was invisible in a way that mattered.
+ *
+ * `auth/invalid-credential` is declared a LEGACY-FALLBACK code, so on a project with
+ * email-enumeration protection ON a mistyped password never reaches the table at all
+ * — the server answers with its own 401 sentence. With protection OFF the SDK reports
+ * `auth/wrong-password` instead, and that code DID reach the table, which had no entry
+ * for it: the same credential and the same mistake produced a clear sentence or the
+ * generic "Unable to sign in. Please try again." depending on a FIREBASE CONSOLE
+ * SETTING rather than on anything the user did. `auth/missing-email` was the same shape
+ * of omission sitting beside the `auth/missing-password` entry that was already there.
+ */
+describe('signInWithEmail — the codes that were reaching the generic sentence', () => {
+  it('★ answers a wrong password with the server’s own sentence', async () => {
+    mockNativeSignInWithEmail.mockRejectedValue(firebaseError('auth/wrong-password'));
+
+    const outcome = await signInWithEmail(EMAIL, PASSWORD);
+
+    expect(outcome).toEqual({
+      kind: 'failure',
+      code: 'auth/wrong-password',
+      message: 'Invalid email or password',
+    });
+  });
+
+  it('★ does NOT treat a wrong password as a legacy account', async () => {
+    // The security half, and the reason this is not simply "add a row". A wrong
+    // password means a Firebase identity EXISTS and the password did not open it —
+    // the opposite of "no Firebase identity answers to these credentials". Falling
+    // back here would hand every typo to the legacy route, which is precisely the
+    // downgrade the fallback list exists to prevent.
+    mockNativeSignInWithEmail.mockRejectedValue(firebaseError('auth/wrong-password'));
+
+    const outcome = await signInWithEmail(EMAIL, PASSWORD);
+
+    expect(outcome.kind).not.toBe('legacyFallback');
+  });
+
+  it('★ answers an empty address with a sentence that names the field', async () => {
+    mockNativeSignInWithEmail.mockRejectedValue(firebaseError('auth/missing-email'));
+
+    const outcome = await signInWithEmail(EMAIL, PASSWORD);
+
+    expect(outcome).toEqual({
+      kind: 'failure',
+      code: 'auth/missing-email',
+      message: 'Enter your email address.',
+    });
+  });
+
+  it('and an unrecognised code still takes the generic sentence', async () => {
+    // The behaviour the two entries above must NOT have changed: a code the table
+    // genuinely does not know is still answered generically, and the SDK's own text
+    // is still never relayed.
+    mockNativeSignInWithEmail.mockRejectedValue(firebaseError('auth/some-future-code'));
+
+    expect(await signInWithEmail(EMAIL, PASSWORD)).toEqual({
+      kind: 'failure',
+      code: 'auth/some-future-code',
+      message: 'Unable to sign in. Please try again.',
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // ensureFirebaseAccount — registration and orphan adoption
 // ---------------------------------------------------------------------------
 

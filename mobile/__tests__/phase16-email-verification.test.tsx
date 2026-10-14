@@ -681,8 +681,28 @@ describe('the frozen modules stayed frozen', () => {
     // `lib/firebase-native.ts`, so nothing here had to change. Its CACHED-token
     // accessor is exactly why RG-9 needs a separate forced-refresh call rather than an
     // edit to this file.
+    //
+    // MOVED ONCE, DELIBERATELY, ON 2026-10-14 — AND NOT BY THIS FEATURE. This pin was
+    // written to catch the VERIFICATION journey encroaching on this module, and a
+    // whole-file hash cannot tell that apart from an unrelated fix landing in it. The
+    // unrelated fix is the one that moved it: two rows were added to the user-facing
+    // `FAILURE_MESSAGES` table — `auth/wrong-password` -> "Invalid email or password"
+    // (the server's own sentence, word for word) and `auth/missing-email` -> "Enter your
+    // email address." — because both codes were falling through to the generic "Unable
+    // to sign in. Please try again." for mistakes a person can actually fix. The whole
+    // change is `git diff`-visible as +28 lines and 0 deletions, in one hunk, entirely
+    // inside that table.
+    //
+    // WHAT DID *NOT* MOVE, so this pin's real claim still stands: no outcome union, no
+    // code classification, no entry of `LEGACY_FALLBACK_CODES`, no policy, and not the
+    // cached-token accessor this comment is about. Those are pinned by BEHAVIOUR in
+    // `firebase-auth.test.ts` — `the two codes that open the legacy route`, the
+    // unconfigured-build case, and `currentFirebaseIdToken`. That is what makes a
+    // whole-file hash a scope TRIPWIRE (it forces exactly this deliberation) rather than
+    // the thing that actually protects behaviour. Re-freezing it points the tripwire at
+    // the next change instead of at this one.
     expect(sha256(lf(read('lib/firebase-auth.ts')))).toBe(
-      '8e81f10f2cc42306cb6d178b369c1cc07f4a76eef332ba76de3f2dac8ddf04d4'
+      'bf729373209f08fb1bc4d265c8b9e1b6575c13a8fdd996c59b1d60f551ec6170'
     );
   });
 

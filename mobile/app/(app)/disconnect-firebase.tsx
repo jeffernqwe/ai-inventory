@@ -14,6 +14,7 @@ import type { FirebaseConfirmMethod } from '../../lib/firebase-auth';
 import { spacing, type } from '../../lib/theme';
 import type { Palette } from '../../lib/theme';
 import { useTheme } from '../../lib/theme-context';
+import { passwordStrengthProblem } from '../../lib/validation';
 
 /**
  * Phase A (F-1) — CHANGING the account's Firebase password.
@@ -270,8 +271,20 @@ export default function ChangeFirebasePasswordScreen() {
   async function submit(): Promise<void> {
     const problems: Record<string, string> = {};
     if (!newPassword) problems.newPassword = 'New password is required';
-    else if (newPassword.length < 8) problems.newPassword = 'Password must be at least 8 characters';
-    if (confirmPassword !== newPassword) problems.confirm = 'Passwords do not match';
+    else {
+      // The SHARED length rule, which is how this screen gained the 72-character ceiling
+      // it was missing. The minimum was checked here; the maximum only on the server, so
+      // an over-long password was sent to it and refused in a developer's words under the
+      // input. That matters more on this screen than on most: the password being typed is
+      // the one that becomes the account's local credential when Firebase is disconnected.
+      const strength = passwordStrengthProblem(newPassword);
+      if (strength) problems.newPassword = strength;
+    }
+    // An EMPTY confirmation is reported as MISSING rather than as a mismatch — the rule
+    // `register.tsx` documents. "Passwords do not match" under a field nobody has typed in
+    // names the wrong problem and reads as though a comparison had happened.
+    if (!confirmPassword) problems.confirm = 'Confirm password is required';
+    else if (confirmPassword !== newPassword) problems.confirm = 'Passwords do not match';
     if (Object.keys(problems).length) {
       setFieldErrors(problems);
       return;

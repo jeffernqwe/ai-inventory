@@ -83,6 +83,60 @@ beforeEach(() => {
   mockedResetPassword.mockResolvedValue({});
 });
 
+describe('reset-password — the rules a new password must satisfy', () => {
+  /**
+   * This screen CHOOSES a password, so its length rule matters here in a way it never
+   * does at sign-in (where a minimum would be a guess about an existing account). The
+   * minimum was checked all along; the 72-character ceiling was the server's alone, so
+   * an over-long password travelled there and came back under the input as "password
+   * must be at most 72 characters" — a sentence written for a developer.
+   */
+  it('★ refuses an over-long password without spending the reset link', async () => {
+    const view = await mount();
+    const tooLong = 'a'.repeat(73);
+    await fireEvent.changeText(view.getByPlaceholderText(PASSWORD_FIELD), tooLong);
+    await fireEvent.changeText(view.getByPlaceholderText(CONFIRM_FIELD), tooLong);
+    await fireEvent.press(view.getByRole('button', { name: 'Set new password' }));
+
+    expect(view.getByText('Password must be at most 72 characters')).toBeTruthy();
+    // Load-bearing: a token is single-use, so spending it on a request the server will
+    // refuse is a link burned for nothing.
+    expect(mockedResetPassword).not.toHaveBeenCalled();
+  });
+
+  it('still reports a short password in the sentence it always used', async () => {
+    const view = await mount();
+    await fireEvent.changeText(view.getByPlaceholderText(PASSWORD_FIELD), 'short1');
+    await fireEvent.changeText(view.getByPlaceholderText(CONFIRM_FIELD), 'short1');
+    await fireEvent.press(view.getByRole('button', { name: 'Set new password' }));
+
+    expect(view.getByText('Password must be at least 8 characters')).toBeTruthy();
+    expect(mockedResetPassword).not.toHaveBeenCalled();
+  });
+
+  it('★ reports an UNTOUCHED confirmation as missing, not as a mismatch', async () => {
+    // "Passwords do not match" under a field nobody has typed in names the wrong
+    // problem, and reads as though something had been compared.
+    const view = await mount();
+    await fireEvent.changeText(view.getByPlaceholderText(PASSWORD_FIELD), 'newpassword1');
+    await fireEvent.press(view.getByRole('button', { name: 'Set new password' }));
+
+    expect(view.getByText('Confirm password is required')).toBeTruthy();
+    expect(view.queryByText(VALIDATION_ERROR)).toBeNull();
+    expect(mockedResetPassword).not.toHaveBeenCalled();
+  });
+
+  it('still reports a non-empty confirmation that differs as a mismatch', async () => {
+    const view = await mount();
+    await fireEvent.changeText(view.getByPlaceholderText(PASSWORD_FIELD), 'newpassword1');
+    await fireEvent.changeText(view.getByPlaceholderText(CONFIRM_FIELD), 'differentpassword');
+    await fireEvent.press(view.getByRole('button', { name: 'Set new password' }));
+
+    expect(view.getByText(VALIDATION_ERROR)).toBeTruthy();
+    expect(mockedResetPassword).not.toHaveBeenCalled();
+  });
+});
+
 describe('reset-password — a new link starts a clean attempt', () => {
   it('keeps what the user typed while the link is unchanged', async () => {
     const view = await mount();

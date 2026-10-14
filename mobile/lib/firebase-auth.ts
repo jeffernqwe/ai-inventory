@@ -146,6 +146,34 @@ const EMAIL_TAKEN_MESSAGE = 'An account with this email already exists. Sign in 
 const FAILURE_MESSAGES: Record<string, string> = {
   'auth/invalid-email': 'Enter a valid email address.',
   'auth/missing-password': 'Enter your password.',
+  // THE EMPTY-ADDRESS SIBLING OF `missing-password`, and its absence was a real defect.
+  // This table listed one of the two empty-field codes and not the other, so the same
+  // class of mistake — an empty input reaching Firebase — produced a precise sentence
+  // for the password and the generic "Unable to sign in. Please try again." for the
+  // address. That generic sentence is what a person saw for pressing Sign In on an empty
+  // form, and it names neither field, suggests a fault rather than a missing input, and
+  // sends them looking for a problem that does not exist. The screens now refuse an empty
+  // form before anything is called (see `lib/validation.ts`), so this entry is the second
+  // line of defence rather than the first — kept because a defence that lives only in the
+  // screen is absent from every other route into this table.
+  'auth/missing-email': 'Enter your email address.',
+  // THE MOST COMMON MISTAKE IN THIS APP, AND IT WAS UNMAPPED.
+  //
+  // `auth/invalid-credential` is what an unknown address or a wrong password reports on a
+  // project with email-enumeration protection ON (Firebase's default), and that code is
+  // handled earlier as a LEGACY-FALLBACK code — so on such a project a typo is answered
+  // by the server's own 401, `Invalid email or password`. With protection OFF the SDK
+  // reports `auth/wrong-password` separately, which is NOT a fallback code and arrives at
+  // THIS table. Without an entry here, therefore, whether a mistyped password produced a
+  // clear sentence or the generic "Unable to sign in. Please try again." depended on a
+  // Firebase CONSOLE SETTING rather than on anything the user did — the same credential,
+  // the same mistake, two different experiences.
+  //
+  // The sentence is deliberately the server's own, word for word, for the reason the
+  // `user-disabled` entry below gives: one mistake must read the same way whichever layer
+  // caught it. `invalid-credential` itself is NOT mapped here — it never reaches this
+  // table from sign-in, because the fallback branch claims it first.
+  'auth/wrong-password': 'Invalid email or password',
   'auth/weak-password': 'Choose a password with at least 6 characters.',
   // Deliberately the same sentence the server's ACCOUNT_DISABLED uses, so a user
   // cannot tell which side disabled them.

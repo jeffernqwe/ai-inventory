@@ -172,6 +172,35 @@ describe('the screen is reachable only where it means something', () => {
     expect(view.getByText(STEP_ONE)).toBeTruthy();
   });
 
+  it('★ refuses an over-long new password without recording a change', async () => {
+    // This screen CHOOSES a password, so the length rule belongs here. The minimum was
+    // checked all along; the 72-character ceiling was the server's alone, so an
+    // over-long password reached it and came back under the input in a developer's
+    // words. Nothing is recorded: the credential is not touched and no request is spent.
+    const view = await mount();
+    await reachStepTwo(view);
+
+    const tooLong = 'a'.repeat(73);
+    await fireEvent.changeText(view.getByPlaceholderText('At least 8 characters'), tooLong);
+    await fireEvent.changeText(view.getByPlaceholderText('Repeat the new password'), tooLong);
+    await fireEvent.press(view.getByRole('button', { name: CHANGE }));
+
+    expect(view.getByText('Password must be at most 72 characters')).toBeTruthy();
+    expect(changeFirebasePassword).not.toHaveBeenCalled();
+  });
+
+  it('★ reports an UNTOUCHED confirmation as missing, not as a mismatch', async () => {
+    const view = await mount();
+    await reachStepTwo(view);
+
+    await fireEvent.changeText(view.getByPlaceholderText('At least 8 characters'), NEW_PASSWORD);
+    await fireEvent.press(view.getByRole('button', { name: CHANGE }));
+
+    expect(view.getByText('Confirm password is required')).toBeTruthy();
+    expect(view.queryByText('Passwords do not match')).toBeNull();
+    expect(changeFirebasePassword).not.toHaveBeenCalled();
+  });
+
   it('reports a mistyped confirmation without reaching the network', async () => {
     const view = await mount();
     await reachStepTwo(view);

@@ -6864,7 +6864,7 @@ Next: **both owner decisions this section was waiting on are taken (2026-10-11)*
 
 | **ISS-27** | **High** | **A table with three columns or fewer renders as a collapsed strip — the answer is unreadable and the message area looks empty** — the assistant was asked for a two-column table; the answer was stored correctly and returned by the API, but on the phone its cells measured **48 px wide and up to 1 452 px tall**, the whole answer sat in a ~200 px column, the question was pushed above the viewport, and the screen presented as **blank** | Found **on the device 2026-10-14**, minutes after §27BS verified the four-column card path: the accessibility tree (`uiautomator`) showed real `android.widget.TextView` cells of the stored answer carrying those bounds, while a pixel scan at threshold 40 found **no ink at all** — it was a threshold lowered to 20 that turned *"nothing is drawn"* into *"a collapsed column is drawn"*. The **card** path escaped the same defect only because a card title is long enough to give the bubble a wide intrinsic width | **FIXED 2026-10-14 — §27BT (mobile only).** A table-bearing answer now takes the full bubble width (`bubbleWide: { flex: 1 }`, still capped by `maxWidth: '84%'`), so the grid's `flex: 1` columns have a width to share; applied to **both** rendering paths, because the card path's escape was luck rather than design. `isTableAnswer` is an O(n) `includes('|')` — a superset of the parser's own detection, so the keystroke-driven render path pays nothing. **5 cases** in `mobile/__tests__/iss-27-narrow-table-width.test.tsx`, the ★ case **watched failing first** (`Expected: 1 / Received: undefined`); mobile **60 suites / 807 tests / 0 failures**, `tsc`/`eslint` clean. **DEVICE-VERIFIED:** the same stored answer re-rendered after the fix and the tree now measures `Product Name [102,1086][566,1182]` and `Quantity [565,1086][821,1182]` — **464 × 96** and **256 × 96** — with all five rows on screen, every `0` present, and the card answer unchanged |
 | **ISS-28** | Low → **`[✓]`** | **A continued conversation never moved up the list, and its displayed time never advanced** — the conversation list is sorted on `updatedAt` and each row renders it, but no write path touched a conversation when a message was added, so `updatedAt` was frozen at creation and "newest first" was in practice "newest *created* first" | Found **on the device 2026-10-14** (§27BT: a conversation continued at 17:14 was still listed as 17:02) and traced to the missing update path on `AIConversation`; the Phase 20F index comment had already anticipated it | **FIXED 2026-10-14 — AI-7 (§27BU), server only:** a persisted turn now advances the conversation's `updatedAt`, on the success path only, because a failed turn persists nothing. 4 cases in `server/test/AI7-conversation-activity.test.mjs`, the ★ case watched failing first; CI green. **DEVICE-VERIFIED:** continuing the oldest of four conversations moved it from last to first with its time advanced **16:22 → 18:11**, and continuing the third did it again **17:02 → 18:17** |
-| **ISS-29** | Medium → **`[✓]`** | **An answer cut off by `AI_MAX_OUTPUT_TOKENS` is stored and served as a complete one** — the turn reaches its cap, the text stops mid-list, and nothing marks it: the member cannot tell a truncated answer from a finished one, and neither the log nor the HTTP response says so | Found **on the device 2026-10-14** (§27BU): the low-stock answer's `out=800` is exactly the default cap and its body ends mid-list (`3. Ultra Sponge 18982 - available 2`), yet it was stored and rendered as an answer. The guard in `parseAnthropicResponse` throws only when `stop_reason === 'max_tokens'` **and there is no text**, so a truncation that carries text passes through by construction. The very next answer used `out=788` and finished, so the frequency is unmeasured | **OPEN — recorded, not fixed (§27BU).** The remedy is a decision rather than a patch: widen the guard into a third degraded reason with its own sentence, or raise the cap and accept the added latency and cost. **FIXED 2026-10-15 — AI-8 (§27BV), server + mobile.** The cap is now **reported by both provider wires** (`stop_reason === 'max_tokens'`, `finishReason === 'MAX_TOKENS'`) instead of only being tested for whether to throw, which is why a truncation carrying any text was invisible at every layer. The partial answer is **kept** and the turn marked `OUTPUT_LIMIT` — a third `DegradedReason` deliberately **not** in the canned-sentence table, because replacing a partial answer would throw away the useful half — and the mark is persisted on the message and returned on reload, so a reopened thread is never cleaner than the screen that produced it. The sentence lives on the client, beside the answer it qualifies, so the stored content stays the model's own words. 9 server cases + 6 mobile cases, each written first and watched failing; both halves proved able to fail by mutation with the files restored **byte-identically**. **DEVICE-VERIFIED 2026-10-15 (§27BV)** with a temporary 40-token cap: `out=40` exactly at the cap, `[ai] degraded turn reason=OUTPUT_LIMIT` beside `outcome=degraded … out=40`, the partial answer **and** the note on the phone, and the same note still there after reopening the thread from the hub — the store and the loaded-history path both keep the mark. The `.env` was restored byte-identically and the backend restarted, so the shipped cap of 800 is what is deployed. **The cap itself is unchanged**, which is the other half of the decision this row named, and **the frequency is still unmeasured** |
+| **ISS-29** | Medium → **`[✓]`** | **An answer cut off by `AI_MAX_OUTPUT_TOKENS` is stored and served as a complete one** — the turn reaches its cap, the text stops mid-list, and nothing marks it: the member cannot tell a truncated answer from a finished one, and neither the log nor the HTTP response says so | Found **on the device 2026-10-14** (§27BU): the low-stock answer's `out=800` is exactly the default cap and its body ends mid-list (`3. Ultra Sponge 18982 - available 2`), yet it was stored and rendered as an answer. The guard in `parseAnthropicResponse` throws only when `stop_reason === 'max_tokens'` **and there is no text**, so a truncation that carries text passes through by construction. The very next answer used `out=788` and finished, so the frequency is unmeasured | **OPEN — recorded, not fixed (§27BU).** The remedy is a decision rather than a patch: widen the guard into a third degraded reason with its own sentence, or raise the cap and accept the added latency and cost. **FIXED 2026-10-15 — AI-8 (§27BV), server + mobile.** The cap is now **reported by both provider wires** (`stop_reason === 'max_tokens'`, `finishReason === 'MAX_TOKENS'`) instead of only being tested for whether to throw, which is why a truncation carrying any text was invisible at every layer. The partial answer is **kept** and the turn marked `OUTPUT_LIMIT` — a third `DegradedReason` deliberately **not** in the canned-sentence table, because replacing a partial answer would throw away the useful half — and the mark is persisted on the message and returned on reload, so a reopened thread is never cleaner than the screen that produced it. The sentence lives on the client, beside the answer it qualifies, so the stored content stays the model's own words. 9 server cases + 6 mobile cases, each written first and watched failing; both halves proved able to fail by mutation with the files restored **byte-identically**. **DEVICE-VERIFIED 2026-10-15 (§27BV)** with a temporary 40-token cap: `out=40` exactly at the cap, `[ai] degraded turn reason=OUTPUT_LIMIT` beside `outcome=degraded … out=40`, the partial answer **and** the note on the phone, and the same note still there after reopening the thread from the hub — the store and the loaded-history path both keep the mark. The `.env` was restored byte-identically and the backend restarted, so the shipped cap of 800 is what is deployed. **The cap itself is DECIDED, not merely unchanged — §27BY**: it stays at **800**, because both turns that reached it had already spent **48.6 s and 57.4 s of the 60 s turn budget**, so raising it would convert a *marked partial answer* into a `504 AI_TIMEOUT` with **no answer at all**, and the derived generation rate (10–42 tokens/s) is recorded with the decision; **the frequency is still unmeasured** |
 
 **Correctly recorded as open or deferred — not issues:** L-17 (recovery-mail delivery never inspected end-to-end),
 B1's residual timing term, B2 / E3 / OD-10 (V4), owner decisions O-5 / O-6 / O-10 / O-11, P-4 (device-time),
@@ -11222,6 +11222,72 @@ shape it replaces: an ARCHIVED product's stock still counts toward on-hand (the 
   by construction, so a larger tenant will cost more; no claim is made about 250 k.
 * **No index change was needed or made.** The new index builds on the next server boot through the same
   `autoIndex` route the earlier phases used, so a stale deployment would run the old plan until it restarts.
+
+# 27BY. The output cap is not the constraint — the deadline is (2026-10-15)
+
+Decides the other half of **ISS-29**, which §27BV deliberately left open: whether to raise
+`AI_MAX_OUTPUT_TOKENS` (default 800) so that a long answer completes instead of arriving truncated. **The
+decision is to keep it at 800**, and it is taken on a measurement rather than a preference.
+
+## The measurement that settles it
+
+The AI-5 turn line already records each turn's provider time and its output tokens, so the cost of
+*approaching* the cap was sitting on disk — settling this needed **no new provider call**, which matters
+because the deployed free tier allows about 50 requests a day in total. Every real turn recorded to date,
+with the test fakes excluded (they answer in microseconds; the filter is provider time above 2 s):
+
+| `out` | provider time | implied rate |
+|---|---|---|
+| 87 / 90 / 128 | 8.6 / 2.9 / 7.1 s | 10.1 / 30.6 / 18.2 tok/s |
+| 228 / 343 | 17.5 / 12.6 s | 13.0 / 27.1 tok/s |
+| 407 / 415 / 429 / 469 / 486 / 499 | 18.2 / 17.7 / 20.1 / 23.1 / 27.5 / 12.0 s | 22.3 / 23.4 / 21.3 / 20.3 / 17.7 / 41.7 tok/s |
+| **788** — finished | 28.0 s | 28.1 tok/s |
+| **800** — the cap | **48.6 s** | 16.5 tok/s |
+| **800** — the cap | **57.4 s** | 13.9 tok/s |
+
+**Both turns that filled the cap spent 48.6 s and 57.4 s of the 60 s turn budget** (`AI_TURN_DEADLINE_MS`).
+The free tier generates roughly **10–42 tokens/s**, so 800 output tokens *is already most of a turn*.
+
+## Why raising the cap would be a regression
+
+A cap raised to 1 500 or 2 048 does not make a long answer arrive. It makes the turn run past the deadline and
+fail as **`504 AI_TIMEOUT`**, which by AI-1's own design is a turn with **no answer at all**. A member would
+trade *"the first twenty rows, plus a note saying the rest was cut off"* for *"the assistant took too long"*.
+That is strictly worse, and the numbers above are the reason: 800 tokens already costs 48–57 s of the 60 s
+available.
+
+So the cap stays at **800**, and AI-8's note is the intended answer to a truncated reply: the partial answer
+is kept, and the member is told the answer was cut off and what to do about it.
+
+## Options considered and rejected
+
+* **Raise the cap alone** — rejected: it converts a *marked* partial answer into an *unmarked* timeout.
+* **Raise the cap, the turn deadline and the client budget together** — not rejected on merit, but it is a
+  coordinated change across three numbers that the provider tier cannot honour anyway: at ~20 tokens/s a
+  2 048-token answer needs **over 100 s**, longer than a member will wait. It belongs with the provider
+  decision (**ISS-22**), not before it.
+* **Lower the cap so a truncated answer fails faster** — rejected: it would hand the member *less* of the
+  answer in order to shorten a wait that is dominated by the model's own latency.
+
+## What would change this decision
+
+A faster or paid provider tier, or a model that answers a long list in fewer tokens. Both are **ISS-22**,
+which the owner has kept on the free tier (§27BF). This entry is the measured reason the cap is not the lever
+to reach for first, recorded rather than left as folklore.
+
+## What is NOT verified, and the limits stated rather than glossed
+
+* **The truncation *frequency* is still unmeasured.** Two capped turns out of fourteen real ones is a count
+  from the whole recorded sample, not a rate; the sample spans several days, two providers and more than one
+  model, and the sample is small.
+* **The rate is derived, not separately measured** — `out ÷ providerMs` includes turns that also spent time
+  on tool rounds, so it is a lower bound on generation speed and an approximation of the true one.
+* **No naturally-capped turn has been seen since AI-8 shipped**, so the note's help to a member in practice
+  rests on the single forced observation (§27BV).
+* **The 800-token figures come from turns that hit the cap**, which is precisely the case where the model is
+  cut off mid-answer; whether it would have written 900 tokens or 2 000 is unknowable from this data.
+
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

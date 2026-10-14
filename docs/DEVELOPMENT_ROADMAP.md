@@ -6776,7 +6776,7 @@ update its tracking boxes, status rows and heading date at the end of a session 
 | Mobile | **133** `.ts`/`.tsx` sources and **0** `.js`/`.jsx` in `app/ components/ lib/ __tests__/` (re-counted 2026-10-12 after §27AY's new guard); Expo 57 / RN 0.86.3, and since §27AY `react-native-reanimated` 4.5.1 / `react-native-worklets` 0.10.1 declared directly at the SDK's own pins — `expo-doctor` **21/21** and `npm ls` free of invalid entries |
 | Tests | **65** server test files (`server/test/*.test.mjs`, up from 64 on 2026-10-12 by §27AX's route-inventory guard) and **51** mobile test files (file counts, re-read 2026-10-12 — §27AY added one). CI's own summary at `3beaf85`: server **185 suites / 1312 tests, 0 failures**; mobile **49 suites / 660 tests** — a "suite" there is CI's unit, not a file. Re-run locally on `3adac9d` for the device pass: mobile **50 / 666**, server **185 / 1312**, both 0 failures, `tsc` and eslint clean (§27AT); re-run locally on 2026-10-12 (§27AY): mobile **51 suites / 674 tests**, 0 failures, with `tsc` and eslint clean — and CI's own `mobile` job reports the same **51 / 674** on both `957e5b3` and `cd405a3`. **Re-run locally 2026-10-13 (AI-1 + AI-2, §27BF):** server **1353 tests / 192 suites, 0 failures** (68 files) and mobile **54 suites / 701 tests, 0 failures**, with `tsc`, `eslint` and both module-graph checks clean on both sides. The **file** counts are the ones that drift — re-read them, do not quote them |
 | Open on GitHub | **Nothing at all** but **issue #32** (deferred majors) — re-read 2026-10-11 (late): `gh pr list --state open` is empty and one issue is open (**re-read 2026-10-12: still exactly one, #32**), **PRs #46–#63 merged** (§27AL–§27AY — #60 the documentation truth pass, #61 the advisory re-confirmation, #62 §27AY, #63 a routine Dependabot minor); #34 (ISS-16) and #38 (ISS-17) closed with their reasons |
-| Open advisories | **5** — 2 high, 3 medium, 0 critical (all mobile; re-read 2026-10-11 from the alerts API after §27AK's disposition, and **verified again** the same evening — the count drifts, and did). **Re-read 2026-10-12: still exactly 5**, confirmed independently by `npm audit --json`; `server` reports **0**; and a plain `npm audit` on `mobile/` prints **71 (55 high, 16 moderate)** for the same five advisories, because it also counts the **61 packages that merely depend on them** — see §27AK's re-confirmation before treating that larger number as a second wave. All five now have a **named fix path, all through the SDK 58 train**. Re-read once more after §27AY's dependency change: **still 5, unchanged** |
+| Open advisories | **5** — 2 high, 3 medium, 0 critical (all mobile; re-read 2026-10-11 from the alerts API after §27AK's disposition, and **verified again** the same evening — the count drifts, and did). **Re-read 2026-10-12: still exactly 5**, confirmed independently by `npm audit --json`; `server` reports **0**; and a plain `npm audit` on `mobile/` prints **71 (55 high, 16 moderate)** for the same five advisories, because it also counts the **61 packages that merely depend on them** — see §27AK's re-confirmation before treating that larger number as a second wave. All five were recorded here as having a **named fix path, all through the SDK 58 train** — **corrected 2026-10-15 (§27CA)**: **three of the five have no patched version published upstream at all** (`braces` ≤ 3.0.3, `node-forge` ≤ 1.4.0, `sprintf-js` ≤ 1.1.3 are each the newest release *and* still in the advisory's range), so no train can close them; the one patch that does exist (`decode-uri-component` 0.5.0) **breaks its own consumer** and was measured, then refused. Re-read once more after §27AY's dependency change: **still 5, unchanged** |
 | Production | Render auto-deploy from `main`; `https://ai-inventory-l1mi.onrender.com` reachable and serving the AUTH-04 endpoints |
 | Device | **First physical-device run performed 2026-10-11** (§27AT): dev client `0972948` installed on the OPPO CPH1969 over USB, app launched and rendered, the USB backend path proved, the §27R register validation confirmed on hardware.  **Unauthenticated only** — nothing behind the login was reachable, so sign-in, verification, inventory and the AI assistant remain **not device-verified**. *(Corrected 2026-10-11 — §27AV: the database is not empty; it is the **test** database and holds 1,815 unusable fixture accounts. The device-run account decision is **taken** — register a fresh test account — and the database it will write into is **decided — `inventoryai_dev_db`** (ISS-20 **resolved** 2026-10-11, §27AV). The `da9c401` APK is now **installed on the phone, byte-identical to `436b2942`** — the app launches and renders, the USB path is proved from the device, and **ISS-02 is CLOSED, device-measured** (§27BA). **Superseded 2026-10-12/13:** the authenticated run **was** performed (§27BA–§27BC), so the clause above no longer holds — the authenticated walkthrough ran end to end (§27BC), and the **AI assistant is now device-verified** (§27BE: four `201`s at 6 185 / 8 212 / 10 302 / **19 388** ms, plus a forced `504` at 2 224 ms whose on-screen copy was correct). **AI-2 (2026-10-13, §27BF) is HALF device-verified, and says which half:** the **Markdown strip IS device-verified** — the prompt that produced F-55 stored `**no products that need restocking**` in the database and rendered it on screen **with no asterisks** — while its **retry and degraded mark were NOT exercised at all**, because the free tier's **daily** model quota was already spent (§27BF).) |
 
@@ -11365,6 +11365,132 @@ reached, now measured at five times the data.
   which is what the missing half of this would be. It is labelled, isolated, refuses production and the test
   database, and is removed by `SEED_CONFIRM=seed-perf-ai npm run cleanup:perf`, which re-queries to prove
   nothing of it remains.
+
+
+
+# 27CA. The dependency review — three tracks, and the one available fix that is not safe to take (2026-10-15)
+
+Read-only review plus two controlled experiments. It corrects a claim the known-issue table has carried since
+§27AK, and it answers the question the queue kept raising: **which of these updates actually deserve a
+session?**
+
+## What was read
+
+* `npm audit`: **server 0**, **mobile 5** (2 high, 3 medium) — the same five the alerts API reports, read
+  again today.
+* In range (`Wanted > Current`): **server 5** — `express` 5.2.1 → 5.3.0, `dotenv` 18.0.7 → 18.0.8,
+  `mongoose` 9.11.1 → 9.11.2, `@types/node` 26.6.4 → 26.6.5, `typescript-eslint` 8.71.1 → 8.71.2.
+  **Mobile**: the SDK-pinned set that ISS-17 records as uninstallable (`expo` 57.0.27 → 57.0.29 and the same
+  rollup), plus `@types/react` 19.2.18 → 19.3.0.
+* Majors, deliberately ignored by `.github/dependabot.yml` and tracked in issue #32: TypeScript 6 → 7,
+  jest 29 → 30, eslint 9 → 10, RN 0.86.3 → 0.87.1, react 19.2.3 → 19.3.1, reanimated, worklets, screens,
+  safe-area-context.
+
+## Reachability decides severity, so it was read from the tree, not assumed
+
+`npm ls` gives the chain for each of the five advisories, and the chain is what says whether a device can
+reach the vulnerable code at all:
+
+| advisory | chain | where it runs | patch published? |
+|---|---|---|---|
+| `braces` (high) | `jest` → `@jest/core` → `micromatch` → `braces@3.0.3` | **test runner only** | **none** — ≤ 3.0.3 is affected and 3.0.3 is the newest release |
+| `node-forge` (high) | `expo` → `@expo/cli` → `node-forge@1.4.0` | **build / CLI only** | **none** — ≤ 1.4.0 is affected and 1.4.0 is the newest release |
+| `sprintf-js` (medium) | `jest-expo` → `babel-jest` → `babel-plugin-istanbul` → `js-yaml@3.15.2` → `argparse` → `sprintf-js@1.0.3` | **test toolchain only** | **none** — ≤ 1.1.3 is affected and 1.1.3 is the newest release |
+| `decode-uri-component` (medium) | `expo-router` → `query-string@7.1.3` → `decode-uri-component@0.2.2` | **SHIPPED — the deep-link query parser** | 0.5.0 exists — **and is refused below, with evidence** |
+| `uuid` (medium) | `expo-sharing` → `@expo/config-plugins` → `xcode` → `uuid@7.0.3` | **build-time config plugins** | 11.1.1 exists, but that is a four-major jump only a native build can verify |
+
+Four of the five therefore cannot run on a member's device. The one that **is** on a shipped path is the one
+that should have been interesting — and is the one this entry had to refuse.
+
+## The experiment: the fix that was available was tried, then refused
+
+`decode-uri-component` is the only advisory where a patched version exists *and* the vulnerable copy is
+reachable from the shipped bundle. So it was fixed the way this repository already fixes transitive
+dependencies — an `overrides` entry, the same mechanism the `@grpc/grpc-js` entry uses — and then measured
+rather than assumed:
+
+1. **Baseline recorded first.** A probe was run against the installed 0.2.2 over **11 adversarial query
+   strings** (percent-encoding, `+` as space, double-encoding, a malformed `%`, repeated keys, empty values,
+   unicode, and a nested `continueUrl=inventoryai://reset-password?token=…`), capturing every parse result as
+   a file whose hash is the behaviour to preserve.
+2. **The override installed cleanly, with no collateral drift.** `npm install` exit 0, **one package
+   changed**, and the entire lockfile diff was four lines: the version, the resolved URL, the integrity hash
+   and `engines` (`>=0.10` → `>=14.16`).
+3. **Every parse on that path then threw.** Not one input, not an edge case: `decodeComponent is not a
+   function`, on all eleven. The mechanism is exact — **0.5.0 is `"type": "module"` and its `exports` map
+   declares only a `default` condition, with no `require` condition at all**, so `require()` hands
+   `query-string@7.1.3` a namespace object (`{ __esModule: true, default: fn }`) where it expects a callable.
+4. **Refused, and reverted properly.** The lockfile was restored to its committed bytes (`356dc6fd…`),
+   `node_modules` rebuilt with `npm ci`, the probe re-run to the **identical behaviour hash**, and the mobile
+   suite **833/833** green afterwards with the tree clean.
+
+**Why refusing is the right call.** The override would trade a *medium* advisory for a **broken query parser
+on the password-reset deep link** — the exact path the fix was meant to protect. The patch cannot be taken by
+an `overrides` entry at all; it needs the consumer chain (`query-string`, and therefore `expo-router`) to
+move to a version that consumes 0.5.0. Recorded as a **decision with its evidence**, not left as an
+unfinished task.
+
+## The corrected disposition
+
+§27AK recorded that all five advisories had "a named fix path, all through the SDK 58 train". **That is
+wrong, and the table above now carries the correction:** three of the five have **no patched version
+published upstream**, so no train can close them — only an upstream release will, and waiting is not a
+strategy, it is a watch. One has a patch that **cannot be taken safely**. One is **build-time only** and
+would need a native build to verify a four-major jump. The honest state is therefore: **zero of five can be
+closed by an update this project can perform today, and none of them is on a path a member reaches while
+using the app except the one that must not be forced.**
+
+## The server group was verified, not merely recommended
+
+The routine track's current contents were installed and tested rather than trusted: the five in-range bumps
+above, with the **full server suite run against them — 1405 tests, 1405 pass, 0 failures, 0 skipped**, `tsc`
+clean and `eslint` clean — and the tree then restored (lockfile byte-identical, `npm ci`). The server's
+`npm audit` is **0**, so this track carries no security question at all.
+
+## SDK 58, researched rather than remembered (2026-10-15)
+
+* **Still a beta, not a stable release.** Expo announced a three-to-four-week beta on 2026-09-15; the beta
+  pairs with React Native **0.88 Release Candidate**, and SDK 58 ships shortly after RN 0.88 goes stable
+  (whose own target was 2026-10-12). Verified from Expo's SDK 58 beta changelog and React Native's release
+  schedule.
+* **Node's floor rises, and this is the prerequisite nobody had recorded.** SDK 58 requires **Node 22.13+
+  on the 22 line or 24.3+ on the 24 line**. `.nvmrc` says `24` and `server/package.json` declares
+  `engines.node: ">=24.0.0"` — so **the SDK train's first action is raising the Node floor to 24.3+**, before
+  any package moves, or the upgrade will fail on a machine that looks correct.
+* Expo Router's navigation core changes (custom navigators and `expo-router/react-navigation` imports),
+  `jest-expo` 58 is the line that carries **jest 30**, and RN 0.87 brings the Strict TypeScript API default
+  and removals (`InteractionManager`, the root `Touchable` export) — the last of those is what makes this a
+  train rather than a bump.
+
+## The policy: three tracks, never mixed
+
+1. **Security track — evidence-gated, not calendar-gated.** An advisory is actionable only when all three
+   hold: a patched version exists, the vulnerable copy is reachable in what ships, and the patch is
+   compatible with the pinned consumer. Anything else is **recorded with its chain and re-checked**, and
+   Dependabot's own security updates keep arriving on their own because they bypass both the
+   `open-pull-requests-limit` and the `ignore` rules in `.github/dependabot.yml`. Today: **nothing on this
+   track is actionable**, which is a finding rather than a backlog.
+2. **Routine minor-and-patch track — taken when green, one grouped PR per ecosystem.** Verified above for the
+   server. The mobile equivalent stays refused while the SDK pins the packages, which is the whole point of
+   the carve-out list.
+3. **Deliberate track — one major at a time, with a runbook.** The SDK train (Node floor first, then
+   `expo install --fix`, then `expo-doctor`, then a native build), then jest 30 and TypeScript 7 behind it,
+   each with the failure that blocks it recorded in issue #32. Never mixed into a feature branch, because the
+   one thing worse than a slow upgrade is an upgrade that cannot be attributed to a change.
+
+## What is NOT verified
+
+* **The advisory ranges and the SDK 58 facts come from published advisories and Expo's changelog, read today
+  by an agent** — they are as good as those sources, not better, and the npm registry moves.
+* **`uuid`'s chain is build-time by topology, not by measurement**: nothing here ran a native build, so
+  whether `uuid` 11 is consumable by `xcode@3.0.1` is **unmeasured**, and no claim is made that it is or
+  isn't.
+* **The three unfixable advisories were not exploited.** "Test toolchain only" is the reachability argument,
+  not a penetration test.
+* **Metro's interop was not exercised** for the refused override: the failure was measured on the Node/CJS
+  resolution path that jest and this project's tooling use. Whether Metro's bundler would have rescued the
+  namespace object on a device is untested — and deliberately so, because the risk being avoided is a broken
+  reset link, which a plausible rescue does not make safe.
 
 
 # 28. Phase Gate System

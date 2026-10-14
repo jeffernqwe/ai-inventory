@@ -292,6 +292,23 @@ const aiController = {
       usage: result.usage || undefined,
     });
 
+    // AI-7 — the conversation is now the most recently ACTIVE one.
+    //
+    // Phase 20F declared the list's sort key as `updatedAt` and the mobile list already
+    // displays that field, so both ends were built for an activity time that nothing
+    // ever wrote: the only writes to this collection were `create(...)`, which left
+    // `updatedAt` equal to `createdAt` forever. The list therefore read "newest first"
+    // as "newest CREATED first" and a continued chat showed the time it was opened
+    // rather than the time it was last used (seen on the device 2026-10-14 — a
+    // conversation continued at 17:14 still listed as 17:02, §27BT).
+    //
+    // Bumping it here, immediately after the turn is durable and before the response,
+    // is the whole fix, and it is deliberately placed on the SUCCESS path only: a
+    // failed turn still persists nothing (Phase 07E / M7), so the activity time can
+    // only ever move when a member actually received an answer.
+    conversation.updatedAt = new Date();
+    await conversation.save();
+
     res.status(201).json({
       conversation: conversationPublic(conversation),
       userMessage: messagePublic(userMessage),

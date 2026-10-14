@@ -10478,6 +10478,92 @@ bubble over a string already in memory, and it **repairs history as well as new 
 * **It is a decoder, not typesetting.** `\frac{a}{b}` becomes `a/b`; a stacked fraction would mean a
   dependency and a layout the bubble has no room for, and the measured need is a readable percentage.
 
+# 27BR. The attribution trailers that came back, and the check that refuses them (2026-10-14)
+
+## The policy was explicit, enforced by hand once, and enforced by nothing
+
+CLAUDE.md rules 1, 2, 4 and 7 forbid naming an AI agent, coding tool or bot as an author or
+co-author, forbid a generated-by tag, signature line or automated footer — naming the exact strings,
+`🤖 Generated with Codebuff` and `Co-Authored-By: Codebuff <noreply@codebuff.com>` among them — and
+rule 7 forbids anything in the repository adding one automatically. The owner enforced this by hand
+in a one-off **message-only rewrite** on 2026-10-11 (§27AS). What the repository has never had is a
+check that can **FAIL**. The trailers came back the other way round:
+
+* **six commits** on `feature/ai1-ai4-assistant-reliability-and-rendering` carried them, two lines
+  each — the five unpushed commits of the AI-5/AI-6 work, **and `3686cb9`, the published head of
+  PR #74**;
+* **`origin/main` was clean**, so a normal merge of that pull request would have written them into
+  the project's permanent history — which is how they arrived the first time.
+
+**Found while reviewing the tree for a different reason, not by any check.** Nothing in the
+repository could have caught it, and that is the finding this record closes on.
+
+## The rewrite, and what "message-only" was verified to mean
+
+Range `3686cb9^..HEAD`, six commits, rewritten with `git filter-branch --msg-filter` and a narrow
+strip script that removes **only the named-tool forms** — the owner's own identity and the
+Dependabot trailers the roadmap keeps on purpose (§27AS) are untouched. Then measured rather than
+asserted:
+
+* for **all twelve** rewritten commits, the **tree hash** and the **author and committer**
+  name/email/date were captured before and compared after, position by position — **identical**;
+* the branch tip's tree is **identical** to the pre-rewrite tip (`git diff` against
+  `refs/original/…` reports nothing), so the rewrite changed no file in the repository;
+* zero forbidden trailer lines remain in the range (down from 12);
+* **one citation was updated**: §27BQ cited the AI-4 commit as `3686cb9`, which the rewrite
+  replaced; it now cites `e5ca4f1`.
+
+## The guard
+
+`scripts/check-commit-attribution.mjs`, wired as the **fourth `ci.yml` job**, `attribution-guard`.
+It reads what the event introduces — a pull request's base commit, or a push's `before` — and fails
+on a forbidden trailer. Four decisions are load-bearing:
+
+* **It checks the author and committer FIELDS, not only the message.** Rule 4's primary object is
+  the author identity: a commit made *as* `Claude Code <noreply@anthropic.com>` with a clean body
+  would pass a message-only check. The named tools are matched as substrings of name or address.
+* **The patterns are line-anchored**, so a message that *discusses* the rule is not a violation.
+  This guard's own commit message depends on it, and it is the same class of defect §27BP records,
+  where another scan caught its own explanatory comment.
+* **The owner's identity and Dependabot's bots are allowed.** Before allowlisting the latter, `main`'s
+  last 2 000 commits were read: `dependabot[bot]` is the **only** bot-shaped identity in them, so the
+  allowlist is a measured fact about this repository rather than a convenience.
+* **A guard that cannot look must not look clean.** A base commit absent from the checkout (the
+  usual cause being a shallow clone) exits **2 — NOT VERIFIED** rather than passing, which is why this
+  is the one job that checks out the full history (`fetch-depth: 0`).
+
+## Verification
+
+* A **self-test on every invocation** (17 controls: the forbidden forms must fire, the owner and
+  Dependabot must not).
+* **exit 0** on the real PR range, `origin/main..HEAD`, 13 commits read.
+* **exit 1** on a throwaway commit **authored by a tool**, and on one carrying the trailer lines —
+  with both kinds reported together as **2 findings across 2 commits**; the throwaway branch was
+  then deleted.
+* **exit 2** against a base commit that is not in the checkout.
+* **CI run `38531435786` on `d2198c0`: four jobs, all green** — `attribution-guard`, `secret-guard`,
+  `server` (the full backend suite in CI's own `mongo:7` container) and `mobile`. The rewrite and the
+  guard are therefore verified by the same pipeline that will judge every later push.
+* Running the guard on its own drafts found **four defects in it**, all fixed and re-verified: the
+  self-test count printed `undefined` (`selfTest()` returns a number and its caller read `.length`);
+  the range label truncated a branch name to `origin/mai`; git's raw `fatal:` was printed beside the
+  guard's own sentence; and **a self-test control asserted the literal `true`** for a tool that was not
+  in the forbidden list — a control that could not fail, which was fixed by adding the tool to the
+  list rather than by weakening the control.
+
+## What is NOT verified, and the limits worth stating
+
+* **A rewrite does not unpublish.** As §27AX already records for the earlier rewrite, GitHub keeps the
+  pre-rewrite objects fetchable through the `refs/pull/*` refs it advertises, so the six messages are
+  clean on the branch and in all future history but are **not erased from GitHub**. The local backup
+  `refs/original/refs/heads/…` is **retained deliberately** at `29748b8`, for the reason §27AX gives.
+* **The identity list is a named list, not rule 4's "any other tool".** That wording is unbounded and a
+  check cannot be; adding a tool means editing the list. Five are named today.
+* **The guard reads commit metadata only.** It cannot tell whether a human or a tool typed a
+  message, and it says nothing about files, branches or pull-request text.
+* The branch's PR was force-pushed to carry the rewrite; anyone holding the old SHAs has a stale
+  checkout, which is the ordinary consequence of rewriting a published branch.
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

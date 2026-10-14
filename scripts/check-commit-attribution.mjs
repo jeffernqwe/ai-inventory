@@ -70,6 +70,31 @@ const ALLOWED_LINES = [
   'Body text mentioning Co-Authored-By: Codebuff as an example is not a trailer line.',
 ];
 
+/**
+ * Rule 4 has a second half the message cannot show: the commit's AUTHOR AND COMMITTER
+ * fields are the primary place a tool gets named as an author, and a message-only check
+ * would miss a commit made *as* `Claude Code <noreply@anthropic.com>` with a clean body.
+ * The named tools are matched as substrings of the name or the address, because those
+ * fields are short and an agent picks its own label.
+ */
+const FORBIDDEN_IDENTITIES = [/codebuff/i, /anthropic/i, /claude/i, /copilot/i, /cursor/i];
+
+/**
+ * The one bot identity that is legitimate here. Dependabot commits real dependency
+ * updates, it is not a coding tool, and the roadmap deliberately KEEPS its trailers
+ * (§27AS). Verified before allowing it: it is the only bot-shaped identity in `main`'s
+ * history, so this allowlist is a fact about the repository rather than a convenience.
+ */
+const ALLOWED_IDENTITIES = [/^dependabot\[bot\]/i];
+
+/** The forbidden tool named by an identity field, or `null`. */
+function forbiddenIdentity(name, email) {
+  const value = `${name} <${email}>`;
+  if (ALLOWED_IDENTITIES.some((re) => re.test(name))) return null;
+  for (const re of FORBIDDEN_IDENTITIES) if (re.test(value)) return re.source;
+  return null;
+}
+
 /** The one matcher both the scan and the self-test use. */
 function forbiddenRuleFor(line) {
   for (const entry of FORBIDDEN_LINES) if (entry.re.test(line)) return entry.rule;
@@ -92,6 +117,21 @@ function selfTest() {
   }
   for (const line of ALLOWED_LINES) {
     controls.push([`must-not-fire: ${JSON.stringify(line)}`, forbiddenRuleFor(line) === null]);
+  }
+  // The identity half, both directions.
+  for (const [name, email] of [
+    ['Claude Code', 'noreply@anthropic.com'],
+    ['Codebuff', 'noreply@codebuff.com'],
+    ['Cursor Agent', 'agent@cursor.com'],
+    ['GitHub Copilot', 'copilot@github.com'],
+  ]) {
+    controls.push([`must-fire identity: ${name} <${email}>`, forbiddenIdentity(name, email) !== null]);
+  }
+  for (const [name, email] of [
+    ['jeffernzxc', 'jefferndullamalinaozxc@gmail.com'],
+    ['dependabot[bot]', '49699333+dependabot[bot]@users.noreply.github.com'],
+  ]) {
+    controls.push([`must-not-fire identity: ${name}`, forbiddenIdentity(name, email) === null]);
   }
   const failed = controls.filter(([, ok]) => !ok);
   if (failed.length) {
@@ -164,21 +204,37 @@ function main() {
   }
 
   const offenders = [];
+  const identities = [];
   for (const sha of shas) {
     const message = git(['log', '-1', '--format=%B', sha]);
     for (const line of message.split('\n')) {
       const rule = forbiddenRuleFor(line);
       if (rule) offenders.push({ sha, line: line.trim(), rule });
     }
+    // `%an`/`%ae` and `%cn`/`%ce` — the author AND the committer, since either field can
+    // name a tool and they are not always the same person.
+    const [an, ae, cn, ce] = git(['log', '-1', '--format=%an%x00%ae%x00%cn%x00%ce', sha]).split('\u0000');
+    for (const [field, name, email] of [
+      ['author', an, ae],
+      ['committer', cn, ce],
+    ]) {
+      const named = forbiddenIdentity(name, email);
+      if (named) identities.push({ sha, field, name, email, named });
+    }
   }
 
-  if (offenders.length) {
+  if (offenders.length || identities.length) {
+    const commits = new Set([...offenders.map((o) => o.sha), ...identities.map((i) => i.sha)]);
     console.error(
-      `[attribution] FAIL — ${offenders.length} forbidden attribution line(s) in ${new Set(offenders.map((o) => o.sha)).size} commit(s):`,
+      `[attribution] FAIL — ${offenders.length + identities.length} forbidden attribution finding(s) in ${commits.size} commit(s):`,
     );
     for (const { sha, line, rule } of offenders) {
       console.error(`[attribution]   ${sha.slice(0, 10)}  ${JSON.stringify(line)}`);
       console.error(`[attribution]     ${rule}`);
+    }
+    for (const { sha, field, name, email, named } of identities) {
+      console.error(`[attribution]   ${sha.slice(0, 10)}  ${field}: ${name} <${email}>`);
+      console.error(`[attribution]     rule 1/4 — a tool is not an author (matched ${named})`);
     }
     console.error(
       '[attribution] CLAUDE.md: the only identity that may appear anywhere in a commit is the owner’s own.',

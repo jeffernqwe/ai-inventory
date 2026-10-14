@@ -24,8 +24,20 @@
 // Coverage is by construction: the model list is `src/models/index.ts`'s own `models`
 // array, so a newly added model is audited without touching this file.
 //
-// Exit code 1 when any declaration and the database disagree, so it can gate a
-// check without anyone parsing output.
+// EXIT CODES, AND THE THREE OUTCOMES THEY MUST KEEP APART — this is the file's
+// contract, because it is meant to gate a check without anyone parsing output:
+//
+//   0  the audit ran and every declaration matches the database
+//   1  the audit ran to COMPLETION and found a declaration/database disagreement
+//   2  NOT VERIFIED — the audit could not complete, so NOTHING was checked
+//
+// Exit 1 is a claim about the database, so it may only ever be the second of those.
+// It used to be the third as well, because the catch-all handler below exited 1 for
+// an unreachable database — and that is the worst false report THIS tool can make,
+// since the remedy a reader then reaches for is `syncIndexes()`, which the paragraph
+// above explains can destroy an index an operator added on purpose. Reproduced for
+// real on 2026-10-14: a `connect ETIMEDOUT` exited 1, reading exactly like drift.
+//
 
 import 'dotenv/config';
 import mongoose from 'mongoose';
@@ -156,12 +168,29 @@ async function main() {
   console.log('[indexes] every declared index matches the database.');
 }
 
+/**
+ * ANY failure on the way to a verdict exits 2 — never 1.
+ *
+ * A connection that could not be opened, a collection that could not be listed and a
+ * fault inside this script are all NOTHING-WAS-CHECKED, because `main()` reaches its
+ * `process.exit(1)` only after every read has succeeded and the drift summary has
+ * been printed. So the only way to exit 1 from here would be to claim a finding this
+ * run never made.
+ *
+ * Exit 2 is the convention this repository already uses for exactly this state:
+ * `verify:demo` exits 2 for "NOT VERIFIED — the database could not be reached" and
+ * states outright that "this is not a data violation", and `audit-access.mjs` exits 2
+ * as well. Guide 6 documents that reading. This script was the one check that did not
+ * follow it, and the message below is deliberately the same shape so an operator who
+ * has seen one has seen both.
+ */
 main().catch(async (err) => {
-  console.error('[indexes] audit failed:', err?.message ?? err);
+  console.error(`[indexes] NOT VERIFIED (exit 2) — ${err?.message ?? err}`);
+  console.error('[indexes] nothing was checked, so this says nothing about the database.');
   try {
     await mongoose.disconnect();
   } catch {
     // Nothing useful to add; the audit is already failing.
   }
-  process.exit(1);
+  process.exit(2);
 });

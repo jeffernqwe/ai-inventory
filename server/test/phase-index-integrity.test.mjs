@@ -302,4 +302,91 @@ dbSuite('Index integrity — declared indexes exist in the database', dbOk, () =
       );
     });
   });
+
+  describe('the audit tool tells a FINDING apart from a FAILURE TO CHECK', () => {
+    /**
+     * `audit:indexes` exists to gate a check on its exit code alone, and its documented
+     * contract is that 1 means "the declarations and the database DISAGREE". A connection
+     * timeout must therefore never exit 1: that states a finding the run never made, and
+     * the remedy a reader then reaches for is `syncIndexes()`, which the script's own
+     * header explains can DROP an index an operator added on purpose — so the wrong code
+     * here can point at the destructive repair. It exits 2 instead, which is the
+     * convention `verify:demo` and `audit-access.mjs` already use for "nothing was
+     * checked".
+     *
+     * Reproduced before the fix, on 2026-10-14: a `connect ETIMEDOUT` exited 1, which is
+     * indistinguishable from drift to anything reading the code rather than the output.
+     */
+    const auditSource = readSource('scripts/audit-indexes.mjs');
+
+    /** The top-level failure handler's own source, or `null` when it cannot be found. */
+    const failureHandler = () => {
+      const at = auditSource.indexOf('main().catch');
+      return at === -1 ? null : auditSource.slice(at);
+    };
+
+    /**
+     * The source with comment-only lines removed, so PROSE about an exit code cannot be
+     * counted as one.
+     *
+     * This filter is not a nicety, and it was added after the first version of the
+     * assertion below FAILED on its own documentation: `audit-indexes.mjs` explains its
+     * exit codes in comments, and the sentence "`main()` reaches its `process.exit(1)`"
+     * matched the pattern, so the guard reported two exit-1 calls where there is one. A
+     * scan that reads text rather than intent has to say which text it means.
+     */
+    const codeLines = () =>
+      auditSource.split('\n').filter((line) => {
+        const trimmed = line.trim();
+        return !trimmed.startsWith('//') && !trimmed.startsWith('*') && !trimmed.startsWith('/*');
+      });
+
+    it('★ the scan is live — both things it looks for are actually in the file', () => {
+      // The positive control. Without it, a rename that made either extraction return
+      // nothing would turn the assertions below into statements about an empty string,
+      // and they would pass for the wrong reason.
+      assert.ok(failureHandler(), 'the top-level failure handler must exist');
+      assert.ok(
+        auditSource.includes('declaration/database disagreements'),
+        'the drift summary must exist, because the exit-1 assertion is anchored to it',
+      );
+      assert.ok(
+        codeLines().some((line) => /process\.exit\(\d\)/.test(line)),
+        'at least one real exit call must survive the comment filter, or the scan is vacuous',
+      );
+    });
+
+    it('★ exits 2, and never 1, when it could not check anything', () => {
+      const handler = failureHandler();
+      assert.ok(handler, 'the top-level failure handler must exist');
+      assert.match(handler, /process\.exit\(2\)/, 'an uncompleted audit must exit 2 (NOT VERIFIED)');
+      assert.doesNotMatch(
+        handler,
+        /process\.exit\(1\)/,
+        'a failure to check must never be reported as a declaration/database disagreement',
+      );
+    });
+
+    it('★ exits 1 from exactly one place, and that place is the drift verdict', () => {
+      // Exactly two exits, in this order: the drift verdict inside `main()`, then the
+      // NOT VERIFIED handler. A third would be a new outcome and must be a decision
+      // rather than an accident, so this fails and says so.
+      const exits = codeLines().flatMap((line) =>
+        [...line.matchAll(/process\.exit\((\d)\)/g)].map((hit) => hit[1]),
+      );
+      assert.deepEqual(exits, ['1', '2'], 'expected the drift verdict and the NOT VERIFIED handler only');
+
+      const code = codeLines().join('\n');
+      const driftAt = code.indexOf('process.exit(1)');
+      const countAt = code.indexOf('declaration/database disagreements');
+      assert.ok(
+        countAt !== -1 && driftAt > countAt,
+        'exit 1 must come AFTER the disagreement count is printed, so it can only report a completed audit',
+      );
+    });
+
+    it('and the header states all three codes where a reader will meet them', () => {
+      assert.match(auditSource, /2\s+NOT VERIFIED/, 'the exit contract must be documented in the header');
+    });
+  });
 });

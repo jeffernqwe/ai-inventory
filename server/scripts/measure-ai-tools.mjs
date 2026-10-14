@@ -63,7 +63,15 @@ function argsFor(toolName, ctx) {
     case 'searchProducts':
       return {};
     case 'getProduct':
-      return { sku: sampleProduct.sku };
+      // BY `id`, NOT BY `sku`. The rule this function opens with is "derive ids from real
+      // rows so the tool does its real work" — and `sku` is the one field a real row may
+      // legitimately not have, so the old form silently degraded to `{ sku: undefined }`
+      // on a SKU-less tenant. The tool answered `TOOL_INVALID_ARGUMENTS`, `min` came back
+      // 0.0 ms, and the report showed a number for a call that never ran: a meaningless
+      // entry in the one table the owner uses to compare accounts. `_id` always exists,
+      // so this measures the real single-product path (lookup + its stock rows) on any
+      // dataset, with or without codes.
+      return { id: String(sampleProduct._id) };
     case 'getInventory':
       return {};
     case 'getLowStockProducts':
@@ -104,7 +112,11 @@ async function main() {
   if (!owner) fail(`business ${businessId} has no OWNER user.`);
 
   // A real row and a real location, so no tool is handed a fabricated id.
-  const sampleProduct = await Product.findOne({ businessId }).select('sku').lean();
+  // `_id` AS WELL AS `sku`, and the id is the one that is always usable. A tenant seeded
+  // by `seed:accounts` deliberately has NO SKUs and NO barcodes — that is what leaves the
+  // app's own barcode generation something to do — so a sample product there has `sku:
+  // undefined`, and `getProduct` requires exactly one of id/sku/barcode. See `argsFor`.
+  const sampleProduct = await Product.findOne({ businessId }).select('_id sku').lean();
   const location = await Location.findOne({ businessId }).select('_id').lean();
   if (!sampleProduct || !location) fail('the tenant has no products or locations to measure against.');
 

@@ -43,9 +43,10 @@ const TIMEOUT_CODES = ['NETWORK_TIMEOUT', 'AI_TIMEOUT'];
 
 /**
  * Maps a failed send onto a friendly, secret-free client message. The server
- * may answer 503 (AI not configured), 504 (turn deadline), 502 (provider down)
- * or 429 (rate limit) — all normal for an assistant that reads data through the
- * backend.
+ * may answer 503 (AI not configured), 504 (turn deadline), 502 (provider down),
+ * 429 `AI_RATE_LIMITED` (this member is sending too fast) or 429
+ * `AI_QUOTA_EXCEEDED` (the assistant's allowance is spent) — all normal for an
+ * assistant that reads data through the backend.
  *
  * Exported because the ordering below is the fix, not an implementation detail:
  * a timeout is ALSO a `status === 0` error, so the previous code — which tested
@@ -53,6 +54,12 @@ const TIMEOUT_CODES = ['NETWORK_TIMEOUT', 'AI_TIMEOUT'];
  * "Cannot reach the server" and sent the user to check a connection that was
  * working (ISS-21 / RC-3). `__tests__/ai1-timeout-copy.test.ts` pins both
  * directions of that distinction.
+ *
+ * AI-6 adds the other half of the same rule, one layer up: the two 429s must
+ * read differently, because their remedies are opposites. `AI_RATE_LIMITED`
+ * clears in seconds and says so; `AI_QUOTA_EXCEEDED` is a spent allowance that
+ * waiting a moment cannot refill, so it must NOT borrow the "temporarily
+ * unavailable / try again in a moment" sentence it used to arrive as.
  */
 export function sendErrorMessage(err: unknown): string {
   const e = (err ?? {}) as SendErrorLike;
@@ -64,6 +71,11 @@ export function sendErrorMessage(err: unknown): string {
   }
   if (e.code === 'AI_RATE_LIMITED') {
     return "You're sending messages too quickly — wait a moment and try again.";
+  }
+  // AI-6 — a spent allowance, not a fault and not something a moment's wait
+  // fixes. Reported before the network check like every other code.
+  if (e.code === 'AI_QUOTA_EXCEEDED') {
+    return 'The assistant has reached its usage limit for now. Please try again later.';
   }
   // Checked BEFORE `isNetwork` on purpose — see this function's doc comment.
   if (e.code && TIMEOUT_CODES.includes(e.code)) {

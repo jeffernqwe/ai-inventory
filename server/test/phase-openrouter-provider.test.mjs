@@ -24,7 +24,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 
 import { aiConfig } from '../src/services/ai/aiConfig.ts';
-import { AiNotConfigured, AiProviderError } from '../src/services/ai/aiErrors.ts';
+import { AiNotConfigured, AiProviderError, AiQuotaExceeded } from '../src/services/ai/aiErrors.ts';
 import { createOpenrouterProvider } from '../src/services/ai/providers/openrouterProvider.ts';
 import { providerRequiredEnv, selectProvider } from '../src/services/ai/providers/index.ts';
 import { validateProductionConfig } from '../src/config/validateConfig.ts';
@@ -523,13 +523,22 @@ unitSuite('OpenRouter provider — Anthropic /v1/messages wire mapping', () => {
     );
   });
 
+  // AI-6 SPLIT. This test used to assert one thing about five statuses: every
+  // non-2xx becomes an `AiProviderError`. 429 and 402 no longer do, deliberately —
+  // the gateway was not failing, it was refusing because an allowance was spent,
+  // and reporting that as a provider outage produced *"temporarily unavailable,
+  // please try again in a moment"*, an action that cannot refill a spent
+  // allowance (§27BF measured it as the DOMINANT failure at this tier).
+  //
+  // Coverage is therefore not reduced: the two statuses moved to the test below,
+  // where they are asserted more strongly — the class AND the code — while the
+  // key-leak check runs in both. `phase06-ai-wire.test.mjs` (protected) still
+  // pins the same contract for 401, and it never sent a 429 or a 402.
   it('maps upstream failures to safe AiProviderErrors that never echo the key', async () => {
     const provider = providerFor(`http://127.0.0.1:${port}/api`);
 
     for (const [status, contentType, raw] of [
       [401, 'application/json', JSON.stringify({ error: { message: `bad key ${TEST_KEY}` } })],
-      [429, 'application/json', JSON.stringify({ error: { message: 'rate limit exceeded' } })],
-      [402, 'application/json', JSON.stringify({ error: { message: 'insufficient credits' } })],
       [500, 'text/html', '<!DOCTYPE html><html>gateway</html>'],
       [200, 'text/event-stream', 'data: {"type":"message_start"}\n\n'],
     ]) {
@@ -539,7 +548,36 @@ unitSuite('OpenRouter provider — Anthropic /v1/messages wire mapping', () => {
           provider.complete({ system: 's', messages: [{ role: 'user', content: 'hi' }], tools: [] }),
           (err) => {
             assert.ok(err instanceof AiProviderError, `${status} must become an AiProviderError`);
+            assert.ok(!(err instanceof AiQuotaExceeded), `${status} is an outage, not a reached limit`);
             assert.ok(!err.message.includes(TEST_KEY), 'the key must never reach the caller');
+            return true;
+          }
+        )
+      );
+    }
+  });
+
+  it('maps a REACHED LIMIT (429 / 402) to an AiQuotaExceeded, never as an outage', async () => {
+    const provider = providerFor(`http://127.0.0.1:${port}/api`);
+
+    for (const [status, message] of [
+      [429, 'rate limit exceeded'],
+      [402, 'insufficient credits'],
+    ]) {
+      responder = () => ({
+        status,
+        contentType: 'application/json',
+        raw: JSON.stringify({ error: { message: `${message} ${TEST_KEY}` } }),
+      });
+      await quiet(() =>
+        assert.rejects(
+          provider.complete({ system: 's', messages: [{ role: 'user', content: 'hi' }], tools: [] }),
+          (err) => {
+            assert.ok(err instanceof AiQuotaExceeded, `${status} must become an AiQuotaExceeded`);
+            assert.equal(err.code, 'AI_QUOTA_EXCEEDED', `${status} must carry the quota code`);
+            assert.ok(!err.message.includes(TEST_KEY), 'the key must never reach the caller');
+            // The sentence must not prescribe a wait that cannot help.
+            assert.doesNotMatch(err.message, /in a moment/i);
             return true;
           }
         )

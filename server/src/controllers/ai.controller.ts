@@ -17,7 +17,13 @@ import { optionalObjectId, requiredString, isObjectId } from '../utils/validate.
 import { invalidId, notFound, throwValidation } from '../utils/errors.ts';
 import ApiError from '../utils/ApiError.ts';
 import { aiConfig } from '../services/ai/aiConfig.ts';
-import { AiAbandoned, AiNotConfigured, AiProviderError, AiTimeout } from '../services/ai/aiErrors.ts';
+import {
+  AiAbandoned,
+  AiNotConfigured,
+  AiProviderError,
+  AiQuotaExceeded,
+  AiTimeout,
+} from '../services/ai/aiErrors.ts';
 import { runAiChat, type ChatTurn } from '../services/ai/ai.service.ts';
 
 /**
@@ -102,6 +108,23 @@ function mapAiFailure(err: unknown) {
   // request the client aborted used to leave no server-side trace whatsoever.
   if (err instanceof AiAbandoned) {
     return new ApiError(499, 'The request was cancelled before the assistant answered.', 'AI_ABANDONED');
+  }
+  // AI-6 — the gateway refused because a LIMIT was reached, not because anything
+  // failed. 429 (not 502) and its own code and sentence, because the correct
+  // action is the opposite of the one a 502 asks for: a 502 says "try again in a
+  // moment", and a spent allowance cannot be waited out that way. This is the
+  // case the device run measured as the DOMINANT failure at this tier (§27BF),
+  // and it used to arrive as a provider outage.
+  //
+  // It is deliberately distinct from the route's own `429 AI_RATE_LIMITED`: that
+  // one says *this member* is sending too fast and clears in seconds, while this
+  // one says the assistant's allowance is spent and does not.
+  if (err instanceof AiQuotaExceeded) {
+    return new ApiError(
+      429,
+      'The AI assistant has reached its usage limit. Please try again later.',
+      'AI_QUOTA_EXCEEDED'
+    );
   }
   if (err instanceof AiProviderError) {
     return new ApiError(502, 'The AI service is temporarily unavailable. Please try again in a moment.', 'AI_UNAVAILABLE');

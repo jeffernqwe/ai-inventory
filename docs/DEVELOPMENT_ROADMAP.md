@@ -10832,10 +10832,15 @@ left exactly as they were.
 * **The threshold that hid the defect is still 40 by default** in the ad-hoc ink tool used for these passes. It is
   fine for bright text on dark surfaces, which is what it was written for, and it is *not* a project tool — but the
   lesson is recorded here so a future pass does not repeat the reading.
-* **The conversation-list timestamp is stale after a new turn** (it showed 17:02 for a turn at 17:14 until the list was
-  re-entered). Seen twice in this pass, **not investigated and not fixed** — recorded so it is not rediscovered as a
-  mystery, and left out of this increment deliberately because it is a different surface with its own refresh
-  semantics.
+* **A continued conversation never moves up the list, and its displayed time never advances.** Observed on the phone
+  (a conversation continued at 17:14 still listed as 17:02) and then traced to its mechanism, so it is a recorded
+  finding rather than a mystery: `AIConversation` carries `timestamps: true` and the list sorts on
+  `{ updatedAt: -1, _id: -1 }`, but **no write path touches a conversation when a message is added** — the only two
+  writes are `AIConversation.create(...)`, so `updatedAt` is frozen at creation and "newest first" is in practice
+  "newest *created* first". The Phase 20F index comment (§20F/M-5) already anticipated the difference: *"the two fields
+  hold equal values today only because a conversation is written once and never updated; the first update path would
+  make that difference real."* **Deliberately NOT fixed here** — it is a server-side behaviour change (advancing
+  `updatedAt` on a turn) with its own decision to make about ordering semantics, and this increment is mobile-only.
 
 # 28. Phase Gate System
 

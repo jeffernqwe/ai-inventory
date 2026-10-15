@@ -406,6 +406,17 @@ stay open are
 `@react-native-firebase/app`, `@react-native-firebase/auth`, `@react-native-google-signin/google-signin`
 and `expo` itself, whose versions this project chooses deliberately.
 
+**The server minor-and-patch group was taken on 2026-10-15** — `express` 5.2.1 → 5.3.0, `dotenv` 18.0.7 →
+18.0.8, `mongoose` 9.11.1 → 9.11.2, `@types/node` 26.6.4 → 26.6.5 and `typescript-eslint` 8.71.1 →
+8.71.2 — verified green (`tsc`, `eslint`, both module-graph checks, the full suite, `npm ci` and the boot
+smoke) and recorded in roadmap **§27CC**. It is **not** a security fix and is not described as one: the CVEs
+express 5.3.0's release notes name were **already closed by the lockfile** (`qs` 6.16.0 and `proxy-addr`
+2.0.8 were already resolved), so what moved is the *declared* floor. **Nothing was taken in `mobile/`** —
+§27CA records why: three of its five advisories have **no patched release published upstream at all**, and
+the one patch that exists breaks its own consumer. The runtime floor is unchanged (express 5.3.0 requires
+Node `>= 18`, below this project's `>= 24`), and the install step is unchanged (`npm ci` ⇒ exit 0, the
+lockfile being in sync being the thing that check proves).
+
 **Records are proportional:** a security, architecture, authorization, schema, route,
 dependency-policy or phase-level change gets a dated record; a routine feature or fix is
 documented by its pull request description, its tests and the code. Do not restate what the

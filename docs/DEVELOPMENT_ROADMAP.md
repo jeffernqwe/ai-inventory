@@ -11549,6 +11549,131 @@ file hash before the run — and the suite reported **1,976** strict and **2,412
 
 Mobile **63 suites / 839 tests / 0 failures**, `tsc --noEmit` and `eslint .` clean; no server change.
 
+# 27CC. The server minor-and-patch group taken — five patches, and mobile deliberately held (2026-10-15)
+
+*(**Renumbered to 27CC when it landed**, and it was 27CB on its own branch. The note that used to sit here
+argued the number was free on both trees, because §27BC–§27CA would land with PR #74 — and that held right up
+to the moment PR #74 also carried a **§27CB of its own**: the Markdown word-boundary guard record. Two sections
+cannot share a number, so the later-landing record yields, and this is the correction of its own earlier
+assumption rather than an omission. `CLAUDE.md` points here.)*
+
+The routine track of the dependency policy (§27CA) was taken the day after it was verified: five in-range
+minor-and-patch bumps in one grouped change. More important than the versions is the part that is *not*
+attached to them — no claim this entry cannot support.
+
+| package | before | after | surface it touches |
+|---|---|---|---|
+| `express` | 5.2.1 | 5.3.0 | the HTTP framework |
+| `dotenv` | 18.0.7 | 18.0.8 | environment loading, `import 'dotenv/config'` |
+| `mongoose` | 9.11.1 | 9.11.2 | the MongoDB data layer |
+| `@types/node` | 26.6.4 | 26.6.5 | types only |
+| `typescript-eslint` | 8.71.1 | 8.71.2 | lint only |
+
+## It is not a security fix, and is not recorded as one
+
+express 5.3.0's release notes name CVEs — `qs` CVE-2026-2391, CVE-2026-82417 and CVE-2026-82562, and
+`proxy-addr` CVE-2026-90711 — and this entry could easily have been written as though the bump closed them.
+**It did not.** They were already closed on the installed tree by *range resolution*: express 5.2.1 declares
+`qs ^6.14.0` and `proxy-addr ^2.0.7`, and the lockfile had already resolved **qs 6.16.0** and
+**proxy-addr 2.0.8** — which is why `npm audit` read **0** server advisories before this change and **0**
+after it. What the bump moves is the *declared floor*: express 5.3.0 declares `qs ^6.16.0`,
+`proxy-addr ^2.0.8` and `content-type ^2.0.0`, so a future resolve cannot drift below the patched versions.
+That is a real benefit and a small one, and the distinction is written down because "this update fixes
+vulnerabilities" is exactly the kind of claim nobody re-checks later.
+
+## Compatibility, measured rather than assumed
+
+* **The runtime floor does not move.** express 5.3.0 declares `engines.node >= 18`, which is below this
+  project's own `>= 24` (`.nvmrc`, `server/package.json`), so no supported Node version changes. SDK 58's
+  **Node 24.3+** prerequisite (§27CA) is untouched here and remains the *first* step of that train.
+* **The install step does not move.** `npm ci` on the bumped tree ⇒ **exit 0**, the check that
+  `package.json` and the lockfile agree — and the first thing CI runs. The lockfile diff is five version
+  bumps and **no package added**; its only structural change is three nested `content-type` copies collapsing
+  into the hoisted **2.1.0**, which is express's own `content-type` 2.x move.
+* **`dotenv`'s one risky behaviour was re-measured, not inherited.** §27AP took the `dotenv` 18 line only
+  after measuring it, because its changelog removed *preloading* while this server's entire environment
+  loading is `import 'dotenv/config'`. Re-run on **18.0.8**: the exports map still publishes `./config` and
+  `./config.js`, and the preload executed from `server/` against the real `.env` loaded **5 of 5** sampled
+  keys (`MONGODB_URI`, `JWT_SECRET`, `PORT`, `NODE_ENV`, `OPENROUTER_API_KEY` — reported as presence, never
+  as values).
+* **Both express surfaces 5.3.0 changes are surfaces this application does not use.** It changes `res.send`'s
+  `Content-Length`/`Transfer-Encoding` handling, and the `Content-Disposition` emitted by
+  `res.download`/`res.attachment`/`res.sendFile`. Grepping `server/src/` for `sendFile`, `.attachment(`,
+  `.download(` and `res.send(` returns **nothing**, so no route can observe either change. The one express
+  surface that *is* used — `app.set('trust proxy', …)` at `src/app.ts:82`, the `proxy-addr` path — stays on
+  the same resolved **2.0.8**; only its declared floor moves.
+
+## Evidence
+
+Verified against the bumped versions, not merely installed. **Every figure below was re-measured on this
+landing's own tree**, because the change was cherry-picked onto `main` after PR #74 merged: the counts are
+larger than the ones the change reported on its own branch (**1323 tests / 187 suites** there, where the AI
+suites did not exist yet), and it is the same five versions under test.
+
+* **Full server suite, full mode: 1405 tests / 205 suites / 0 failures / 0 skipped** (~269 s). Two Atlas
+  `MongoDB connection lost` transients appeared during the run and recovered — **0 failures and 0 skipped is
+  what the run ended with**, and the transient is named rather than smoothed over.
+* **`npm ci` on the bumped tree ⇒ exit 0** — the check that `package.json` and the lockfile agree, and the
+  first thing CI runs.
+* Unit mode **786 tests / 179 suites — 749 pass / 0 fail / 37 deliberately skipped (`TEST_MODE=unit`)**:
+  module resolution holds on a from-scratch tree, which is the failure a lockfile-only install can introduce.
+* `tsc --noEmit` **0** · `eslint .` **0** · `check:extensions` **0** and `check:specifiers` **0** (379
+  modules, 1839 relative specifiers — 992 literal, 847 by candidate extension — 0 stale, 0 unresolved) ·
+  `npm audit` **0** · secret guard **22/22 controls**, 463 files scanned, **0**.
+* **Boot smoke, and it answered both ways on this tree — reported that way rather than as one clean number.**
+  `/api/health/live` = **200** every time (it is dependency-free by design). `/api/health/ready` = **200 on the
+  first poll** in one boot with `db: "connected"` and **0** reconnects, and = **503 for a full 40 s** in two
+  other boots during the same session while the driver's state flapped — the same Atlas instability that put
+  **44** `MongoDB connection lost` lines inside the suite run above. Readiness is a local check of the driver's
+  state, so a 503 there is the dependency's state, not a boot failure and not something these bumps caused;
+  the four versions that touch the server's startup path (express, dotenv, mongoose, `@types/node`) all booted
+  and served. **SIGTERM ⇒ status 143** — it terminated on the signal inside the window, not the 137 that means
+  force-killed.
+
+**One transient is recorded rather than smoothed over.** The *first* boot smoke answered **503** with
+`db: disconnected`, because the Atlas cluster stopped answering server selection for ~5 s at 08:03:58 —
+minutes after the same suite had connected to it. A retry at 08:05:18 read ready/connected. That is the
+recurring `ReplicaSetNoPrimary` transient this roadmap has recorded before, not a consequence of the express
+bump — but it is why one smoke failed and the next one passed, and reporting it as one clean pass would have
+been false.
+
+## Why `mobile/` was not touched
+
+§27CA's disposition stands unchanged and is not restated here: of mobile's five advisories, three have **no
+patched release published upstream at all** (`braces`, `node-forge`, `sprintf-js`), one is **build-time
+only** (`uuid`, whose four-major patch needs a native build to verify), and the only one on a shipped path
+(`decode-uri-component`, the deep-link query parser) has a patch that **breaks its own consumer** and was
+measured, then refused. Nothing in `mobile/` can be improved by an update this project can perform today, so
+nothing in `mobile/` changed — and its SDK-pinned packages continue to move only with an Expo SDK upgrade
+through `npx expo install --fix`.
+
+## The maintenance procedure, and where it lives
+
+* **The policy** is `.github/dependabot.yml` — minor and patch only, grouped per ecosystem, at most two open
+  pull requests, weekly, with every Expo-SDK-pinned mobile package excluded by name; **security updates are
+  exempt from all of it**, bypassing both the pull-request limit and the `ignore` rules. CLAUDE.md states the
+  same policy in prose, and the two are meant to be read together.
+* **The gates** are read by `node scripts/check-upgrade-watches.mjs` — read-only and dependency-free, and
+  deliberately **outside CI because it needs the network** (§27AQ). It reports `READY`/`DEFERRED` per watch
+  and proves its own decision function against fixtures before reporting, so a mis-read candidate is a
+  failing control rather than a false `READY`.
+* **The majors** — TypeScript 7, jest 30, eslint 10, the SDK 58 train and the `uuid` chain — are tracked in
+  issue #32 against the failure that blocks each, and are taken one at a time instead of standing open as
+  permanently red pull requests.
+* **The order for the next take**, so it is not re-derived: read the advisory's chain in `npm ls` before
+  trusting its severity, take in-range patches as a single grouped change, run the full suite in full mode
+  plus `npm ci` and the boot smoke, and record what is **not** closed together with the reason.
+
+## What is NOT verified
+
+* **No native build and no device run.** This is a server-side, library-level change; the boot smoke and the
+  HTTP-exercising suites are the strongest evidence available in this environment, and neither is a device.
+* **`uuid`'s chain remains classified by topology rather than by measurement** (§27CA). Nothing here changes
+  that.
+* **Production was not touched.** The bump reaches production when a deployment installs the new lockfile;
+  nothing here deployed anything, and no dependency step was run against a production database.
+
+
 
 # 28. Phase Gate System
 

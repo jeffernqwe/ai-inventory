@@ -765,13 +765,25 @@ export const aiApi = {
    * allows a whole turn up to AI_TURN_DEADLINE_MS (60 s) because the model may
    * need several tool rounds, so a 15 s client abort killed answers the server
    * was still producing and then blamed the network (ISS-21).
+   *
+   * AI-9 — the one route whose caller may also STOP it. The signal is passed
+   * straight through to the transport, which reports that abort as its own code
+   * (`REQUEST_CANCELLED`) rather than as a timeout, so the screen can tell "the
+   * member stopped" from "we gave up waiting". The server sees the closed
+   * connection and ends the turn (`499 AI_ABANDONED`) instead of running it to
+   * its deadline, so a stopped turn stops costing a model call.
    */
-  chat: (token: string, { conversationId, message }: { conversationId?: string | null; message: string }): Promise<ApiResponse> =>
+  chat: (
+    token: string,
+    { conversationId, message }: { conversationId?: string | null; message: string },
+    options: { signal?: AbortSignal } = {},
+  ): Promise<ApiResponse> =>
     apiFetch('/api/ai/chat', {
       token,
       method: 'POST',
       body: { conversationId, message },
       timeoutMs: AI_REQUEST_TIMEOUT_MS,
+      signal: options.signal,
     }),
 };
 

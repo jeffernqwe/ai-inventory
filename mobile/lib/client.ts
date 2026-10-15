@@ -63,6 +63,23 @@ export class ApiError extends Error {
 }
 
 /**
+ * AI-9 — the CALLER cancelled its own request, and that is not a failure.
+ *
+ * A user-initiated abort reaches `fetch` the same way this client's own timeout
+does (both abort the same `AbortController`, and both surface as an
+ * `AbortError`), so without a distinct code the transport would report a member
+ * changing their mind as `NETWORK_TIMEOUT` — "the assistant took too long" —
+ * which is a sentence about a problem they do not have, and one that no retry
+ * could ever satisfy. The two are separated by asking *whose* abort fired: the
+ * caller's signal is the only thing that can set `REQUEST_CANCELLED`.
+ *
+ * It is deliberately NOT a network error either (`isNetwork` is `status === 0`,
+ * which is true here): a stop is a decision, not an outage, and a screen that
+ * treats it as one sends the member to check a connection that was working.
+ */
+export const REQUEST_CANCELLED = 'REQUEST_CANCELLED';
+
+/**
  * Phase 26A: notified whenever a request that CARRIED a token was refused on
  * authentication grounds (401, or 403 for a disabled account). The listener
  * decides what that means — this module holds no policy — and `lib/auth.tsx`
@@ -113,6 +130,18 @@ export interface ApiFetchOptions {
    * fires.
    */
   temporarySession?: boolean;
+  /**
+   * AI-9 — the caller's own cancellation.
+   *
+   * Supplied by a screen that lets the member STOP something slow (the AI
+   * assistant's turn is budgeted 75 s on this side and 60 s on the server).
+   * Aborting it rejects with the `REQUEST_CANCELLED` code above, which is
+   * distinct from this client's `NETWORK_TIMEOUT` on purpose.
+   *
+   * It is the only way a request can end early at the caller's request, so every
+   * existing caller that passes nothing keeps the behaviour it had.
+   */
+  signal?: AbortSignal;
 }
 
 function toQuery(params?: QueryParams | null): string {
@@ -278,7 +307,7 @@ export async function apiFetch<T = unknown>(path: string, options: ApiFetchOptio
 
 async function apiFetchAttempt<T = unknown>(
   path: string,
-  { method = 'GET', token, body, params, temporarySession = false, timeoutMs }: ApiFetchOptions,
+  { method = 'GET', token, body, params, temporarySession = false, timeoutMs, signal }: ApiFetchOptions,
   isRetry: boolean,
 ): Promise<T> {
   let effectiveToken = token ?? null;
@@ -306,6 +335,27 @@ async function apiFetchAttempt<T = unknown>(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), budgetMs);
 
+  // AI-9 — ONE controller, two reasons to abort, and the reason is read back at
+  // the failure site below. The caller's signal is FORWARDED into this controller
+  // rather than passed to `fetch` beside it, because a `fetch` can only be given
+  // one signal: replacing this one would silently drop the timeout, and racing two
+  // would make the losing one unstoppable. Forwarding keeps a single abort path
+  // that both the budget and the member can pull.
+  const callerSignal = signal ?? null;
+  const onCallerAbort = () => controller.abort();
+  if (callerSignal) {
+    // Already aborted before the request began: abort now rather than fetch a
+    // request nobody wants. (`abort()` on an already-aborted controller is a
+    // no-op, so the immediate case and the later one share one handler.)
+    if (callerSignal.aborted) controller.abort();
+    else callerSignal.addEventListener('abort', onCallerAbort);
+  }
+  /** Releases the timer and the caller's listener on every exit path. */
+  const releaseRequest = (): void => {
+    clearTimeout(timer);
+    callerSignal?.removeEventListener('abort', onCallerAbort);
+  };
+
   let res: Response;
   try {
     res = await fetch(`${API_URL}${path}${toQuery(params)}`, {
@@ -315,13 +365,18 @@ async function apiFetchAttempt<T = unknown>(
       signal: controller.signal,
     });
   } catch (err) {
-    clearTimeout(timer);
+    releaseRequest();
     if (isAbortError(err)) {
+      // WHOSE abort this was decides what the member is told. The caller's own
+      // signal can only be aborted by the caller, so it wins when both are set.
+      if (callerSignal?.aborted) {
+        throw new ApiError(0, REQUEST_CANCELLED, 'The request was cancelled.');
+      }
       throw new ApiError(0, 'NETWORK_TIMEOUT', 'The request timed out. Check your connection and try again.');
     }
     throw new ApiError(0, 'NETWORK_ERROR', 'Cannot reach the server. Check your connection and try again.');
   }
-  clearTimeout(timer);
+  releaseRequest();
 
   const data = await readJson(res);
   if (res.status >= 200 && res.status < 300) return data as T;
@@ -363,7 +418,9 @@ async function apiFetchAttempt<T = unknown>(
         path,
         // `timeoutMs` is carried across the retry: a recovered request must get
         // the same budget its caller asked for, not silently revert to 15 s.
-        { method, token: refreshed, body, params, temporarySession, timeoutMs },
+        // `signal` is carried for the same reason in the other direction: a
+        // retried request must still be stoppable by the caller who asked for it.
+        { method, token: refreshed, body, params, temporarySession, timeoutMs, signal },
         true,
       );
     }

@@ -165,6 +165,17 @@ export default function ProductDetailScreen() {
    * uses, so printing and sharing produce **one** layout instead of two. Passing
    * only `html` would page the label at `expo-print`'s default (US Letter, 612×792),
    * which is a different document from the 595×340 label the share sheet offers.
+   *
+   * MEASURED 2026-10-15 (Android, OPPO CPH1969, expo-print 57.0.2) — and the reason the
+   * note above is about the DOCUMENT while this one is about the PAGE: the print dialog's
+   * paper size is the print service's, not this app's. Saving this action's output gave
+   * `MediaBox [0 0 612 792]`, and so did a deliberate experiment that generated the label
+   * PDF first and printed THAT file (`printAsync({ uri })`), which means the page size is
+   * not something expo-print can set here: `getAttributesFromOptions` builds the print job
+   * from `orientation` and margins alone, and `UNKNOWN_PORTRAIT` is precisely "let the
+   * service or the user choose". What carries the geometry is the file `Share PDF` writes
+   * (`MediaBox [0 0 594.96 339.12]`, measured on the same device), so a label printer wants
+   * that PDF, or a media size chosen in the dialog. Recorded in roadmap §27CE.
    */
   async function onPrintLabel(): Promise<void> {
     if (busyLabel) return;

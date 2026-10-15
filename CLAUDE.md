@@ -408,6 +408,26 @@ stay open are
 `@react-native-firebase/app`, `@react-native-firebase/auth`, `@react-native-google-signin/google-signin`
 and `expo` itself, whose versions this project chooses deliberately.
 
+**Device measurements on 2026-10-15, and one correction of the record** (roadmap **§27CE**) — no production behaviour
+change: the diff is 11 comment lines and the one experiment it describes was measured and then **reverted**. Two open
+device items are settled as far as this hardware allows. **ISS-25's last unmeasured shape is closed on hardware:** the
+stored six-column table renders as **one card per row** — title **647 px** (the full bubble), labels **288 px**, values
+**359 px**, all three rows carrying all five lines, and **zero** pipes, rules, `**`, `###` or `\frac` anywhere in the
+dump. **ISS-13's device half is measured and splits in two:** the artifact `Share PDF` writes is
+`/MediaBox [0 0 594.95996 339.12]` — exactly the 595×340 label page — while the print dialog's sheet is **612×792**
+(US Letter) and **is not the app's to set**, because expo-print's Android module builds the print job from `orientation`
+and margins only (`UNKNOWN_PORTRAIT` = "the service or the user decides"), which is also why the eight guard cases can
+pin the arguments and never the page. The obvious remedy — generate the label PDF and print *that* file — was tried on
+the device and produced the same Letter sheet, so it was **reverted rather than shipped**; a label printer wants the
+shared PDF, or a media size chosen in the dialog. **The correction matters more than either measurement:** an earlier
+attempt in this session explained "zero requests reached the local backend" as the installed build talking to the
+deployed backend, and that was **wrong** — `adb shell uiautomator dump` was being read back through paths Git Bash and
+Node disagree about (`/sdcard/…` mangled; Node's `/tmp` is `C:\tmp`, the shell's is `AppData\Local\Temp`), so every
+"screen" was a **stale file** and the app was in fact sitting on the **Expo dev launcher**. Two rules this leaves:
+a device reading is evidence only once a **reload is proven** (Metro `Bundled … (1 module)`), since the first attempt at
+the experiment silently measured the old code; and an absence of evidence is never evidence about the system until the
+instrument is known good.
+
 **The server minor-and-patch group was taken on 2026-10-15** — `express` 5.2.1 → 5.3.0, `dotenv` 18.0.7 →
 18.0.8, `mongoose` 9.11.1 → 9.11.2, `@types/node` 26.6.4 → 26.6.5 and `typescript-eslint` 8.71.1 →
 8.71.2 — verified green (`tsc`, `eslint`, both module-graph checks, the full suite, `npm ci` and the boot

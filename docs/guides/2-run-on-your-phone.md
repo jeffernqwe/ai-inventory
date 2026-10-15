@@ -90,6 +90,63 @@ adb devices
 
 **Do not continue until this line says `device`.** Everything in Guides 2 and 3 is built on it.
 
+## Before Step 4 — does this build have what it needs? (two minutes, saves hours)
+
+A phone build is assembled in Expo's cloud from settings that live in **two** places: the file
+`mobile/eas.json` in this project, and the **EAS environment** for the profile you are building.
+Settings that are missing do **not** stop a build — and that is the trap.
+
+**What actually happened, 2026-10-15.** The `production` EAS environment was empty, while `preview`
+and `development` each had nine settings. A production build therefore had no Firebase settings at
+all. The app still built, still started, and still let someone register — through the **old
+password path**, silently, instead of the Firebase-first path with the emailed verification code. A
+green build had quietly become the wrong build. The same build has no `google-services.json`, and
+*that* one fails **inside the build** rather than at run time.
+
+Run this from the `mobile` folder:
+
+```bash
+cd C:/Users/jeffe/inventory-ai/mobile
+node scripts/check-build-env.mjs --live
+```
+
+**How to read it.** One line per build profile. `ok` means every setting that profile needs is
+present. Anything else prints `::error::` lines naming the exact missing settings, and the command
+exits with code `1`. Without `--live`, the same command checks only what is written inside the
+project (which is what the automated checks run) and says so instead of guessing about EAS.
+
+The two halves it checks:
+
+- **The app's settings** — `EXPO_PUBLIC_API_URL` (the backend address, which must be a public
+  `https://` address for a released build: `localhost`, `10.0.2.2` and `192.168.…` mean *your
+  laptop*, never a phone on a train) and the four Firebase values, which must be **all four or
+  none**.
+- **The two Google files** — `GOOGLE_SERVICES_JSON` and `GOOGLE_SERVICE_INFO_PLIST`. EAS hands the
+  build the uploaded file's location; without them the build looks for a file that only exists on a
+developer's machine.
+
+To see what an environment currently holds (names only — values are never printed here):
+
+```bash
+npx eas env:list --environment production
+```
+
+**The backend has the same kind of gap, and one command shows it.** New members cannot register on
+a server whose mail settings are missing, because the verification code is emailed before any
+account exists. That server says so the moment it starts:
+
+```text
+[config] integrations mail=off firebase=on emailVerification=off ai=on(openrouter)
+[config] warning: email verification is ENABLED but mail is not configured: … Set MAIL_PROVIDER,
+MAIL_FROM and the selected provider key (RESEND_API_KEY or BREVO_API_KEY) on this host.
+```
+
+One line tells you what is switched on; the warning under it tells you what that costs and which
+setting fixes it. **It is a warning on purpose — the server keeps running** (existing members are
+unaffected), which is exactly why it had to be said out loud: on 2026-10-15 the deployed service
+looked perfectly healthy while being unable to onboard anybody. Both settings live in the hosting
+dashboard (Render → Environment), never in this project.
+
 ## Step 4 — put a **development** build of the app on the phone
 
 From the `mobile` folder:

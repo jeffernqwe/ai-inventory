@@ -12007,6 +12007,171 @@ and no test, build, lint or guard could say so.
   walk floors in the first case still hold (the same case asserts `CLAUDE.md` is the real file, not an empty read).
 
 
+# 27CH. The deployment that was legal, silent and unusable — what this deployment is, and what it is missing (2026-10-15)
+
+Server, mobile and CI. **No route, permission, schema, session, JWT, dependency, environment or
+behaviour change on either side**: the server adds one boot line, one class of boot warning and two
+read-only fields on an existing health endpoint, the mobile side adds one read-only guard script with
+its own controls, and `CLAUDE.md` and two guides record it. Nothing that already worked behaves
+differently, and no request is refused or accepted that was not before.
+
+## How it was found — by asking the deployed service, read-only
+
+The owner's question was whether this app could take a **test-production deployment**. Every signal
+this project publishes said yes, and they were all measured on the deployed Render service on
+2026-10-15, publicly, with no credentials and no writes:
+
+| Probe | Answer | Time |
+| --- | --- | --- |
+| `GET /api/health/live` | `200`, `{"status":"live"}` | 0.248 s |
+| `GET /api/health` | `200`, `{"status":"ok","db":"connected"}` | 0.147 s |
+| `POST /api/auth/forgot-password` (a deliberately non-existent address) | **`503 MAIL_NOT_CONFIGURED`** | 0.194 s |
+| `POST /api/auth/email-verification/request` (a garbage ID token) | `400 FIREBASE_TOKEN_INVALID` | 0.144 s |
+| `POST /api/auth/firebase/exchange` (the same garbage token) | `401 FIREBASE_TOKEN_INVALID` | 0.233 s |
+
+The last two are the *good* news, and it is specific: the Admin SDK **verified** that token and
+rejected it, so **Firebase is configured in production**. The forgotten-password answer is the
+finding. `MAIL_PROVIDER` is not set on that host, so `isMailConfigured()` is false — which means the
+**AUTH-04 registration gate cannot work either**: `request.ts` reads the same predicate one step
+later (steps 4/5, after token verification and before any challenge is touched) and answers
+`503 EMAIL_VERIFICATION_NOT_CONFIGURED`. A new member verifies their email *before* any `User`,
+`Business`, JWT or session exists, so **a server that cannot send mail cannot onboard anybody — while
+serving every existing member perfectly.** The system was not broken. Something was missing, and
+nothing said so: `/ready` was `200`, CI was green, and the production configuration validator — which
+does refuse to boot on a missing `MONGODB_URI`, a short `JWT_SECRET` or a half-configured Firebase
+service account — had nothing to say, because a **supported but unusable** integration is not a
+validation problem.
+
+The mobile half was found the same way, one layer out: `eas env:list` answers
+**`No variables found for this environment.` for `production`**, while `preview` and `development`
+each carry nine (the four `EXPO_PUBLIC_FIREBASE_*`, two Google client ids, the public API URL, and the
+two Google native configuration **files**). A `--profile production` build therefore inlines `''` for
+every Firebase value — and **nothing fails**: `lib/auth.tsx` takes the branch that kept unconfigured
+builds usable before Firebase existed and registers the member through the **legacy password
+endpoint**. The owner would have got a green build, a working sign-in and an account whose flow
+(AUTH-04 verification, Firebase-first registration) was never the one under test. Without
+`GOOGLE_SERVICES_JSON`, the same build is worse than degraded: `app.config.js` falls back to
+`./google-services.json`, which exists on a developer's machine and not on a build runner, so the
+failure surfaces **inside Gradle**.
+
+Two deployment halves, one shape: **legal, silent, crippling.** That is the defect class this
+increment removes.
+
+## What shipped — the server (`config/deploymentReadiness.ts`)
+
+1. **One boot line** that states every integration, greppable with one token:
+   `[config] integrations mail=off firebase=on emailVerification=off ai=on(openrouter)`. It reports
+   names and states, never a value.
+2. **A warning for the states that are legal, silent and unusable** — one note per state, naming the
+   variables to set and the two `503` codes a caller already gets. It fires for *email verification
+   enabled with no mail* (the production state above) and for *Firebase configured with no pepper*
+   (reachable outside production, where validation is deliberately lenient). It is a **warning and
+   never a failure**: refusing to boot over an optional integration would turn a degraded feature
+   into a dead deployment on the next restart, which is why the wiring is asserted to *still boot and
+   still listen* in production with a note outstanding.
+3. **It reads the real predicates** (`isMailConfigured`, `isFirebaseConfigured`,
+   `isEmailVerificationConfigured`) rather than re-deriving their rules, so the line cannot disagree
+   with the behaviour it describes — the same argument `config/firebase.ts` and
+   `config/emailVerification.ts` make for sharing their predicates with the validator.
+4. **A build identity on the existing `GET /api/health`**: `commit` and `uptimeSeconds`. The question
+   *"is the deployed build the one I merged?"* had no answer from outside the hosting dashboard, and
+   this project has already paid for a stale-build assumption twice (§27CE). The value comes from the
+   host's environment, so it is treated as untrusted: **7–40 hex characters or `unknown`**, never a
+   typo, a shell remnant or a URL echoed onto a public endpoint. The surface is deliberately narrow —
+   `/ready` stays a readiness gate and `/live` stays dependency-free, and the deployment's
+   *integration* state is deliberately **not** published, because those states are already observable
+   precisely by the callers they affect (`503 MAIL_NOT_CONFIGURED`) and a public inventory of what a
+   server has switched on would widen the surface for convenience alone.
+
+## What shipped — the mobile guard (`mobile/scripts/check-build-env.mjs`)
+
+One read-only script that turns "the profiles look fine" into a checked contract, given a name
+(`npm run check:build-env` in `mobile/`) and a CI step of its own. Its rules are **read from the
+sources**, not remembered: the `process.env.EXPO_PUBLIC_*` names come from a scan of the mobile
+sources and must each be documented in `.env.example`, and the two **build-runner file variables**
+come from `app.config.js` — which is how this guard learned they exist, and why it does not need a
+hand-written list that would go stale silently.
+
+* **Repository rules** (offline, what CI runs): a **release** profile — derived from the profile tree,
+  not hardcoded: `developmentClient` is what makes a profile a development one — must name a public
+  **https** backend, so loopback, the emulator alias `10.0.2.2`, LAN addresses and `.local` are
+  refused **by host**, because "it is an `http://` URL" was never the thing that mattered; Firebase is
+  checked **all-or-nothing**, mirroring `isFirebaseConfigured()`; and nothing server-owned or
+  build-runner-input may carry an `EXPO_PUBLIC_` prefix, decided from the **name** so it needs no
+  value and cannot be defeated by a value that looks innocuous.
+* **`--live` rules** (the pre-build half): asks the EAS CLI what the profile's environment actually
+  supplies and requires the **union** of `eas.json`'s inline `env` and the store to satisfy the rest.
+  Only **names** are read from `env:list`; no value enters the process, is printed or is compared.
+* **Offline it says the store is unchecked rather than assuming it is clean** — a claim it cannot make
+  must not be printed as one.
+
+## Verification
+
+* **The guard's controls run on every invocation (CI included), 17 of them**, and the first version
+  **failed them twice** — which is the only reason the tool is trustworthy. The first run caught a
+  real hole in the guard's own rules (a server-owned name found in the **sources** was reported only
+  as *undocumented*; the more serious finding was checked against `.env.example` alone), and the
+  second caught a control that was wrong rather than the rule. One control mutation was also caught
+  by the *control itself*: injecting the two native names into both lists produced four findings
+  where the case expected two, and the case was corrected rather than the rule weakened.
+* **The live run reproduces the finding on the real EAS project**: `--profile production --live`
+  exits **1** naming `EXPO_PUBLIC_FIREBASE_API_KEY`, `EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN`,
+  `EXPO_PUBLIC_FIREBASE_PROJECT_ID`, `EXPO_PUBLIC_FIREBASE_APP_ID`, `GOOGLE_SERVICES_JSON` and
+  `GOOGLE_SERVICE_INFO_PLIST`; `development`, `ios-simulator` and `preview` all pass. The offline run
+  exits **0** with *"repository rules only — run with `--live` before a release build"*.
+* **`server/test/DEP-1-deployment-readiness.test.mjs` — 21 cases**, registered in `run-tests.mjs`'s
+  `PURE_UNIT` list (an unclassified file makes `npm test` exit `2`), driving the **real predicates
+  through a controlled environment** rather than mocking them, and pinning: the line's exact text and
+  that it is **one** line; the report against a full, a bare and a *provider-selected-but-incomplete*
+  deployment; both warnings; **six** shapes that must produce **no** warning (a check that always had
+  something to say is noise an operator learns to ignore); that **no sentinel secret reaches the line
+  or either warning**, with a positive control proving each sentinel really was in the environment (so
+  "absent from the output" cannot pass because it was never set); the commit precedence order, the
+  `unknown` shape rule (including a plausible injection string) and the uptime clamps; that `/ready`
+  and `/live` did not grow a field; and that the boot line and its warnings are emitted **before** the
+  database is touched, that a degraded deployment **still boots and does not exit in production**,
+  and that a healthy one logs no warning at all.
+* **Server unit mode: 812 tests / 185 suites — 775 pass / 0 fail / 37 deliberately skipped** (from
+  790 / 180), exit **0**.
+* **Mobile: 64 suites / 848 tests / 0 failures**, `npx tsc --noEmit` and `npx eslint .` clean. The
+  guard is run by its own CI step in the `mobile` job, after the typecheck, and it self-tests first.
+* **Both boot paths were observed on a real local boot, not only in-process** (which is the standard
+  for this project: a suite that asserts a line's shape proves less than a process that prints it).
+  With the project's full local configuration the line read
+  `[config] integrations mail=on(brevo) firebase=on emailVerification=on ai=on(openrouter)` and
+  `GET /api/health` answered
+  `{"status":"ok","db":"connected","commit":"abc1234def5678","uptimeSeconds":12,…}` — a real
+  commit id taken from the environment — with `/ready` and `/live` unchanged. With the four mail
+  variables emptied — **the deployed production state, reproduced locally** — the line read
+  `mail=off`, the warning was printed verbatim (`… no new member can complete registration … Set
+  MAIL_PROVIDER, MAIL_FROM and the selected provider key …`), and the server went on to connect and
+  serve `/api/health` with `commit: "unknown"`, which is also the answer for a host that states no
+  commit at all.
+
+## Limits, stated rather than smoothed over
+
+* **The server change makes the state legible; it does not fix the deployment.** A boot line cannot
+  set `MAIL_PROVIDER`, and no code change can. Both blockers remain **configuration the owner must
+  set**: the mail variables on the Render service, and the six EAS variables in the `production`
+  environment. Until they are set, registration on a production build still cannot complete — but it
+  now **says so at boot and in CI's sibling check**, which is the whole of what this increment claims.
+* **The AUTH-04 half of the production finding is inferred from the shared predicate, not observed on
+  a valid token.** `forgot-password` proves the mail boundary is unconfigured on that host; the
+  verification-code request was probed with a garbage token, which is rejected **before** the mail
+  gate by design, so its `503` was not directly observed. The inference is one line of
+  `services/emailVerification/request.ts` and is recorded as an inference.
+* **`--live` needs a signed-in EAS CLI, so it is not in CI.** The offline half is the repository gate
+  and cannot see the store; the live half is a manual pre-build step. That split is deliberate (no
+  credentials in CI) and it means a purely EAS-side problem is caught by the checklist, not by a pull
+  request.
+* **The build identity is only as good as the host's variable.** On a host that states no commit the
+  field reads `unknown`, and nothing here detects a deploy that *claims* the right commit while
+  serving an older image.
+* **Neither warning knows about a state nobody has thought of.** The two notes cover the two shapes
+  that exist today; a third integration with the same failure mode would be silent again, which is
+  why the module's reader is shared rather than duplicated in each caller.
+
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

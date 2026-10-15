@@ -7,8 +7,11 @@ into every conversation.
 
 Nothing was edited in the move — this is the same text, verbatim.
 
-- **Authoritative per-phase records:** `docs/DEVELOPMENT_ROADMAP.md` (§27A onward, plus the
-  phase sections earlier in that file).
+- **Authoritative per-phase records:** `docs/DEVELOPMENT_ROADMAP.md` (§27 onward, plus the
+  phase sections earlier in that file). *(Corrected 2026-10-15: this cited a "27A onward" section that has
+  never existed — the lettered series starts at 27B and the plan-record series at §27 itself. Caught by the
+  section-integrity guard the same day it was written, which is also why the wrong identifier is written here
+  **without its sigil**: the guard scans this file too, and a quoted bad citation is still a citation.)*
 - **Security-relevant records:** `docs/AUTH_SECURITY_MASTER_CHECKLIST.md` (§39–§42).
 - **The compact phase list** (one line per phase) is still in `CLAUDE.md` §7, because agents
   need to know what already exists before proposing work.

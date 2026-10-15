@@ -11675,6 +11675,80 @@ through `npx expo install --fix`.
 
 
 
+# 27CD. The section numbering gets the guard everything else already had (2026-10-15)
+
+A verification increment in the documentation layer, written the same afternoon as **§27CB** and **§27CC**
+because those two are what produced its evidence. No production behaviour, no dependency, no route and no
+schema change.
+
+## The defect, twice in one afternoon
+
+1. **A number was claimed twice.** The server-bumps record was written as `27CB` on its own branch, from the
+   stated assumption that §27BC–§27CA would land with the AI campaign and that `27CB` was free on both trees.
+   It was not: the AI campaign also carried a `27CB` (the Markdown word-boundary guard, §27CB). **Nothing
+   failed** — no test, no build — and the collision was found by a human reading a merge conflict. Resolving
+   it cost a renumbering across three documents and a rewrite of the section's own justification (§27CC).
+2. **A citation pointed at a section that does not exist.** `docs/PHASE_HISTORY.md` sent readers to a `27A`
+   record. There is no `27A`: the lettered series starts at `27B` and the plan-record series at §27 itself.
+   That citation had been live and wrong for an unknown length of time and was found only because the scanner
+   was run over the whole tree.
+
+Both are one failure: **the document numbering is an index, and nothing checked it** — while this repository
+guards its route inventory, its issue identifiers, its module graph and its dependency pins exactly this way.
+
+## What it measures
+
+* **No plan record is numbered twice** in the roadmap.
+* **Every citation to a `27…` record resolves** to a declared one, scanned across the project's own text —
+  docs, sources, tests, scripts and workflows (**446** files here, the same corpus rule the issue-record guard
+  uses).
+
+## The scoping was measured, and that is the part worth keeping
+
+Small integers are a **different convention**: records use `## 1. …`-style local sub-headings, and **four such
+numbers repeat today** (`1`, `2`, `3`, `4`, each three times, across different records). A guard over "every
+numbered heading" would report four false positives on a clean tree and be deleted within a week. The `27…`
+namespace is what is checked, and it holds **79** records.
+
+## Proved able to fail, in both directions
+
+* A second `# 27CB.` record appended to the roadmap → the duplicate assertion fails with `[['27CB', 2]]`,
+  which is precisely the defect class that cost the renumbering.
+* A citation to an unresolvable record appended → the citation assertion fails naming the file and the id.
+* The roadmap was restored **byte-identically** after each mutation (hash compared before and after).
+* The file's own in-test control exercises both scanners, and the corpus is asserted non-trivial — **>70**
+  records and **>400** files, with both floors taken from a measurement (**79** and **446**) rather than
+  guessed, because a guard whose walk or parser matched nothing would pass forever.
+
+## The guard applies to itself, and no self-exclusion was needed
+
+Writing this record, the one-line fix in `PHASE_HISTORY.md` and the test file's own prose **re-created the
+defect**: quoting the bad identifier and planting an unresolvable one made the scan report **four** new
+dangling citations — measured, because the first run of the finished suite failed naming all four. Rather than
+exclude the file (the route the issue-record guard took, for its own good reason), the identifiers are written
+**without their sigil** and the unresolvable one is **assembled from parts**, so the corpus stays whole and
+this file is judged by its own rule.
+
+## What it does NOT check
+
+* **It cannot see a collision before the two records meet.** Two branches can each claim `27CB` and both be
+  clean; this fires when the second lands — at the merge, which is earlier than the human who found it by hand
+  but is not prevention.
+* **It says nothing about whether a record is true**, sensibly numbered, or whether §27CA is the section a
+  sentence actually meant. It checks that the number exists and is unique.
+* **Numbering outside the `27…` namespace is deliberately unconstrained** — the small-integer convention
+  above, and `§14C.9`-style references into the design authority, which has its own numbering.
+
+## Verification
+
+* `server/test/phase-docs-section-integrity.test.mjs` — 4 cases, registered in `run-tests.mjs`'s `PURE_UNIT`
+  list (an unclassified file makes `npm test` exit 2, so the registration is part of the change).
+* Server **unit mode 790 tests / 180 suites — 753 pass / 0 fail / 37 deliberately skipped** (from **786 / 179
+  — 749 / 0 / 37**), `npm run test:unit` exit **0**.
+* `docs/PHASE_HISTORY.md`'s citation corrected to §27 — the one real dangling reference in the tree — with
+  the correction recording why the wrong identifier is written there without its sigil.
+
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

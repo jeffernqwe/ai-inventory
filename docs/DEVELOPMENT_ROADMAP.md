@@ -11947,6 +11947,66 @@ it** — no phone is attached to this host today — and the item stays open unt
   but it also means this increment adds no new server-side test coverage.
 
 
+# 27CG. The instruction file had 29 records it could not find, and nothing said so (2026-10-15)
+
+Documentation and verification only. One block in `CLAUDE.md` and three additions to
+`server/test/phase-docs-section-integrity.test.mjs`. **No production behaviour, no dependency, no route, no schema,
+no permission, no environment and no mobile change**; no record's content, date or number was altered.
+
+## How the gap was found — from a real one
+
+AI-9 (§27CF) ended by backfilling `CLAUDE.md`'s AI list with **AI-7 and AI-8**, which had shipped on 2026-10-14/15 and
+were recorded in this file but **nowhere in the instruction file**. That was one increment's gap, noticed by hand.
+Rather than guess how many others there were, the question was measured: for every `^# 27XX.` record declared in this
+roadmap, does its anchor appear **anywhere** in `CLAUDE.md`?
+
+**29 of 82 records did not.** The distribution matters more than the count — they are concentrated in the
+**2026-10-10 → 2026-10-15** window (§27AG…§27BZ) plus the earlier §27D–§27K and §27T series — which is to say the
+lag grew exactly during the period this project was shipping fastest. The failure mode is the same one §27CD was
+written for, one level up: **the numbering is an index and nothing checked it; here `CLAUDE.md` is the project's
+index and nothing checked *it*.** A reader starting from the instruction file could not find a third of the records,
+and no test, build, lint or guard could say so.
+
+## What shipped
+
+1. **An index block in `CLAUDE.md`**, listing the 29 with a one-line subject each. The list was **generated from this
+   file's own headings by a script**, not retyped: a title cannot drift and no subject can be invented by a human
+   remembering.
+2. **A third property in `phase-docs-section-integrity.test.mjs`** — *every declared plan record is reachable from
+   `CLAUDE.md`* — with its own helper (`recordsUnreachableFrom`) and controls in both directions. It sits with the two
+   existing properties (no number claimed twice; every citation resolves) because it is the same kind of claim.
+3. **The rule is stated next to the list in `CLAUDE.md`**, so the guard enforces a declared convention rather than an
+   intention only its author held.
+
+## Limits, stated rather than smoothed over
+
+* **The check is mechanical — it looks for the anchor, not the subject.** Several of the 29 are covered in substance
+  under another heading without naming their record: **Phase 28**, **Phase 30A**, the workflow simplification
+  (§27AG) and ISS-12 (§27AO) all appear in this file already. They are listed anyway, because a matcher clever enough
+  to tell those apart is a matcher nobody could check, and the remedy for a false positive is one line.
+* **It does not check that a pointer is accurate** — a line could name the wrong subject and pass. It checks
+  reachability, which is what the file is for.
+* **It grows `CLAUDE.md` by one line per increment, forever.** That is the accepted cost, recorded rather than
+  glossed: the alternative is an entry point that silently omits a growing share of the record set, and a per-session
+  read of ~29 short lines is cheaper than the searches it replaces.
+* **Nothing was reconciled beyond reachability.** No record was re-dated, no claim in this file was corrected for
+  content, and the 29 subjects were not re-verified — each pointer leads to its own dated record, which remains the
+  authority.
+
+## Verification
+
+* **The new case failed on its own first run, and for a real reason**: it reported `CLAUDE.md: §27CG` and
+  `phase-docs-section-integrity.test.mjs: §27CG` as dangling citations, because the record this increment was writing
+  did not exist yet while two files already cited it. That is §27CD's second property firing unaided, and it is
+  recorded because it is evidence: the suite was run before the record was added, on purpose, to see whether it
+  noticed.
+* **Break/restore proof for the new case:** one pointer line deleted from `CLAUDE.md`'s index reddens the reachability
+  case naming exactly that record (and changes nothing else); the file is then restored **byte-identically**, verified
+  by sha256.
+* The three documentation suites pass (**19/19**), the server unit mode passes, `mobile/` is untouched, and the
+  walk floors in the first case still hold (the same case asserts `CLAUDE.md` is the real file, not an empty read).
+
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

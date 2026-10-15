@@ -48,6 +48,15 @@
  *    guard whose scan silently matched nothing would pass forever. The real-tree proof — a duplicate and a
  *    dangling citation injected into the corpus, watched failing, tree restored byte-identically — is what
  *    the roadmap record cites.
+ *
+ * A THIRD PROPERTY JOINED LATER (2026-10-15, §27CG): **every declared record is reachable from `CLAUDE.md`.**
+ * The file is this project's entry point — an increment lands a paragraph there and its record here — and that
+ * convention had lagged invisibly: measured mechanically, **29 of the roadmap's 82 plan records had no `§`
+ * anchor anywhere in `CLAUDE.md`**, so a reader (or an agent) starting from the instruction file could not find
+ * them at all. Nothing failed, because nothing checked. The rule is the same shape as the two above and is
+ * enforced the same way, with one honest limit stated here rather than discovered: it is **mechanical** — it
+ * looks for the anchor, not for the subject — so a record described under another heading without being named
+ * still counts as a violation, and the remedy is one line rather than an argument.
  */
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -123,7 +132,22 @@ function projectTextFiles() {
   return out;
 }
 
+const CLAUDE_PATH = path.join(repoRoot, 'CLAUDE.md');
+
+/**
+ * The declared records that cannot be found in the instruction file.
+ *
+ * A record is *reachable* when its anchor appears anywhere in `CLAUDE.md` — as a citation
+ * (`roadmap §27CF`) or in the index block that lists the ones this file does not carry by
+ * name. The anchor is the test, not the subject: see the header for why that limit is stated
+ * rather than papered over with a smarter matcher nobody could check.
+ */
+function recordsUnreachableFrom(ids, claudeText) {
+  return ids.filter((id) => !claudeText.includes(id));
+}
+
 const roadmap = readFileSync(ROADMAP_PATH, 'utf8');
+const claude = readFileSync(CLAUDE_PATH, 'utf8');
 const declared = planRecordIds(roadmap);
 const declaredSet = new Set(declared);
 
@@ -155,6 +179,14 @@ describe('docs section integrity', () => {
     assert.deepEqual(violations, []);
   });
 
+  test('★ every declared plan record is reachable from CLAUDE.md', () => {
+    // The entry point is only an entry point if the records are visible from it. The floor in the case
+    // above proves the walk is reading the project; this proves the file it reads is the real one.
+    assert.ok(claude.length > 20_000, `CLAUDE.md looks too small to be the instruction file (${claude.length})`);
+    assert.ok(claude.includes('Documentation index'), 'sanity: the index block is where the pointers live');
+    assert.deepEqual(recordsUnreachableFrom(declared, claude), []);
+  });
+
   test('the scanners can fail — an in-test control for both properties', () => {
     // The control proves the *helpers* report what the assertions above would catch. It is not a
     // substitute for the real-tree break/restore proof, which the roadmap record cites.
@@ -177,5 +209,10 @@ describe('docs section integrity', () => {
     assert.deepEqual(danglingCitations(plant, known), ['27ZZ'], 'the planted dangling citation must be seen');
     // And the negative direction: a citation that does resolve is not reported.
     assert.deepEqual(danglingCitations('§27CB', new Set(['27CB'])), []);
+
+    // The reachability scanner, controlled the same way: a record absent from the file is reported, one
+    // present is not. Both directions, so a function that returned [] for everything cannot pass here.
+    assert.deepEqual(recordsUnreachableFrom(['27CB', '27CZ'], 'this file mentions 27CB only'), ['27CZ']);
+    assert.deepEqual(recordsUnreachableFrom(['27CB'], 'this file mentions 27CB only'), []);
   });
 });

@@ -6872,7 +6872,7 @@ P-6 + Gate 1 + iOS app registration (environment-blocked), and the new-identity 
 
 ## Pending
 
-**Fixes:** ~~ISS-21~~ (**FIXED and device-verified 2026-10-12 — §27BD/§27BE**: the 15 s client abort against the AI path's 60 s budget; only **AI-1's abandoned-turn cancellation remains unmeasured on hardware**) · ~~ISS-23~~ (**FIXED 2026-10-13 — AI-2, §27BF**: raw Markdown stripped at the assistant bubble) · ~~ISS-24~~ (**FIXED 2026-10-13 — AI-3, §27BG**: the assistant's tool queries no longer pay for the whole tenant partition — 9 of 9 tools ≤ 650 ms at 10 000 products, with the answers proven **byte-identical** by `perf:golden`) · **ISS-22** (**code half complete 2026-10-14 — §27BF + §27BL**: the zero-length `200` is retried once and a degraded turn is marked and logged, so it is countable, **and** a reached limit is now its own `429 AI_QUOTA_EXCEEDED` with its own sentence instead of a `502` outage — the distinct code and sentence this row asked for; **still open as the provider-tier decision alone**, which the owner declined to spend on) · ~~ISS-06~~ (**CLOSED 2026-10-12 — §27AZ**, measured from the built APK: `compileSdk` 36 / `minSdk` 24 / `targetSdk` 36, no raise needed) · ~~ISS-25~~ (**FIXED 2026-10-13 — AI-4, §27BH**: the answer is now rendered rather than de-markered — tables, headings and lists become real layout with no marker on screen; the server and the prompt are untouched, so latency and token cost are unchanged; **DEVICE-VERIFIED 2026-10-14 — §27BS**: two real stored answers were read on the phone, one of them a **4-column, 5-row table** the assistant was asked for directly — rendered as **one card per row**, the row's own name as the title and the header's other columns as label/value lines, with the header row not drawn as a row, **no `|`, no `------` and no `**` anywhere on the screen**, the closing sentence as prose, and the one-character `0` measured **drawn on all five cards** (267 ink pixels, bbox `428..445`, the same glyph signature five times). What stays open is the judgement and the sample, not the behaviour: *"does it read well"* is the owner's call, and the **grid** path (≤ 3 columns) plus the stored **6-column** table — which belongs to another business, so the phone cannot see it — have not been seen on hardware) · ~~ISS-28~~ (**FIXED and device-verified 2026-10-14 — AI-7, §27BU**: a continued conversation now rises to the top of the list and its displayed time advances — observed twice on the phone, **16:22 → 18:11** and **17:02 → 18:17**) · **ISS-29** (**OPEN, recorded 2026-10-14 — §27BU**: an answer truncated by the 800-token cap is served as a complete one, because the existing `max_tokens` guard fires only when the response carries no text; the remedy is a decision, not a patch) · ISS-17/ISS-18 (decided and recorded, no action pending) · ISS-13 (**fixed, §27AM** — its device half rides with the same pass) · ~~ISS-27~~ (**FIXED and device-verified 2026-10-14 — §27BT**: a two- or three-column table collapsed to **48 px cells** and made the whole message area look empty; a table answer now takes the full bubble width, and the same stored answer re-rendered as a **464 × 96 / 256 × 96** two-column grid with every value on screen) · ~~ISS-26~~ (**FIXED 2026-10-13, recorded §27BQ**: the assistant's LaTeX now decodes into plain text instead of reaching the screen as source — no dependency, no renderer, no prompt change, so no per-turn token cost; **device-verified 2026-10-14, and the device found the decoder hiding a different number — §27BS**: `\frac{17 + 5}{113}` rendered as `17+ 5/113` (17.04 instead of the 19.5% the model computed), so a fraction side carrying an operator now keeps its brackets, and the same rule covers `× · ÷ /` because `\frac{1}{2 \times 3}` decoded to `1/2 × 3` — one and a half instead of one sixth). *(ISS-01 fixed in #36; ISS-16 disposed in #37; ISS-02 remediated — §27AJ; the 7 advisories dispositioned — §27AK; all 2026-10-10.)*
+**Fixes:** ~~ISS-21~~ (**FIXED and device-verified 2026-10-12 — §27BD/§27BE**: the 15 s client abort against the AI path's 60 s budget; only **AI-1's abandoned-turn cancellation remains unmeasured on hardware**) · ~~ISS-23~~ (**FIXED 2026-10-13 — AI-2, §27BF**: raw Markdown stripped at the assistant bubble) · ~~ISS-24~~ (**FIXED 2026-10-13 — AI-3, §27BG**: the assistant's tool queries no longer pay for the whole tenant partition — 9 of 9 tools ≤ 650 ms at 10 000 products, with the answers proven **byte-identical** by `perf:golden`) · **ISS-22** (**code half complete 2026-10-14 — §27BF + §27BL**: the zero-length `200` is retried once and a degraded turn is marked and logged, so it is countable, **and** a reached limit is now its own `429 AI_QUOTA_EXCEEDED` with its own sentence instead of a `502` outage — the distinct code and sentence this row asked for; **still open as the provider-tier decision alone**, which the owner declined to spend on) · ~~ISS-06~~ (**CLOSED 2026-10-12 — §27AZ**, measured from the built APK: `compileSdk` 36 / `minSdk` 24 / `targetSdk` 36, no raise needed) · ~~ISS-25~~ (**FIXED 2026-10-13 — AI-4, §27BH**: the answer is now rendered rather than de-markered — tables, headings and lists become real layout with no marker on screen; the server and the prompt are untouched, so latency and token cost are unchanged; **DEVICE-VERIFIED 2026-10-14 — §27BS**: two real stored answers were read on the phone, one of them a **4-column, 5-row table** the assistant was asked for directly — rendered as **one card per row**, the row's own name as the title and the header's other columns as label/value lines, with the header row not drawn as a row, **no `|`, no `------` and no `**` anywhere on the screen**, the closing sentence as prose, and the one-character `0` measured **drawn on all five cards** (267 ink pixels, bbox `428..445`, the same glyph signature five times). What stays open is the judgement and the sample, not the behaviour: *"does it read well"* is the owner's call, and the stored **6-column** table — which belongs to another business, so the phone cannot see it — has not been seen on hardware. *(Corrected 2026-10-16: the **grid** path this row also listed as unseen **was** seen — §27BT's device run re-rendered a two-column table as a **464 × 96 / 256 × 96** grid with every value on screen, which is the ≤ 3-column path. The stale clause was left in the row for two days; only the 6-column card case is genuinely unverified, and it is the remaining measurement this record names.)* · ~~ISS-28~~ (**FIXED and device-verified 2026-10-14 — AI-7, §27BU**: a continued conversation now rises to the top of the list and its displayed time advances — observed twice on the phone, **16:22 → 18:11** and **17:02 → 18:17**) · **ISS-29** (**OPEN, recorded 2026-10-14 — §27BU**: an answer truncated by the 800-token cap is served as a complete one, because the existing `max_tokens` guard fires only when the response carries no text; the remedy is a decision, not a patch) · ISS-17/ISS-18 (decided and recorded, no action pending) · ISS-13 (**fixed, §27AM** — its device half rides with the same pass) · ~~ISS-27~~ (**FIXED and device-verified 2026-10-14 — §27BT**: a two- or three-column table collapsed to **48 px cells** and made the whole message area look empty; a table answer now takes the full bubble width, and the same stored answer re-rendered as a **464 × 96 / 256 × 96** two-column grid with every value on screen) · ~~ISS-26~~ (**FIXED 2026-10-13, recorded §27BQ**: the assistant's LaTeX now decodes into plain text instead of reaching the screen as source — no dependency, no renderer, no prompt change, so no per-turn token cost; **device-verified 2026-10-14, and the device found the decoder hiding a different number — §27BS**: `\frac{17 + 5}{113}` rendered as `17+ 5/113` (17.04 instead of the 19.5% the model computed), so a fraction side carrying an operator now keeps its brackets, and the same rule covers `× · ÷ /` because `\frac{1}{2 \times 3}` decoded to `1/2 × 3` — one and a half instead of one sixth). *(ISS-01 fixed in #36; ISS-16 disposed in #37; ISS-02 remediated — §27AJ; the 7 advisories dispositioned — §27AK; all 2026-10-10.)*
 **Upgrades, in issue #32's order:** Expo SDK 58 — **deferred by Gate 0 until Expo promotes it to `latest`** (§27AI records the decision and the runbook; the pins differ from PR #34's set — RN 0.88 family, not 0.87.1) → the React 19 type fixes (ISS-01 is the first of them) → TypeScript 7 →
 jest 30 → ~~the `actions/*` v7 re-pin~~ (**taken early 2026-10-11 — ISS-12 resolved, §27AO**) → ~~`dotenv` 18 and `@types/bcryptjs` 3~~ (**taken 2026-10-11 — §27AP**: `dotenv` 18 taken with the preload path measured; the `@types/bcryptjs` row's premise was wrong — 3.0.0 is a deprecated stub, so the dependency was **removed** instead and `tsc` proves it). **The two that remain are now measured, not pending:** jest 30 arrives *with* the SDK 58 promotion (`jest-expo@58.0.9`), and TypeScript 7 is upstream-blocked on a typescript-eslint line that admits 7 (§27AQ).
 **Testing:** the L-17 mail leg, owner-assisted; and a dated test baseline for this section.
@@ -11493,6 +11493,61 @@ clean and `eslint` clean — and the tree then restored (lockfile byte-identical
   resolution path that jest and this project's tooling use. Whether Metro's bundler would have rescued the
   namespace object on a device is untested — and deliberately so, because the risk being avoided is a broken
   reset link, which a plausible rescue does not make safe.
+
+
+# 27CB. The guard that was blind to the defect it was written for (2026-10-16)
+
+A verification increment in the assistant's Markdown pipeline — the one part of AI-2/AI-4 that shipped with no
+rule-level guard. No production behaviour, no dependency, no prompt and no server change.
+
+## The gap
+
+AI-4 found a real defect in shipped code: `stripMarkdown` had **no word boundary at all**, so it rewrote
+`4*5*6` as `456` and `A*B*C` as `ABC` — **two characters removed and a quantity silently changed**, which is
+the worst class of bug in an assistant that reports quantities. The fix shipped. AI-4 then left one residual
+**recorded rather than fixed** (`4**5**6` → `4*5*6`, where the operators survive, so no quantity is altered).
+Neither the fix nor the residual had a guard: the AI-2 and AI-4 suites pin the two named invariants
+(`SKU_123_AB` is data; `12 * 3 = 36` is arithmetic), not the rule that produces them.
+
+## The first guard written was wrong, and that is the entry's substance
+
+It compared **alphanumeric content** before and after and asserted nothing was lost. It **passed while the
+defect it was written for was present**, because `4*5*6` and `456` keep the same digits in the same order —
+the comparison is blind to exactly this bug. That was not reasoned about: the boundary rule was removed and
+the passing property was watched.
+
+The shipped guard compares **runs** instead. A marker is removed *between* two alphanumeric runs, so removing
+it **fuses** them, and fusion is visible where a character comparison is not. The property is deliberately not
+"nothing may change" — the model writes Markdown and the parser consumes markers, so that is false by design;
+the claim is narrower: the pipeline may **style** a run, it may not **fuse** it.
+
+## Scoping, measured rather than chosen
+
+* Over the no-backtick corpus (every string to depth 6 over `* _ # 4 a` — **19,530** inputs) a run may never
+  be fused, by `stripMarkdown` or by the rendered span list.
+* With backticks, a run boundary **can** be fused — **1,492** cases — and every one is a code span or a styled
+  span adjacent to a run; removing backticks from the corpus removes all of them. The styling carries the
+  separation: `` `4`4 `` yields `[code "4", plain "4"]`, so the boundary survives in structure. The exemption
+  is therefore exact, not a convenience.
+* The general form is what ships: **a run boundary may disappear only where a styled span carries it.**
+
+## Proved able to fail
+
+The boundary rule was removed from its two code sites in `stripMarkdown` — the edit asserted to have landed by
+file hash before the run — and the suite reported **1,976** strict and **2,412** styled violations against
+**0** on the clean tree, with the file restored **byte-identically** afterwards.
+
+## What is NOT verified, and the limits stated rather than glossed
+
+* **It is a property over generated inputs, not a proof** — a small alphabet at depth 6 cannot see a defect
+  that needs a longer or more exotic string.
+* **The styled-span exemption is a proxy**: it asserts styling is present at the fusion, not that the
+  specific boundary is the styled one. On the measured corpus the two coincide.
+* **The residual AI-4 accepted is pinned, not fixed** — `4**5**6` → `4*5*6` is now asserted, so a future
+  decision to change it fails loudly instead of drifting.
+* **It says nothing about how an answer reads**, which only a screen can settle.
+
+Mobile **63 suites / 839 tests / 0 failures**, `tsc --noEmit` and `eslint .` clean; no server change.
 
 
 # 28. Phase Gate System

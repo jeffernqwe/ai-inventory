@@ -11,6 +11,12 @@ An AI-powered inventory management system for Android and iOS.
 > `docs/DEVELOPMENT_ROADMAP.md`). The system specification in
 > `docs/SYSTEM_SPECIFICATION.md` is the primary source of truth.
 
+**Not a programmer?** Start with the plain-English guides in
+[`docs/guides/`](docs/guides/README.md): running the app on a laptop, running it on a phone,
+mirroring the phone to a laptop, the test accounts and mock data, and a reference for every script
+and command the project ships. They explain the technical terms as they go, and they never contradict
+the documents above.
+
 ---
 
 ## Repository Structure
@@ -376,7 +382,7 @@ unreachable — `/api/health` reports `db: connected|disconnected`.
 
 ## Mobile (`mobile/`)
 
-Expo app with Expo Router (file-based routing), written in **TypeScript** (`app/`, `components/` and `lib/` hold 82 `.ts`/`.tsx` files and no `.js`; `__tests__/` adds 50 more — both re-counted 2026-10-12). It is a **client
+Expo app with Expo Router (file-based routing), written in **TypeScript** (`app/`, `components/` and `lib/` hold 87 `.ts`/`.tsx` files and no `.js`; `__tests__/` adds 62 more — both re-counted 2026-10-15). It is a **client
 only** — the backend is the security boundary. The app never connects to MongoDB and
 never holds MongoDB or AI credentials. The JWT is the only thing persisted (Expo
 SecureStore); the user profile is re-fetched from `/api/auth/me` on every launch so

@@ -12,6 +12,7 @@ import { sendFirebasePasswordResetEmail } from '../lib/firebase-auth';
 import { spacing, type } from '../lib/theme';
 import type { Palette } from '../lib/theme';
 import { useTheme } from '../lib/theme-context';
+import { emailProblem } from '../lib/validation';
 
 /**
  * Fixed on purpose, and never derived from the response.
@@ -120,10 +121,25 @@ export default function ForgotPasswordScreen() {
 
   async function submit(): Promise<void> {
     const value = email.trim();
-    // Presence only. The email-shape rule lives in the server's validator and is
-    // deliberately not duplicated here, where the two copies would drift apart.
-    if (!value) {
-      setFieldErrors({ email: 'Email is required' });
+    // PRESENCE *AND* SHAPE, and the shape rule is still NOT written here.
+    //
+    // This screen used to check presence only, on the recorded reasoning that a second
+    // copy of the server's shape rule would drift away from it. That reasoning was right
+    // about the risk and wrong about the only way to avoid it: the rule now lives in
+    // exactly ONE client place (`lib/validation.ts`), which does not duplicate it per
+    // screen, names the server rule it mirrors, and is pinned to it by
+    // `__tests__/auth-validation-rules.test.ts` — a guard that fails if the two ever
+    // disagree. So the drift the old comment feared is now a test failure rather than a
+    // silent divergence.
+    //
+    // What that buys is the case this screen could not describe: `owner@company` has no
+    // domain suffix, so nothing was caught here, and the outcome depended on the build —
+    // Firebase would report it, and a build with no Firebase configuration would send it
+    // to the server to be answered in a developer's words. It is now refused before a
+    // request is made, and a real typo is distinguished from an empty field.
+    const emailIssue = emailProblem(value);
+    if (emailIssue) {
+      setFieldErrors({ email: emailIssue });
       return;
     }
 

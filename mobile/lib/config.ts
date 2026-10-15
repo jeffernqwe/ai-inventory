@@ -23,6 +23,24 @@ export const API_URL: string = raw.replace(/\/+$/, '');
 export const REQUEST_TIMEOUT_MS = 15000;
 
 /**
+ * The wall-clock budget for ONE assistant turn (AI-1).
+ *
+ * The assistant is the one route whose server side can legitimately take tens of
+ * seconds: the backend bounds a whole turn with `AI_TURN_DEADLINE_MS` (60 s by
+ * default) because the model may need several tool rounds before it can answer.
+ * Applying the global 15 s budget to it meant the phone aborted a request the
+ * server was still answering — a measured WORKING answer took 13 283 ms, 88 % of
+ * that budget — and then reported the abort to the user as "Cannot reach the
+ * server", which was untrue (ISS-21, root cause RC-1).
+ *
+ * The margin over the server's deadline absorbs the response write and the two
+ * message rows persisted after the model answers. This value must stay ABOVE
+ * `AI_TURN_DEADLINE_MS`: `__tests__/ai1-turn-time-budget.test.ts` reads the
+ * server's own default out of its source and fails if it does not.
+ */
+export const AI_REQUEST_TIMEOUT_MS = 75000;
+
+/**
  * Firebase client configuration (Phase 32D).
  *
  * These four values are CLIENT configuration, never secrets. Firebase's own

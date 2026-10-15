@@ -12,6 +12,7 @@ import { defaultHomePath } from '../lib/permissions';
 import { spacing, type } from '../lib/theme';
 import type { Palette } from '../lib/theme';
 import { useTheme } from '../lib/theme-context';
+import { credentialsProblems } from '../lib/validation';
 
 const createStyles = (colors: Palette) =>
   StyleSheet.create({
@@ -194,10 +195,32 @@ export default function LoginScreen() {
     // its window has moved. The button is disabled too, so this is the keyboard
     // "→" path (the field's onSubmitEditing) as well as a belt-and-braces guard.
     if (coolingDown) return;
+
+    // REQUIRED-FIELD AND FORMAT VALIDATION RUN FIRST, AND NOTHING IS SENT IF EITHER
+    // FAILS. This screen previously had no such guard at all, so pressing Sign In on
+    // an empty form asked Firebase — or, on a build with no Firebase configuration, the
+    // legacy endpoint — to authenticate nothing. The answer arrived as the generic
+    // "Unable to sign in. Please try again.", which names neither field, suggests a
+    // fault rather than a missing input, and sends the person to hunt for a problem
+    // that is not there. Every other auth screen in this app already validated before
+    // it called anything; this brings Login into line with them, and the rules
+    // themselves live in `lib/validation.ts` so the six screens cannot drift apart.
+    const problems = credentialsProblems(email, password);
+    if (Object.keys(problems).length) {
+      resetFeedback();
+      setFieldErrors(problems);
+      return;
+    }
+
     setBusy(true);
     resetFeedback();
     try {
-      await signIn({ email, password });
+      // The address is TRIMMED on the way out. A trailing space is invisible on a
+      // phone keyboard and would come back as `auth/invalid-email`; the server
+      // normalises the same way, so the trimmed value is what both paths already
+      // wanted. The password is deliberately NOT trimmed — leading and trailing
+      // spaces are legitimate password characters.
+      await signIn({ email: email.trim(), password });
       // Navigation: on success the signedIn guard redirects this screen away.
     } catch (err) {
       applyAuthError(err);

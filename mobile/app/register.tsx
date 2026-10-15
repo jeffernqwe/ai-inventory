@@ -12,6 +12,7 @@ import { defaultHomePath } from '../lib/permissions';
 import { type } from '../lib/theme';
 import type { Palette } from '../lib/theme';
 import { useTheme } from '../lib/theme-context';
+import { emailProblem, passwordProblem, passwordStrengthProblem } from '../lib/validation';
 
 const createStyles = (colors: Palette) =>
   StyleSheet.create({
@@ -61,14 +62,32 @@ export default function RegisterScreen() {
 
   async function submit(): Promise<void> {
     // Required-field validation runs first, so an empty form never reaches the
-    // Firebase sign-up path. The password/confirm-match rule is preserved: an
-    // empty confirmation reports its own required error, and a non-empty one
-    // that differs still reports 'Passwords do not match'.
+    // Firebase sign-up path — a path that CREATES AN IDENTITY, which is why getting
+    // this wrong here is worse than anywhere else. The password/confirm-match rule is
+    // preserved: an empty confirmation reports its own required error, and a non-empty
+    // one that differs still reports 'Passwords do not match'.
+    //
+    // The EMAIL rule now comes from the shared module and covers the address's SHAPE
+    // as well as its presence. Presence alone was the old guard, so `owner@company`
+    // travelled as far as Firebase and came back described in a developer's words —
+    // and on an unconfigured build it travelled to the server's validator, the only
+    // place that shape rule then existed.
     const next: Record<string, string> = {};
     if (!businessName.trim()) next.businessName = 'Business name is required';
     if (!name.trim()) next.name = 'Name is required';
-    if (!email.trim()) next.email = 'Email is required';
-    if (!password) next.password = 'Password is required';
+    const emailIssue = emailProblem(email);
+    if (emailIssue) next.email = emailIssue;
+    // Presence first, then LENGTH — in that order, so a short password and an empty one
+    // are never confused. The length rule was the server's alone until now, which meant
+    // a 5-character password travelled there and came back as "password must be at least
+    // 8 characters" under the input. `reset-password.tsx` and `change-password.tsx`
+    // already refused it client-side; this is the third screen that chooses a password.
+    const passwordIssue = passwordProblem(password);
+    if (passwordIssue) next.password = passwordIssue;
+    else {
+      const strength = passwordStrengthProblem(password);
+      if (strength) next.password = strength;
+    }
     if (!confirm) next.confirm = 'Confirm password is required';
     else if (confirm !== password) next.confirm = 'Passwords do not match';
     if (Object.keys(next).length) {

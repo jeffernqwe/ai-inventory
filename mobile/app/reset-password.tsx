@@ -13,6 +13,7 @@ import { confirmFirebasePasswordReset, verifyFirebasePasswordResetCode } from '.
 import { type } from '../lib/theme';
 import type { Palette } from '../lib/theme';
 import { useTheme } from '../lib/theme-context';
+import { passwordStrengthProblem } from '../lib/validation';
 
 const RESET_COMPLETED = 'Password changed. Please sign in again.';
 
@@ -150,8 +151,20 @@ function ResetPasswordForm({ attempt }: { attempt: ResetAttempt }) {
     // server's own field name so a server-side error for it lands on this input.
     const problems: Record<string, string> = {};
     if (!newPassword) problems.newPassword = 'New password is required';
-    else if (newPassword.length < 8) problems.newPassword = 'Password must be at least 8 characters';
-    if (confirmPassword !== newPassword) problems.confirmPassword = 'Passwords do not match';
+    else {
+      // THE SHARED LENGTH RULE, which is how this screen gained the 72-character ceiling
+      // it was missing. The minimum was checked here all along; the maximum was the
+      // server's alone, so an over-long password travelled there and came back under the
+      // input as "password must be at most 72 characters" — a developer's sentence.
+      const strength = passwordStrengthProblem(newPassword);
+      if (strength) problems.newPassword = strength;
+    }
+    // An EMPTY confirmation is reported as MISSING rather than as a mismatch. That is the
+    // rule `register.tsx` already documents, and it matters for the same reason: "Passwords
+    // do not match" under a field nobody has typed in describes the wrong problem and reads
+    // as though a comparison had happened. A non-empty one that differs still says it.
+    if (!confirmPassword) problems.confirmPassword = 'Confirm password is required';
+    else if (confirmPassword !== newPassword) problems.confirmPassword = 'Passwords do not match';
     if (Object.keys(problems).length) {
       setFieldErrors(problems);
       return;

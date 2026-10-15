@@ -869,6 +869,10 @@ export const inventoryService = {
    * `q` searches product name/sku/barcode; `status` filters product status;
    * `lowStock`/`outOfStock` filter rows by per-row available quantity (per
    * §19: low = available <= minimumStock, out = available <= 0).
+   *
+   * TWO SHAPES, chosen by whether the request filters on the JOINED PRODUCT. Both
+   * are business-scoped at every stage and return the same DTO; only the position
+   * of the page window differs.
    */
   async listRows(businessId: IdLike, { productId, locationId, q, status, lowStock, outOfStock, skip, limit }: InventoryListFilters) {
     const bizOid = oid(businessId);
@@ -879,18 +883,103 @@ export const inventoryService = {
     if (locationId) match.locationId = oid(locationId);
 
     const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const pipeline: PipelineStage[] = [
-      { $match: match },
-      {
-        $lookup: {
-          from: 'products',
-          let: { pid: '$productId' },
-          pipeline: [
-            { $match: { $expr: { $and: [{ $eq: ['$businessId', bizOid] }, { $eq: ['$_id', '$$pid'] }] } } },
-          ],
-          as: 'product',
+
+    /** The product document the row DTO carries, scoped to the business. */
+    const productLookup: PipelineStage = {
+      $lookup: {
+        from: 'products',
+        let: { pid: '$productId' },
+        pipeline: [
+          { $match: { $expr: { $and: [{ $eq: ['$businessId', bizOid] }, { $eq: ['$_id', '$$pid'] }] } } },
+        ],
+        as: 'product',
+      },
+    };
+
+    /** availableQuantity = quantity - reservedQuantity, as §19 defines it. */
+    const availableField: PipelineStage = {
+      $addFields: {
+        availableQuantity: {
+          $subtract: [{ $ifNull: ['$quantity', 0] }, { $ifNull: ['$reservedQuantity', 0] }],
         },
       },
+    };
+
+    /**
+     * A product-dependent filter cannot be evaluated from the inventory row alone,
+     * so the product join has to happen BEFORE the page window for these requests —
+     * which is the slow shape, kept deliberately and covered by the comment on the
+     * fast path below.
+     */
+    const filtersOnProduct =
+      Boolean(q) || status === 'ACTIVE' || status === 'ARCHIVED' || Boolean(lowStock) || Boolean(outOfStock);
+
+    if (!filtersOnProduct) {
+      // THE FAST PATH: page first, join the page.
+      //
+      // Measured 2026-10-13 on a synthetic 10 000-product tenant (20 105 inventory
+      // rows): the joins below used to run once per TENANT ROW — `explain` showed
+      // nReturned=20105 at the product join (+3.1 s) and again (+3.2 s) at the
+      // location join — to produce a 25-row page, because the `$skip`/`$limit` sat at
+      // the very bottom inside a `$facet`, and a facet cannot run without everything
+      // above it running first. Each individual join is an index lookup; the COUNT of
+      // them is the cost. Selecting the page first makes this query O(page) and the
+      // same call now costs ~0.2 s.
+      //
+      // `{ updatedAt: -1, _id: -1 }` is a total order (the `_id` tiebreaker is why a
+      // transfer's two legs, written in one millisecond, still page stably), so the
+      // first `limit` rows of the sorted stream are exactly the rows the facet used to
+      // pick, and the order is index-provided by the inventory model's
+      // `{ businessId: 1, updatedAt: -1, _id: -1 }` index.
+      //
+      // The `product.0` existence filter moves BELOW the window, which changes one
+      // thing only for data the application cannot produce: an inventory row whose
+      // product is missing is now dropped from the page rather than from the total.
+      // Products are archive-only and never hard-deleted (§4), so no such row exists
+      // in an application-written database; the filter is retained as read-path
+      // hygiene, and the total counts the rows the query scoped, not the rows a join
+      // happened to resolve.
+      const pipeline: PipelineStage[] = [
+        { $match: match },
+        { $sort: { updatedAt: -1, _id: -1 } },
+        { $skip: skip },
+        { $limit: limit },
+        productLookup,
+        { $match: { 'product.0': { $exists: true } } },
+        { $unwind: '$product' },
+        availableField,
+        {
+          $lookup: {
+            from: 'locations',
+            let: { lid: '$locationId' },
+            pipeline: [
+              { $match: { $expr: { $and: [{ $eq: ['$businessId', bizOid] }, { $eq: ['$_id', '$$lid'] }] } } },
+            ],
+            as: 'location',
+          },
+        },
+        { $unwind: { path: '$location', preserveNullAndEmptyArrays: true } },
+      ];
+
+      // The count is a separate aggregation over the SAME `$match`, run in parallel
+      // with the page: `$count` on this indexed match never touches a document.
+      const [rows, counted] = await Promise.all([
+        Inventory.aggregate(pipeline),
+        Inventory.aggregate([{ $match: match }, { $count: 'total' }]),
+      ]);
+      return {
+        items: rows.map((row) => inventoryRowPublic(row)),
+        total: counted[0]?.total ?? 0,
+      };
+    }
+
+    // THE FILTERED PATH: the join runs above the window because the filter needs the
+    // joined product (`q` against its name/sku/barcode, `status` against its status,
+    // low/out stock against its `minimumStock`). Output shape and total are exactly
+    // what this method has always returned.
+    const pipeline: PipelineStage[] = [
+      { $match: match },
+      productLookup,
     ];
 
     const productMatch: Record<string, unknown> = { 'product.0': { $exists: true } };
@@ -901,13 +990,7 @@ export const inventoryService = {
     }
     pipeline.push({ $match: productMatch });
     pipeline.push({ $unwind: '$product' });
-    pipeline.push({
-      $addFields: {
-        availableQuantity: {
-          $subtract: [{ $ifNull: ['$quantity', 0] }, { $ifNull: ['$reservedQuantity', 0] }],
-        },
-      },
-    });
+    pipeline.push(availableField);
     if (outOfStock) pipeline.push({ $match: { $expr: { $lte: ['$availableQuantity', 0] } } });
     if (lowStock) pipeline.push({ $match: { $expr: { $lte: ['$availableQuantity', '$product.minimumStock'] } } });
 

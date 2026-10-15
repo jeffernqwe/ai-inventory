@@ -137,6 +137,62 @@ describe('password confirmation is preserved', () => {
   });
 });
 
+describe('password length is judged before an identity is created', () => {
+  /**
+   * Registration is where a password is CHOSEN, and it was the last screen that chose
+   * one without checking its length — so a 5-character password was sent to the server
+   * and came back under the input in a developer's words. `reset-password.tsx` and
+   * `change-password.tsx` already refused it client-side; the rule is now shared.
+   *
+   * This matters more here than anywhere else in the app: `signUp` on a
+   * Firebase-configured build CREATES AN IDENTITY, so a rejected form is not a wasted
+   * request but a half-made account.
+   */
+  const submitWithPassword = async (view: View, password: string): Promise<void> => {
+    await fireEvent.changeText(view.getByPlaceholderText(BUSINESS_PLACEHOLDER), 'Acme Retail');
+    await fireEvent.changeText(view.getByPlaceholderText(NAME_PLACEHOLDER), 'Ada Lovelace');
+    await fireEvent.changeText(view.getByPlaceholderText(EMAIL_PLACEHOLDER), 'owner@example.com');
+    await fireEvent.changeText(view.getByPlaceholderText(PASSWORD_PLACEHOLDER), password);
+    await fireEvent.changeText(view.getByPlaceholderText(CONFIRM_PLACEHOLDER), password);
+    await press(view);
+  };
+
+  it('★ refuses a short password without calling sign-up', async () => {
+    const view = await mount();
+    await submitWithPassword(view, 'short1');
+
+    expect(view.getByText('Password must be at least 8 characters')).toBeTruthy();
+    expect(signUp).not.toHaveBeenCalled();
+  });
+
+  it('★ refuses an over-long password without calling sign-up', async () => {
+    const view = await mount();
+    await submitWithPassword(view, 'a'.repeat(73));
+
+    expect(view.getByText('Password must be at most 72 characters')).toBeTruthy();
+    expect(signUp).not.toHaveBeenCalled();
+  });
+
+  it('★ reports an EMPTY password as required, never as too short', async () => {
+    // The order of the two checks, which is the difference between a useful message
+    // and a misleading one: "at least 8 characters" under a field the person has not
+    // filled in says the wrong thing about what is wrong.
+    const view = await mount();
+    await submitWithPassword(view, '');
+
+    expect(view.getByText('Password is required')).toBeTruthy();
+    expect(view.queryByText('Password must be at least 8 characters')).toBeNull();
+    expect(signUp).not.toHaveBeenCalled();
+  });
+
+  it('accepts a password at exactly the minimum length', async () => {
+    const view = await mount();
+    await submitWithPassword(view, 'a'.repeat(8));
+
+    expect(signUp).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('a complete form is unchanged', () => {
   it('★ calls sign-up exactly once with the entered values', async () => {
     const view = await mount();

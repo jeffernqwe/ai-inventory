@@ -187,49 +187,123 @@ function reorderItemPublic(doc: ReorderItemSource) {
  * matches. Shared by listWithStock and listReorder so every stock list uses the
  * same §19 math and can never disagree with the dashboard.
  */
+/**
+ * Per-product availability, computed by MERGING two streams instead of one join per
+ * product.
+ *
+ * WHAT THIS REPLACES. The previous shape ran a `$lookup` into `inventory` once per
+ * product of the tenant. Measured 2026-10-13 on a synthetic 10 000-product tenant
+ * (20 105 inventory rows), `explain('executionStats')` showed 10 000 sub-pipeline
+ * executions examining 20 105 rows and costing 2.0–2.2 s — to produce a 20-row page.
+ * Each individual join was an INDEX lookup; the COUNT of them was the cost, and no
+ * index can fix a fan-out of one query per row, which is why this is a restructure
+ * rather than an index.
+ *
+ * WHAT IT DOES INSTEAD. The products stream stays in place and a single `$unionWith`
+ * brings in inventory ALREADY GROUPED BY PRODUCT — one pass, one hash aggregate —
+ * after which one `$group` joins the two sides on their shared key (`_id`: a
+ * product's own `_id` on the product side, the grouped `productId` on the inventory
+ * side). Every filter, sort and `$regex` therefore stays inside MongoDB; nothing
+ * about matching semantics moves into application code, which is what makes this
+ * output-identical rather than merely similar.
+ *
+ * Published per surviving product: the product document ITSELF (the root of the old
+ * shape, byte for byte, so every DTO below needs no change) plus two fields:
+ *
+ *   available — quantity - reservedQuantity, summed across the product's rows, and
+ *               0 when it has no inventory at all. §19: a missing row is zero
+ *               stock, not missing stock. Identical arithmetic to the `$ifNull`
+ *               pair this replaces.
+ *   hasRow    — whether ANY inventory row contributed. This is what a
+ *               location-scoped request needs to mean "only products actually
+ *               stocked at that location"; the old shape tested `$size(inv) > 0`
+ *               on the lookup result array.
+ *
+ * `$max` is the merge operator on purpose: it IGNORES missing values, so each
+ * accumulator simply takes the side of the union that carries it.
+ */
 function availabilityStages(
   bizOid: mongoose.Types.ObjectId,
-  locCond: Record<string, unknown>[] = []
+  locationId?: string
 ): PipelineStage[] {
+  // The inventory side is filtered by a plain equality match, not an `$expr`, so the
+  // Phase 20D `{ businessId, locationId }` index serves it directly.
+  const invMatch: Record<string, unknown> = { businessId: bizOid };
+  if (locationId) invMatch.locationId = new ObjectId(locationId);
+
   return [
+    // Carry the product document through the merge untouched.
+    { $project: { __product: '$$ROOT' } },
     {
-      $lookup: {
-        from: 'inventory',
-        let: { pid: '$_id' },
+      $unionWith: {
+        coll: 'inventory',
         pipeline: [
-          {
-            $match: {
-              $expr: {
-                $and: [
-                  { $eq: ['$businessId', bizOid] },
-                  { $eq: ['$productId', '$$pid'] },
-                  ...locCond,
-                ],
-              },
-            },
-          },
+          { $match: invMatch },
           {
             $group: {
-              _id: null,
-              quantity: { $sum: '$quantity' },
-              reserved: { $sum: '$reservedQuantity' },
+              _id: '$productId',
+              __quantity: { $sum: '$quantity' },
+              __reserved: { $sum: '$reservedQuantity' },
             },
           },
+          // `_id` stays as the productId: it is the merge key on both sides.
+          { $project: { __quantity: 1, __reserved: 1, __hasRow: { $literal: true } } },
         ],
-        as: 'inv',
       },
     },
-    { $addFields: { invRow: { $arrayElemAt: ['$inv', 0] } } },
     {
-      $addFields: {
-        available: {
-          $subtract: [
-            { $ifNull: ['$invRow.quantity', 0] },
-            { $ifNull: ['$invRow.reserved', 0] },
+      $group: {
+        _id: '$_id',
+        __product: { $max: '$__product' },
+        __quantity: { $max: '$__quantity' },
+        __reserved: { $max: '$__reserved' },
+        __hasRow: { $max: '$__hasRow' },
+      },
+    },
+    // A group with no product document holds inventory rows for a product the
+    // catalogue filter excluded (an ARCHIVED product, another filter below). Those are
+    // dropped here, exactly as the products-side `$match` dropped them before.
+    { $match: { __product: { $ne: null } } },
+    {
+      $replaceRoot: {
+        newRoot: {
+          $mergeObjects: [
+            '$__product',
+            {
+              available: {
+                $subtract: [{ $ifNull: ['$__quantity', 0] }, { $ifNull: ['$__reserved', 0] }],
+              },
+              hasRow: { $eq: ['$__hasRow', true] },
+            },
           ],
         },
       },
     },
+  ];
+}
+
+/**
+ * The category document a catalogue row carries, joined for the PAGE only.
+ *
+ * Both callers apply this after `$skip`/`$limit`, so the join runs for at most one
+ * page of rows. It does not filter anything (the old shape joined every matching row
+ * before the facet, but a row whose category is missing still surfaced — as a null
+ * `categoryId`, which is what the normalisation below the pipeline reads), so moving
+ * it below the page window cannot change which rows come back or how many.
+ */
+function categoryStages(bizOid: mongoose.Types.ObjectId): PipelineStage.FacetPipelineStage[] {
+  return [
+    {
+      $lookup: {
+        from: 'categories',
+        let: { cat: '$categoryId' },
+        pipeline: [
+          { $match: { $expr: { $and: [{ $eq: ['$businessId', bizOid] }, { $eq: ['$_id', '$$cat'] }] } } },
+        ],
+        as: 'category',
+      },
+    },
+    { $addFields: { category: { $arrayElemAt: ['$category', 0] } } },
   ];
 }
 
@@ -546,33 +620,32 @@ export const productService = {
       match.$or = [{ name: re }, { sku: re }, { barcode: re }];
     }
 
-    const locCond = locationId ? [{ $eq: ['$locationId', new ObjectId(locationId)] }] : [];
-
     const pipeline: PipelineStage[] = [
       { $match: match },
-      // Phase 20H: the sort has to sit ABOVE the first $lookup, not inside the
-      // $facet below. A $facet sub-pipeline runs in the aggregation executor —
-      // past the point where the query planner can absorb a sort — and a $sort
-      // placed after a $lookup is equally out of the planner's reach. In either
-      // position the order was left to a blocking in-memory sort and the winning
-      // plan was `FETCH | IXSCAN[businessId_1]`, an index that cannot supply
-      // `{ createdAt: -1, _id: -1 }`. Here the planner takes `$match + $sort`
-      // together and walks the Phase 20G index
-      // `{ businessId: 1, createdAt: -1, _id: -1 }` instead, so the order is
-      // index-provided for every filter combination this method accepts.
-      // Returning already-ordered rows is safe: $lookup, $addFields, $match and
-      // $unwind all preserve their input order (the same reliance the History
-      // pipeline in transactions.service.js already has), and $facet.metadata
-      // counts the documents reaching the facet, which this move does not change.
-      // `_id` breaks createdAt ties in the same direction as the primary sort
-      // so an offset page boundary inside a tie is stable.
-      { $sort: { createdAt: -1, _id: -1 } },
-      ...availabilityStages(bizOid, locCond),
+      // No `$sort` here, and no per-product `$lookup` either.
+      //
+      // Phase 20H moved the sort above the first `$lookup` so the planner could take
+      // `$match + $sort` together and walk the Phase 20G index
+      // `{ businessId: 1, createdAt: -1, _id: -1 }`. That advice was right for the
+      // shape it was written against, and this method is no longer that shape: the
+      // availability merge in `availabilityStages` has to read the whole inventory
+      // partition to answer a STOCK-FILTERED question at all, so no index can supply
+      // the page order while a stock predicate is applied above it — the rows that
+      // survive the predicate are not a contiguous run of any index. What matters is
+      // the relative cost: the merge replaces 10 000 index-lookups (2.0–2.2 s
+      // measured) with one grouped pass, while the sort it pushes into the facet
+      // branch below is a few tens of milliseconds over the same rows. The page
+      // window is unchanged — `$skip`/`$limit` — and `_id` still breaks `createdAt`
+      // ties in the same direction, so a page boundary inside a tie is stable.
+      // (Unfiltered catalogue reads never reach this method: `list()` sends them to
+      // `listSimple`, whose order is still index-provided.)
+      ...availabilityStages(bizOid, locationId),
     ];
 
-    // Only products actually stocked at the chosen location.
+    // Only products actually stocked at the chosen location — the merge reports
+    // whether any inventory row contributed.
     if (locationId) {
-      pipeline.push({ $match: { $expr: { $gt: [{ $size: '$inv' }, 0] } } });
+      pipeline.push({ $match: { hasRow: true } });
     }
     if (outOfStock) {
       pipeline.push({ $match: { $expr: { $lte: ['$available', 0] } } });
@@ -582,23 +655,17 @@ export const productService = {
     }
 
     pipeline.push({
-      $lookup: {
-        from: 'categories',
-        let: { cat: '$categoryId' },
-        pipeline: [
-          { $match: { $expr: { $and: [{ $eq: ['$businessId', bizOid] }, { $eq: ['$_id', '$$cat'] }] } } },
-        ],
-        as: 'category',
-      },
-    });
-    pipeline.push({ $addFields: { category: { $arrayElemAt: ['$category', 0] } } });
-    pipeline.push({
       $facet: {
+        // Counted after the stock filters, as it always has been, and counted on the
+        // documents reaching the facet — so the page's own sort and joins cannot
+        // affect it (a $facet's branches read the same input independently).
         metadata: [{ $count: 'total' }],
-        // The $sort that orders these rows lives at the top of the pipeline
-        // (Phase 20H) so the planner can serve it from an index; only the page
-        // window is applied here.
-        data: [{ $skip: skip }, { $limit: limit }],
+        data: [
+          { $sort: { createdAt: -1, _id: -1 } },
+          { $skip: skip },
+          { $limit: limit },
+          ...categoryStages(bizOid),
+        ],
       },
     });
 
@@ -641,22 +708,20 @@ export const productService = {
       ...availabilityStages(bizOid),
       { $match: { $expr: { $lte: ['$available', '$minimumStock'] } } },
       {
-        $lookup: {
-          from: 'categories',
-          let: { cat: '$categoryId' },
-          pipeline: [
-            { $match: { $expr: { $and: [{ $eq: ['$businessId', bizOid] }, { $eq: ['$_id', '$$cat'] }] } } },
-          ],
-          as: 'category',
-        },
-      },
-      { $addFields: { category: { $arrayElemAt: ['$category', 0] } } },
-      {
         $facet: {
           metadata: [{ $count: 'total' }],
           // Worst-off first (available ascending), then newest, then `_id` so a
-          // tie on both leading keys still pages deterministically.
-          data: [{ $sort: { available: 1, createdAt: -1, _id: -1 } }, { $skip: skip }, { $limit: limit }],
+          // tie on both leading keys still pages deterministically. The sort sits in
+          // this branch rather than above the facet because the count does not depend
+          // on order — the same reason this branch held the sort before the
+          // availability merge (see `availabilityStages`). The category join follows
+          // the page window, so it runs for at most one page of rows.
+          data: [
+            { $sort: { available: 1, createdAt: -1, _id: -1 } },
+            { $skip: skip },
+            { $limit: limit },
+            ...categoryStages(bizOid),
+          ],
         },
       },
     ];

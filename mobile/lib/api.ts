@@ -1,5 +1,6 @@
 import { apiFetch } from './client';
 import type { QueryParams } from './client';
+import { AI_REQUEST_TIMEOUT_MS } from './config';
 
 /**
  * Typed endpoint wrappers over the backend REST API. Each function returns the
@@ -759,9 +760,19 @@ export const aiApi = {
    * Run one user message through the assistant. Omit conversationId to start a
    * new conversation (title is derived from the first message). Returns
    * { conversation, userMessage, assistantMessage }.
+   *
+   * AI-1 — the one route that opts out of the global 15 s budget. The server
+   * allows a whole turn up to AI_TURN_DEADLINE_MS (60 s) because the model may
+   * need several tool rounds, so a 15 s client abort killed answers the server
+   * was still producing and then blamed the network (ISS-21).
    */
   chat: (token: string, { conversationId, message }: { conversationId?: string | null; message: string }): Promise<ApiResponse> =>
-    apiFetch('/api/ai/chat', { token, method: 'POST', body: { conversationId, message } }),
+    apiFetch('/api/ai/chat', {
+      token,
+      method: 'POST',
+      body: { conversationId, message },
+      timeoutMs: AI_REQUEST_TIMEOUT_MS,
+    }),
 };
 
 export default {

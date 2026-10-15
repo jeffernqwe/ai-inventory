@@ -57,6 +57,19 @@ export interface ProviderRequest {
   system: string;
   messages: ProviderMessage[];
   tools: ToolDefinition[];
+  /**
+   * Wall-clock budget for THIS call, in ms (AI-1). runAiChat passes the time
+   * remaining in the turn's single deadline, so the turn's total cost is bounded
+   * by that deadline rather than by (per-call cap x tool iterations). Optional:
+   * a provider that ignores it is still bounded by the loop's own race.
+   */
+  timeoutMs?: number;
+  /**
+   * Aborted when the caller has gone away (AI-1). Threaded from the inbound HTTP
+   * request so an abandoned turn cancels its model call instead of paying for an
+   * answer nobody will read.
+   */
+  signal?: AbortSignal;
 }
 
 /** Token accounting as the provider reported it, or null when it reported none. */
@@ -71,6 +84,17 @@ export interface ProviderResponse {
   text: string;
   toolCalls: ToolCall[];
   usage: ProviderUsage | null;
+  /**
+   * AI-8 — whether the provider STOPPED because it reached the output cap.
+   *
+   * It is reported on every response, including the ones that carry text, because that
+   * is precisely the case that was invisible: `stop_reason === 'max_tokens'` was read
+   * only to decide whether to throw, and a truncation that carried any text therefore
+   * discarded the fact. This is the provider's own signal, not a count — the cap itself
+   * lives in `aiConfig().maxOutputTokens` — so a provider that reports nothing simply
+   * omits it (`undefined`, which is not a truncation).
+   */
+  truncated?: boolean;
 }
 
 /**

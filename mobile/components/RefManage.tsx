@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, StyleSheet, Text, View } from 'react-native';
 import type { TextInputProps } from 'react-native';
 
 import { StatusBadge } from './Badge';
@@ -10,6 +10,7 @@ import Chip from './Chip';
 import { Icon } from './icons';
 import type { IconName } from './icons';
 import Input from './Input';
+import KeyboardScrollView from './KeyboardScrollView';
 import ListRow from './ListRow';
 import ListScreen from './ListScreen';
 import SearchField from './SearchField';
@@ -273,7 +274,7 @@ export default function RefManage({
         onClose={closeForm}
         title={editing ? `Edit ${singular.toLowerCase()}` : `New ${singular.toLowerCase()}`}
       >
-        <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheetBody} keyboardShouldPersistTaps="handled">
+        <KeyboardScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheetBody} keyboardShouldPersistTaps="handled">
           <Banner type="error" text={formError} />
           <Input
             name="name"
@@ -307,7 +308,7 @@ export default function RefManage({
           ))}
           <Button title={editing ? 'Save changes' : `Create ${singular.toLowerCase()}`} onPress={save} loading={saving} full />
           <Button title="Cancel" variant="secondary" onPress={closeForm} style={styles.cancelBtn} full />
-        </ScrollView>
+        </KeyboardScrollView>
       </Sheet>
     </View>
   );

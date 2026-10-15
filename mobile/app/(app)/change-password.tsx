@@ -11,6 +11,7 @@ import { changePassword } from '../../lib/api';
 import { ApiError } from '../../lib/client';
 import { isSessionError, useSession } from '../../lib/auth';
 import { spacing } from '../../lib/theme';
+import { passwordStrengthProblem } from '../../lib/validation';
 
 function fieldMap(err: unknown): Record<string, string> {
   const out: Record<string, string> = {};
@@ -43,8 +44,18 @@ export default function ChangePasswordScreen() {
     const problems: Record<string, string> = {};
     if (!currentPassword) problems.currentPassword = 'Current password is required';
     if (!newPassword) problems.newPassword = 'New password is required';
-    else if (newPassword.length < 8) problems.newPassword = 'Password must be at least 8 characters';
-    if (confirmPassword !== newPassword) problems.confirm = 'Passwords do not match';
+    else {
+      // The SHARED length rule, which is how this screen gained the 72-character ceiling
+      // it was missing: the minimum was checked here, the maximum only on the server, so an
+      // over-long password was refused in a developer's words under the input.
+      const strength = passwordStrengthProblem(newPassword);
+      if (strength) problems.newPassword = strength;
+    }
+    // An EMPTY confirmation is reported as MISSING, not as a mismatch — the rule
+    // `register.tsx` documents. "Passwords do not match" under an untouched field names the
+    // wrong problem.
+    if (!confirmPassword) problems.confirm = 'Confirm password is required';
+    else if (confirmPassword !== newPassword) problems.confirm = 'Passwords do not match';
     if (Object.keys(problems).length) {
       setFieldErrors(problems);
       return;

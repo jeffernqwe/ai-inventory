@@ -1,11 +1,17 @@
 /**
  * Shared JSON-over-HTTPS caller for the AI providers (Node >=18 global fetch,
  * no SDK dependency). Enforces a timeout and normalises every failure into an
- * AiProviderError with a safe, client-presentable message — raw upstream
- * bodies and statuses are logged server-side, never returned to the client.
+ * AI error carrying a safe, client-presentable message — raw upstream bodies
+ * and statuses are logged server-side, never returned to the client.
+ *
+ * TWO non-2xx answers are deliberately not an AiProviderError (AI-6): 429 and 402
+ * mean the gateway answered correctly and refused because an allowance is spent,
+ * so they become an AiQuotaExceeded (429 AI_QUOTA_EXCEEDED) instead. Every other
+ * status — including every 5xx, which really is an outage — keeps the
+ * AiProviderError this layer has always thrown.
  */
 
-import { AiProviderError } from '../aiErrors.ts';
+import { AiAbandoned, AiProviderError, AiQuotaExceeded } from '../aiErrors.ts';
 
 /**
  * The upstream JSON body, as far as anything here is allowed to assume: an
@@ -30,6 +36,12 @@ export interface PostJsonOptions {
   body: unknown;
   timeoutMs?: number;
   providerName?: string;
+  /**
+   * Aborted when the CALLER has gone away (AI-1). Combined with this layer's own
+   * timeout so either can end the request, and told apart in the catch below so
+   * an abandoned call is neither logged as a timeout nor reported as one.
+   */
+  signal?: AbortSignal;
 }
 
 /**
@@ -123,9 +135,11 @@ function logUpstreamDiagnostics({
   );
 }
 
-export async function postJson({ url, headers = {}, body, timeoutMs = 60000, providerName = 'ai' }: PostJsonOptions): Promise<UpstreamJsonBody> {
+export async function postJson({ url, headers = {}, body, timeoutMs = 60000, providerName = 'ai', signal }: PostJsonOptions): Promise<UpstreamJsonBody> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  // Either this layer's own timeout or the caller disappearing ends the request.
+  const abortSignal = signal ? AbortSignal.any([controller.signal, signal]) : controller.signal;
 
   // The definite-assignment assertion replaces the untyped `let res;` without
   // touching the flow: every path reaching the read below has either assigned a
@@ -140,7 +154,7 @@ export async function postJson({ url, headers = {}, body, timeoutMs = 60000, pro
         ...headers,
       },
       body: JSON.stringify(body),
-      signal: controller.signal,
+      signal: abortSignal,
     });
   } catch (err) {
     clearTimeout(timer);
@@ -148,6 +162,15 @@ export async function postJson({ url, headers = {}, body, timeoutMs = 60000, pro
     // the assertion is the erasable way to read the properties this check has
     // always read. Nothing is attached to the error that leaves.
     if ((err as { name?: unknown })?.name === 'AbortError') {
+      // AI-1 — WHO aborted decides what this is. A caller that has gone away is
+      // not a timeout: logging it as one would hide the abandonment, and
+      // throwing a timeout would become a 502 written to a closed socket. The
+      // caller's own signal is what tells the two apart, because this layer's
+      // controller is only ever aborted by its own timer.
+      if (signal?.aborted) {
+        console.error(`[ai:${providerName}] caller went away; the upstream call was cancelled`);
+        throw new AiAbandoned();
+      }
       console.error(`[ai:${providerName}] request timed out after ${timeoutMs}ms`);
       throw new AiProviderError('The AI service took too long to respond. Please try again.');
     }
@@ -157,14 +180,33 @@ export async function postJson({ url, headers = {}, body, timeoutMs = 60000, pro
   clearTimeout(timer);
 
   if (!res.ok) {
-    console.error(`[ai:${providerName}] upstream HTTP ${res.status}`);
+    // AI-6 — 429 and 402 are the two non-2xx that are NOT outages. The gateway is
+    // answering perfectly well; it is refusing because an allowance is spent.
+    // 429 is the measured dominant failure at this tier (`429
+    // free-models-per-day`, §27BF) and 402 is its sibling — an exhausted credit
+    // balance. Both used to reach the member as 502 AI_UNAVAILABLE, whose sentence
+    // tells them to try again in a moment, which cannot refill either one. 402 was
+    // previously covered by a test case that labelled it `insufficient credits`
+    // and still asserted a provider failure; it is the same class.
+    //
+    // The log line is deliberately separate and greppable, because the operator
+    // question is never "was there a 429?" but "is this a limit or an outage?".
+    const isQuotaRefusal = res.status === 429 || res.status === 402;
+    console.error(
+      isQuotaRefusal
+        ? `[ai:${providerName}] upstream rate/quota limit reached (HTTP ${res.status})`
+        : `[ai:${providerName}] upstream HTTP ${res.status}`
+    );
     // Phase 31D.6: this branch used to throw without reading the body, so a
     // non-2xx was diagnosable only by its status code. The read is guarded
     // because an error body may itself fail to arrive (a truncated stream, a
-    // connection dropped mid-body) and that must not replace the
-    // AiProviderError this branch has always thrown.
+    // connection dropped mid-body) and that must not replace the error this
+    // branch throws — and it happens BEFORE the throw for the same reason it
+    // always has: the quota case needs its diagnostics just as much, and the
+    // body is still never returned to the client.
     const errorBody = await res.text().catch(() => '');
     logUpstreamDiagnostics({ providerName, res, body: errorBody, reason: 'HTTP error' });
+    if (isQuotaRefusal) throw new AiQuotaExceeded();
     throw new AiProviderError('The AI service returned an error. Please try again.');
   }
 

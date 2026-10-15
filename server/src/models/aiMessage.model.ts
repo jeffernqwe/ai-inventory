@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 
 const { Schema } = mongoose;
 
+
 const aiMessageRoles = ['USER', 'ASSISTANT', 'TOOL'];
 
 const aiMessageSchema = new Schema(
@@ -33,6 +34,21 @@ const aiMessageSchema = new Schema(
     ],
     usage: {
       type: Schema.Types.Mixed,
+    },
+    /**
+     * AI-8 — set ONLY on an assistant turn that was marked degraded, and so absent on
+     * every message written before this (and on every healthy turn).
+     *
+     * It is stored because the mark has to survive the round trip: a thread reopened
+     * tomorrow must not look more trustworthy than the screen that produced it, and the
+     * rate of each reason becomes countable from the database rather than only from a
+     * log file that rotation will eat. A plain trimmed String, not an enum, because the
+     * vocabulary belongs to the service that produces it (`DegradedReason`) and a second
+     * copy here could silently disagree with the first.
+     */
+    degraded: {
+      type: String,
+      trim: true,
     },
   },
   { collection: 'ai_messages', timestamps: true }

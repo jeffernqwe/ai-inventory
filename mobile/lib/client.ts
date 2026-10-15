@@ -91,6 +91,17 @@ export interface ApiFetchOptions {
   body?: unknown;
   params?: QueryParams | null;
   /**
+   * Wall-clock budget for THIS request, in ms (AI-1). Defaults to
+   * `REQUEST_TIMEOUT_MS`, so every existing caller keeps the global 15 s budget
+   * and only a caller that states otherwise is affected.
+   *
+   * It exists because one route is legitimately slow: the assistant's server side
+   * is bounded by its own turn deadline, not by 15 s, so a single global budget
+   * could only ever be wrong for one of the two. The assistant passes its own,
+   * larger budget; nothing else changes.
+   */
+  timeoutMs?: number;
+  /**
    * N-4 — the `token` on this request is a DELIBERATELY TEMPORARY session that is
    * never applied to the app, so a 401/403 answer must NOT be reported as session
    * loss. See the note at the report site below for why that distinction has to
@@ -267,7 +278,7 @@ export async function apiFetch<T = unknown>(path: string, options: ApiFetchOptio
 
 async function apiFetchAttempt<T = unknown>(
   path: string,
-  { method = 'GET', token, body, params, temporarySession = false }: ApiFetchOptions,
+  { method = 'GET', token, body, params, temporarySession = false, timeoutMs }: ApiFetchOptions,
   isRetry: boolean,
 ): Promise<T> {
   let effectiveToken = token ?? null;
@@ -288,8 +299,12 @@ async function apiFetchAttempt<T = unknown>(
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   if (effectiveToken) headers.Authorization = `Bearer ${effectiveToken}`;
 
+  // AI-1 — the caller's own budget when it stated one, otherwise the global
+  // default. Resolved here, once, so every request in the app still shares one
+  // timeout unless it deliberately opts out.
+  const budgetMs = timeoutMs ?? REQUEST_TIMEOUT_MS;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), budgetMs);
 
   let res: Response;
   try {
@@ -346,7 +361,9 @@ async function apiFetchAttempt<T = unknown>(
     if (refreshed) {
       return apiFetchAttempt<T>(
         path,
-        { method, token: refreshed, body, params, temporarySession },
+        // `timeoutMs` is carried across the retry: a recovered request must get
+        // the same budget its caller asked for, not silently revert to 15 s.
+        { method, token: refreshed, body, params, temporarySession, timeoutMs },
         true,
       );
     }

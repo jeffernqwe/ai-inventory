@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { StyleSheet, Text, TextInput, View } from 'react-native';
 import type { TextInputProps } from 'react-native';
+import { useKeyboardScroll } from './KeyboardScrollView';
 import { radius, spacing, type } from '../lib/theme';
 import type { Palette } from '../lib/theme';
 import { useTheme } from '../lib/theme-context';
@@ -102,6 +103,15 @@ export default function Input({
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [focused, setFocused] = useState(false);
+  const inputRef = useRef<TextInput>(null);
+  /**
+   * The keyboard fix, from the field's side: on focus, tell the nearest keyboard-aware
+   * scroll view which field was focused so IT can bring it above the keyboard. Null on a
+   * screen that does not scroll (a bottom-anchored layout lifts itself instead) and inside a
+   * sheet whose own scroll view supplies its own registration — in both cases there is
+   * nothing for this field to do, and nothing breaks.
+   */
+  const reportFocusToScrollView = useKeyboardScroll();
 
   /**
    * Phase 32N — whether this field's secret is currently REVEALED.
@@ -133,6 +143,7 @@ export default function Input({
    */
   const field = (
     <TextInput
+      ref={inputRef}
       style={[
         styles.input,
         multiline && styles.multiline,
@@ -154,7 +165,10 @@ export default function Input({
       maxLength={maxLength}
       returnKeyType={returnKeyType}
       onSubmitEditing={onSubmitEditing}
-      onFocus={() => setFocused(true)}
+      onFocus={() => {
+        setFocused(true);
+        reportFocusToScrollView?.(inputRef.current);
+      }}
       onBlur={() => {
         setFocused(false);
         onBlur?.();

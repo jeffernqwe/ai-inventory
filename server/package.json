@@ -22,7 +22,17 @@
     "cleanup:dev-mongodb": "node scripts/cleanup-mongodb.mjs --target=dev --command=cleanup:dev-mongodb",
     "cleanup:prod-mongodb": "node scripts/cleanup-mongodb.mjs --target=prod --command=cleanup:prod-mongodb",
     "cleanup:all-mongodb": "node scripts/cleanup-mongodb.mjs --target=all --command=cleanup:all-mongodb",
-    "cleanup:test-firebase": "node scripts/cleanup-test-firebase.mjs"
+    "cleanup:test-firebase": "node scripts/cleanup-test-firebase.mjs",
+    "cleanup:firebase-accounts": "node scripts/cleanup-firebase-accounts.mjs",
+    "audit:indexes": "node scripts/audit-indexes.mjs",
+    "seed:perf": "node scripts/seed-perf-data.mjs",
+    "seed:demo": "node scripts/seed-demo-account.mjs",
+    "seed:accounts": "node scripts/seed-accounts.mjs",
+    "verify:demo": "node scripts/verify-demo-data.mjs",
+    "cleanup:perf": "node scripts/cleanup-perf-data.mjs",
+    "perf:measure": "node scripts/measure-ai-tools.mjs",
+    "perf:golden": "node scripts/capture-ai-golden.mjs",
+    "perf:turns": "node scripts/measure-ai-turns.mjs"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

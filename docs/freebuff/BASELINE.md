@@ -155,6 +155,17 @@ No environment variable values, credentials or secret material were read or reco
 install/uninstall, a `package.json`/lockfile change, or an Expo/React Native/Firebase/Mongoose/Express
 version change must **STOP** and explain before acting.
 
+**Annotated 2026-10-15 — one dependency change, and it was the owner's authorisation, not this thread's.** The
+freeze above scopes *this thread's task work*; it is not a repository invariant, and the owner has since
+authorised exactly one change: the five in-range server minor-and-patch bumps — `express` 5.2.1 → 5.3.0,
+`dotenv` 18.0.7 → 18.0.8, `mongoose` 9.11.1 → 9.11.2, `@types/node` 26.6.4 → 26.6.5 and `typescript-eslint`
+8.71.1 → 8.71.2 — verified green and recorded in `docs/DEVELOPMENT_ROADMAP.md` §27CB. So the Server row above
+is accurate **as the FB-002 capture it is**, while its closing note ("No dependency was installed, removed or
+upgraded by Freebuff") **no longer describes the repository**: those five versions are superseded on
+`server/`. `mobile/` is unchanged, by decision (§27CA). §10's "Freebuff has executed none of them" is
+likewise superseded for the server side — the full suite, `npm ci` and the boot smoke were run for §27CB, at
+the counts recorded there.
+
 ## 10. Test baseline
 
 See `TEST_BASELINE.md` for the full inventory, mode classification and provenance. Summary at this

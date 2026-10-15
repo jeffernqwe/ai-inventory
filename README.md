@@ -382,7 +382,7 @@ unreachable — `/api/health` reports `db: connected|disconnected`.
 
 ## Mobile (`mobile/`)
 
-Expo app with Expo Router (file-based routing), written in **TypeScript** (`app/`, `components/` and `lib/` hold 82 `.ts`/`.tsx` files and no `.js`; `__tests__/` adds 50 more — both re-counted 2026-10-12). It is a **client
+Expo app with Expo Router (file-based routing), written in **TypeScript** (`app/`, `components/` and `lib/` hold 87 `.ts`/`.tsx` files and no `.js`; `__tests__/` adds 62 more — both re-counted 2026-10-15). It is a **client
 only** — the backend is the security boundary. The app never connects to MongoDB and
 never holds MongoDB or AI credentials. The JWT is the only thing persisted (Expo
 SecureStore); the user profile is re-fetched from `/api/auth/me` on every launch so

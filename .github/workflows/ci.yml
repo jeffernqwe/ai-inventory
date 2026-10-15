@@ -254,5 +254,15 @@ jobs:
       - name: Typecheck
         run: npx tsc --noEmit
 
+      # The build-environment guard's REPOSITORY half: the profile contract in
+      # `eas.json`, the variables the sources read, and their documentation. Its
+      # controls run first, on every invocation, so a rule that quietly stopped
+      # matching cannot report a clean tree. `--live` — the half that asks the EAS
+      # environment what a profile actually has, which is what would have caught the
+      # production build on 2026-10-15 — needs a signed-in EAS CLI, so it belongs to
+      # the pre-build checklist (docs/guides/2-run-on-your-phone.md), not to CI.
+      - name: Check the build-environment contract
+        run: node scripts/check-build-env.mjs
+
       - name: Test
         run: npx jest .

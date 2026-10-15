@@ -109,6 +109,8 @@ npm run typecheck        # same idea, for the app
 npm run lint
 npm test                 # the app's own test suite
 npm run test:watch       # re-runs the tests automatically as you edit
+npm run check:build-env  # will a phone build have the settings it needs?
+node scripts/check-build-env.mjs --live   # the same question, including EAS (needs a sign-in)
 ```
 
 **How to read the result:** the tests end with a summary line, where `0 failures` is a pass.
@@ -525,6 +527,8 @@ commands, the performance probes and `audit-access.mjs`.
 | `npm start`, `npm run android`, `npm run ios`, `npm run web` | other ways to start it | ✅ |
 | `npm run typecheck`, `npm run lint` | app consistency checks | ✅ |
 | `npm test`, `npm run test:watch` | the app's test suite | ✅ |
+| `npm run check:build-env` | are this project's build settings complete? | ✅ reads only |
+| `node scripts/check-build-env.mjs --live` | …**and** what the EAS environment holds (names only) | ✅ reads only |
 
 **From the project root**
 

@@ -19,6 +19,8 @@
 import app from '../app.ts';
 import env from './env.ts';
 import { connectDatabase, disconnectDatabase } from './db.ts';
+import { deploymentLine, deploymentNotes, integrationReport } from './deploymentReadiness.ts';
+import type { IntegrationReport } from './deploymentReadiness.ts';
 import {
   createShutdownHandler,
   registerSignalHandlers,
@@ -43,6 +45,7 @@ type StartServerOptions = {
   connectFn?: () => unknown;
   closeFn?: () => unknown;
   validator?: () => ConfigProblem[];
+  readiness?: () => IntegrationReport;
   exit?: (code: number) => void;
   logger?: Logger;
   signalTarget?: SignalTarget;
@@ -59,6 +62,7 @@ type StartServerOptions = {
  * @param {Function}[options.connectFn]        async DB connect (true/false or throws)
  * @param {Function}[options.closeFn]          async DB close (shutdown)
  * @param {Function}[options.validator]        () => [{ variable, message }]
+ * @param {Function}[options.readiness]        () => IntegrationReport (boot line + warnings)
  * @param {Function}[options.exit]             default process.exit (inject to capture)
  * @param {object}  [options.logger]           { log, error }
  * @param {object}  [options.signalTarget]     default process
@@ -73,6 +77,7 @@ export async function startServer({
   connectFn = connectDatabase,
   closeFn = disconnectDatabase,
   validator = validateProductionConfig,
+  readiness = integrationReport,
   exit,
   logger = console,
   signalTarget = process,
@@ -95,6 +100,18 @@ export async function startServer({
       exitFn(1);
       return null;
     }
+  }
+
+  // What this deployment IS, and what it cannot do — said once, before anything else is
+  // attempted. Validation above refuses to boot on a configuration that is outright broken;
+  // this reports the states that are legal, silent and unusable instead (see
+  // config/deploymentReadiness.ts). It is deliberately a WARNING and never a failure: an
+  // optional integration that cannot work degrades a feature, and refusing to boot over one
+  // would turn that into a dead deployment on its next restart.
+  const report = readiness();
+  logger.log(deploymentLine(report));
+  for (const note of deploymentNotes(report)) {
+    logger.error(`[config] warning: ${note}`);
   }
 
   // H8 — connect before accepting traffic. Production treats a failed connect

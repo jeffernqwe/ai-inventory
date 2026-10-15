@@ -6774,7 +6774,7 @@ update its tracking boxes, status rows and heading date at the end of a session 
 | CI | `.github/workflows/ci.yml` only — jobs **server / mobile / secret-guard**; last `main` run green on `cd405a3` (run `38165714705`, 2026-10-12 — jobs `server` / `mobile` / `secret-guard` all success), and on `957e5b3` before it (run `38165357249`), and on every run before those |
 | Backend | **117** `.ts` modules + one deferred `.js` (`server/src/services/entitlement.service.js`); **0** open advisories |
 | Mobile | **133** `.ts`/`.tsx` sources and **0** `.js`/`.jsx` in `app/ components/ lib/ __tests__/` (re-counted 2026-10-12 after §27AY's new guard); Expo 57 / RN 0.86.3, and since §27AY `react-native-reanimated` 4.5.1 / `react-native-worklets` 0.10.1 declared directly at the SDK's own pins — `expo-doctor` **21/21** and `npm ls` free of invalid entries |
-| Tests | **65** server test files (`server/test/*.test.mjs`, up from 64 on 2026-10-12 by §27AX's route-inventory guard) and **51** mobile test files (file counts, re-read 2026-10-12 — §27AY added one). CI's own summary at `3beaf85`: server **185 suites / 1312 tests, 0 failures**; mobile **49 suites / 660 tests** — a "suite" there is CI's unit, not a file. Re-run locally on `3adac9d` for the device pass: mobile **50 / 666**, server **185 / 1312**, both 0 failures, `tsc` and eslint clean (§27AT); re-run locally on 2026-10-12 (§27AY): mobile **51 suites / 674 tests**, 0 failures, with `tsc` and eslint clean — and CI's own `mobile` job reports the same **51 / 674** on both `957e5b3` and `cd405a3`. **Re-run locally 2026-10-13 (AI-1 + AI-2, §27BF):** server **1353 tests / 192 suites, 0 failures** (68 files) and mobile **54 suites / 701 tests, 0 failures**, with `tsc`, `eslint` and both module-graph checks clean on both sides. **Re-run by CI 2026-10-14 (head `2bf99c5`, the same jobs that gate the pull request):** server **1405 tests / 205 suites, 0 failures, 0 skipped** (75 test files) and mobile **62 suites / 833 tests, 0 failures**. The **file** counts are the ones that drift — re-read them, do not quote them |
+| Tests | **65** server test files (`server/test/*.test.mjs`, up from 64 on 2026-10-12 by §27AX's route-inventory guard) and **51** mobile test files (file counts, re-read 2026-10-12 — §27AY added one). CI's own summary at `3beaf85`: server **185 suites / 1312 tests, 0 failures**; mobile **49 suites / 660 tests** — a "suite" there is CI's unit, not a file. Re-run locally on `3adac9d` for the device pass: mobile **50 / 666**, server **185 / 1312**, both 0 failures, `tsc` and eslint clean (§27AT); re-run locally on 2026-10-12 (§27AY): mobile **51 suites / 674 tests**, 0 failures, with `tsc` and eslint clean — and CI's own `mobile` job reports the same **51 / 674** on both `957e5b3` and `cd405a3`. **Re-run locally 2026-10-13 (AI-1 + AI-2, §27BF):** server **1353 tests / 192 suites, 0 failures** (68 files) and mobile **54 suites / 701 tests, 0 failures**, with `tsc`, `eslint` and both module-graph checks clean on both sides. **Re-run by CI 2026-10-14 (head `2bf99c5`, the same jobs that gate the pull request):** server **1405 tests / 205 suites, 0 failures, 0 skipped** (75 test files) and mobile **62 suites / 833 tests, 0 failures**. **Re-run locally 2026-10-15 (AI-9, §27CF):** mobile **64 suites / 848 tests, 0 failures**, `tsc` and `eslint` clean; the server suite was deliberately **not** re-run in that pass because no server file changed, and the three documentation guards were (**18/18**). The **file** counts are the ones that drift — re-read them, do not quote them |
 | Open on GitHub | **Nothing at all** but **issue #32** (deferred majors) — re-read 2026-10-11 (late): `gh pr list --state open` is empty and one issue is open (**re-read 2026-10-12: still exactly one, #32**), **PRs #46–#63 merged** (§27AL–§27AY — #60 the documentation truth pass, #61 the advisory re-confirmation, #62 §27AY, #63 a routine Dependabot minor); #34 (ISS-16) and #38 (ISS-17) closed with their reasons |
 | Open advisories | **5** — 2 high, 3 medium, 0 critical (all mobile; re-read 2026-10-11 from the alerts API after §27AK's disposition, and **verified again** the same evening — the count drifts, and did). **Re-read 2026-10-12: still exactly 5**, confirmed independently by `npm audit --json`; `server` reports **0**; and a plain `npm audit` on `mobile/` prints **71 (55 high, 16 moderate)** for the same five advisories, because it also counts the **61 packages that merely depend on them** — see §27AK's re-confirmation before treating that larger number as a second wave. All five were recorded here as having a **named fix path, all through the SDK 58 train** — **corrected 2026-10-15 (§27CA)**: **three of the five have no patched version published upstream at all** (`braces` ≤ 3.0.3, `node-forge` ≤ 1.4.0, `sprintf-js` ≤ 1.1.3 are each the newest release *and* still in the advisory's range), so no train can close them; the one patch that does exist (`decode-uri-component` 0.5.0) **breaks its own consumer** and was measured, then refused. Re-read once more after §27AY's dependency change: **still 5, unchanged** |
 | Production | Render auto-deploy from `main`; `https://ai-inventory-l1mi.onrender.com` reachable and serving the AUTH-04 endpoints |
@@ -6854,7 +6854,7 @@ Next: **both owner decisions this section was waiting on are taken (2026-10-11)*
 
 | **ISS-20** | **High → `[✓]`** | **The local development server serves the TEST database** — `server/.env` sets `MONGODB_DB_NAME=inventoryai_test_db`, which the resolver honours, so development and test share one database; `.env.example` names that combination as forbidden ("never to a value belonging to another environment"). `inventoryai_dev_db` (11 users / 11 businesses) is unused, and `npm test` / `npm run cleanup:test-mongodb` (`deleteMany({})` per collection) can therefore **delete data the local server is serving** — including the account the device run creates | Read at source 2026-10-11: `config/env.ts:52-111` (`DATABASE_NAMES`, `resolveDatabaseName`), `config/db.ts:165-169` (explicit `dbName`); the startup line `[db] connected to MongoDB (database: inventoryai_test_db)`; cluster `listDatabases()` → `inventoryai_dev_db`, `inventoryai_test_db`, `inventoryai_prod_db`, and **no `test`** | **RESOLVED 2026-10-11 by owner decision (§27AV):** `server/.env` repointed to `inventoryai_dev_db` — one line changed, previous file kept as a git-ignored backup, key sets verified identical with exactly one value differing. The restarted backend's boot line reads `database: inventoryai_dev_db`, and repointing revealed that the development database holds the owner's 11 **acceptance-test tenants** (all empty), which the misconfiguration had been hiding |
 
-| **ISS-21** | High | **The mobile client aborts every request at 15 s while the AI path is budgeted 60 s per model call and up to 6 tool iterations, so a slow assistant answer is aborted client-side and reported as a network failure** — `POST /api/ai/chat` is **never logged** *(corrected 2026-10-12: an aborted request is invisible to `httpLogger`, which emits on `res.on('finish')` only, so "never logged" does not mean "never sent" — see §27BC's correction and §27BD's probe)* and the user is told *"Cannot reach the server. Check your connection and try again."* The abort budget is **global to every route** (`apiFetch`), not just the assistant; and `sendErrorMessage` tested `isNetwork` before the code, so the transport's own `NETWORK_TIMEOUT`/`NETWORK_ERROR` distinction was discarded before it reached the screen | Discovered on the device 2026-10-12 (**§27BC, F-51**): `POST /api/ai/chat` appears **0** times in the server log (100 requests, boot → end of run) while the screen was provably talking to the right backend — `GET /api/ai/conversations` is logged, so the destination was never in doubt; `mobile/lib/config.ts` `REQUEST_TIMEOUT_MS = 15000` vs `server/src/services/ai/aiConfig.ts` `AI_REQUEST_TIMEOUT_MS` default **60000** and `AI_MAX_TOOL_ITERATIONS` default **6**; the shipped `runAiChat` measured **13 283 ms** for a working answer | **FIXED 2026-10-12 by AI-1 (§27BD):** one wall-clock deadline per turn (`AI_TURN_DEADLINE_MS`, 60 s) replaces the *product* of per-call cap × iterations; the assistant gets its own client budget (`AI_REQUEST_TIMEOUT_MS`, 75 s) that a guard keeps above the server's deadline; a timeout is now `504 AI_TIMEOUT` and its own sentence rather than *"cannot reach the server"*; and an abandoned turn is cancelled. **VERIFIED ON THE DEVICE 2026-10-12 (§27BE)** — measured over the real route: four `201`s at **6 185 / 8 212 / 10 302 / 19 388 ms**, the last running **4.4 s past the old 15 s client abort and still answering and rendering**, plus a forced-deadline `504` at **2 224 ms** whose on-screen copy was *"The assistant took too long to answer. Please try again."* with the old *"Cannot reach the server"* **absent from the screen**. The **AI-1 Task 5 cancellation remains unverified on hardware** (§27BE states why the attempt was inconclusive). Recorded with **F-52** (the deployed `nvidia/nemotron-3-ultra-550b-a55b:free` answers the app's own first suggested prompt with a tool call once and with neither text nor a tool call the next time) and **F-53** (the negative-stock guard is unreachable through the UI, so the device run cannot prove the server rule) |
+| **ISS-21** | High | **The mobile client aborts every request at 15 s while the AI path is budgeted 60 s per model call and up to 6 tool iterations, so a slow assistant answer is aborted client-side and reported as a network failure** — `POST /api/ai/chat` is **never logged** *(corrected 2026-10-12: an aborted request is invisible to `httpLogger`, which emits on `res.on('finish')` only, so "never logged" does not mean "never sent" — see §27BC's correction and §27BD's probe)* and the user is told *"Cannot reach the server. Check your connection and try again."* The abort budget is **global to every route** (`apiFetch`), not just the assistant; and `sendErrorMessage` tested `isNetwork` before the code, so the transport's own `NETWORK_TIMEOUT`/`NETWORK_ERROR` distinction was discarded before it reached the screen | Discovered on the device 2026-10-12 (**§27BC, F-51**): `POST /api/ai/chat` appears **0** times in the server log (100 requests, boot → end of run) while the screen was provably talking to the right backend — `GET /api/ai/conversations` is logged, so the destination was never in doubt; `mobile/lib/config.ts` `REQUEST_TIMEOUT_MS = 15000` vs `server/src/services/ai/aiConfig.ts` `AI_REQUEST_TIMEOUT_MS` default **60000** and `AI_MAX_TOOL_ITERATIONS` default **6**; the shipped `runAiChat` measured **13 283 ms** for a working answer | **FIXED 2026-10-12 by AI-1 (§27BD):** one wall-clock deadline per turn (`AI_TURN_DEADLINE_MS`, 60 s) replaces the *product* of per-call cap × iterations; the assistant gets its own client budget (`AI_REQUEST_TIMEOUT_MS`, 75 s) that a guard keeps above the server's deadline; a timeout is now `504 AI_TIMEOUT` and its own sentence rather than *"cannot reach the server"*; and an abandoned turn is cancelled. **VERIFIED ON THE DEVICE 2026-10-12 (§27BE)** — measured over the real route: four `201`s at **6 185 / 8 212 / 10 302 / 19 388 ms**, the last running **4.4 s past the old 15 s client abort and still answering and rendering**, plus a forced-deadline `504` at **2 224 ms** whose on-screen copy was *"The assistant took too long to answer. Please try again."* with the old *"Cannot reach the server"* **absent from the screen**. The **AI-1 Task 5 cancellation remains unverified on hardware** (§27BE states why the attempt was inconclusive). *(**Annotated 2026-10-15 — AI-9, §27CF:** the cancellation is now **reachable on demand** — the composer offers a **Stop** while a turn is in flight, which aborts the request and is exactly the provocation the two earlier device attempts could not produce — but it is still **unmeasured on hardware**, because no phone was attached that day. The row therefore stays open on the same item, now with a deterministic trigger and a `REQUEST_CANCELLED` code that keeps a stop from ever being reported as this defect's *"Cannot reach the server"*.)* Recorded with **F-52** (the deployed `nvidia/nemotron-3-ultra-550b-a55b:free` answers the app's own first suggested prompt with a tool call once and with neither text nor a tool call the next time) and **F-53** (the negative-stock guard is unreachable through the UI, so the device run cannot prove the server rule) |
 | **ISS-22** | Medium | **The gateway can answer `200` with a zero-length body, turning a turn into a `502 AI_UNAVAILABLE` for the user** — a different failure shape from ISS-21's F-52 sibling (a 200 carrying only `thinking` and no text) but the same family of unreliable free-tier responses | Measured 2026-10-12 (**§27BE, F-54**): `[ai:openrouter] upstream non-JSON diagnostics` recorded `status=200`, `contentType=application/json`, **`bodyLength=0`**, `classification=EMPTY`, so `JSON.parse('')` throws. **Once in five turns.** The Phase 31D.3 diagnostics are what made it visible at all | **Code half delivered 2026-10-13 — AI-2 (§27BF):** a content-less `200` is now retried once (`AI_EMPTY_RETRY_MAX`, default 1) and a turn that exhausts that budget is marked `degraded=EMPTY_COMPLETION` on the 201 and logged as `[ai] degraded turn reason=… attempts=…`, so the failure rate is countable for the first time. **STILL OPEN — a provider-tier decision, not a code defect.** The shape is still handled as a clean 502 with no crash; what remains unresolved is whether the retry should grow beyond one and whether the free tier is acceptable at all. **The owner declined a paid model on 2026-10-13**, so the residual is accepted for V1 and the retry is the whole mitigation. **Re-measured on hardware the same day: the dominant failure is now a `429 free-models-per-day` QUOTA limit, not a body shape** — the retry was never exercised and could not have helped, which re-scopes this row rather than closing it. A **distinct code and sentence for a quota limit** is the follow-up the measurement now argues for (roadmap §27BF) — **DELIVERED 2026-10-14 by AI-6 (§27BL):** the gateway's `429` (and its `402` sibling) is now `429 AI_QUOTA_EXCEEDED` with its own sentence, raised from exactly one place, **never retried**, and kept apart from the route's own `429 AI_RATE_LIMITED`; every other non-2xx, **5xx included**, still answers `502 AI_UNAVAILABLE`. The code half this row was waiting on is therefore complete, and **what remains open is the provider-tier question alone** — which the owner has already answered (*stay on the free tier*). **Not device-verified** |
 | **ISS-23** | Low | **The assistant's answer reaches the screen with raw Markdown** — `**no products that need restocking**` renders **with the asterisks visible** | Seen on the device 2026-10-12 (**§27BE, F-55**), sample 4 | **FIXED 2026-10-13 — AI-2 (§27BF).** `stripMarkdown` in `components/AiChat.tsx` strips bold/italic markers, backticks, fences and heading hashes, applied at the assistant bubble only and deliberately **not** a Markdown renderer (no new dependency). 13 cases in `mobile/__tests__/ai2-assistant-markdown.test.ts` include two deliberate limits: single underscores are never emphasis (`SKU_123_AB`, `MIN_STOCK_LEVEL` are data, not formatting) and a lone asterisk counts only when a non-space follows it, so `12 * 3 = 36` survives as arithmetic. Applied at the single render point, so loaded history and the live reply are treated alike |
 | **ISS-25** | Low | **Markdown TABLES in an assistant answer render literally** — the `| Product | SKU | … |` rows and the `|---|` separator appear on screen as text | Found **on the device** 2026-10-13 (§27BG), in **all three** successful answers of the large-catalogue run: asked for a 20-row list, the model answers with a table, and the OCR of the phone screen shows the pipes. AI-2's `stripMarkdown` (ISS-23) covers bold/italic/backticks/fences/headings and deliberately nothing more, so this is **not a regression** — it is a gap that only a long list exposes | **FIXED 2026-10-13 — AI-4 (§27BH), mobile only.** The answer is **rendered**, not de-markered: a dependency-free parser (`mobile/lib/assistantMarkdown.ts`) turns the structures the model already emits into real layout (`mobile/components/AssistantMarkdown.tsx`), with headings, bullet/numbered lists and **tables** — a grid at ≤ 3 columns, one card per row above that, because five to seven columns cannot fit a phone's width. `stripMarkdown` is retained as the residual pass over spans the parser does not model, so no marker can reach the screen (pinned as a property over both real answers). Cost: **+0.148 ms** of parsing per answer against turns of 12–40 s; **the server and the prompt are untouched, so latency and token usage are unchanged**. **29 new cases** (plus the 13 AI-2 cases re-pointed at the new module and unchanged), suite **55 / 731 / 0**, three mutations each reddening the right cases. **Not yet confirmed on the device.** |
@@ -11838,6 +11838,113 @@ failure as a stale dump one layer up, which is why the reload is stated here as 
 * **A disposable tenant is left behind.** `DEVICE-CHECK-2026-10-15` — one business, one user, one conversation and one
   product — is labelled and removable by its `businessId`, and the phone is signed into it rather than into a real
   account.
+
+
+# 27CF. AI-9 — the turn can be stopped, and a stop is not a failure (2026-10-15)
+
+Mobile only. **No server file, route, permission, schema, dependency, prompt or token-cost change**, and no model or
+provider change: the server has been able to end an abandoned turn since **AI-1 Task 5**, and this increment is what
+gives a member the ability to abandon one deliberately.
+
+## The wait was long, and there was nothing to do about it
+
+A turn is not slow because of the database. Measured repeatedly on the phone: **6 185 / 8 212 / 10 302 / 19 388 ms**
+(§27BE), **40.2 / 34.8 / 12.2 s** with one **`504` at 60.5 s** (§27BG), **13.9 / 28.3 / 49.9 s** with another `504` at
+the deadline (§27BU) — against **0.3–0.6 s of tool time** and **95–99 % provider time** read per turn (§27BS, §27BI).
+The server's ceiling for one turn is `AI_TURN_DEADLINE_MS` (**60 s**) and the client's budget for this one route is
+`AI_REQUEST_TIMEOUT_MS` (**75 s**).
+
+Until now the member had **no way to end that wait**. The composer's primary action was
+`<Button title="Send" loading={sending} disabled={!input.trim()} />` with the input already cleared — so
+`loading` disabled it and `!input.trim()` disabled it again — which made the one thing a member wants after thirty
+seconds of spinner the one thing the screen refused to offer. The only exits were to leave the screen or kill the
+app. Both abort the request, and AI-1's Task 5 handles that properly on the server (`499 AI_ABANDONED`, logged with
+`outcome=AI_ABANDONED` and zero spend, instead of running to the deadline), but neither is a **decision the app made**
+and neither can be described to the person who made it.
+
+## The distinction — the entire increment
+
+A stop and a timeout are the **same event at the transport boundary**: both abort the same `AbortController`, and
+both arrive as a rejection whose `name` is `AbortError`. Without a separate code, stopping a slow turn would have
+been reported as `NETWORK_TIMEOUT` — *"The assistant took too long to answer. Please try again."* — a sentence about
+a problem the member does not have, and one that invites them to retry the very turn they just cancelled.
+
+`mobile/lib/client.ts` therefore does three things, and the shape of the first one is deliberate:
+
+1. A caller's `signal` is **forwarded into the controller the timeout already owns**, rather than passed to `fetch`
+   beside it. A `fetch` takes exactly one signal, so replacing this one would silently drop the timeout and racing
+   two would make the losing one unstoppable; forwarding keeps a **single abort path** that both the budget and the
+   member can pull. A signal already aborted before the request begins aborts it immediately.
+2. At the failure site the transport asks **whose abort fired**. The caller's signal can only be aborted by the
+   caller, so it wins, and answers the new **`REQUEST_CANCELLED`** code; otherwise the existing `NETWORK_TIMEOUT`
+   stands. Both are `status: 0` — which is exactly why the code, not the status, is what the screen reads.
+3. `signal` is carried across the one AUTH-03 recovery retry, for the same reason `timeoutMs` is: a retried request
+   must still be stoppable by the caller who asked for it.
+
+The same trap is closed one layer up in `components/AiChat.tsx`: `sendErrorMessage` now refuses `REQUEST_CANCELLED`
+with its own sentence before its `isNetwork` branch, because a cancellation is a `status === 0` error too and would
+otherwise have been answered with *"Cannot reach the server"*. The screen routes a stop away from that function
+entirely; this makes the wrong sentence **unreachable rather than merely unvisited**.
+
+## The screen
+
+* **Stop replaces Send** while a turn is in flight — one slot, two actions, no layout shift, and no dead button.
+* A stopped turn leaves a **note, not an error**: no banner, no session cleared, and the question stays on screen so
+the member can see what was stopped.
+* The note's copy is written to be **true in both cases**. A turn the model had already finished is stored either
+  way, so it does not claim nothing was written; it says the answer will be there when the chat is reopened. (This
+  is the same honesty constraint AI-8 hit: a conversation's messages are persisted together only once an answer
+exists, so the two outcomes differ and the copy must not pick one.)
+* The cancellation is checked **before** `isSessionError`, so a stop cannot become session loss — not by today's
+  mechanics, which cannot produce a status for it, but by **ordering**, which is the property worth having.
+* While the spinner is up the wait is now **stated rather than implied**: `A full answer can take up to a minute.`
+
+## What it unblocks
+
+**AI-1 Task 5's abandoned-turn cancellation was the one AI-1 item that stayed unverified on hardware**, and the
+reason is in §27BE: it could not be provoked. Two device attempts tried to abandon a turn by other means and both
+were inconclusive, because the app offered no way to end a turn on purpose. A Stop button is exactly that
+provocation, so the device item now has a **deterministic trigger**: fire a turn, press Stop, and the server log
+should carry `[ai] turn outcome=AI_ABANDONED … calls=0` with no `201` following. **This increment does not measure
+it** — no phone is attached to this host today — and the item stays open until someone does.
+
+## Verification
+
+* `mobile/__tests__/ai9-assistant-stop.test.tsx` — **9 cases, 9 passed**: five on the screen (the slot becomes a
+  stop and the request carries a real, un-aborted signal; a stop produces the note and neither failure sentence and
+  never `signOut`; a stop does not stick, so the next turn sends and renders; the negative control that a genuine
+  `NETWORK_TIMEOUT` still reads as a slow assistant; and the code predicate itself) and four on the transport
+  (the caller's abort is `REQUEST_CANCELLED`; **the negative control** that a supplied-but-never-aborted signal still
+  ends as `NETWORK_TIMEOUT`; a stop is never session loss; and `sendErrorMessage` never describes a stop as an
+  unreachable server, with `NETWORK_ERROR` still doing so).
+* **Proved able to fail twice by mutation**, each mutation asserted to have landed (the target pattern matched) and
+  each file restored **byte-identical** afterwards — `AiChat.tsx` sha256 `5fd8956f…`, `client.ts` sha256 `0d11d081…`,
+  both re-verified after the restore. Removing the screen's cancel branch reddens **exactly** the two starred screen
+  cases; removing the transport's "whose abort" check reddens **exactly** the two cancellation cases. Two tests that
+  hang rather than fail were also found and fixed in this increment's own test helper: RNTL 14's `fireEvent.press`
+  resolves only after the handler's work settles, so awaiting a press whose turn is **meant** to stay pending
+  deadlocks until jest's 5 000 ms test timeout (measured, three cases) — the helper now presses un-awaited and lets
+  `waitFor` flush the update that is itself under test.
+* Mobile **64 suites / 848 tests / 0 failures** (up from 63 / 839), `tsc --noEmit` and `eslint .` clean. **No server
+  file was changed**, so the DB-backed server suites were not re-run; the documentation guards were, and pass.
+
+## What is NOT verified
+
+* **Nothing here has been seen on a phone.** No device is attached to this host today, so the Stop affordance, the
+  note and the copy have never been rendered on a screen — including the judgement of whether *"Stop"* is the right
+  word in the right place.
+* **The server-side effect is stated as mechanism, not as measurement.** That a React Native abort closes the socket
+  `ai.controller.ts` watches (`res.on('close')` with `writableEnded === false`) is what XHR abort does and is covered
+  by AI-1's own suite over the real route; it has **not** been observed with this client on hardware. The same is
+  true of *when* the cancellation lands — between loop iterations or inside an in-flight provider call.
+* **The wasted spend is bounded, not eliminated.** A stop ends the turn as soon as the server notices; a model call
+  that had already begun is still paid for, so stopping mid-answer saves the remainder and the tool rounds after it,
+  not the whole turn.
+* **The note's truthfulness about storage rests on the persistence rule**, not on a probe: *a conversation's messages
+  are written together only once an answer exists* (Phase 07E / M7). A turn that finished before the abort is
+  therefore stored and will appear on reload; the copy says so, and that path is unobserved.
+* **No server, permission, session or schema change is claimed to be needed** for any of this, which is the point —
+  but it also means this increment adds no new server-side test coverage.
 
 
 # 28. Phase Gate System

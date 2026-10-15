@@ -8,6 +8,7 @@ import { CenterLoader, ErrorState, errorText } from './ListState';
 import { aiApi } from '../lib/api';
 import type { ApiResponse } from '../lib/api';
 import { isSessionError, useSession } from '../lib/auth';
+import { REQUEST_CANCELLED } from '../lib/client';
 import { formatTime } from '../lib/format';
 import { radius, spacing, type } from '../lib/theme';
 import type { Palette } from '../lib/theme';
@@ -77,6 +78,15 @@ export function sendErrorMessage(err: unknown): string {
   if (e.code === 'AI_QUOTA_EXCEEDED') {
     return 'The assistant has reached its usage limit for now. Please try again later.';
   }
+  // AI-9 — a request the member STOPPED is the same trap one step over: it is a
+  // `status === 0` error too, so without this branch a cancellation routed through here
+  // would be answered with "Cannot reach the server" — a sentence about a connection that
+  // was working, for an act the member performed deliberately. The screen keeps a stop
+  // away from this function entirely; this makes the wrong sentence unreachable rather
+  // than merely unvisited.
+  if (e.code === REQUEST_CANCELLED) {
+    return 'You stopped waiting for that answer.';
+  }
   // Checked BEFORE `isNetwork` on purpose — see this function's doc comment.
   if (e.code && TIMEOUT_CODES.includes(e.code)) {
     return 'The assistant took too long to answer. Please try again.';
@@ -86,6 +96,20 @@ export function sendErrorMessage(err: unknown): string {
   }
   const field = Array.isArray(e.fields) ? e.fields.find((f) => f?.field === 'message') : null;
   return field?.message || e.message || 'Your message could not be sent.';
+}
+
+/**
+ * AI-9 — did the MEMBER stop this turn, rather than it failing?
+ *
+ * Exported and separate from `sendErrorMessage` for the same reason that function
+ * is exported: the distinction is the behaviour, not an implementation detail. A stop
+ * is not an error at all — there is nothing to report, no retry to offer and no
+ * session to clear — so it must never reach the error banner, and a screen that
+ * routed it through the banner would be telling the member their own decision had
+ * gone wrong.
+ */
+export function isStoppedSend(err: unknown): boolean {
+  return (err as { code?: string } | null | undefined)?.code === REQUEST_CANCELLED;
 }
 
 /** One rendered bubble. */
@@ -201,7 +225,37 @@ function ThinkingRow() {
     <View style={[styles.bubbleRow, styles.rowAssistant]}>
       <View style={[styles.bubble, styles.bubbleAssistant, styles.thinking]}>
         <ActivityIndicator size="small" color={colors.primary} />
-        <Text style={styles.thinkingText}>Analyzing your inventory…</Text>
+        <Text style={styles.thinkingText}>
+          Analyzing your inventory…
+          {'\n'}
+          <Text style={styles.thinkingHint}>A full answer can take up to a minute.</Text>
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+/**
+ * AI-9 — the note left where a turn was stopped.
+ *
+ * It says what the member did and what the server does about it, and it is careful
+ * about ONE thing: an abort that arrives after the model already finished still
+ * stores the turn, so the note must not promise that nothing was written. What it can
+ * promise is bounded and true — a stopped turn is not lost from the thread, because a
+ * conversation's messages are stored together only once an answer exists, and a
+ * finished answer is stored the moment it is produced.
+ */
+function StoppedRow() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  return (
+    <View style={[styles.bubbleRow, styles.rowAssistant]}>
+      <View style={[styles.bubble, styles.bubbleAssistant, styles.thinking]}>
+        <Icon name="close" color={colors.textMuted} size={16} />
+        <Text testID="chat-stopped-note" style={styles.thinkingText}>
+          You stopped waiting for this answer. If the assistant had already finished, it will be here when you
+          reopen this chat.
+        </Text>
       </View>
     </View>
   );
@@ -257,6 +311,19 @@ export default function AiChat({ conversationId = null }: AiChatProps) {
   const [sending, setSending] = useState(false);
   const [input, setInput] = useState('');
   const [sendError, setSendError] = useState<string | null>(null);
+  /**
+   * AI-9 — a turn the member stopped. Kept apart from `sendError` on purpose: a stop
+   * is not a failure, has no sentence to show, and must survive long enough to be read
+   * (the turn it belongs to is gone the moment it is aborted, so the note IS the
+   * outcome). Cleared when the next send starts, not by a timer.
+   */
+  const [stopped, setStopped] = useState(false);
+  /**
+   * The in-flight turn's abort handle, non-null only while one is in flight. A ref
+   * rather than state because it is read by a press handler, never rendered, and a
+   * re-render must not be what makes a stop possible.
+   */
+  const stopRef = useRef<AbortController | null>(null);
   const listRef = useRef<FlatList<ChatRow>>(null);
 
   const loadThread = useCallback(async (): Promise<void> => {
@@ -321,10 +388,19 @@ export default function AiChat({ conversationId = null }: AiChatProps) {
     if (!message || sending) return;
     setInput('');
     setSendError(null);
+    setStopped(false);
     setRows((prev) => [...prev, { key: `pending-${Date.now()}`, role: 'user', content: message }]);
+    // AI-9 — one controller per turn, registered BEFORE the request so the Stop
+    // button has something to pull from the first render the member can see.
+    const controller = new AbortController();
+    stopRef.current = controller;
     setSending(true);
     try {
-      const res = await aiApi.chat(token as string, { conversationId: convId, message });
+      const res = await aiApi.chat(
+        token as string,
+        { conversationId: convId, message },
+        { signal: controller.signal },
+      );
       if (!convId) setConvId(res?.conversation?.id ?? null);
       const reply = res?.assistantMessage;
       if (!reply?.content) throw new Error('The assistant returned no answer.');
@@ -333,14 +409,37 @@ export default function AiChat({ conversationId = null }: AiChatProps) {
       // mark on a truncated answer arrives on this response and would be lost here.
       setRows((prev) => [...prev, toRow(reply)]);
     } catch (err) {
+      // Checked FIRST: a stop is the member's own act, and `isSessionError` must never
+      // get the chance to end their session over it (it cannot today — a cancelled
+      // request has no status — but the ordering makes that a property rather than a
+      // coincidence).
+      if (isStoppedSend(err)) {
+        setStopped(true);
+        return;
+      }
       if (isSessionError(err)) {
         await signOut();
         return;
       }
       setSendError(sendErrorMessage(err));
     } finally {
+      stopRef.current = null;
       setSending(false);
     }
+  }
+
+  /**
+   * AI-9 — the member's stop.
+   *
+   * It aborts the request and nothing else: the server notices the closed connection
+   * and ends the turn (AI-1's `499 AI_ABANDONED`) instead of running it to its 60 s
+   * deadline, so a stopped turn stops costing a model call. There is no destructive
+   * step here — no session cleared, no stored message removed, no conversation
+   * deleted — which is why it needs no confirmation. A press with no turn in flight is
+   * a no-op rather than an error.
+   */
+  function stop(): void {
+    stopRef.current?.abort();
   }
 
   if (loading && rows.length === 0) {
@@ -359,7 +458,7 @@ export default function AiChat({ conversationId = null }: AiChatProps) {
         keyExtractor={(item) => item.key}
         renderItem={({ item }) => <MessageBubble item={item} />}
         ListEmptyComponent={<Welcome onAsk={send} />}
-        ListFooterComponent={sending ? <ThinkingRow /> : null}
+        ListFooterComponent={sending ? <ThinkingRow /> : stopped ? <StoppedRow /> : null}
         contentContainerStyle={styles.listContent}
         onContentSizeChange={scrollToEnd}
         keyboardShouldPersistTaps="handled"
@@ -385,7 +484,16 @@ export default function AiChat({ conversationId = null }: AiChatProps) {
             maxLength={MAX_MESSAGE_CHARS}
             autoCorrect
           />
-          <Button title="Send" onPress={() => send()} loading={sending} disabled={!input.trim()} style={styles.sendButton} />
+          {/* AI-9 — one slot, two actions. While a turn is in flight the composer is
+              disabled and the only useful thing left to do is stop, so the primary slot
+              becomes the stop rather than a dead Send button (which is what the
+              `loading={sending}` + emptied input produced before: a spinner the member
+              could only wait behind for up to 75 s). */}
+          {sending ? (
+            <Button title="Stop" variant="secondary" onPress={stop} style={styles.sendButton} />
+          ) : (
+            <Button title="Send" onPress={() => send()} disabled={!input.trim()} style={styles.sendButton} />
+          )}
         </View>
       </View>
     </View>
@@ -431,8 +539,12 @@ const createStyles = (colors: Palette) =>
     // On the primary-filled user bubble: readable in both themes without a
     // hardcoded white, which would vanish against the dark theme's light blue.
     timeUser: { color: colors.textOnPrimary, opacity: 0.75 },
-    thinking: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-    thinkingText: { ...type.caption, color: colors.textMuted },
+    thinking: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexShrink: 1 },
+    thinkingText: { ...type.caption, color: colors.textMuted, flexShrink: 1 },
+    // AI-9 — the wait is stated rather than implied: turns measured on the device run
+    // 6–40 s and the server's own ceiling is a minute, so "up to a minute" is the
+    // honest expectation to set while the spinner is on screen.
+    thinkingHint: { ...type.caption, color: colors.textMuted, opacity: 0.8 },
 
     welcome: { paddingVertical: spacing.xxl, alignItems: 'center' },
     welcomeIcon: { marginBottom: spacing.sm },

@@ -20,6 +20,16 @@
 //      throws; this one did not, so the only evidence of the failure was a missing
 //      answer — which is why it took elimination to identify (§27BG).
 //
+// A SECOND DEFECT, FOUND BY THIS SUITE'S FIRST DEVICE RUN (2026-10-17, §27CM). On the
+// phone the fix behaved exactly as designed — the member read the actionable sentence
+// and no error banner — and the SERVER then reported the turn as
+// `outcome=AI_OUTPUT_LIMIT … in=0 out=0 model=unknown`: the parser had the gateway's
+// `usage` and `model` in hand and threw both away with the error, so the one turn whose
+// entire story is "the model spent everything it had" looked like a turn that cost
+// nothing on a model nobody could name. The failure now carries its accounting, and the
+// service adopts it before writing the line — which is what the four ★ cases below pin,
+// the last of them through the real wire so the hand-thrown case cannot be the only proof.
+//
 // AFTER. `AiOutputLimit` / `AI_OUTPUT_LIMIT`, its own sentence, and one `[ai]` line
 // naming the cap. It is deliberately NOT an `AiProviderError`, for the same reason
 // `AiTimeout`, `AiAbandoned` and `AiQuotaExceeded` are not: "we gave up waiting", "the
@@ -164,6 +174,72 @@ unitSuite('AI-10 the output limit is its own failure (DB-free)', () => {
     assert.equal(isAiError(thrown), true, 'and the service must let it through its catch untouched');
   });
 
+  // -------------------------------------------------------------------------
+  // A cap-spent turn is the ONE turn whose whole point is the spend (found on the
+  // device 2026-10-17, §27CM). The phone said the right sentence — and the server
+  // said the turn had cost `in=0 out=0 model=unknown`, because `parseAnthropicResponse`
+  // threw away a `usage` and a `model` it had already parsed. The line exists to
+  // answer "what did this cost?", and on a spent output budget it answered "nothing".
+  // -------------------------------------------------------------------------
+
+  it('★ carries the spend it saw, so a spent cap is countable afterwards', () => {
+    let thrown = null;
+    try {
+      parseAnthropicResponse({
+        content: [],
+        stop_reason: 'max_tokens',
+        model: 'stub-model',
+        usage: { input_tokens: 1200, output_tokens: 800 },
+      });
+    } catch (err) {
+      thrown = err;
+    }
+
+    assert.ok(thrown, 'the response is still refused');
+    assert.equal(thrown.model, 'stub-model', 'the model is known at the throw site');
+    assert.deepEqual(
+      thrown.usage,
+      { inputTokens: 1200, outputTokens: 800 },
+      'and so is the burn — the two numbers an operator decides on',
+    );
+  });
+
+  it('omits usage when the gateway reported none, rather than inventing zeros', () => {
+    let thrown = null;
+    try {
+      parseAnthropicResponse({ content: [], stop_reason: 'max_tokens', model: 'stub-model' });
+    } catch (err) {
+      thrown = err;
+    }
+
+    assert.ok(thrown);
+    assert.equal(thrown.usage ?? null, null, 'a missing report stays missing (absent, not zeroed)');
+    assert.equal(thrown.model, 'stub-model', 'but the model is still named');
+  });
+
+  it('★ the turn line reports the tokens a spent output budget actually burned', async () => {
+    process.env.AI_PROVIDER = 'fake';
+    try {
+      setFakeScenario(() => {
+        throw new AiOutputLimit(undefined, {
+          model: 'stub-model',
+          usage: { inputTokens: 1200, outputTokens: 800 },
+        });
+      });
+      await assert.rejects(
+        runAiChat({ businessId: 'b-dummy', userId: 'u-dummy', role: ROLES.OWNER, message: 'how much stock?' }),
+        (err) => err.code === AI_OUTPUT_LIMIT,
+      );
+    } finally {
+      process.env.AI_PROVIDER = 'openrouter';
+    }
+
+    const cost = logLines.find((l) => l.includes('[ai] turn'));
+    assert.ok(cost, 'the turn must still report what it spent');
+    assert.match(cost, /in=1200 out=800/, 'the model spent its whole budget: the line must not say it spent nothing');
+    assert.match(cost, /model=stub-model/, 'and must name the model the cap was spent on');
+  });
+
   it('logs the failure it used to swallow, naming the cap', async () => {
     await callProvider().then(
       () => assert.fail('the call must throw'),
@@ -296,6 +372,25 @@ dbSuite('AI-10 the limit reaches the client as its own code, never as an outage'
     assert.notEqual(res.json.code, 'AI_UNAVAILABLE', 'a spent output budget is not a provider outage');
     assert.match(res.json.error, /out of room|length limit/i);
     assert.doesNotMatch(res.json.error, /temporarily unavailable|in a moment/i, 'the sentence that cannot help');
+  });
+
+  it('★ the same spend is reported over the REAL wire, not only for a hand-thrown error', async () => {
+    const owner = await registerOwner(api, tracker);
+    respond = { status: 200, body: EMPTY_AT_THE_CAP, contentType: 'application/json' };
+
+    const res = await api('POST', '/api/ai/chat', {
+      token: owner.token,
+      body: { message: 'How many products are completely out of stock?' },
+    });
+    assert.equal(res.status, 502, 'positive control: the request really reached the gateway');
+    assert.equal(hits, 1);
+
+    // The whole chain: stub gateway → postJson → parseAnthropicResponse → AiOutputLimit →
+    // the service's catch → the cost line. A hand-thrown error would prove only the last hop.
+    const cost = logLines.find((l) => l.includes('[ai] turn') && l.includes('AI_OUTPUT_LIMIT'));
+    assert.ok(cost, 'the turn must report itself');
+    assert.match(cost, /in=1200 out=800/, 'the gateway reported 1200 in / 800 out and the line must carry it');
+    assert.match(cost, /model=stub-model/, 'the model that spent the cap is named');
   });
 
   it('leaves no conversation and no message behind when the limit is hit', async () => {

@@ -13,7 +13,7 @@
  */
 
 import { aiConfig } from './aiConfig.ts';
-import { AiAbandoned, AiProviderError, AiTimeout, isAiError } from './aiErrors.ts';
+import { AiAbandoned, AiProviderError, AiTimeout, aiErrorAccounting, isAiError } from './aiErrors.ts';
 import { selectProvider, type ProviderMessage, type ProviderResponse, type ProviderUsage, type ToolDefinition } from './providers/index.ts';
 import { executeTool, AI_TOOL_DEFS } from './tools.ts';
 
@@ -273,6 +273,15 @@ export async function runAiChat({ businessId, userId, role, history = [], messag
     } catch (err) {
       countCall();
       if (isAiError(err)) {
+        // A failure can still know what it cost. `AiOutputLimit` is raised at the one
+        // place where the model and the reported token spend are already parsed, and a
+        // spent output budget is the turn whose cost matters most — it used to reach
+        // this line as `in=0 out=0 model=unknown`, which reports the opposite of what
+        // happened (AI-10's device run, 2026-10-17). Adopted BEFORE the report for the
+        // same reason every counter is: the line is written once, from here.
+        const spent = aiErrorAccounting(err);
+        if (spent.model) model = spent.model;
+        if (spent.usage) usage = spent.usage;
         reportTurn((err as { code?: string }).code ?? 'AI_ERROR');
         throw err;
       }

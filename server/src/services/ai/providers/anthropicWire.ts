@@ -106,7 +106,16 @@ export function parseAnthropicResponse(data: AnthropicResponse, fallbackModel = 
     // 2xx in which nothing was unavailable and a moment's wait cannot help, because the
     // same question spends the same output budget again. The classification is the fix;
     // the sentence and the log line live where the cap is known (see `complete` below).
-    throw new AiOutputLimit();
+    //
+    // The model and the spend travel WITH the failure. Both are parsed right here and
+    // were previously dropped, so the turn line reported `in=0 out=0 model=unknown` for
+    // the one turn whose entire story is that the model spent everything it had
+    // (measured on the device 2026-10-17). A caller who reads only the message sees
+    // exactly the sentence it saw before.
+    throw new AiOutputLimit(undefined, {
+      model: (typeof data.model === 'string' && data.model) || fallbackModel,
+      usage,
+    });
   }
   // AI-8 — the stop reason is REPORTED, not merely tested. The throw above covers the
   // case where the cap left nothing usable; this covers every other one, where the cap

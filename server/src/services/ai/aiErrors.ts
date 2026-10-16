@@ -9,6 +9,14 @@
  *   AiAbandoned      -> 499 AI_ABANDONED      (the CALLER went away, AI-1)
  *   AiOutputLimit    -> 502 AI_OUTPUT_LIMIT   (the model spent its own output budget, AI-10)
  *
+ * A FAILURE CAN STILL KNOW WHAT IT COST. `AiOutputLimit` may carry the model it
+ * happened on and the token spend the gateway reported, because that class is raised
+ * at the one place where both are already parsed — and a spent output budget is
+ * exactly the turn whose cost an operator needs. Before this, the AI-5 turn line
+ * reported `in=0 out=0 model=unknown` for it (found on the device 2026-10-17), which
+ * is the opposite of the truth: the model burned its entire budget. Nothing else
+ * carries accounting today, so the reader stays narrow on purpose.
+ *
  * No type carries secrets, stack traces, or internal URIs. Provider internals
  * (raw upstream bodies, keys) are logged server-side only.
  *
@@ -128,13 +136,55 @@ export class AiAbandoned extends Error {
 export class AiOutputLimit extends Error {
   declare code: string;
 
+  /** The model whose output budget was spent, when the wire named one. */
+  model?: string;
+
+  /** What it burned before it ran out of room, when the gateway reported it. */
+  usage?: { inputTokens: number; outputTokens: number } | null;
+
   constructor(
-    message = 'The assistant ran out of room before it could answer. Please ask a shorter or more specific question.'
+    message = 'The assistant ran out of room before it could answer. Please ask a shorter or more specific question.',
+    accounting: AiErrorAccounting = {},
   ) {
     super(message);
     this.name = 'AiOutputLimit';
     this.code = AI_OUTPUT_LIMIT;
+    // Adopted only when present: an absent report stays absent rather than becoming
+    // a zero, so a turn line can never present "not measured" as "cost nothing".
+    if (typeof accounting.model === 'string' && accounting.model) this.model = accounting.model;
+    if (accounting.usage) this.usage = accounting.usage;
   }
+}
+
+/**
+ * The accounting a failure may know: the model it happened on and the tokens spent.
+ *
+ * A shape rather than an import, so this module keeps depending on nothing — the
+ * neutral `ProviderUsage` it mirrors is structurally identical, and the service
+ * assigns it straight back into its own usage variable.
+ */
+export interface AiErrorAccounting {
+  model?: string;
+  usage?: { inputTokens: number; outputTokens: number } | null;
+}
+
+/**
+ * Read whatever accounting an error carries, and nothing else.
+ *
+ * Deliberately defensive about the two known fields and silent about everything
+ * else: these values end up in a log line, so a malformed one must be dropped
+ * rather than printed. Undefined fields stay undefined, so a failure that knows
+ * nothing cannot make the service's counters look measured.
+ */
+export function aiErrorAccounting(err: unknown): AiErrorAccounting {
+  const e = err as { model?: unknown; usage?: unknown } | null | undefined;
+  const out: AiErrorAccounting = {};
+  if (typeof e?.model === 'string' && e.model) out.model = e.model;
+  const raw = e?.usage as { inputTokens?: unknown; outputTokens?: unknown } | null | undefined;
+  if (raw && typeof raw.inputTokens === 'number' && typeof raw.outputTokens === 'number') {
+    out.usage = { inputTokens: raw.inputTokens, outputTokens: raw.outputTokens };
+  }
+  return out;
 }
 
 /**
@@ -167,4 +217,5 @@ export default {
   AI_ABANDONED,
   AI_OUTPUT_LIMIT,
   isAiError,
+  aiErrorAccounting,
 };

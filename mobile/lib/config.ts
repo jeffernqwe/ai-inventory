@@ -9,6 +9,14 @@ import { Platform } from 'react-native';
  * through 10.0.2.2, everything else uses localhost. Physical devices should
  * set EXPO_PUBLIC_API_URL to the machine's LAN address.
  *
+ * A LOOPBACK VALUE HERE IS A PHONE TALKING TO ITSELF, and that is the single most
+ * confusing state this project has produced: on 2026-10-16 a physical phone was
+ * running a dev build whose `mobile/.env` named loopback, every request failed
+ * instantly, and the app reported "Cannot reach the server" — which was true and
+ * useless, since the address it named was the device in the member's hand. The
+ * value is left exactly as configured; `lib/client.ts` makes the *message* say so
+ * instead, in a development build only.
+ *
  * Only ever a plain HTTP(S) URL — no credentials or secrets belong here.
  */
 function defaultBaseUrl(): string {
@@ -20,7 +28,53 @@ const raw: string = process.env.EXPO_PUBLIC_API_URL || defaultBaseUrl();
 
 export const API_URL: string = raw.replace(/\/+$/, '');
 
+/**
+ * The ordinary budget for one request, once the server is known to be awake.
+ *
+ * DEP-2 narrowed what this constant MEANS rather than changing it: it is the
+ * budget a request gets while `lib/client.ts` can see that the server answered
+ * something recently (see `SERVER_WARM_WINDOW_MS`). A request made when the server
+ * has not answered recently gets `COLD_START_TIMEOUT_MS` instead, because the
+ * deployed host needs longer than this to answer its first request after it has
+ * been idle — measured, not assumed, and the reason is recorded on that constant.
+ */
 export const REQUEST_TIMEOUT_MS = 15000;
+
+/**
+ * The budget for a request made while the server has NOT been proven awake
+ * recently — in practice, the first request of a session (DEP-2).
+ *
+ * WHY THIS EXISTS, in measurements rather than opinion. The deployed free-tier
+ * instance holds a request while it boots: on 2026-10-16 its first byte arrived at
+ * **32 369 ms** after an idle period (and 32 440 ms in an earlier reading) against
+ * **194 ms** warm, with TCP completing in 52 ms and TLS in 87 ms — so the wait is
+ * the host, not the network. The client's single 15 s budget therefore aborted a
+ * request the server was still going to answer, on every first request of every
+ * session, and reported it as an unreachable server.
+ *
+ * It also removes a correctness hazard that has nothing to do with politeness: a
+ * request the client abandoned at 15 s can still complete on the server, so a
+ * member could be told a stock movement failed while the inventory records it.
+ * Waiting long enough to hear the real answer is what makes the reply trustworthy.
+ *
+ * It is spent only when the wait can be needed, and the cost of being wrong is a
+ * longer wait rather than a wrong answer — an unreachable host fails this budget
+ * immediately (no connection to hold open), so this is not a 60 s stall on a
+ * network outage in practice.
+ */
+export const COLD_START_TIMEOUT_MS = 60000;
+
+/**
+ * How long one answered request keeps the client assuming the server is awake.
+ *
+ * MUST STAY BELOW THE HOST'S OWN IDLE-SLEEP THRESHOLD. Render's free instances
+ * sleep after 15 minutes without a request, so a window at or above that would
+ * let the client decide a *sleeping* server is awake, apply the 15 s budget to a
+ * request that cannot be answered in 15 s, and recreate the exact defect this
+ * pair of constants removes. `__tests__/dep2-client-connectivity.test.ts` asserts
+ * that relationship rather than trusting it to stay true.
+ */
+export const SERVER_WARM_WINDOW_MS = 5 * 60 * 1000;
 
 /**
  * The wall-clock budget for ONE assistant turn (AI-1).

@@ -12172,6 +12172,102 @@ hand-written list that would go stale silently.
   why the module's reader is shared rather than duplicated in each caller.
 
 
+# 27CI. The first request of every session was aborted before the server could answer it — and the app blamed the network for it (2026-10-16)
+
+**Source.** A device report from the owner: *"During the phone test earlier, I encountered an error that said something
+like 'Cannot connect to the server.'"* — followed by an instruction to find the root cause, fix it, and verify on the phone.
+**Scope.** Mobile only: `lib/config.ts`, `lib/client.ts`, one new Jest suite and one re-specified assertion in AI-1's suite.
+**No server file, route, permission, schema, session, JWT, dependency, environment, EAS or Render change, and no request
+refused or accepted that was not before.** Three defects were found; the third is the one the owner's sentence named.
+
+## What was measured, on the phone in the owner's hand
+
+1. **A dev build pointed at loopback is a phone talking to itself.** A sign-in attempt from the CPH1969 arrived at a
+   stand-in backend on the laptop as `POST /api/auth/login` (`host=localhost:4000`, `cl=88`,
+   `ct=application/json`, `ua=okhttp/4.12.0`) — proof that `mobile/.env` names loopback and that the request leaves the
+   app correctly. With the `adb reverse` tunnel removed, the same tap produced, verbatim:
+   **"Cannot reach the server. Check your connection and try again."** That sentence is *accurate* and useless at once: the
+   address it blamed is the device in the member's hand.
+2. **The deployed free-tier host needs ~32 s to answer its first request, and every non-assistant request had a 15 s
+   budget.** Measured twice on 2026-10-16 against `https://ai-inventory-l1mi.onrender.com`: first byte at **32 369 ms**
+   (TCP 52 ms, TLS 87 ms — the wait is the host booting) and **32 440 ms**, against **194 ms** warm. Reproduced
+   deterministically against a stub with that exact profile, with the server-side fingerprint of the client's decision:
+   `CLIENT-GONE POST /api/auth/login after=14989ms`.
+3. **The 15 s abort was reported as an unreachable server.** The same run's screen read *"Cannot reach the server. Check
+   your connection and try again."* — the sentence for a request that never arrived — while the server had simply not
+   answered yet. The classification read the **shape** of the rejection (`err.name === 'AbortError'`), and React Native's
+   aborted request rejects as `TypeError: Network request failed`, so the client's own decision was attributed to the
+   network. This is why the owner saw that sentence even when the app was pointed at production, and it **falsifies the
+   sentence this project recorded in AI-1** ("the app says *timed out*, never *cannot reach the server*") — AI-1 fixed the
+   copy in the assistant screen and left the transport inferring the cause from an error string.
+
+A fourth, smaller thing was found and fixed in the harness rather than the app: the stand-in backend first answered on the
+instant path **before reading the request body**, so a request that genuinely carried `Content-Length: 88` was logged as
+`bodyBytes=0`. That was reported as a finding and then disproved by its own instrumentation — recorded because a
+measurement harness that lies about its subject is worse than no harness. Two leftovers from it are now facts: the login
+body is `{email,password,deviceLabel}` and **no credential appears in the query string** (`queryKeys=(none)`).
+
+## What shipped
+
+* **`COLD_START_TIMEOUT_MS = 60000`** and **`SERVER_WARM_WINDOW_MS = 5 min`** (`lib/config.ts`), with the measurement each
+  is derived from written beside it. The warm window is deliberately **below** Render's 15-minute idle-sleep threshold — at
+  or above it, the client would call a sleeping server awake and recreate the defect.
+* **`requestBudget()`** (`lib/client.ts`): a request that states no budget gets 15 s **once the server has answered
+  something within the warm window**, and the cold allowance otherwise. An answer of **any** kind — refusals included — is
+  proof the server is awake, recorded at the response. Every explicit `timeoutMs` bypasses the rule, so the assistant's
+  budget is untouched in both states.
+* **The timeout is classified by construction, not by inference.** The controller now records *whose* abort fired
+  (`abortCause`) before aborting, and the failure site reads that first; `isAbortError` remains only as the fallback for an
+  abort this client did not start. The caller-cancellation branch (AI-9) is unchanged and still wins.
+* **`unreachableMessage(baseUrl, isDev)`**: production copy byte-identical, and a **development** build pointed at a
+  loopback address appends the URL it is actually calling and both ways out (`adb reverse tcp:4000 tcp:4000`, or point
+  `EXPO_PUBLIC_API_URL` somewhere reachable). `10.0.2.2` is deliberately not treated as a mistake — it is correct for an
+  Android emulator.
+
+## Verification
+
+* **Suite:** `mobile/__tests__/dep2-client-connectivity.test.ts`, **15 cases**, written first and watched fail
+  (**11 failed / 4 passed**, with `COLD_START_TIMEOUT_MS` and `SERVER_WARM_WINDOW_MS` undefined and `unreachableMessage`
+  missing). A second red run caught two authoring errors in the new suite itself (an off-by-one at the budget boundary and
+  an unstubbed `fetch`), both fixed in the test rather than the code.
+* **AI-1's suite re-specified, not weakened:** its *"keeps the global budget"* case now proves the server awake with one
+  answered request before asserting 15 s, because that is the state in which the contract is now stated; the cold half
+  belongs to DEP-2's own suite, which asserts both states.
+* **Mobile 65 suites / 863 tests / 0 failures** (from 64 / 848), `tsc --noEmit` clean, `eslint .` with **zero warnings**
+  (the first run flagged an inline `require` in the new suite, fixed by importing instead), and
+  `npm run check:build-env` offline still green (17 controls, 4 profiles).
+* **On the phone, all three fixes observed**, with the screen read by OCR rather than inferred from a scroll position:
+  (a) against a 32 s cold backend the app **waited the full 32 001 ms** and rendered the server's own refusal — no abort,
+  no `CLIENT-GONE`; (b) against a backend that then stopped answering, the app aborted at **14 995 ms** and the screen read
+  **"The request timed out. Check your connection and try again."** — the truthful sentence, with the warm budget back at
+  15 s; (c) with the tunnel down, the development build rendered *"Cannot reach the server. Check … (dev build note: …)"*.
+* **End-to-end against the deployed service, cold:** after 37 minutes idle, a real sign-in from the phone showed the
+  button's spinner at t+6 s and t+20 s (the old code died at t+15 s) and the **server's real answer at t+34 s**;
+  `GET /api/health` a minute later reported `uptimeSeconds: 58`, i.e. the app's own request was what booted the instance.
+* A by-product that closes a DEP-1 blocker from outside: the deployed host answers
+  `POST /api/auth/forgot-password` with **202** and the uniform message — **mail is configured there now** (DEP-1 measured
+  `503 MAIL_NOT_CONFIGURED` on 2026-10-15), so registration is no longer blocked by that variable.
+
+## Limits, stated rather than smoothed over
+
+* **This makes the first request survive a cold start; it does not make the wait shorter.** The owner's decision stands:
+  the cold start is accepted for V1. The honest complaint is now a ~30 s wait rather than a false failure — and the data
+  hazard it removed (a write aborted at 15 s that the server still completes) is gone with it.
+* **The cold allowance is a client-side estimate of the host's state.** It is spent whenever the server has not answered
+  within five minutes, so a host that is slow for another reason is waited on for up to 60 s instead of 15. An unreachable
+  host fails immediately (there is no connection to hold), so the longer wait is not paid on a network outage in practice —
+  but it is a longer wait, not a smarter one, and the numbers are pinned rather than tuned from real traffic.
+* **Nothing here observes the deployment.** A keep-alive that stops the host sleeping (a scheduled ping) is the other half
+  of this problem and is deliberately **not** in this increment: it costs no code but does need a scheduler nobody has
+  configured, and the owner asked for free tools only.
+* **The dev-build note cannot reach a production build** by design, and is asserted as such; it names a client
+  configuration value (never a secret).
+* **The phone was driven by `adb input` and read by OCR/accessibility dumps, and layout drift caused two false starts**
+  (a tap landing where the button *used* to be, and a scroll position read as a cleared banner). Every result above was
+  re-taken with the widget's position measured immediately before the tap. An automation harness with stale coordinates
+  reports whatever the screen happened to be — recorded so the next one measures first.
+
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

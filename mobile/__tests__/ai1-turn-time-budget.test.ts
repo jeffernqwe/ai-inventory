@@ -12,7 +12,12 @@
  *
  * WHAT THIS FILE PINS.
  *   1. A caller can state its own budget (`timeoutMs`), and it is honoured.
- *   2. Omitting it changes nothing: every other route keeps the 15 s budget.
+ *   2. Omitting it changes nothing: every other route keeps the ordinary budget
+ *      — 15 s — which DEP-2 narrowed to mean "while the server has answered
+ *      recently". The test below therefore proves the server is AWAKE first (one
+ *      answered request), because that is the state in which this contract is
+ *      stated; the cold-start allowance that applies before it is DEP-2's own
+ *      subject, in `dep2-client-connectivity.test.ts`.
  *   3. The assistant's budget is the one that grew — proven by observing that a
  *      chat request is STILL ALIVE past 15001 ms, which is the assertion that
  *      would fail if `aiApi.chat` forgot to pass it.
@@ -100,7 +105,20 @@ describe('AI-1 — a caller may state its own budget', () => {
     });
   });
 
-  it('keeps the global budget for a route that does not ask for one', async () => {
+  it('keeps the ordinary budget for a route that does not ask for one, once the server is awake', async () => {
+    // DEP-2: awake means "answered something recently". One answered request is
+    // the whole condition, and it is established here rather than assumed, so this
+    // test states the warm contract without depending on file order.
+    fetchMock.mockImplementation(() =>
+      Promise.resolve({
+        status: 200,
+        json: async () => ({}),
+        headers: { get: () => null },
+      } as unknown as Response),
+    );
+    await apiFetch('/api/health');
+
+    fetchMock.mockImplementation(abortAware());
     jest.useFakeTimers();
     const state = track(apiFetch('/api/products'));
 

@@ -1,4 +1,9 @@
-import { API_URL, REQUEST_TIMEOUT_MS } from './config';
+import {
+  API_URL,
+  COLD_START_TIMEOUT_MS,
+  REQUEST_TIMEOUT_MS,
+  SERVER_WARM_WINDOW_MS,
+} from './config';
 
 /** One field-level validation problem from the server's `fields` array. */
 export interface ApiFieldError {
@@ -288,6 +293,84 @@ export function setSessionRenewalHandler(
 }
 
 /**
+ * DEP-2 — when the server last answered anything, in this app run.
+ *
+ * IN MEMORY ONLY, DELIBERATELY. This is not an authentication fact, a session fact
+ * or a preference: it is a statement about the last few minutes of ONE process's
+ * conversation with the backend, and a persisted copy would be stale exactly when
+ * it matters most — a fresh launch is the likeliest moment to meet a server that
+ * has been asleep, and it is also the moment a persisted copy would have been
+ * written by a previous run that ended long ago. A restart therefore begins by
+ * assuming the server may be cold, and that is the safe direction: the cost is a
+ * longer wait that ends the instant an answer arrives.
+ */
+let lastServerAnswerAt = 0;
+
+/**
+ * The budget for a request that stated none.
+ *
+ * THE RULE, in one sentence: wait longer only while there is no recent evidence
+ * that the server is awake. Every explicit `timeoutMs` bypasses it entirely, so
+ * the assistant's own larger budget is unaffected in both states and no route can
+ * accidentally inherit the cold-start allowance.
+ */
+function requestBudget(explicit?: number): number {
+  if (typeof explicit === 'number') return explicit;
+  const answeredRecently =
+    lastServerAnswerAt > 0 && Date.now() - lastServerAnswerAt < SERVER_WARM_WINDOW_MS;
+  return answeredRecently ? REQUEST_TIMEOUT_MS : COLD_START_TIMEOUT_MS;
+}
+
+/**
+ * True when a base URL names the device itself.
+ *
+ * Only the loopback forms are included, and `10.0.2.2` is deliberately NOT: that
+ * address means "the host machine" to an Android emulator and is the CORRECT
+ * configuration there, so reporting it as a mistake would cry wolf in the one
+ * place it works as intended.
+ */
+function isLoopbackBaseUrl(baseUrl: string): boolean {
+  const match = /^https?:\/\/([^/?#]+)/i.exec(baseUrl);
+  if (!match) return false;
+  let host = match[1].toLowerCase();
+  if (host.startsWith('[')) {
+    const end = host.indexOf(']');
+    host = end === -1 ? host : host.slice(1, end);
+  } else {
+    const colon = host.indexOf(':');
+    if (colon !== -1) host = host.slice(0, colon);
+  }
+  return host === 'localhost' || host === '127.0.0.1' || host === '::1';
+}
+
+/**
+ * DEP-2 — what "cannot reach the server" says, and when a development build says
+ * more.
+ *
+ * THE PRODUCTION SENTENCE IS UNCHANGED, and that is a requirement rather than an
+ * accident: several suites pin it, and it is correct for a member whose network is
+ * genuinely down.
+ *
+ * A DEVELOPMENT BUILD POINTED AT LOOPBACK IS A DIFFERENT FACT and deserves a
+ * different sentence, because the general one actively misleads: it blames the
+ * network when the app is in fact calling the phone in the member's hand. That
+ * state was measured on 2026-10-16 — a physical phone running a dev build whose
+ * `mobile/.env` named loopback produced this exact sentence on every request,
+ * while the real answer was one `adb reverse` away. The suffix names the URL that
+ * is actually configured (client configuration, never a secret) and both ways out
+ * of the state, and it cannot reach a production build at all.
+ */
+export function unreachableMessage(baseUrl: string, isDev: boolean): string {
+  const base = 'Cannot reach the server. Check your connection and try again.';
+  if (!isDev || !isLoopbackBaseUrl(baseUrl)) return base;
+  return (
+    `${base} (dev build note: EXPO_PUBLIC_API_URL is ${baseUrl}, which is this ` +
+    'device itself — run "adb reverse tcp:4000 tcp:4000" while your backend listens on ' +
+    'the laptop, or point EXPO_PUBLIC_API_URL at an address this phone can reach.)'
+  );
+}
+
+/**
  * Single request path for the whole app. Adds JSON headers and a Bearer token
  * when given, applies a timeout, and normalizes every non-2xx response into an
  * ApiError using the backend's { error, code, fields } shape. Screens never
@@ -328,12 +411,22 @@ async function apiFetchAttempt<T = unknown>(
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   if (effectiveToken) headers.Authorization = `Bearer ${effectiveToken}`;
 
-  // AI-1 — the caller's own budget when it stated one, otherwise the global
-  // default. Resolved here, once, so every request in the app still shares one
-  // timeout unless it deliberately opts out.
-  const budgetMs = timeoutMs ?? REQUEST_TIMEOUT_MS;
+  // AI-1 — the caller's own budget when it stated one. DEP-2 — otherwise the
+  // budget for the state this client is in: the ordinary 15 s once the server has
+  // answered recently, a cold-start allowance while it has not. Resolved here,
+  // once, so every request in the app shares one rule unless it opts out.
+  const budgetMs = requestBudget(timeoutMs);
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), budgetMs);
+  // WHOSE abort this is, recorded BEFORE the abort fires rather than inferred from
+  // the rejection afterwards. That inference is what failed on the device: an
+  // aborted request in React Native can reject as a plain
+  // `TypeError: Network request failed`, so the client's own decision was reported
+  // as somebody else's outage.
+  let abortCause: 'timeout' | 'caller' | null = null;
+  const timer = setTimeout(() => {
+    abortCause = 'timeout';
+    controller.abort();
+  }, budgetMs);
 
   // AI-9 — ONE controller, two reasons to abort, and the reason is read back at
   // the failure site below. The caller's signal is FORWARDED into this controller
@@ -342,7 +435,10 @@ async function apiFetchAttempt<T = unknown>(
   // would make the losing one unstoppable. Forwarding keeps a single abort path
   // that both the budget and the member can pull.
   const callerSignal = signal ?? null;
-  const onCallerAbort = () => controller.abort();
+  const onCallerAbort = () => {
+    abortCause = 'caller';
+    controller.abort();
+  };
   if (callerSignal) {
     // Already aborted before the request began: abort now rather than fetch a
     // request nobody wants. (`abort()` on an already-aborted controller is a
@@ -366,17 +462,29 @@ async function apiFetchAttempt<T = unknown>(
     });
   } catch (err) {
     releaseRequest();
-    if (isAbortError(err)) {
-      // WHOSE abort this was decides what the member is told. The caller's own
-      // signal can only be aborted by the caller, so it wins when both are set.
-      if (callerSignal?.aborted) {
-        throw new ApiError(0, REQUEST_CANCELLED, 'The request was cancelled.');
-      }
+    // WHOSE abort this was decides what the member is told. The caller's own
+    // signal can only be aborted by the caller, so it wins when both are set.
+    if (callerSignal?.aborted) {
+      throw new ApiError(0, REQUEST_CANCELLED, 'The request was cancelled.');
+    }
+    // A timeout is this client's own decision, so it is read from what this
+    // client DID (`abortCause`) and only secondarily from the rejection's shape.
+    // The shape was the original — and, measured on a device on 2026-10-16,
+    // wrong — authority: the budget fired at 14 989 ms, the rejection arrived as
+    // `TypeError: Network request failed`, and a merely slow server was reported
+    // as unreachable, sending the member to check a connection that was working.
+    // `isAbortError` stays as the fallback for an abort this client did not start.
+    if (abortCause === 'timeout' || isAbortError(err)) {
       throw new ApiError(0, 'NETWORK_TIMEOUT', 'The request timed out. Check your connection and try again.');
     }
-    throw new ApiError(0, 'NETWORK_ERROR', 'Cannot reach the server. Check your connection and try again.');
+    throw new ApiError(0, 'NETWORK_ERROR', unreachableMessage(API_URL, __DEV__));
   }
   releaseRequest();
+
+  // DEP-2 — an answer of ANY kind, refusals included, proves the server is awake:
+  // it is the only thing that ends the cold-start allowance. Recorded here, where
+  // the response exists, so no caller has to remember anything.
+  lastServerAnswerAt = Date.now();
 
   const data = await readJson(res);
   if (res.status >= 200 && res.status < 300) return data as T;

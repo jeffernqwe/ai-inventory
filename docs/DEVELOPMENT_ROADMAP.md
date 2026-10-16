@@ -12501,21 +12501,60 @@ printed. The stub now closes in the **last** root-level hook, beside the app ser
 
 ## Limits
 
-* **NOT device-verified — attempted 2026-10-16 and BLOCKED, recorded as blocked rather than as passing.** The run was
-  staged to be **deterministic and quota-free** rather than lucky: the server was started with `OPENROUTER_BASE_URL`
-  pointed at a local stub that replays the **exact captured Q4 body** (`content: []`, `stop_reason: 'max_tokens'`) —
-  the technique the wire suite already uses — with `adb reverse tcp:4000`/`tcp:8081` tunnels and Metro serving the dev
-  client, all three verified answering before the phone was touched. The blocker is physical: the device sits on a
-  **password-protected lock screen** (`showingAndNotOccluded=true`, and `wm dismiss-keyguard` does not clear it), so
-  synthesized input never reaches the app. The attempt ended with the app still on the **pre-change bundle**, which is
-  established rather than assumed — Metro logged no bundle request. Three things cost time here and are worth the next
-  session's: Git Bash rewrites `/sdcard/…` into a Windows path unless `MSYS_NO_PATHCONV=1` is set, so an empty
-  `uiautomator` dump reads as a blank screen and is really a dump that never left the host (§27CE's finding, still
-  live); force-stopping and relaunching the launcher activity keeps the bundle the app already had, so a dev-client
-  open (`inventoryai://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A8081`) is required; and the machine's
-  own dev server is normally already running on `:4000` with the **old** code, so it has to be replaced, not reused.
-  **Staging was torn down afterwards** — Metro, the stub and both tunnels removed, the normal dev server restarted — so
-  nothing on this machine is left pointed at a stub.
+* **NOT device-verified — attempted twice on 2026-10-16 and BLOCKED, recorded as blocked rather than as passing.** The
+  run was staged to be **deterministic and quota-free** rather than lucky: the server was started with
+  `OPENROUTER_BASE_URL` pointed at a local stub that replays the **exact captured Q4 body** (`content: []`,
+  `stop_reason: 'max_tokens'`) — the technique the wire suite already uses — with `adb reverse tcp:4000`/`tcp:8081`
+  tunnels and Metro serving on 8081, all three verified answering before the phone was touched. The first attempt died
+  on a **password-protected lock screen** (`wm dismiss-keyguard` does not clear it). The second, on an unlocked device,
+  got further and found the **real blocker, which is not the phone's state at all**.
+
+  **Why the app can never load this branch's bundle on that device (the actual reason).** The installed
+  `com.inventoryai.app` is a **release APK**: its package flags carry **no `DEBUGGABLE`**, and the package dump contains
+  **zero** dev-launcher classes, so `inventoryai://expo-development-client/?url=…` resolves to `MainActivity` and does
+  nothing — the app is not a development client and has no packager to be pointed at. Its JS is therefore the bundled
+  release JS, aimed at the **deployed** backend: Metro never logged a bundle request for any launch, and the sign-in
+  test produced `REGISTRATION_REQUIRED` for an identity that exists in the **development** database only, which is what
+  proves the request went to the deployed API rather than to this machine's server. **Reaching the phone with working-tree
+  code therefore requires a development build (an EAS `development` profile or a local native build), which is exactly the
+  Phase 30B work this project deliberately defers** — so this gap is now correctly scoped as *"needs a dev build"* rather
+  than *"needs another attempt"*.
+
+  **Three findings worth the next attempt's time, all observed rather than reasoned:**
+  1. **ColorOS freezes the app, and a frozen app is indistinguishable from a broken UI.** Taps put the IME on screen but
+     `mServedView=null`, `input text` and even individual `KEYEVENT`s changed nothing, and **no `ReactNativeJS` line
+     appeared at all** — which is how *"the JS bundle is not running"* was established rather than guessed. The device's
+     own log names the cause:
+     `ColorHansManager: stateRToFFreeze … pkgName: com.inventoryai.app, reason: top`. Raising the standby bucket to
+     active and whitelisting the package from Doze fixed it immediately — typing then landed (`EditText text="abc"`) and
+     `ReactNativeJS: Running "main"` appeared. **Any device run on this handset should do that first**, and both changes
+     were reverted afterwards.
+  2. **The soft keyboard covers a submit button**, which is how the first sign-in attempt silently did nothing: the button
+     sits far enough down that the IME overlaps it, so the tap went to a key. Press `KEYCODE_BACK` to hide the keyboard
+     before tapping, and re-read coordinates from a fresh dump afterwards — the form scrolls while the IME is up (the
+     email field moved 77 px).
+  3. **Node and Git Bash do not agree about `/tmp`** (Node resolves it to `C:\tmp`, the shell to
+     `%TEMP%`) and Git Bash rewrites `/sdcard/…` unless `MSYS_NO_PATHCONV=1` is set, so an empty `uiautomator` dump reads
+     as a blank screen and is really a dump that never left the host (§27CE's finding, still live). Also: the machine's
+     own dev server is normally **already running on `:4000` with the old code**, so it has to be replaced rather than
+     reused, and `seed:accounts` refuses any `--accounts` size below 100.
+
+  **Left behind, declared rather than silent:** one seeded development tenant created for the sign-in test —
+  `ai10device@example.com`, business `6ad221fd386e211e7596f09b`, OWNER, 23 products — which the run never needed. It is
+  **not** removed here on purpose: `cleanup:test-firebase` deletes *every* identity in the project, and
+  `cleanup:firebase-accounts --email=…` refuses while a MongoDB user still references the address (§27BB's trap), so a
+  targeted removal needs the business's rows deleted first, which no existing script does scoped. Deleting it is the
+  owner's call. **Staging was torn down afterwards** — Metro, the stub and both tunnels removed, the doze whitelist
+  entry dropped, the normal dev server restarted — so nothing on this machine is left pointed at a stub. *(Annotated
+  2026-10-17: **RESOLVED AND VERIFIED — §27CM.** The owner approved a fresh `development`-profile EAS build of this
+  branch and it was installed over the preview APK (an update, not a wipe), Metro served the working-tree bundle to
+  the phone (`Android Bundled 2380ms … entry.js (1568 modules)`), sign-in was done with the device's own Google
+  account — no password created, typed or stored — and all three items this section left open were then measured on
+  hardware: the sentence below rendered on screen against a stub replaying the captured Q4 body, `[ai] turn
+  outcome=AI_OUTPUT_LIMIT` beside `502`, and **no** *"Cannot reach the server"*. The same run exposed a second, small
+  defect on this path — the turn reported `in=0 out=0 model=unknown` for the one turn that spends a whole output
+  budget — which §27CM fixes and pins with four new cases. The leftover `ai10device@example.com` tenant named above is
+  still present and is still the owner's call.)*
 * **The failure is named, not prevented.** A free-tier model that spends `AI_MAX_OUTPUT_TOKENS` without answering still
   cannot answer; the member now gets a true, actionable sentence and an operator gets a line, instead of a false outage.
 * The `[ai:openrouter]` line is written **once per failed call**, so a retried turn would log twice; no counter is kept,
@@ -12594,6 +12633,160 @@ with that promotion, and TypeScript 7 is still refused by both linters' declared
   conservative direction is chosen so the failure mode is an alert that stays open rather than one closed wrongly.
 * Prerelease bounds are compared on their numeric prefix (this file's semver helper ignores prerelease tags), and the
   advisory API is rate-limited when unauthenticated — a failure there is reported as `UNREADABLE`, never as a pass.
+
+
+# 27CM. AI-10 and AI-9 on the phone — and the cost line that called a spent output budget nothing (2026-10-17)
+
+Verification of already-shipped work, plus one small server fix it exposed. **No new dependency, no route,
+permission, schema, session, environment or mobile change**; the output cap (`AI_MAX_OUTPUT_TOKENS`, 800) is
+untouched, no model or provider changed, and the sentence the phone now displays is **byte-identical to what §27CK
+shipped** — this section changes only what the server writes in its own log.
+
+## Why two items were stuck, and what actually unstuck them
+
+§27CK's device attempt ended by identifying the real blocker rather than the visible one: the installed
+`com.inventoryai.app` was a **release APK** (no `DEBUGGABLE` flag, zero dev-launcher classes), whose JS is the
+bundled release JS pointed at the **deployed** backend. Metro never logged a bundle request for any launch, and the
+sign-in test produced `REGISTRATION_REQUIRED` for an identity that exists only in the **development** database —
+which is what proves the request went to the cloud. Reaching the phone with working-tree code therefore needed a
+**development build**, which is the owner's call and was made: a fresh `development`-profile build of this branch on
+EAS (**`f6f852bd-3dfa-43e2-8a63-f60d6fd94c6e`**, SDK 57.0.0, `com.inventoryai.app`, version `1.0.0`/build `1`,
+created `13:40:21Z`, completed `13:57:51Z`, queue 231 s + build 818 s) and `adb install -r` over the preview APK.
+Same package and same EAS keystore, so it was an **update rather than a wipe** — established, not assumed: the app's
+`firstInstallTime` stayed `2026-10-11` and only `lastUpdateTime` moved.
+
+Then the phone ran this branch, and Metro's own log is the proof of it:
+`Android Bundled 2380ms node_modules\expo-router\entry.js (1568 modules)`. The launch is the dev-client deep link
+(`inventoryai://expo-development-client/?url=http%3A%2F%2Flocalhost%3A8081`) with `adb reverse tcp:4000` and
+`tcp:8081` in place, so the phone's loopback is this machine — which is why the app's configured
+`EXPO_PUBLIC_API_URL=http://localhost:4000` is correct here and would be a phone talking to itself without the tunnel
+(§27CI's third defect).
+
+**Sign-in was done without a password, and that is a finding in its own right.** The login screen's *Continue with
+Google* button (Phase C's native path) signed in with the identity the device already holds, so no credential was
+created, typed, logged or stored, and the previously seeded test identity (below) turned out to be unnecessary. The
+server saw `/api/auth/firebase/exchange` **200** (1 394 ms) and then `/api/dashboard` **200** for user
+`6acf1fc36e396b95a2c20aef` on `inventoryai_dev_db` — so the device was reading the **development** database through
+this machine, which is the state the previous attempt could not reach.
+
+## AI-10, on the phone, deterministically
+
+The provider was pointed at a **local stub** that replays the exact captured Q4 body (`content: []`,
+`stop_reason: 'max_tokens'`) — the technique §27CK's wire suite already uses — so the run is quota-free and the shape
+is the one measured on the free tier. One question typed on the phone ("How is my inventory doing"), one tap on Send:
+
+```text
+[stub]  18:37:20.525Z POST /v1/messages mode=maxtokens asked="How is my inventory doing"
+[ai:openrouter] output limit reached with nothing usable (model=stub/stub-model, maxTokens=800, stop=max_tokens)
+[ai] turn outcome=AI_OUTPUT_LIMIT total=19ms providerMs=19ms calls=1 toolMs=0ms toolRuns=0 tools=none …
+POST /api/ai/chat 502 (213.7 ms)
+```
+
+and the phone rendered the question, then **"The assistant ran out of room before it could answer. Please ask a
+shorter or more specific question."** — with **no error banner**, no *"Cannot reach the server"*, and the composer
+live again. That is the whole increment verified through the interface a member uses: the kind of failure, the code,
+the sentence, and the absence of the wrong sentence. The stub's log line matters as much as the server's: the
+question it received is the **member's own text**, so the request really travelled phone → app → this machine's
+server → stub.
+
+## AI-9, on the phone, by doing what a member does
+
+The stub was switched to `slow:25000` (a held response, no model), a second question was typed, and the in-flight
+state was read off the screen: the thinking row (*"Analyzing your inventory… A full answer can take up to a
+minute."*) with the primary slot reading **Stop** where Send had been. Tap:
+
+```text
+[ai:openrouter] caller went away; the upstream call was cancelled
+[ai] turn outcome=AI_ABANDONED total=12794ms providerMs=12794ms calls=1 toolMs=0ms toolRuns=0 tools=none …
+[stub] 18:38:33.754Z POST /v1/messages mode=slow:25000 asked="What is low here"
+[stub] 18:38:58.761Z caller had already gone away; nothing sent
+```
+
+The screen showed the note verbatim — *"You stopped waiting for this answer. If the assistant had already finished,
+it will be here when you reopen this chat."* — with **no error banner** and Send restored, and **no `201` followed**.
+The stub's second line is the part that cannot be faked by the client: the abort closed the **upstream** connection
+12.2 s before the held answer would have been produced, so the turn stopped costing work rather than merely stopping
+being rendered.
+
+**One prediction in the record was wrong, and the measurement is the correction.** §27CF expected a stopped turn to
+log `calls=0`; it logged **`calls=1`**, because the stop landed **inside an in-flight provider call** — the case that
+same section listed as unobserved (*"between loop iterations or inside an in-flight provider call"*). So a stop saves
+the remainder of the turn (the rest of that call, and every tool round after it), which is exactly what §27CF's own
+Limits paragraph said it would: **bounded, not eliminated**.
+
+## AI-5's line, read off a real device turn
+
+With the stub answering normally, one phone turn produced
+`[ai] turn outcome=ok total=5ms providerMs=5ms calls=1 toolMs=0ms toolRuns=0 tools=none empty=0 in=320 out=48
+model=stub-model iterations=1` beside `POST /api/ai/chat 201 (513.8 ms)`, and the answer rendered on screen. The
+**split** is the point, not the magnitude: on a socket that answers instantly, `providerMs` is the whole turn — which
+is the same finding the free-tier measurements reach from the other direction (95–99 % provider, §27BS/§27BI).
+
+## The defect the run exposed: a spent budget reported as no spend at all
+
+On the cap-spent turn above, the same line read **`in=0 out=0 model=unknown`**. The phone was right and the server was
+wrong: the gateway's body carried `usage: { input_tokens: 1200, output_tokens: 800 }` and a **model name**, and
+`parseAnthropicResponse` **threw both away** — `usage` and `model` were already parsed one line above the
+`throw new AiOutputLimit()`. Because the service reports the turn **before** it rethrows, nothing downstream could
+recover them, so the **one** turn whose entire story is *"the model spent everything it had"* was the one turn that
+looked free and nameless. That is the opposite of what the line exists for: it is the number an operator decides on
+(raise the cap, or narrow the question).
+
+Fixed in three files, as a small addition to the **existing** class rather than a new one:
+
+* **`aiErrors.ts`** — `AiOutputLimit` accepts optional **accounting** (`model`, `usage`), and
+  **`aiErrorAccounting(err)`** reads exactly those two fields, defensively, so a malformed value is dropped rather
+  than logged. An absent report stays **absent and is never zeroed**, because "not measured" and "cost nothing" must
+  not be the same line.
+* **`anthropicWire.ts`** — the throw site attaches the model and the spend it had already parsed. Message, code and
+  HTTP status are unchanged, so a caller that reads only the sentence sees exactly what it saw before.
+* **`ai.service.ts`** — the AI-layer catch adopts the accounting **before** writing the turn line, for the same
+  reason every counter is incremented before the report there: the line is written once.
+
+**Written first, and watched fail** — four cases in `AI10-output-limit-not-an-outage.test.mjs`, and the failure
+output *is* the defect: `actual: '[ai] turn outcome=AI_OUTPUT_LIMIT total=3ms … in=0 out=0 model=unknown
+iterations=1'` against `expected: /in=1200 out=800/`, plus `thrown.model` reading `undefined` where `'stub-model'`
+was required. Three of the four are DB-free (the metadata carried by the parser, the **omitted-not-zeroed** control,
+and the turn line for a hand-thrown failure); the fourth goes **over the real wire** — stub gateway → `postJson` →
+parser → `AiOutputLimit` → the service's catch → the cost line — so the hand-thrown case cannot be the only proof.
+
+## Verification
+
+* `AI10-output-limit-not-an-outage.test.mjs`: **14/14 green** (10 before this change, 4 added), in full mode and over
+the real wire with `hits === 1` as the positive control that the turn reached the gateway.
+* Full server suite: **1445 tests / 213 suites / 0 failures**; `tsc --noEmit`, `eslint .`, `check:extensions` and
+`check:specifiers` clean (387 modules, 1 866 relative specifiers resolved).
+* **No mobile file was changed** — the sentence verified on the phone is the one §27CK shipped — so the mobile suite
+was not re-run; the documentation guards were, and pass.
+* Staging was torn down afterwards: stub, staging server, Metro and both `adb reverse` tunnels removed, so nothing on
+this machine is left pointed at a stub.
+
+## Limits
+
+* **A stub is a socket, not the free tier.** The classification, the sentence, the abort and the cost line are
+verified **deterministically**, which is what makes them evidence rather than luck; but the free tier's **rate** of
+empty completions and its real cap behaviour are unchanged by this run, so **ISS-22** (the provider decision) still
+rests on the counts collected earlier and remains the owner's.
+* **The device cannot by itself say which side's sentence it rendered, and that is fine.** The client's copy and the
+server's `error` for this code are the **same text by design**, so a screenshot is consistent with either. Which one
+the screen uses is pinned where it can be: `mobile/__tests__/ai10-output-limit-copy.test.ts` feeds a **diverging**
+server sentence (*"The AI service is temporarily unavailable…"*, the old outage copy) and asserts the code wins, and
+reads `AI_OUTPUT_LIMIT` out of the server's own source so the client cannot be right about a string the server never
+emits. The phone run adds the composition — the right failure producing the right sentence and not the wrong one.
+* **One path of the Stop is still unprovoked.** §27CF's note promises the answer will be there when the chat is
+reopened, because a turn the model had **already finished** is stored either way. This run's stop landed during the
+in-flight provider call, so nothing was stored and that half of the promise was not observed. The persistence rule it
+rests on (Phase 07E / M7) is unchanged and still tested.
+* **The phone now carries a development build, and that is a deliberate state change.** It has no embedded bundle and
+`expo-updates` is deliberately not installed, so the app opens **only while Metro on this machine serves it over
+USB**. A standalone build is an EAS `preview`/`production` build; anyone picking this phone up without Metro will see
+the dev launcher, not a broken app.
+* **Still present, and still the owner's call:** the leftover seeded development tenant from the previous attempt,
+`ai10device@example.com` (business `6ad221fd386e211e7596f09b`, OWNER, 23 products). This run did **not** need it —
+the Google path signed in with an existing account — and it was not removed: `cleanup:test-firebase` deletes *every*
+identity in the project, `cleanup:firebase-accounts --email=…` refuses while a MongoDB user still references the
+address (§27BB's trap), and no existing script deletes a scoped business. Removing it is a targeted cleanup that
+should be written as one, not improvised with a broad delete.
 
 
 # 28. Phase Gate System

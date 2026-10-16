@@ -9,11 +9,26 @@
 // This probe asks the assistant the questions a member asks, over the real route,
 // and prints the wall clock, the tools the turn used, the model, and the answer.
 //
-// GROUND TRUTH. Each question carries the facts its answer must contain, and the
-// probe REPORTS the missing ones instead of judging the prose. Two of them are the
-// seeded tenant's fixed figures (the seed is deterministic: 10 000 products, 1 492
-// low, 620 out — see `seed:perf`); the product-specific one is read out of the
-// database at run time, so it stays correct if the seed changes. Numbers are
+// GROUND TRUTH, READ AT RUN TIME RATHER THAN REMEMBERED. Each question carries the
+// facts its answer must contain, and the probe REPORTS the missing ones instead of
+// judging the prose. Every fact comes out of the database when the probe runs: the
+// dashboard counts from `dashboardService.summary()`, the restock total from
+// `productService.listReorder().total`, and the product's own name and on-hand
+// quantity from its documents.
+//
+// WHY IT CHANGED (2026-10-16). The first three facts used to be literals — 10 000
+// products, 1 492 low, 620 out — because the seed is deterministic. The seeded
+// tenant then grew to 50 000 products and the probe printed `MISSING 10000, 1492,
+// 620` against a completely correct answer. That is the one thing an instrument must
+// never do: a false negative that costs a person an afternoon of re-reading a good
+// answer. A number remembered in a script is only ever true of one database.
+//
+// WHAT THIS DOES AND DOES NOT PROVE. Taking the counts from the same services the AI
+// tools call makes this a check that the model REPORTS the database faithfully, and
+// it works at any catalogue size. It cannot catch a defect INSIDE those services,
+// because they produced the expectation — deliberately so: duplicating the low-stock
+// rule here (available <= minimumStock, ACTIVE only) would risk an expectation that
+// is itself wrong, and those rules already have their own suites. Numbers are
 // compared after stripping thousands separators, because a model writes 1,492 as
 // often as 1492.
 //
@@ -33,14 +48,20 @@
 
 import 'dotenv/config';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import mongoose from 'mongoose';
 
 import env from '../src/config/env.ts';
-import Business from '../src/models/business.model.ts';
-import Inventory from '../src/models/inventory.model.ts';
-import Product from '../src/models/product.model.ts';
-import User from '../src/models/user.model.ts';
+// The models BARREL, not the four models this script reads directly: the services it
+// now calls populate by model NAME (`Location`, `Category`), so a script that imports
+// only what it touches itself fails with "Schema hasn't been registered for model
+// 'Location'" — which is exactly how the first run of the run-time-derived version
+// behaved. Importing the barrel registers every schema, as the app itself does.
+import { Business, Inventory, Product, User } from '../src/models/index.ts';
 import { signAccessToken } from '../src/config/jwt.ts';
+import dashboardService from '../src/services/dashboard.service.ts';
+import productService from '../src/services/product.service.ts';
 import { createSessionForToken, newSessionId } from '../src/services/session.service.ts';
 
 function argValue(flag) {
@@ -58,7 +79,10 @@ function normalize(value) {
 async function main() {
   const businessId = argValue('--business');
   const base = argValue('--base') ?? 'http://localhost:4000';
-  const out = argValue('--out') ?? 'C:/Users/jeffe/AppData/Local/Temp/ai-turns.json';
+  // The default lands OUTSIDE the repository on purpose (a measurement must never
+  // become a committed file), and it is derived from the host's own temp directory
+  // rather than naming one developer's machine, so the probe works anywhere.
+  const out = argValue('--out') ?? path.join(os.tmpdir(), 'ai-turns.json');
   if (!businessId) throw new Error('--business=<id> is required');
 
   await mongoose.connect(env.mongodbUri, { dbName: env.mongodbDbName });
@@ -73,16 +97,22 @@ async function main() {
   const rows = await Inventory.find({ businessId, productId: product._id }).select('quantity').lean();
   const onHand = rows.reduce((sum, row) => sum + (row.quantity ?? 0), 0);
 
+  // The tenant-wide facts, read the same way — and through the same services the AI
+  // tools themselves call, so the expectation can never describe a different
+  // database than the answer it is checked against.
+  const summary = await dashboardService.summary(businessId);
+  const restock = await productService.listReorder(businessId, { skip: 0, limit: 1 });
+
   const questions = [
     {
       message: 'How is my inventory doing? Give me the headline numbers.',
-      expects: ['10000', '1492', '620'],
-      why: 'dashboard summary: active products / low stock / out of stock',
+      expects: [summary.totalProducts, summary.lowStockProducts, summary.outOfStockProducts],
+      why: `dashboard summary: active products / low stock / out of stock (${summary.totalProducts} / ${summary.lowStockProducts} / ${summary.outOfStockProducts}, read now)`,
     },
     {
       message: 'Which products need restocking, and how many are there in total?',
-      expects: ['1492'],
-      why: 'reorder list total',
+      expects: [restock.total],
+      why: `reorder list total (${restock.total}, read now)`,
     },
     {
       message: `What is the current stock of the product with SKU ${PRODUCT_SKU}? Tell me its name and quantity.`,
@@ -97,8 +127,8 @@ async function main() {
       // the one the harness would notice coming back.
       message:
         'How many products are completely out of stock, and what percentage of the active catalogue is that?',
-      expects: ['620', '10000'],
-      why: 'the out-of-stock count and the percentage base it is quoted against (§27BG Q4)',
+      expects: [summary.outOfStockProducts, summary.totalProducts],
+      why: `the out-of-stock count (${summary.outOfStockProducts}) and the percentage base (${summary.totalProducts}) it is quoted against (§27BG Q4)`,
     },
   ];
 
@@ -157,9 +187,18 @@ async function main() {
     const assistant = payload?.assistantMessage;
     if (payload?.conversation?.id) conversationId = payload.conversation.id;
     const answer = assistant?.content ?? payload?.message ?? raw.slice(0, 400);
-    const missing = question.expects
-      .filter((fact) => !normalize(answer).includes(normalize(fact)))
-      .map((fact) => String(fact).slice(0, 40));
+    // THE FACT CHECK ONLY MEANS SOMETHING ON A TURN THAT SUCCEEDED. A failed turn
+    // answers with an error envelope, and reporting its facts as `MISSING` reads as
+    // "the model got the numbers wrong" when the truth is "the model never answered"
+    // — the same class of false negative this probe was just fixed for. Measured
+    // 2026-10-16: a `502 AI_UNAVAILABLE` printed `MISSING 3079, 50000` against an
+    // error body and nothing else.
+    const succeeded = status === 201;
+    const missing = succeeded
+      ? question.expects
+          .filter((fact) => !normalize(answer).includes(normalize(fact)))
+          .map((fact) => String(fact).slice(0, 40))
+      : [];
 
     results.push({
       question: question.message,
@@ -178,8 +217,16 @@ async function main() {
     console.log(
       `[turns] q${index + 1}  status=${status}  ${ms} ms  degraded=${payload?.degraded ?? '-'}  model=${assistant?.model ?? '-'}`,
     );
-    console.log(`[turns]      tools : ${(assistant?.toolsUsed ?? []).join(', ') || '(none)'}`);
-    console.log(`[turns]      check : ${question.why} -> ${missing.length ? `MISSING ${missing.join(', ')}` : 'all expected facts present'}`);
+    console.log(`[turns]      tools : ${(assistant?.toolsUsed ?? []).join(', ') || '(none named in the response)'}`);
+    console.log(
+      `[turns]      check : ${question.why} -> ${
+        succeeded
+          ? missing.length
+            ? `MISSING ${missing.join(', ')}`
+            : 'all expected facts present'
+          : `NOT CHECKED — the turn did not succeed (status ${status}); see the server's own [ai] line for what ran`
+      }`,
+    );
     console.log(`[turns]      answer: ${String(answer).replace(/\s+/g, ' ').slice(0, 420)}`);
     console.log('');
   }

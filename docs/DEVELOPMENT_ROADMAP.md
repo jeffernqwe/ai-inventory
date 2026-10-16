@@ -7025,6 +7025,29 @@ validate (ISS-16's lesson), and majors are taken deliberately. **Watch:** run `n
 of any session that considers executing; begin when `latest` is a 58.x release. If the pre-release path is chosen
 later, replace this paragraph with that decision, its date and its rationale.
 
+**Gate 0 is now OPEN, and the recommendation is still not to execute yet (annotated 2026-10-16, read the same way).**
+`npm view expo dist-tags` — and the new `decode-uri-component`-era watch beside it — reports **`latest = 58.0.12`**
+while this project installs **57.0.27**, so the condition this paragraph set has been met and the watch has fired for
+the first time (§27CL). Three things follow, and only the first is a green light.
+
+1. **The promotion happened, so the waiting reason is gone** — the pins are stable releases now, not the
+   `0.88.0-rc.4` candidate this section refused to build on.
+2. **The table above is stale and must be re-read, not reused.** It was taken from `expo@58.0.7` when 58 was on
+   `next`; the SDK's own `bundledNativeModules.json` for **58.0.12** is the authority at execution, and this file
+   already records a case where a proposal was wrong on two of five pins (PR #34).
+3. **Opening a gate is not a reason to move.** The owner's standing preference is **stability over currency** — *"we
+   don't need to upgrade everything just for the sake of using the latest versions"* — and this is the largest change
+   on the deferred list: RN 0.86.3 → 0.88, React 19.2 → 19.3, jest 30 riding with it, **plus the two things JS-only
+   CI cannot check** — the `patch-package` fix for the RNFirebase Auth PII finding (ISS-02) and `@react-native-firebase/auth`
+   compatibility with RN 0.88 — and it ends with a **device pass** rather than a CI result.
+
+**Recommendation (2026-10-16): defer, and keep this runbook ready.** The conditions that would reopen it are a
+**security fix or a defect that only SDK 58 resolves**, or a **native build that has to be re-cut anyway** for another
+reason — at which point the migration rides along instead of being its own risk. Nothing about V1's user-visible
+behaviour improves with SDK 58 today, and the current setup is stable, verified and green. This paragraph is a
+reading and a recommendation, not a decision to execute: no branch was cut, no dependency was touched, and the pins
+in this section remain the 2026-10-10 reading.
+
 ## Verified target set (read from the package, not guessed)
 
 `npm pack expo@58.0.7` → its `bundledNativeModules.json`, 2026-10-10:
@@ -12478,8 +12501,21 @@ printed. The stub now closes in the **last** root-level hook, beside the app ser
 
 ## Limits
 
-* **NOT device-verified.** The chain is proven over the wire and on the client, but nobody has seen this sentence on the
-  OPPO against a live gateway, which is where the original failure was measured.
+* **NOT device-verified — attempted 2026-10-16 and BLOCKED, recorded as blocked rather than as passing.** The run was
+  staged to be **deterministic and quota-free** rather than lucky: the server was started with `OPENROUTER_BASE_URL`
+  pointed at a local stub that replays the **exact captured Q4 body** (`content: []`, `stop_reason: 'max_tokens'`) —
+  the technique the wire suite already uses — with `adb reverse tcp:4000`/`tcp:8081` tunnels and Metro serving the dev
+  client, all three verified answering before the phone was touched. The blocker is physical: the device sits on a
+  **password-protected lock screen** (`showingAndNotOccluded=true`, and `wm dismiss-keyguard` does not clear it), so
+  synthesized input never reaches the app. The attempt ended with the app still on the **pre-change bundle**, which is
+  established rather than assumed — Metro logged no bundle request. Three things cost time here and are worth the next
+  session's: Git Bash rewrites `/sdcard/…` into a Windows path unless `MSYS_NO_PATHCONV=1` is set, so an empty
+  `uiautomator` dump reads as a blank screen and is really a dump that never left the host (§27CE's finding, still
+  live); force-stopping and relaunching the launcher activity keeps the bundle the app already had, so a dev-client
+  open (`inventoryai://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A8081`) is required; and the machine's
+  own dev server is normally already running on `:4000` with the **old** code, so it has to be replaced, not reused.
+  **Staging was torn down afterwards** — Metro, the stub and both tunnels removed, the normal dev server restarted — so
+  nothing on this machine is left pointed at a stub.
 * **The failure is named, not prevented.** A free-tier model that spends `AI_MAX_OUTPUT_TOKENS` without answering still
   cannot answer; the member now gets a true, actionable sentence and an operator gets a line, instead of a false outage.
 * The `[ai:openrouter]` line is written **once per failed call**, so a retried turn would log twice; no counter is kept,

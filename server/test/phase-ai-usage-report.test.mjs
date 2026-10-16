@@ -15,7 +15,7 @@
 // and — the one that matters most — that no credential-shaped string can reach the output
 // even when the log it read contains one.
 
-import { describe, it, before, after } from 'node:test';
+import { it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile, spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -24,12 +24,16 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { startServer, makeApi, createTracker, registerOwner, disconnectDb } from './support.mjs';
+import { dbSuite, unitSuite } from './testEnv.mjs';
+import { AIMessage, AIConversation } from '../src/models/index.ts';
+
 const run = promisify(execFile);
 const SERVER_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SCRIPT = path.join(SERVER_ROOT, 'scripts', 'ai-usage.mjs');
 
 /** A line that only LOOKS like a credential, so the leak control has something to catch. */
-const PLANTED_KEY = 'sk-or-v1-PLANTED-0000000000000000000000000000000000000000';
+const PLANTED_KEY = 'sk-or-v1-PLANTED-0000000000000000000000000000000000000000'; // secret-guard:allow (a deliberate fixture: the leak control needs a key-shaped string to prove the report cannot print one)
 
 /**
  * A log fragment shaped like the server's real output: one access-log line (the JSON the
@@ -69,7 +73,117 @@ async function cli(args) {
   }
 }
 
-describe('the AI usage report reads the log it is given, and nothing else', () => {
+// ---------------------------------------------------------------------------
+// The database half. `AIMessage` already stores model, toolsUsed, usage and the AI-8
+// `degraded` mark on every assistant turn — its own comment says the reason is that "the
+// rate of each reason becomes countable from the database rather than only from a log file
+// that rotation will eat" — so production usage figures need no schema change and no log
+// sink. What the database CANNOT show is a FAILED turn: nothing is persisted until an answer
+// exists (Phase 07E / M7), which is why the log half still exists.
+// ---------------------------------------------------------------------------
+
+const { dbOk, baseUrl, server } = await startServer();
+const api = makeApi(baseUrl);
+const tracker = createTracker(dbOk);
+
+after(async () => {
+  await tracker.cleanup();
+  if (server) await new Promise((resolve) => server.close(resolve));
+  await disconnectDb();
+});
+
+dbSuite('the usage report can read the turns the database already stores', dbOk, () => {
+  it('★ counts one business\' stored turns, their tokens, tools and degraded split', async () => {
+    const owner = await registerOwner(api, tracker);
+    const conv = await AIConversation.create({ businessId: owner.businessId, userId: owner.userId, title: 'fixture' });
+    await AIMessage.create([
+      { conversationId: conv._id, role: 'USER', content: 'q1' },
+      {
+        conversationId: conv._id,
+        role: 'ASSISTANT',
+        content: 'a1',
+        model: 'stub/model',
+        toolsUsed: ['getInventorySummary'],
+        usage: { inputTokens: 1200, outputTokens: 800 },
+      },
+      {
+        conversationId: conv._id,
+        role: 'ASSISTANT',
+        content: 'a2',
+        model: 'stub/model',
+        degraded: 'OUTPUT_LIMIT',
+        usage: { inputTokens: 100, outputTokens: 50 },
+      },
+    ]);
+    // One turn just outside the default window, written raw because `timestamps: true` owns
+    // createdAt — the same technique support.mjs uses for a deliberate tie.
+    const old = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    await AIMessage.collection.insertOne({
+      conversationId: conv._id,
+      role: 'ASSISTANT',
+      content: 'a3',
+      model: 'stub/model',
+      usage: { inputTokens: 7, outputTokens: 3 },
+      createdAt: old,
+      updatedAt: old,
+    });
+
+    const res = await cli([
+      '--db',
+      `--business=${owner.businessId}`,
+      '--days=7',
+      '--no-provider',
+      '--json',
+    ]);
+    assert.equal(res.code, 0, res.stderr);
+    const db = JSON.parse(res.stdout).database;
+
+    // The database name is asserted rather than assumed: a report that silently read the
+    // wrong database would look perfectly plausible and be worthless.
+    assert.match(db.database, /_test_db$/, 'a test run must read the test database');
+    assert.equal(db.turns, 2, 'assistant turns only — the USER message is not a turn');
+    assert.equal(db.conversations, 1);
+    assert.equal(db.healthyTurns, 1);
+    assert.deepEqual(db.degradedReasons, { OUTPUT_LIMIT: 1 });
+    assert.deepEqual(db.tokens, { input: 1300, output: 850 }, 'summed from the Mixed `usage` the provider reported');
+    assert.deepEqual(db.tools, { getInventorySummary: 1 });
+    assert.deepEqual(db.models, { 'stub/model': 2 });
+    assert.equal(
+      db.perDay.reduce((n, d) => n + d.turns, 0),
+      2,
+      'the per-day series covers the window and nothing outside it',
+    );
+  });
+
+  it('★ widens with --days, which is how the 30-day turn is seen', async () => {
+    const owner = await registerOwner(api, tracker);
+    const conv = await AIConversation.create({ businessId: owner.businessId, userId: owner.userId, title: 'window' });
+    const old = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    await AIMessage.collection.insertOne({
+      conversationId: conv._id,
+      role: 'ASSISTANT',
+      content: 'old',
+      model: 'stub/model',
+      createdAt: old,
+      updatedAt: old,
+    });
+
+    const narrow = await cli(['--db', `--business=${owner.businessId}`, '--days=7', '--no-provider', '--json']);
+    assert.equal(JSON.parse(narrow.stdout).database.turns, 0, 'outside the window');
+    const wide = await cli(['--db', `--business=${owner.businessId}`, '--days=60', '--no-provider', '--json']);
+    assert.equal(JSON.parse(wide.stdout).database.turns, 1, 'inside a wider one');
+  });
+
+  it('★ the database half is opt-in — no --db means no connection at all', async () => {
+    const res = await cli([`--log=${logPath}`, '--no-provider', '--json']);
+    assert.equal(res.code, 0, res.stderr);
+    const report = JSON.parse(res.stdout);
+    assert.equal('database' in report, false, 'the report must not touch the database unless asked');
+    assert.equal(report.turns, 4, 'and the log half is unaffected');
+  });
+});
+
+unitSuite('the AI usage report reads the log it is given, and nothing else', () => {
   it('★ counts turns, outcomes, requests and empty completions from the cost lines alone', async () => {
     const res = await cli([`--log=${logPath}`, '--no-provider', '--json']);
     assert.equal(res.code, 0, res.stderr);
@@ -148,5 +262,24 @@ describe('the AI usage report reads the log it is given, and nothing else', () =
     assert.equal(res.code, 0, res.stderr);
     assert.match(res.stdout, /control\(s\) passed/i);
     assert.match(res.stdout, /must-fire/i, 'the controls are labelled by what they assert');
+  });
+
+  it('★ the tool never writes anything, anywhere', async () => {
+    // The read-only claim is the whole reason this can be run against production, so it is
+    // pinned the way §27BF pinned the assistant's own read-only tools: by scanning the
+    // source, with a control that proves the scanner can still fail.
+    const source = fs.readFileSync(SCRIPT, 'utf8');
+    const WRITE_CALL = /\.(create|insertOne|insertMany|updateOne|updateMany|replaceOne|deleteOne|deleteMany|findOneAndUpdate|findOneAndReplace|findOneAndDelete|bulkWrite|save)\s*\(/;
+    assert.equal(WRITE_CALL.test(source), false, 'the usage report must contain no write call');
+    assert.equal(
+      WRITE_CALL.test('await AIMessage.create({ role: \'ASSISTANT\' })'),
+      true,
+      'positive control: the scan must fail on a planted write',
+    );
+    assert.equal(
+      WRITE_CALL.test('await AIMessage.countDocuments({ role: \'ASSISTANT\' })'),
+      false,
+      'negative control: a read verb is not a write',
+    );
   });
 });

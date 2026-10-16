@@ -46,6 +46,12 @@
 import 'dotenv/config';
 import fs from 'node:fs';
 import process from 'node:process';
+import mongoose from 'mongoose';
+
+import env from '../src/config/env.ts';
+// The models BARREL, not the single model this reads: it registers every schema, which is
+// what the sibling measurement scripts found they needed the hard way.
+import { AIMessage } from '../src/models/index.ts';
 
 /** Every field a complete `[ai] turn` line carries (AI-5's shape, in ai.service.ts). */
 const TURN_FIELDS = [
@@ -224,8 +230,95 @@ export async function readProviderUsage({ apiKey, baseUrl = DEFAULT_BASE_URL, fe
   }
 }
 
+/**
+ * The durable half: what the DATABASE already knows about stored turns.
+ *
+ * WHY THIS IS POSSIBLE WITHOUT A SCHEMA CHANGE. `AIMessage` has stored `model`, `toolsUsed`,
+ * `usage` and (since AI-8) `degraded` on every assistant turn all along, and its own comment
+ * says why: *"the rate of each reason becomes countable from the database rather than only
+ * from a log file that rotation will eat."* That is exactly the gap this source closes —
+ * production usage figures with no new field, no log sink and no credential.
+ *
+ * WHAT IT CANNOT SHOW, said plainly because the alternative is a report that lies by
+ * omission: a FAILED turn persists NOTHING (Phase 07E / M7 — a conversation's messages are
+ * written together only once an answer exists), so a timeout, an abandoned turn, an output
+ * limit and a quota refusal appear only in the log. The two halves are complements, not
+ * alternatives: the database is durable and production-visible and covers what was ANSWERED;
+ * the log covers what was NOT.
+ *
+ * EVERY FIGURE IS COMPUTED INSIDE MONGODB. One aggregation returns one document per group,
+ * the same rule SCALE-dashboard-counts pins for the dashboard: moving documents to the app to
+ * count them is what turns a report into a load test. Only the aggregate is read.
+ */
+export async function readDatabaseUsage({ businessId, days = 7, model = AIMessage, connection = mongoose } = {}) {
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  const match = { role: 'ASSISTANT', createdAt: { $gte: since } };
+  if (businessId) {
+    // Scoped through the conversation, because a message carries no businessId of its own.
+    const conversations = await connection.connection.db
+      .collection('ai_conversations')
+      .find({ businessId: new mongoose.Types.ObjectId(String(businessId)) }, { projection: { _id: 1 } })
+      .toArray();
+    match.conversationId = { $in: conversations.map((c) => c._id) };
+  }
+
+  const group = (id, extra = {}) => [{ $match: match }, { $group: { _id: id, turns: { $sum: 1 }, ...extra } }];
+
+  const [totals, perDay, perModel, degraded, tokens, tools] = await Promise.all([
+    model.aggregate(group('$conversationId')),
+    model.aggregate([
+      { $match: match },
+      { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone: 'UTC' } }, turns: { $sum: 1 } } },
+      { $sort: { _id: 1 } },
+    ]),
+    model.aggregate(group({ $ifNull: ['$model', 'unnamed'] })),
+    model.aggregate(group({ $ifNull: ['$degraded', ''] })),
+    model.aggregate([
+      {
+        $match: match,
+      },
+      {
+        $group: {
+          _id: null,
+          input: { $sum: { $ifNull: ['$usage.inputTokens', 0] } },
+          output: { $sum: { $ifNull: ['$usage.outputTokens', 0] } },
+        },
+      },
+    ]),
+    model.aggregate([{ $match: match }, { $unwind: '$toolsUsed' }, { $group: { _id: '$toolsUsed', turns: { $sum: 1 } } }, { $sort: { turns: -1 } }]),
+  ]);
+
+  const fromRows = (rows) => Object.fromEntries(rows.map((r) => [String(r._id), r.turns]));
+  const degradedReasons = {};
+  let healthyTurns = 0;
+  for (const row of degraded) {
+    const reason = String(row._id ?? '');
+    if (reason) degradedReasons[reason] = row.turns;
+    else healthyTurns += row.turns;
+  }
+
+  return {
+    status: 'OK',
+    database: env.mongodbDbName,
+    days,
+    // Counted in MongoDB, so `turns` is the sum of one number per conversation rather than
+    // the length of an array of documents.
+    turns: totals.reduce((n, r) => n + r.turns, 0),
+    conversations: totals.length,
+    // Named `perDay` rather than `series` (vague in JSON) and not `days` (which is the window).
+    perDay: perDay.map((r) => ({ day: String(r._id), turns: r.turns })),
+    models: fromRows(perModel),
+    tools: fromRows(tools),
+    // "not marked degraded" rather than "verified healthy": a message written before AI-8
+    // cannot carry the mark, so this is a lower bound on the degraded count, not an upper one.
+    healthyTurns,
+    degradedReasons,
+    tokens: tokens.length ? { input: tokens[0].input, output: tokens[0].output } : { input: 0, output: 0 },
+  };
+}
+
 /** The human report. Reads `summary` and `provider`; never reads the log or the key. */
-export function formatReport({ summary, provider, source }) {
+export function formatReport({ summary, provider, source, database }) {
   const out = [];
   const dash = (v) => (v === null || v === undefined ? 'n/a' : String(v));
   out.push('[ai-usage] read-only report — no model was called and no quota was spent');
@@ -239,6 +332,26 @@ export function formatReport({ summary, provider, source }) {
   out.push(`  time: provider ${summary.providerMs} ms · tools ${summary.toolMs} ms · total ${summary.totalMs} ms (provider share ${summary.providerShare === null ? 'n/a' : summary.providerShare})`);
   out.push(`  tokens: in ${summary.tokens.input} · out ${summary.tokens.output}`);
   out.push(`  models: ${summary.models.length ? summary.models.join(', ') : 'none named'}`);
+  out.push('');
+  if (database && database.status === 'OK') {
+    const entries = (map) =>
+      Object.entries(map ?? {})
+        .sort((a, b) => b[1] - a[1])
+        .map(([k, v]) => `${k}=${v}`)
+        .join(' ');
+    out.push(`  stored turns (database ${database.database}, last ${database.days} day(s)):`);
+    out.push(`    turns: ${database.turns} across ${database.conversations} conversation(s)`);
+    out.push(`    not-marked-degraded: ${database.healthyTurns} · degraded: ${entries(database.degradedReasons) || 'none'}`);
+    out.push(`    tokens: in ${database.tokens.input} · out ${database.tokens.output}`);
+    out.push(`    models: ${entries(database.models) || 'none'} · tools: ${entries(database.tools) || 'none'}`);
+    out.push(`    per day (UTC): ${database.perDay.map((d) => `${d.day}=${d.turns}`).join(' ') || 'none'}`);
+    // The sentence that keeps this half from being read as a complete usage picture.
+    out.push('    only ANSWERED turns are stored: a failed turn persists nothing (Phase 07E / M7), so');
+    out.push('    timeouts, abandonment, output limits and quota refusals appear in the log half alone.');
+    out.push('    "not-marked-degraded" is a lower bound — a turn written before AI-8 cannot carry the mark.');
+  } else if (database && database.status !== 'SKIPPED') {
+    out.push(`  stored turns: ${database.status} — ${database.detail}`);
+  }
   out.push('');
   if (provider.status === 'OK') {
     out.push('  provider account (GET /v1/key — read-only):');
@@ -272,7 +385,7 @@ export function formatReport({ summary, provider, source }) {
 // property this tool claims is one case here, labelled by what it asserts.
 // ---------------------------------------------------------------------------
 
-const PLANTED_KEY = 'sk-or-v1-PLANTED-0000000000000000000000000000000000000000';
+const PLANTED_KEY = 'sk-or-v1-PLANTED-0000000000000000000000000000000000000000'; // secret-guard:allow (a deliberate fixture: the leak control needs a key-shaped string to prove the report cannot print one)
 
 function runControls() {
   const failures = [];
@@ -456,18 +569,47 @@ async function main() {
     process.exit(0);
   }
 
-  const read = await readSource({
-    logPath: argValue('--log'),
-    stdinIsTty: Boolean(process.stdin.isTTY),
-    readFile: fs.promises.readFile,
-    readInput: readStdin,
-  });
-  if (!read.ok) {
-    console.error(`[ai-usage] NOT VERIFIED — ${read.detail}.`);
-    process.exit(2);
+  const logPath = argValue('--log');
+  const wantDb = process.argv.includes('--db');
+  const days = Number.parseInt(argValue('--days') ?? '7', 10) || 7;
+  const businessId = argValue('--business');
+
+  // THE LOG HALF IS OPTIONAL WHEN --db IS GIVEN. Without this, `--db` on a terminal would
+  // fall through to the stdin branch and refuse for having no log, which is the wrong refusal:
+  // the database half needs no log at all.
+  let read = { ok: true, source: 'not requested (--db was given)', text: '' };
+  if (logPath || !wantDb) {
+    read = await readSource({
+      logPath,
+      stdinIsTty: Boolean(process.stdin.isTTY),
+      readFile: fs.promises.readFile,
+      readInput: readStdin,
+    });
+    if (!read.ok) {
+      console.error(`[ai-usage] NOT VERIFIED — ${read.detail}.`);
+      process.exit(2);
+    }
+  }
+  const summary = summarize(parseLog(read.text));
+
+  let database = { status: 'SKIPPED', detail: 'not requested (no --db)' };
+  if (wantDb) {
+    try {
+      await mongoose.connect(env.mongodbUri, { dbName: env.mongodbDbName });
+      database = await readDatabaseUsage({ businessId, days });
+    } catch (err) {
+      // Read-only and best-effort: an unreachable database is a row in the report, not a
+      // crash — but if it was the ONLY source asked for, the whole run measured nothing.
+      database = { status: 'UNREADABLE', detail: `the database could not be read (${err?.name ?? 'error'})` };
+    } finally {
+      await mongoose.disconnect().catch(() => {});
+    }
+    if (database.status !== 'OK' && !logPath && read.source.startsWith('not requested')) {
+      console.error(`[ai-usage] NOT VERIFIED — ${database.detail}.`);
+      process.exit(2);
+    }
   }
 
-  const summary = summarize(parseLog(read.text));
   const provider = process.argv.includes('--no-provider')
     ? { status: 'SKIPPED', detail: 'not requested (--no-provider)' }
     : await readProviderUsage({
@@ -476,11 +618,14 @@ async function main() {
       });
 
   if (process.argv.includes('--json')) {
-    console.log(JSON.stringify({ readAt: new Date().toISOString(), source: read.source, ...summary, provider }, null, 2));
+    const payload = { readAt: new Date().toISOString(), source: read.source, ...summary, provider };
+    // Absent unless asked for, so a reader can tell "not requested" from "zero turns".
+    if (wantDb) payload.database = database;
+    console.log(JSON.stringify(payload, null, 2));
     process.exit(0);
   }
 
-  console.log(formatReport({ summary, provider, source: read.source }));
+  console.log(formatReport({ summary, provider, source: read.source, database: wantDb ? database : null }));
   process.exit(0);
 }
 

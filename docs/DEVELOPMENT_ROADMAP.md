@@ -12789,6 +12789,101 @@ address (§27BB's trap), and no existing script deletes a scoped business. Remov
 should be written as one, not improvised with a broad delete.
 
 
+# 27CN. AI-11 — The assistant's own usage report, and what the allowance actually says (2026-10-17)
+
+Server tooling only: a new read-only `server/scripts/ai-usage.mjs` behind `npm run ai:usage`, its test suite, and
+the two documentation references. **No application behaviour, route, permission, schema, session, dependency,
+environment, model or mobile change**, and **no model was called from anywhere in this work** — so it spent none of
+the allowance it exists to measure.
+
+## Why another tool, when three already measure the assistant
+
+The decision that is still open is **ISS-22**: whether the assistant stays on the free tier. It needs one kind of
+evidence — *how much of the allowance do real turns spend, and what is failing?* — and the instruments that existed
+could not supply it, for a reason worth stating plainly: **they consume what they measure.** `perf:turns` times real
+member turns and spends provider quota (the deployed free tier allows roughly **50 requests a day in total**, §27BF),
+so running it to ask "are we near the limit?" moves the number being asked about. The per-turn cost line (AI-5's
+`[ai] turn …`) already records what **every** real turn cost — it is written on every exit, including the ones that
+throw — but nothing read those lines back: they go to stdout and are never aggregated.
+
+This is the missing half of a pair. AI-5 made a turn's cost **visible**; AI-11 makes it **countable**, and joins it
+to what the provider says about the allowance.
+
+## What it reads, and what it refuses to guess
+
+* **The log.** Every `[ai] turn …` line: turns, outcomes, provider **requests** (`calls`), tool rounds, empty
+  completions, tokens, the model, and the provider-versus-tools time split. `--log=<path>` reads a saved file; with no
+  path it reads **stdin**, so `npm start | npm run ai:usage --silent --` works on a live server.
+* **The provider's own account.** `GET {OPENROUTER_BASE_URL}/v1/key` — a **GET**, so it is free and reads no model —
+  returning the daily free-model counter, whether the key is on the free tier, and paid usage.
+
+Nothing is written anywhere, no database is touched, and the two readings are joined in the report rather than by
+hand. Four decisions are worth recording because each could reasonably have gone the other way:
+
+1. **A turn line cut short is counted, and reported `malformed`.** A restart can kill half a line, and its `[ai] turn`
+   prefix is already written. Dropping it would **understate** usage — the one direction a quota report must not err
+   in — so what it carries is used, what it lacks contributes nothing, and the count says the columns are partial.
+2. **Absent is never a zero, in either direction.** A missing field contributes nothing to a sum; a missing provider
+   counter prints `null`. This is AI-10's rule (a failure that knows nothing must not look measured) applied to a
+   report whose whole job is to be trusted.
+3. **An AI-2 degraded warning is NOT a second turn.** It is a second line about a turn already counted, so counting it
+   would inflate usage on exactly the turns that had trouble — and those are the turns an operator is reading about.
+4. **The ratio comes from the log it was given, and the report says so.** The requests-per-turn figure is what turns a
+   request-counting allowance into a number of turns, and it is only as good as its input: a log of cheap turns
+   overstates the capacity remaining.
+
+## The reading, and the finding
+
+Taken live on **2026-10-17** against the deployed key (a GET, nothing spent):
+
+```text
+provider account (GET /v1/key — read-only):
+  free tier: true
+  free-model requests today: 37 used of 50 · 13 remaining
+  paid usage: 0 (today 0, this month 0)
+```
+
+Two things follow. **§27BF's "about 50 requests a day in total" is now a provider-confirmed figure** rather than a
+reading inferred from failure behaviour — the allowance is a **daily request counter on free models**, it is currently
+**37 of 50 spent**, and **paid usage is zero**, so nothing has been billed and nothing needs to be. And **the unit of
+that allowance is a request, not a turn**: the same run's local log measured **1 request/turn** (the staged turns had
+no tool rounds) while real device turns measured **2–3** (§27BI, §27BF), so the honest capacity figure is derived per
+log, which is precisely why the tool prints the ratio it used instead of assuming one.
+
+## Limits of the instrument, and of the number
+
+* **It reads a log it is given.** The provider half needs no log; the usage half needs wherever the server's stdout
+  goes. On a deployment that means a log sink, and until one exists the log half describes this machine. This is
+  stated rather than worked around: the alternative (persisting a per-turn metric row) is a **schema change**, which
+  is a decision rather than a patch.
+* **The day boundary is UTC**, and the daily counter resets on it — so "today" in the provider's answer is not
+  necessarily the reader's today.
+* **It cannot measure latency end to end.** `perf:turns` still does that, and still spends quota. Nothing here
+  replaces it; it replaces running it to answer a question that costs nothing to answer.
+* **Nothing about the provider changed.** No model, no cap, no tier, no dependency — the cap decision is still the
+  owner's, and this tool exists to give it a reading rather than to make it.
+* **A log of cheap turns overstates capacity**, which is why the ratio is printed beside the capacity it produces.
+
+## Verification
+
+* **Controls: 14, all passing** — 7 **must-fire** and 7 **must-not-fire**, labelled by what each asserts, run by
+  `--self-test` before any report is produced. They pin the parse, the turn/not-a-turn distinction, `malformed`, the
+  absent-not-zero rule in both directions, the share arithmetic, the capacity function's refusal to divide by an
+  unmeasured zero, the provider mapping with its masked `label` dropped, and the credential-leak property.
+* **Proven able to fail twice by mutation, each restored byte-identical (sha256 `f04c0fcb…` before and after):**
+  making `malformed` unable to increment reddens the truncated-line and share controls
+  (`malformed expected 1, got 0`); defaulting an absent provider counter to `0` reddens the absent-not-zero control
+  (`daily expected {used:4, limit:null, remaining:null}, got {used:4, limit:0, remaining:0}`). Both exit **1** and
+  refuse to produce a report.
+* **Suite: 6 cases**, `PURE_UNIT`, driving the real CLI in a child process against a fixture log: the arithmetic by
+  hand (4 turns, 7 requests, 1 malformed, 4 599 in / 1 299 out), the requests-per-turn ratio and the share as a
+  literal, **exit 2 on an unreadable log** with a message that says *NOT VERIFIED*, stdin, the provider mapping, and
+  the leak control — whose **run is asserted first**, because a leak check that passes when the tool crashes is
+  decoration.
+* Full server suite **1451 tests / 214 suites / 0 failures** (up from 1445 / 213), `tsc --noEmit` and `eslint .`
+  clean.
+
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

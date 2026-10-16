@@ -306,15 +306,17 @@ still unmeasured".
 
 ## Part 4 — Measuring the assistant
 
-These answer *"how fast is it, really?"*. They all need a `businessId`, and they refuse without
-one — the throwaway tenant's is printed by `seed:perf`, and your own account's is printed by
-`verify:demo`. All three are **read-only against the database**.
+These answer *"how fast is it, really?"* and *"how much of the allowance is left?"*. The three that
+ask the database need a `businessId`, and they refuse without one — the throwaway tenant's is printed
+by `seed:perf`, and your own account's is printed by `verify:demo`. All of them are **read-only
+against the database**, and only `perf:turns` spends AI quota.
 
 | Command | What it measures |
 |---|---|
 | `npm run perf:measure -- --business=<id>` | How long each of the assistant's data queries takes — **no AI calls at all**, so it costs nothing |
 | `npm run perf:golden -- --business=<id> --out=before.json` | Records the exact answers those queries produce, with a fingerprint of each |
 | `npm run perf:turns -- --business=<id> --only=2` | One or two **real** assistant conversations, timed end to end |
+| `npm run ai:usage -- --log=<path>` | What the assistant has actually cost and how it failed — **no AI calls, no database, no quota** |
 
 ```bash
 cd C:/Users/jeffe/inventory-ai/server
@@ -341,6 +343,24 @@ npm run perf:turns -- --business=PUT_THE_BUSINESS_ID_HERE --only=1,3
   of requests per day in total, so keep the question list short and use `--only=` to re-check one
   question instead of all of them. It defaults to `http://localhost:4000`; `--base=` overrides that,
   and `--out=` says where to save the answers.
+- **`ai:usage` is the one to run *before* spending anything.** It reads the server's own per-turn log
+  lines (`[ai] turn …`, written for every turn including the ones that fail) and the AI provider's
+  own account, then joins them: how many turns happened, which ones failed and how, how many provider
+  **requests** they cost, the provider-versus-tools time split, and — from the provider — how much of
+  the daily free allowance is left. Nothing is called and nothing is written, so it is free to run
+  whenever the question comes up. It reads a saved log with `--log=<path>`, or **stdin** when no path
+  is given (so `npm start > server.log` and a pipe both work); `--no-provider` keeps it fully offline
+  and `--json` prints the same figures as one object.
+
+```bash
+cd C:/Users/jeffe/inventory-ai/server
+
+# what has the assistant cost, and what is left today?   (nothing is spent)
+npm run ai:usage -- --log=server.log
+
+# the same, straight off a running server's output
+npm start | npm run ai:usage --silent --
+```
 
 ---
 
@@ -515,6 +535,7 @@ commands, the performance probes and `audit-access.mjs`.
 | `npm run perf:measure -- --business=…` | time the assistant's queries (no AI cost) | ✅ reads only |
 | `npm run perf:golden -- --business=…` | fingerprint the assistant's answers | ✅ reads only |
 | `npm run perf:turns -- --business=…` | real assistant turns | ⚠️ spends AI quota |
+| `npm run ai:usage -- --log=…` | turns, failures and the allowance left | ✅ reads only (offline with `--no-provider`) |
 | `npm run cleanup:test-mongodb` | wipe the test database | ⚠️ destructive, throwaway data |
 | `npm run cleanup:dev-mongodb` | wipe the development database | ⚠️⚠️ **your data** |
 | `npm run cleanup:test-firebase` | delete every development login | ⚠️⚠️ **irreversible** |

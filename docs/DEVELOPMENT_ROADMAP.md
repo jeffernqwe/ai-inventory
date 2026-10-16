@@ -12325,6 +12325,18 @@ CJS-compatible patch. The exposure is real but narrow, and it is the only one of
 the cost is a hang from a crafted malformed percent-encoded link (**denial of service**), and no path here exposes,
 alters or exfiltrates data.
 
+**Which of the five actually ship, measured rather than argued from the imports** (2026-10-16): the production Android
+and iOS bundles' source maps — **1 441** and **1 317** modules — both list `query-string` and `decode-uri-component`,
+reached exactly through `expo-router/build/fork/getPathFromState.js` and `getStateFromPath.js`, while **`node-forge`,
+`braces`, `micromatch`, `sprintf-js` and `xcode` appear in neither**. So **one of the five advisories is inside a shipped
+artifact and it is the DoS one**; the other four are Node-side tooling that never reaches a phone. *(The `uuid` hits in
+those maps are `expo-modules-core/src/uuid/index.ts` — Expo's own implementation, verified on Android — not the `uuid`
+package, which is absent.)* **The instrument mattered more than the answer:** a string search over the minified bundle
+reported `query-string: 0`, which reads as "not shipped" and is **false** — Metro's production output uses numeric module
+ids and keeps almost no module paths (four `node_modules/…` strings survive, all of them assets). The first version of
+this paragraph was written from that grep and was wrong; the source map is the only honest way to ask the question, and
+this is recorded because an instrument that fails quietly is exactly what this increment is about.
+
 ## The three with nothing to apply
 
 `sprintf-js`, `braces` and `node-forge` each have **no published fix at all**: read from the registry on 2026-10-16,

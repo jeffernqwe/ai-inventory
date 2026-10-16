@@ -12884,6 +12884,100 @@ log, which is precisely why the tool prints the ratio it used instead of assumin
   clean.
 
 
+# 27CO. AI-11, part two — the durable half, and the row the TTL sweep had already deleted (2026-10-17)
+
+The usage report's second source, its tests, and one repaired test in a suite this work did not otherwise touch. **No
+schema change — that is the finding, not a limitation** — no application behaviour, route, permission, session,
+dependency, environment, model or mobile change, and still **no model call anywhere**.
+
+## The data was already there, and its own model said so
+
+§27CN recorded the honest limit that the report's log half needs somewhere for the server's stdout to go: on a
+deployment that means a log sink, and until one exists the usage half describes one machine. Then the question "is
+there a durable record already?" was asked of the schema rather than assumed, and the answer was in `AIMessage`'s own
+comment: it stores `model`, `toolsUsed`, `usage` and (since AI-8) `degraded` on **every assistant turn**, and the
+reason is written beside the field — *"the rate of each reason becomes countable from the database rather than only
+from a log file that rotation will eat."*
+
+So the second source needed **no new field, no migration, no log sink and no credential**: `npm run ai:usage --
+--db --days=30` reads what production has been recording all along. Every figure is computed **inside MongoDB** — one
+aggregation returning one document per group, the rule SCALE-dashboard-counts pins for the dashboard — and only
+aggregates are read, never documents.
+
+## The reading, and the number that matters for ISS-22
+
+Run against the development database over 30 days (the shape production will have):
+
+```text
+stored turns (database inventoryai_dev_db, last 30 day(s)):
+  turns: 44 across 28 conversation(s)
+  not-marked-degraded: 30 · degraded: EMPTY_COMPLETION=11 OUTPUT_LIMIT=3
+  tokens: in 151647 · out 12166
+  models: nvidia/nemotron-3-ultra-550b-a55b:free=27 openrouter=12 nvidia/nemotron-3-super-120b-a12b:free=3 …
+  tools: getInventorySummary=11 searchProducts=9 getOutOfStockProducts=5 getInventoryHistory=3 …
+  per day (UTC): 2026-10-14=19 2026-10-15=21 2026-10-16=4
+```
+
+**14 of 44 answered turns were degraded — 11 rescued-or-spent `EMPTY_COMPLETION` and 3 `OUTPUT_LIMIT`.** That is the
+first *production-shaped* reliability figure this project has had rather than a reading from a staged run, and it is
+the number **ISS-22** was waiting for: at this tier roughly **a quarter of answered turns arrived only after the
+empty-completion retry or with a caveat attached** (AI-2's `degraded` mark is exactly the instrument that makes it
+countable). It is evidence for the decision, not the decision: the owner's call on the free tier is unchanged.
+
+Two honest notes on reading the table. **`not-marked-degraded` is a lower bound**: a message written before AI-8
+cannot carry the mark, and the report says so in place rather than in a footnote. And **12 turns carry the label
+`openrouter`**, which is the parser's `fallbackModel` used when the wire names no model — recorded rather than fixed,
+because it is a label rather than a lie, and changing how model names are stored is a data question, not a patch.
+
+The two halves also cross-check each other, and their disagreement is informative: the provider reports **37 free
+requests used today (a UTC day)** while the database shows 4 stored turns on 2026-10-16 and none on 2026-10-17. They
+are measuring different things — provider **requests** against **answered turns** — across different boundaries, which
+is precisely why both are printed and neither is presented as the whole picture.
+
+## The by-product: a test that raced a production index, measured rather than called flaky
+
+A full run after this change failed **one** test, and it was not one of this increment's:
+`phase26a-session-lifecycle.test.mjs` case 10 threw `Cannot read properties of null (reading '_id')`. The cause is a
+race the test could not win, and rather than name it *flaky* it was **measured**: a probe inserted a session whose
+`expiresAt` was already in the past — which is exactly what the case does — and MongoDB's TTL monitor deleted it
+**21 789 ms** later (the `sessions` collection declares `expireAfterSeconds: 0`, whose sweep runs about once a
+minute). The case then re-read the row after expiring it, so it was racing that sweep with a window of a few seconds,
+and it lost.
+
+**The fix is the order, not a weaker assertion:** the row's `_id` is captured *before* the expiry, and the claim is
+identical — the session list must not offer that session. Verified **still able to fail**: removing the expiry filter
+from the list query (`session.service.ts`) reddens exactly case 10, with the file restored **byte-identical**
+(sha256 `d39c09af…`). The repaired case passes twice in a row, and the whole suite passes afterwards.
+
+## Verification
+
+* The suite is now **10 cases** (7 log-side, 3 database-side), run in full mode over real MongoDB: the assistant
+  turns of one business counted (a USER message is not a turn), their tokens summed from the Mixed `usage` the
+  provider reported, tools and models tallied, the degraded split by reason with the unmarked count beside it, a turn
+  outside the window excluded and included again by `--days`, the **database name asserted** so a mis-connection
+  cannot look plausible, and `--db` proven **opt-in** (no flag, no connection).
+* **The read-only claim is pinned by a source scan**, the way §27BF pinned the assistant's own tools: the report must
+  contain no write call, with a positive control (a planted `AIMessage.create`) that the scan fails on and a negative
+  control (a `countDocuments`) that it does not.
+* **Proven able to fail once by mutation for the database half:** dropping `role: 'ASSISTANT'` from the match reddens
+  `assistant turns only — the USER message is not a turn`; restored byte-identical (sha256 `ea9dfd00…`). One earlier
+  attempt was a **no-op** — a `perl` substitution whose escaping did not match, which the project has a rule about:
+  a mutation that cannot apply is not evidence, so it was redone with the edit asserted to land.
+* Full server suite **1455 tests / 215 suites / 0 failures**, `tsc --noEmit` and `eslint .` clean, and
+  `check-secrets` clean (the two deliberate key-shaped fixtures the leak control needs carry the scanner's own
+  `secret-guard:allow` waiver for a test fixture, and its 22 self-test controls still fire).
+
+## Limits
+
+* **The development database is not production usage.** The shape is right and the mechanism is the same, but these
+  are this machine's turns; the figure worth acting on is the one production prints.
+* **Answered turns only.** A failed turn persists nothing (Phase 07E / M7), so the degraded rate is measured against
+  the turns that *completed* — the failures it omits are exactly what the log half is for.
+* **`not-marked-degraded` is a lower bound** on health, not a certificate.
+* `--db` reads the database it is pointed at by the environment; a test run is fail-closed to the test database by
+  `resolveDatabaseName`, and the suite asserts the name it saw.
+
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

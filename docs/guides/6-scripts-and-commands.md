@@ -343,14 +343,21 @@ npm run perf:turns -- --business=PUT_THE_BUSINESS_ID_HERE --only=1,3
   of requests per day in total, so keep the question list short and use `--only=` to re-check one
   question instead of all of them. It defaults to `http://localhost:4000`; `--base=` overrides that,
   and `--out=` says where to save the answers.
-- **`ai:usage` is the one to run *before* spending anything.** It reads the server's own per-turn log
-  lines (`[ai] turn …`, written for every turn including the ones that fail) and the AI provider's
-  own account, then joins them: how many turns happened, which ones failed and how, how many provider
-  **requests** they cost, the provider-versus-tools time split, and — from the provider — how much of
-  the daily free allowance is left. Nothing is called and nothing is written, so it is free to run
-  whenever the question comes up. It reads a saved log with `--log=<path>`, or **stdin** when no path
-  is given (so `npm start > server.log` and a pipe both work); `--no-provider` keeps it fully offline
-  and `--json` prints the same figures as one object.
+- **`ai:usage` is the one to run *before* spending anything.** It reads two things that cost nothing
+  and joins them. **The log** — the server's own per-turn lines (`[ai] turn …`, written for every turn
+  including the ones that fail) — gives turns, which ones failed and how, how many provider
+  **requests** they cost and the provider-versus-tools time split. **The database** (`--db`) gives the
+  turns that were *answered*: `AIMessage` has always persisted the model, the tools used, the
+  provider's token usage and (since AI-8) whether the turn was degraded, so those figures need no new
+  field and no log sink. Then it asks the AI provider's own account how much of the daily free
+  allowance is left. Nothing is called and nothing is written, which is what makes it free to run
+  whenever the question comes up.
+
+  `--log=<path>` reads a saved log and **stdin** reads a pipe; `--db` reads the database and is
+  **opt-in** (no flag, no connection), scoped by `--days=N` (default 7) and `--business=<id>`;
+  `--no-provider` keeps it fully offline; `--json` prints the same figures as one object. The two
+  halves are **complements, not alternatives**: a failed turn persists nothing, so timeouts,
+  abandonment, output limits and quota refusals appear only in the log.
 
 ```bash
 cd C:/Users/jeffe/inventory-ai/server
@@ -360,6 +367,9 @@ npm run ai:usage -- --log=server.log
 
 # the same, straight off a running server's output
 npm start | npm run ai:usage --silent --
+
+# what has actually been ANSWERED, over the last 30 days — straight from the database
+npm run ai:usage -- --db --days=30
 ```
 
 ---
@@ -536,6 +546,7 @@ commands, the performance probes and `audit-access.mjs`.
 | `npm run perf:golden -- --business=…` | fingerprint the assistant's answers | ✅ reads only |
 | `npm run perf:turns -- --business=…` | real assistant turns | ⚠️ spends AI quota |
 | `npm run ai:usage -- --log=…` | turns, failures and the allowance left | ✅ reads only (offline with `--no-provider`) |
+| `npm run ai:usage -- --db --days=30` | what was **answered**, and its degraded rate | ✅ reads only |
 | `npm run cleanup:test-mongodb` | wipe the test database | ⚠️ destructive, throwaway data |
 | `npm run cleanup:dev-mongodb` | wipe the development database | ⚠️⚠️ **your data** |
 | `npm run cleanup:test-firebase` | delete every development login | ⚠️⚠️ **irreversible** |

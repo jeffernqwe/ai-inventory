@@ -42,7 +42,7 @@
 // requests a day IN TOTAL, roadmap §27BF), and a turn with tool iterations spends
 // more than one request. Keep the question list short — and when you only need ONE
 // of them (`--only=1`, or `--only=1,3`), say so: re-checking a single question
-// should not cost the other three. The turn's own split now arrives in the SERVER's
+// should not cost the others. The turn's own split now arrives in the SERVER's
 // log (`[ai] turn outcome=… providerMs=… calls=… toolMs=…`, AI-5), so a single
 // question is often all that is needed to see where the time went.
 
@@ -129,6 +129,18 @@ async function main() {
         'How many products are completely out of stock, and what percentage of the active catalogue is that?',
       expects: [summary.outOfStockProducts, summary.totalProducts],
       why: `the out-of-stock count (${summary.outOfStockProducts}) and the percentage base (${summary.totalProducts}) it is quoted against (§27BG Q4)`,
+    },
+    {
+      // OWNER REQUEST, 2026-10-16: "During the next AI test, include this simple
+      // question — 'How many total units do we have?' — to verify that the
+      // assistant can report the total inventory quantity correctly." It is the
+      // simplest figure in the system and the one a member checks the dashboard
+      // against, so a wrong or refused answer here is a first-impression defect.
+      // The expectation is `totalInventoryQuantity`, the same field the mobile
+      // dashboard renders, so a mismatch means the assistant and the app disagree.
+      message: 'How many total units do we have?',
+      expects: [summary.totalInventoryQuantity],
+      why: `total on-hand units across the tenant (${summary.totalInventoryQuantity}, read now — the figure the dashboard shows)`,
     },
   ];
 

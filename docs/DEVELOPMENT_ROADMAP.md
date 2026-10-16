@@ -12268,6 +12268,109 @@ body is `{email,password,deviceLabel}` and **no credential appears in the query 
   reports whatever the screen happened to be — recorded so the next one measures first.
 
 
+# 27CJ. The fixed version that is not a fix, and the one the updater said it could not reach (2026-10-16)
+
+Dependency curation, `mobile/package.json` and `mobile/package-lock.json` only. **No server or mobile source file,
+no route, no permission, no model, no session, no environment and no application behaviour changed**, no dependency's
+declared range was edited, and nothing was upgraded beyond one transitive package: the whole increment is a single
+`overrides` entry, and four advisories left open with the reason each one is still open.
+
+## Where it started
+
+Five advisories were open, all in `mobile/package-lock.json` and all transitive — `braces` and `node-forge` (high),
+`decode-uri-component`, `sprintf-js` and `uuid` (medium). §27AL recorded this debt as open, and the security checklist
+recorded `uuid` as having *"a fix the graph **cannot reach** — Dependabot's own updater failed on it … so only an
+upstream release clears it"*. That sentence is true of **Dependabot's updater** and false of **npm**, and the distance
+between those two is the whole increment.
+
+## `uuid` — closed, because "cannot reach" was a statement about the updater
+
+A Dependabot updater rewrites a package's **declared range**; `xcode@3.0.1` declares `uuid ^7.0.3` and the patched
+version is **11**, so there is nothing for it to rewrite and it reported the path as unreachable. An **override** does
+not rewrite the range — it replaces the resolution — so `uuid: ^11.1.1` now sits beside the existing `@grpc/grpc-js`
+override, and the alert is expected to clear when this reaches the default branch (Dependabot reads the manifest there).
+
+**The chain recorded in the checklist was also wrong, and is corrected here:** it read `jest-expo` → `xcode` → `uuid`,
+while `npm ls uuid --all` shows one path — `expo-sharing@57.0.22` → `@expo/config-plugins@57.0.10` → `xcode@3.0.1` →
+`uuid`. One consumer, one call site: `grep` over the installed `xcode` finds `require('uuid')` once and `uuid.v4()`
+once, and the advisory's own trigger — a missing bounds check in **`v3`/`v5`/`v6` when a `buf` is provided** — needs an
+argument this call never passes. So the alert was never reachable here and closing it is hygiene rather than a security
+fix; that is stated rather than dressed up, because an alert closed for tidiness and an alert closed for exposure are
+different claims.
+
+## `decode-uri-component` — the published fix is a trap, and here is the repro
+
+Dependabot's first patched version is **0.5.0**, and applying it **breaks the application**. 0.5.0 is **ESM-only**
+(`"type": "module"`, one `exports.default`), while its only consumer here — `query-string@7.1.3`, reached by
+`expo-router@57.0.25` — is CommonJS and calls the module's export **directly**:
+
+```js
+const decodeComponent = require('decode-uri-component');   // query-string/index.js:3
+```
+
+`require()` of an ESM module yields the namespace (`{__esModule, default}`), so the call throws. Measured, in this tree,
+with the override applied and then reverted — not predicted from release notes:
+
+* with `decode-uri-component@^0.5.0`: **`TypeError: decodeComponent is not a function`** — and the affected code is the
+  **app's own deep-link query parsing** (`expo-router/build/fork/getPathFromState.js` and `getStateFromPath` both reach
+  query-string), so this is a runtime path, not a build-time one;
+* with the override removed: `require('query-string').parse('?a=x%20y&b=1&b=2')` → `{"a":"x y","b":["1","2"]}` —
+  the positive control that the revert restored the working chain rather than merely removing an error.
+
+**Moving the parent is not an exit either.** `query-string` 8.x and 9.x are **also ESM-only**, so the same
+`require()` would receive a namespace with no `parse` at all — and both still declare `decode-uri-component@^0.4.1`, the
+**vulnerable** range. There is no version of query-string that is simultaneously CJS-compatible and patched, so this
+advisory is **blocked upstream** until expo-router stops depending on query-string 7 or decode-uri-component publishes a
+CJS-compatible patch. The exposure is real but narrow, and it is the only one of the four that reaches a shipped bundle:
+the cost is a hang from a crafted malformed percent-encoded link (**denial of service**), and no path here exposes,
+alters or exfiltrates data.
+
+## The three with nothing to apply
+
+`sprintf-js`, `braces` and `node-forge` each have **no published fix at all**: read from the registry on 2026-10-16,
+every one's `latest` release is **inside its own vulnerable range** — `sprintf-js` 1.1.3 (advisory `<= 1.1.3`), `braces`
+3.0.3 (`<= 3.0.3`), `node-forge` 1.4.0 (`<= 1.4.0`) — so there is nothing to install, nothing to override and nothing to
+wait for except a release. Their lanes are build and test tooling (`braces` ← `micromatch` ← `@jest/core`; `sprintf-js`
+← `argparse@1` ← `js-yaml@3` ← `@istanbuljs/load-nyc-config` ← `babel-jest`; `node-forge` ← `@expo/cli`), none of them
+is imported by application code, and each advisory needs an attacker-controlled input to a build tool — a glob pattern,
+a format string, an RSA signature — that nothing in this project supplies.
+
+**One option was available and deliberately not taken, so that it is not re-derived:** overriding `js-yaml` to `^4`
+would remove `argparse@1` and `sprintf-js` from the tree entirely (`@istanbuljs/load-nyc-config` calls
+`require('js-yaml').load(...)`, which exists in both majors, and only ever for a `.nycrc.yaml` this repository does not
+have). It was rejected because it substitutes a **major version the parent does not declare** in order to delete a
+package whose one vulnerable call this repository never makes — a real change to a third-party chain in exchange for a
+green alert, which is the trade this record exists to make visible rather than to take quietly.
+
+## Verification
+
+* `npm ls uuid --all` and `npm ls decode-uri-component --all` — one path each, resolved to `uuid@11.1.1` and (reverted)
+  `decode-uri-component@0.2.2`.
+* The lockfile diff is **exactly the uuid entry** — 8 insertions, 2 deletions, and both the `resolved` URL and the
+  integrity hash changed with it (the second lockfile attempt nested `decode-uri-component` under `query-string` as a
+  side effect of the revert; a clean reinstall from the restored lockfile removed that artefact rather than leaving it in
+  the diff).
+* `require('uuid').v4()` returns a valid v4 (regex-checked), and uuid 11 still ships the CJS build xcode resolves
+  (`exports.node.require` → `dist/cjs/index.js`), so `require('uuid').v4()` is the same call xcode already makes.
+* Mobile **65 suites / 863 tests / 0 failures**, `tsc --noEmit` clean, `eslint .` clean, and `npm ci --dry-run` exit 0
+  (the check CI's install path depends on).
+* An Android production bundle still exports — `npx expo export --platform android` → one `.hbc` of **3 565 987 bytes**
+  plus metadata — so the tooling chain resolves end to end with the override in place.
+
+## Limits, stated rather than smoothed over
+
+* **No iOS prebuild was run** — this host has no macOS, so the `xcode` path is verified at the API boundary (the CJS
+  build is present and `uuid.v4()` works) and **not** by generating a `pbxproj`. That is the one consumer of the changed
+  package, and it is the one thing this increment cannot exercise where it stands; it is a Phase 30B-shaped item.
+* **`npm audit` disagrees with Dependabot by an order of magnitude** — 60 vulnerabilities (5 moderate, 55 high) against
+  Dependabot's five open advisories. They read different sources and ranges, and reconciling them is not attempted here.
+  Dependabot's list is the authority this record was written against.
+* **Four advisories remain open**, and three of them cannot be closed by any change in this repository today. They are
+  now recorded in `SECURITY.md` as known-and-open rather than left to be re-reported as fresh findings.
+* Nothing here was merged before being read: the alert-closing is asserted **as expected** (Dependabot reads the default
+  branch), not as observed, and the alert list itself is the confirmation to re-read afterwards.
+
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

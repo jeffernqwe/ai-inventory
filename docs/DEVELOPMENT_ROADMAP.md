@@ -9500,7 +9500,7 @@ password"* rather than anything Firebase-shaped.
 3. **A quota-specific error code and sentence** (from §27BF's correction) — a `429 free-models-per-day` is still reported as a generic `502 AI_UNAVAILABLE`.
 4. **The rule this increment generalises:** never apply a page window below a fan-out. When a pipeline joins per row, either move the window above the join or replace the join with a merge — and prove the rewrite with `perf:golden`, not with a timing.
 5. **`perf:turns` reads its ground truth at run time (done 2026-10-16), and verifying that found two more things.** The three tenant-wide expectations were literals — 10 000 products, 1 492 low, 620 out — because the seed is deterministic; when the seeded tenant grew to **50 000** products the probe printed `MISSING 10000, 1492, 620` against a **completely correct** answer and scored it `grounded 0/1`. That is the one thing an instrument must never do: a false negative that sends a person back to re-read a good answer. Every fact is now read from the database when the probe runs, and the same question then reported **all expected facts present, `grounded 1/1`, 10 256 ms**. A **failed** turn is no longer given a fact verdict either: a `502` used to print `MISSING 3079, 50000` against an error body, which reads as "the model got the numbers wrong" when the model never answered. **What the fix deliberately does not prove:** because the expectation comes from the same services that produced the answer, it cannot catch a defect *inside* them — duplicating the low-stock rule here would risk an expectation that is itself wrong, and those rules already have their own suites.
-   **Two findings, measured while checking it (2026-10-16).** (a) **Q4 fails deterministically.** *"How many products are completely out of stock, and what percentage of the active catalogue is that?"* — the question whose `504 AI_TIMEOUT` at 60 341 ms on 2026-10-13 this harness was extended to catch — returned **`502 AI_UNAVAILABLE` twice, at 31 421 ms and 31 789 ms**, both after `getInventorySummary` had already run (`calls=2 toolRuns=1 iterations=2`). (b) **The cause is a misclassification that leaves no trace.** On the OpenRouter path there is exactly one `AiProviderError` throw that logs nothing — `anthropicWire.ts` raises it when `stop_reason === 'max_tokens'` with **no text and no tool call**, i.e. the model spent its own output cap before saying anything — and every sibling path in `providers/http.ts` logs before it throws. No provider line appeared in the server's log for either failure, which is what identifies that path by elimination. The member is then told the service is *temporarily unavailable* and to try again in a moment, when the truth is that the answer was cut off before it began and the wire layer's own advice was *"try a shorter question"*. Both are recorded, neither is fixed here: `providers/http.ts` is a protected file, and a new error class with its own code and sentence is an increment rather than a patch.
+   **Two findings, measured while checking it (2026-10-16).** (a) **Q4 fails deterministically.** *"How many products are completely out of stock, and what percentage of the active catalogue is that?"* — the question whose `504 AI_TIMEOUT` at 60 341 ms on 2026-10-13 this harness was extended to catch — returned **`502 AI_UNAVAILABLE` twice, at 31 421 ms and 31 789 ms**, both after `getInventorySummary` had already run (`calls=2 toolRuns=1 iterations=2`). (b) **The cause is a misclassification that leaves no trace.** On the OpenRouter path there is exactly one `AiProviderError` throw that logs nothing — `anthropicWire.ts` raises it when `stop_reason === 'max_tokens'` with **no text and no tool call**, i.e. the model spent its own output cap before saying anything — and every sibling path in `providers/http.ts` logs before it throws. No provider line appeared in the server's log for either failure, which is what identifies that path by elimination. The member is then told the service is *temporarily unavailable* and to try again in a moment, when the truth is that the answer was cut off before it began and the wire layer's own advice was *"try a shorter question"*. Both are recorded, neither is fixed here: `providers/http.ts` is a protected file, and a new error class with its own code and sentence is an increment rather than a patch. *(Annotated 2026-10-16: **FIXED — AI-10, §27CK.** The increment this paragraph asked for is the one it got: `AiOutputLimit` / `AI_OUTPUT_LIMIT` with its own sentence at 502, one greppable server line naming the cap and the model at the path that used to be silent, and the client's own copy for the code. The `max_tokens` shape is now classified as a LIMIT rather than an outage, and the harness bug that hid the fix for a round is recorded there too. The cap itself (800) is still untouched.)*
    **A fifth question (2026-10-16, owner request).** *"How many total units do we have?"* is now in the harness, checked against `totalInventoryQuantity` — the same field the mobile dashboard renders, so a mismatch is the assistant and the app disagreeing in front of a member. It is the simplest figure in the system and therefore the one worth having permanently in the list. **Run alone the same day (`--only=5`) against the 50 000-product tenant: `201` at 5 462 ms, tools `getInventorySummary`, no degraded turn, and the answer named the figure exactly — *12 425 872 total units on hand* — matched against the dashboard's own value, `grounded 1/1`.** It is also the fastest turn measured on this tenant (5.5 s against 12–40 s for the harder questions), which is what a question whose tool is one aggregate should look like, and it is the cheap way to tell "the assistant is slow" apart from "the assistant is broken" when the provider is having a bad day.
 
 # 27BH. AI-4 — the assistant's answer, rendered: a dependency-free parser for the structures the model already writes, and a word boundary that stops it deleting characters from arithmetic (2026-10-13)
@@ -12381,9 +12381,183 @@ green alert, which is the trade this record exists to make visible rather than t
   Dependabot's five open advisories. They read different sources and ranges, and reconciling them is not attempted here.
   Dependabot's list is the authority this record was written against.
 * **Four advisories remain open**, and three of them cannot be closed by any change in this repository today. They are
-  now recorded in `SECURITY.md` as known-and-open rather than left to be re-reported as fresh findings.
-* Nothing here was merged before being read: the alert-closing is asserted **as expected** (Dependabot reads the default
-  branch), not as observed, and the alert list itself is the confirmation to re-read afterwards.
+  now recorded in `SECURITY.md` as known-and-open rather than left to be re-reported as fresh findings.* Nothing here was merged before being read: the alert-closing is asserted **as expected** (Dependabot reads the default branch), not as observed, and the alert list itself is the confirmation to re-read afterwards.
+
+**(Annotated 2026-10-16 — the expectation was re-read and holds.)** `gh api repos/…/dependabot/alerts?state=open`
+answers **four**: `sprintf-js` (GHSA-hp3w-g68c-fv3c, medium), `braces` (GHSA-vfj7-8cjw-p6xm, high), `node-forge`
+(GHSA-86w9-cpqp-85rv, high) and `decode-uri-component` (GHSA-vcc3-ghjq-m6fr, medium) — the four this section leaves
+open, each for the reason recorded above, with the **fifth (`uuid`) gone**. The API's own `first_patched_version` field
+is what makes that reading checkable from outside this document rather than taken on trust: it is **absent** for the
+three *"no published fix at all"* advisories, and **`0.5.0`** for `decode-uri-component` — the ESM-only release this
+section measured as unusable. The count went **5 → 4**, which is the uuid override doing exactly what it was expected
+to do and nothing more: the other four are untouched by it.
+
+
+
+# 27CK. AI-10 — The answer the model could not fit, and the harness that hid the fix (2026-10-16)
+
+Server + mobile; **no new dependency, no model or provider change, no route, permission, schema, session or
+environment change**, and the output cap itself (`AI_MAX_OUTPUT_TOKENS`, default 800) is deliberately **untouched** —
+this increment names the failure and gives it a remedy, it does not raise the ceiling.
+
+## The defect, and why it was invisible
+
+§27BG recorded it as a finding rather than a fix: *"How many products are completely out of stock, and what
+percentage of the active catalogue is that?"* — the question the whole 50 000-product harness was extended to catch —
+answered **`502 AI_UNAVAILABLE` twice, at 31 421 ms and 31 789 ms**, each after `getInventorySummary` had already run
+and answered (`calls=2 toolRuns=1 iterations=2`). Three things were wrong at once, and only one of them was the
+sentence:
+
+1. **It named the wrong component.** Nothing upstream was unavailable: the gateway answered **2xx**, and the model had
+   spent its whole output budget before producing a single token of answer or a tool call. `parseAnthropicResponse` saw
+   `stop_reason: 'max_tokens'` with nothing usable and threw `AiProviderError` — the one class the controller maps to
+   *"The AI service is temporarily unavailable. Please try again in a moment."*
+2. **It prescribed an action that cannot work.** A retry spends the same budget again, so *"try again in a moment"*
+   walks the member round the same loop. The wire layer's own advice — *"try a shorter question"* — was already the
+   right remedy, and it never reached the screen.
+3. **It left no trace at all.** Every sibling path in `providers/http.ts` logs before it throws; this shape is a 2xx, so
+   it had no status line either. A repository-wide search for the canned sentence found exactly one occurrence, its own
+   assignment, and the only evidence of the failure was a **missing answer** — which is why identifying it took
+   elimination (§27BG).
+
+## What changed
+
+* **`src/services/ai/aiErrors.ts`** — `AiOutputLimit` / `AI_OUTPUT_LIMIT`, deliberately **not** an `AiProviderError`,
+  for the same reason `AiTimeout`, `AiAbandoned` and `AiQuotaExceeded` are not: *"we gave up waiting"*, *"the caller
+  left"*, *"an allowance is spent"* and *"the model ran out of room"* are four different facts with four different
+  remedies, and collapsing any of them into *"temporarily unavailable"* is the defect this increment exists to
+  prevent. `isAiError` covers it, so `ai.service.ts`'s provider-failure catch lets it through untouched.
+* **`src/services/ai/providers/anthropicWire.ts`** — the `max_tokens`-with-nothing-usable throw becomes
+  `AiOutputLimit`, and the one path that used to be silent now logs before it throws:
+  `[ai:openrouter] output limit reached with nothing usable (model=…, maxTokens=800, stop=max_tokens)`. Logged at the
+  call site rather than in the parser because **that is where the cap is known**, and the cap is the number an operator
+  acts on.
+* **`src/controllers/ai.controller.ts`** — its own mapping, checked **before** the provider branch: `502` with
+  `AI_OUTPUT_LIMIT` and *"The assistant ran out of room before it could answer. Please ask a shorter or more specific
+  question."* The status stays in the 502 family (the upstream response was unusable) while the **code and the sentence**
+  carry the meaning — which is what the client switches on.
+* **`mobile/components/AiChat.tsx`** — the client owns its copy for the new code, as it does for every other one, so
+  the sentence the member reads is not inherited from a server string that could change under it.
+
+The cap is left alone on purpose. Raising `AI_MAX_OUTPUT_TOKENS` would make this failure rarer and the free tier's
+answers more expensive; that is a provider decision (**ISS-22**, still the owner's), not a classification one.
+
+## The harness defect this increment found on the way
+
+The wire case above drives the **real** Anthropic-compatible provider against a stub gateway on localhost, so nothing
+can spend provider quota. Its first version failed with `ECONNREFUSED` on the stub's own port — while the DB-free
+cases in the same file passed, and a direct `fetch` from the same process to the same port also failed. The stub was
+not misconfigured: **`node --test` ran the suite's cleanup hook early and closed it.** A root-level `after()` registered
+before the file's first `await` belongs to the root suite as it existed then, and the runner executes it as soon as
+that root's first child finishes — which, in a file whose second suite is registered after `await startServer()`,
+means *before that suite runs*. The hook that closes the app server and the database sits **after** that await and has
+never had the problem, which is why the pattern is invisible until a stub is created above it.
+
+This is recorded because it was expensive and because it is a property of the runner, not of this test: the symptom
+(*a provider that cannot reach a gateway that is listening*) looks exactly like the defect the suite was written to
+classify, so the fake failure was indistinguishable from the real one until the stub's own `listening` flag was
+printed. The stub now closes in the **last** root-level hook, beside the app server and the database.
+
+## Verification
+
+* **`server/test/AI10-output-limit-not-an-outage.test.mjs`** — 10 cases, **10/10 in full mode**; in `TEST_MODE=db` the
+  four wire cases run **4/4**, the headline one driving stub → `postJson` → `parseAnthropicResponse` → `AiOutputLimit` →
+  the service's pass-through → the controller's mapping → the HTTP answer, with `hits === 1` as the **positive control**
+  that the turn really reached the stub (without it, the assertions would pass against a provider that never spoke).
+  It also pins that the limit is **never retried** (one provider call — paying twice cannot buy room that was already
+  spent), that the turn's `outcome=` uses the same word as the error code, and that **AI-8's** truncated-but-present
+  answer still keeps its text and its `truncated` mark.
+* **`mobile/__tests__/ai10-output-limit-copy.test.ts`** — 10 cases, written first and **watched failing**: with the
+  client branch neutered, **5 of 10 red**; restored, 10/10. It asserts the sentence by value, that it is not the outage,
+  quota, timeout, rate-limit or unreachable sentence, that the **code wins over the server's message carried on the same
+  object**, and it reads `AI_OUTPUT_LIMIT` out of the **server's own source** so the client cannot be correct against a
+  string the server never emits — the guard AI-6 (§27BL) established, applied here.
+* `tsc --noEmit`, `eslint`, and both module-graph checks clean on both sides; the docs guards pass with this record in
+  place (the section-integrity guard failed on the dangling `§27CK` citation **before** this section existed, which is
+  the guard working exactly as §27CG designed it).
+
+## Limits
+
+* **NOT device-verified.** The chain is proven over the wire and on the client, but nobody has seen this sentence on the
+  OPPO against a live gateway, which is where the original failure was measured.
+* **The failure is named, not prevented.** A free-tier model that spends `AI_MAX_OUTPUT_TOKENS` without answering still
+  cannot answer; the member now gets a true, actionable sentence and an operator gets a line, instead of a false outage.
+* The `[ai:openrouter]` line is written **once per failed call**, so a retried turn would log twice; no counter is kept,
+  because the turn's own cost line (`outcome=AI_OUTPUT_LIMIT`, AI-5) is where the count belongs.
+
+
+# 27CL. The advisory that stays open is now watched, and the gate the watch says has opened (2026-10-16)
+
+`scripts/check-upgrade-watches.mjs` only; **no application behaviour, dependency, route, permission, schema,
+session or environment change**, no alert dismissed, and no upgrade started.
+
+## A fourth watch, because "plan a safe upgrade" needs a trigger
+
+§27CJ left `decode-uri-component` open for a measured reason — its only patched release (0.5.0) is **ESM-only**
+while its consumer here, `query-string@7.1.3`, is CommonJS and calls the export directly, so applying the fix breaks
+the app's deep-link query parsing — and left the monitoring as prose: *"re-read the alert list afterwards."* A prose
+instruction is a thing someone has to remember. The project already owns the mechanism for "waiting on other people
+to publish" (three watches, one read-only command, `--self-test` controls), so the advisory became a watch:
+
+* **the gate is conjunctive** — a release that is **patched** *and* **requireable from CommonJS**. Both halves are
+  read from a source rather than remembered: the patched floor from the advisory itself, and the CommonJS shape from
+  the published manifest (`exports.require`, or a `main` on a package that does not declare `"type": "module"`).
+* **a patched-but-ESM-only release is `DEFERRED` and says so by name**, so the state §27CJ measured is reproduced by
+  the tool rather than described by it.
+* it is **read-only** and stays **outside CI** for the same reason the others are: it needs the network.
+
+## Two corrections of the record, found by running it rather than reading it
+
+1. **The public advisory carries no `first_patched_version` for this GHSA** — the field is `null`, while Dependabot's
+   own alert API reports `0.5.0` from the same database. The first version of this watch trusted the field first and
+   therefore reported `UNREADABLE`. The floor is now derived from what the advisory *does* carry and is exact:
+   **`vulnerable_version_range: <= 0.4.2`** — a release is patched when the advisory's own range does not admit it.
+   (This is the same class of mistake §27CJ corrected twice already: a copied number where a read one exists.)
+2. **A range parser bug in the new code, caught by its own controls and not by the report:** the first
+   implementation split a clause on whitespace, so `<= 0.4.2` became the bounds `<=` and `0.4.2`, gave the operator an
+   empty version, and answered *unparsed*. Four controls failed at once (`expected [READY], got [UNREADABLE]`, and the
+   three range cases beside it) — a good illustration of why the controls are the second thing written and the first
+   thing read. The operator and its version are now taken together in one expression, and anything the expression does
+   not consume is reported rather than treated as "not vulnerable".
+
+## The finding, which is not about this advisory at all
+
+Run live on **2026-10-16**, the report is no longer "everything deferred":
+
+```text
+READY      expo        dist-tags: latest=58.0.12 next=58.0.11
+DEFERRED   jest-expo   installed SDK 57.0.27 pins jest-expo ~57.0.5 | pinned 57.0.6: @jest/globals=^29.2.1 — no jest 30 on the installed SDK's line
+DEFERRED   typescript-eslint  server 8.71.2 peers typescript <6.1.0 | mobile parser 8.71.2 peers <6.1.0
+DEFERRED   decode-uri-component  0.5.0 is patched (outside the advisory range <= 0.4.2) but ESM-only (type=module, no require condition)
+```
+
+**§27AI's Gate 0 — *`latest` must be 58* — is open.** SDK 58 is published on `latest` (58.0.12) while this project
+installs 57.0.27, which is the trigger the watch exists to announce, and the first time any of the four has fired.
+Recorded as a **reading with its date**, not as a reason to start: the SDK 58 train is a major promotion (React Native
+0.88, the jest-expo 58 line, every SDK-pinned module), it is the subject of its own runbook, and it is the owner's
+call — nothing here has begun it. The two neighbours stay shut for the reason they already recorded: jest 30 rides
+with that promotion, and TypeScript 7 is still refused by both linters' declared peers.
+
+## Verification
+
+* **26 controls pass** (5 must-fire, 19 must-not-fire, 2 range), up from 17 — the new set pins the READY case, the
+  ESM-only case that must not fire, the real advisory shape (no `first_patched_version`, `<= 0.4.2`, newest 0.5.0
+  requireable → READY), the range boundary (`0.4.2` still admitted → DEFERRED), an open-ended range, a compound one,
+  and two unreadable shapes.
+* The live report was read from the registry and the public advisory API, and its four rows are quoted above verbatim.
+* The Dependabot alert list was re-read the same day and answers **four** open, the `uuid` advisory having cleared when
+  §27CJ's override reached the default branch (annotated in §27CJ, and in `SECURITY.md` with the GHSA identifiers).
+
+## Limits
+
+* **The watch can see a release; it cannot test one.** Whether a future patched-and-requireable release actually keeps
+  the app's deep-link parsing working is still a bundle-and-run question, and §27CJ's source-map method plus a device
+  run are what answer it.
+* **The CommonJS rule is deliberately conservative but not a resolver**: a package that keeps a stale `main` beside an
+  `exports` map with no `require` condition is read as requireable, and Node would not resolve it that way. The
+  conservative direction is chosen so the failure mode is an alert that stays open rather than one closed wrongly.
+* Prerelease bounds are compared on their numeric prefix (this file's semver helper ignores prerelease tags), and the
+  advisory API is rate-limited when unauthenticated — a failure there is reported as `UNREADABLE`, never as a pass.
 
 
 # 28. Phase Gate System

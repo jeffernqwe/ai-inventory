@@ -61,6 +61,13 @@ const TIMEOUT_CODES = ['NETWORK_TIMEOUT', 'AI_TIMEOUT'];
  * clears in seconds and says so; `AI_QUOTA_EXCEEDED` is a spent allowance that
  * waiting a moment cannot refill, so it must NOT borrow the "temporarily
  * unavailable / try again in a moment" sentence it used to arrive as.
+ *
+ * AI-10 is that rule a third time, on the failure that had no code of its own: a
+ * provider answer cut off at `AI_MAX_OUTPUT_TOKENS` before it produced anything
+ * usable arrived as `AI_UNAVAILABLE` — "temporarily unavailable, try again in a
+ * moment" for a 2xx that named the wrong component AND prescribed the one action
+ * that cannot help, since the same question spends the same budget again. The
+ * remedy is a narrower question, so the sentence asks for one.
  */
 export function sendErrorMessage(err: unknown): string {
   const e = (err ?? {}) as SendErrorLike;
@@ -77,6 +84,13 @@ export function sendErrorMessage(err: unknown): string {
   // fixes. Reported before the network check like every other code.
   if (e.code === 'AI_QUOTA_EXCEEDED') {
     return 'The assistant has reached its usage limit for now. Please try again later.';
+  }
+  // AI-10 — the model spent its whole output budget before it could answer. Like the
+  // quota above, this is checked before the network test and it OWNS its sentence
+  // rather than inheriting the server's: the remedy is a narrower question, and a
+  // member who is told to "try again in a moment" spends the same turn's budget again.
+  if (e.code === 'AI_OUTPUT_LIMIT') {
+    return 'The assistant ran out of room before it could answer. Please ask a shorter or more specific question.';
   }
   // AI-9 — a request the member STOPPED is the same trap one step over: it is a
   // `status === 0` error too, so without this branch a cancellation routed through here

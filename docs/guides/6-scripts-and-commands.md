@@ -365,11 +365,13 @@ node scripts/check-upgrade-watches.mjs      # reports whether a deferred upgrade
 - **`audit-access.mjs`** needs the `gh` tool already signed in as you, and is deliberately **not**
   run automatically — in a pipeline the same endpoints answer `403`, which would be a useless "not
   verified". Run it by hand before and after anything that touches repository settings.
-- **`check-upgrade-watches.mjs`** needs the network. It watches three things that are **waiting on
-  other people to publish** — a new Expo SDK, the Jest version that comes with it, and the linter
-  that gates a TypeScript 7 upgrade. `--json` gives machine-readable output; `--self-test` runs only
-  its own controls. A "READY" line is **news, not an error** — the exit code stays 0 unless one of
-  its own checks is broken.
+- **`check-upgrade-watches.mjs`** needs the network. It watches four things that are **waiting on
+  other people to publish** — a new Expo SDK, the Jest version that comes with it, the linter that
+  gates a TypeScript 7 upgrade, and a `decode-uri-component` release that is both patched and usable
+  from CommonJS (the one open advisory that reaches a shipped bundle; its patched release is ESM-only,
+  so applying it today breaks the app — see `SECURITY.md`). `--json` gives machine-readable output;
+  `--self-test` runs only its own controls. A "READY" line is **news, not an error** — the exit code
+  stays 0 unless one of its own checks is broken.
 
 ### `audit:indexes` — the database-index check
 

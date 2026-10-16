@@ -14,7 +14,7 @@
  */
 
 import { aiConfig } from '../aiConfig.ts';
-import { AiNotConfigured, AiProviderError } from '../aiErrors.ts';
+import { AiNotConfigured, AiOutputLimit } from '../aiErrors.ts';
 import { postJson, type UpstreamJsonBody } from './http.ts';
 import type {
   AIProvider,
@@ -101,7 +101,12 @@ export function parseAnthropicResponse(data: AnthropicResponse, fallbackModel = 
     ? { inputTokens: data.usage.input_tokens ?? 0, outputTokens: data.usage.output_tokens ?? 0 } as ProviderUsage
     : null;
   if (data.stop_reason === 'max_tokens' && toolCalls.length === 0 && !text) {
-    throw new AiProviderError('The AI service response was cut off. Please try a shorter question.');
+    // AI-10 — this used to throw an AiProviderError, which the controller maps to
+    // 502 AI_UNAVAILABLE: *"temporarily unavailable, please try again in a moment"* for a
+    // 2xx in which nothing was unavailable and a moment's wait cannot help, because the
+    // same question spends the same output budget again. The classification is the fix;
+    // the sentence and the log line live where the cap is known (see `complete` below).
+    throw new AiOutputLimit();
   }
   // AI-8 — the stop reason is REPORTED, not merely tested. The throw above covers the
   // case where the cap left nothing usable; this covers every other one, where the cap
@@ -198,7 +203,25 @@ export function createAnthropicCompatibleProvider(opts: AnthropicCompatibleOptio
           tools: toAnthropicTools(tools),
         },
       });
-      return parseAnthropicResponse(data as AnthropicResponse, fallbackModel);
+      // AI-10 — the one failure on this path that used to leave NO trace. Every sibling
+      // in providers/http.ts logs before it throws; this shape is a 2xx, so it had no
+      // status line either, and the only evidence of the Q4 failure was a missing answer
+      // — which is why identifying it took elimination (§27BG). Logged HERE rather than
+      // in the parser because this is where the cap is known, and the cap is the number
+      // an operator acts on: a model that consistently spends `maxTokens` without
+      // answering is a cap that is too small (or a question that needs narrowing).
+      try {
+        return parseAnthropicResponse(data as AnthropicResponse, fallbackModel);
+      } catch (err) {
+        if (err instanceof AiOutputLimit) {
+          console.warn(
+            `[ai:${name}] output limit reached with nothing usable (model=${model},` +
+              ` maxTokens=${cfg.maxOutputTokens}, stop=max_tokens) — the model spent its` +
+              ' whole output budget before answering'
+          );
+        }
+        throw err;
+      }
     },
   };
 }

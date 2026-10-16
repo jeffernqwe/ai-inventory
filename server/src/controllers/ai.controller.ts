@@ -20,6 +20,7 @@ import { aiConfig } from '../services/ai/aiConfig.ts';
 import {
   AiAbandoned,
   AiNotConfigured,
+  AiOutputLimit,
   AiProviderError,
   AiQuotaExceeded,
   AiTimeout,
@@ -128,6 +129,19 @@ function mapAiFailure(err: unknown) {
       429,
       'The AI assistant has reached its usage limit. Please try again later.',
       'AI_QUOTA_EXCEEDED'
+    );
+  }
+  // AI-10 — the model spent its whole output budget before producing anything usable.
+  // Checked BEFORE the provider branch because it is a different fact with a different
+  // remedy: nothing is unavailable, and "try again in a moment" cannot help, since the
+  // same question spends the same budget again. The status stays in the 502 family (the
+  // upstream response was unusable) while the CODE and the sentence carry the meaning —
+  // which is the distinction the mobile client switches on.
+  if (err instanceof AiOutputLimit) {
+    return new ApiError(
+      502,
+      'The assistant ran out of room before it could answer. Please ask a shorter or more specific question.',
+      'AI_OUTPUT_LIMIT'
     );
   }
   if (err instanceof AiProviderError) {

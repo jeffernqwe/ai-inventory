@@ -7,14 +7,16 @@
  *   AiQuotaExceeded  -> 429 AI_QUOTA_EXCEEDED (a LIMIT was reached, not an outage, AI-6)
  *   AiTimeout        -> 504 AI_TIMEOUT        (the turn outlasted its own deadline, AI-1)
  *   AiAbandoned      -> 499 AI_ABANDONED      (the CALLER went away, AI-1)
+ *   AiOutputLimit    -> 502 AI_OUTPUT_LIMIT   (the model spent its own output budget, AI-10)
  *
  * No type carries secrets, stack traces, or internal URIs. Provider internals
  * (raw upstream bodies, keys) are logged server-side only.
  *
- * Each error has its OWN status because the four failures need four different
- * things from the reader: configure the server, retry the service, wait — or,
- * for AI-6, stop retrying immediately and come back later. Collapsing any two of
- * them is what made a spent allowance look like a broken server.
+ * Each error has its OWN status and its OWN code because each failure needs a
+ * different thing from the reader: configure the server, retry the service, wait,
+ * stop retrying and come back later, ask for less at once. Collapsing any two of
+ * them is what made a spent allowance look like a broken server (AI-6) and what
+ * made a spent output budget look like one too (AI-10).
  */
 
 export const AI_NOT_CONFIGURED = 'AI_NOT_CONFIGURED';
@@ -22,6 +24,7 @@ export const AI_UNAVAILABLE = 'AI_UNAVAILABLE';
 export const AI_QUOTA_EXCEEDED = 'AI_QUOTA_EXCEEDED';
 export const AI_TIMEOUT = 'AI_TIMEOUT';
 export const AI_ABANDONED = 'AI_ABANDONED';
+export const AI_OUTPUT_LIMIT = 'AI_OUTPUT_LIMIT';
 
 export class AiNotConfigured extends Error {
   declare code: string;
@@ -110,6 +113,31 @@ export class AiAbandoned extends Error {
 }
 
 /**
+ * The model spent its whole output budget (`AI_MAX_OUTPUT_TOKENS`) before producing
+ * anything usable — no text, no tool call (AI-10).
+ *
+ * Deliberately NOT an AiProviderError, for the same reason AiTimeout, AiAbandoned and
+ * AiQuotaExceeded are not: nothing upstream failed and nothing is unavailable. The
+ * gateway answered 2xx with an empty body because the model was still working when it
+ * hit its own cap, and the correct thing to tell the member is therefore *not* "try
+ * again in a moment" — the same question spends the same budget again. It is the one
+ * class the controller maps to its own sentence, and the one that used to arrive as a
+ * provider outage: measured twice on the 50 000-product tenant 2026-10-16 (§27BG Q4,
+ * §27CK) at 31 421 ms and 31 789 ms, with the turn's tool already run and answered.
+ */
+export class AiOutputLimit extends Error {
+  declare code: string;
+
+  constructor(
+    message = 'The assistant ran out of room before it could answer. Please ask a shorter or more specific question.'
+  ) {
+    super(message);
+    this.name = 'AiOutputLimit';
+    this.code = AI_OUTPUT_LIMIT;
+  }
+}
+
+/**
  * True for every error the AI layer raises on purpose. ai.service.ts uses this to
  * let its own failures through its provider-failure catch untouched — which is
  * what keeps an AiTimeout an AiTimeout rather than a 502.
@@ -120,7 +148,8 @@ export function isAiError(err: unknown) {
     err instanceof AiProviderError ||
     err instanceof AiQuotaExceeded ||
     err instanceof AiTimeout ||
-    err instanceof AiAbandoned
+    err instanceof AiAbandoned ||
+    err instanceof AiOutputLimit
   );
 }
 
@@ -130,10 +159,12 @@ export default {
   AiQuotaExceeded,
   AiTimeout,
   AiAbandoned,
+  AiOutputLimit,
   AI_NOT_CONFIGURED,
   AI_UNAVAILABLE,
   AI_QUOTA_EXCEEDED,
   AI_TIMEOUT,
   AI_ABANDONED,
+  AI_OUTPUT_LIMIT,
   isAiError,
 };

@@ -24,7 +24,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 
 import { aiConfig } from '../src/services/ai/aiConfig.ts';
-import { AiNotConfigured, AiProviderError, AiQuotaExceeded } from '../src/services/ai/aiErrors.ts';
+import { AI_OUTPUT_LIMIT, AiNotConfigured, AiProviderError, AiOutputLimit, AiQuotaExceeded } from '../src/services/ai/aiErrors.ts';
 import { createOpenrouterProvider } from '../src/services/ai/providers/openrouterProvider.ts';
 import { providerRequiredEnv, selectProvider } from '../src/services/ai/providers/index.ts';
 import { validateProductionConfig } from '../src/config/validateConfig.ts';
@@ -230,16 +230,22 @@ function restoreAll(restores) {
 }
 
 /**
- * Run a call with console.error silenced. The failure paths under test log
- * upstream diagnostics (by design, for operators); those lines are noise here.
+ * Run a call with console.error AND console.warn silenced. The failure paths
+ * under test log upstream diagnostics (by design, for operators); those lines are
+ * noise here. `warn` joined in AI-10, which logs the output limit at the provider
+ * layer rather than at the HTTP layer — that line is asserted where it belongs
+ * (`AI10-output-limit-not-an-outage.test.mjs`) and suppressed here.
  */
 async function quiet(fn) {
   const original = console.error;
+  const originalWarn = console.warn;
   console.error = () => {};
+  console.warn = () => {};
   try {
     return await fn();
   } finally {
     console.error = original;
+    console.warn = originalWarn;
   }
 }
 
@@ -505,7 +511,12 @@ unitSuite('OpenRouter provider — Anthropic /v1/messages wire mapping', () => {
     assert.deepEqual(out2.toolCalls, [{ id: 'x', name: 'getProduct', input: {} }]);
   });
 
-  it('maps a max_tokens stop with no content to a truncation error', async () => {
+  it('maps a max_tokens stop with no content to the OUTPUT LIMIT, not to a provider error (AI-10)', async () => {
+    // AI-10 changed this classification, and the change IS the fix: this used to be an
+    // `AiProviderError`, which the controller maps to 502 AI_UNAVAILABLE — "temporarily
+    // unavailable, please try again in a moment" for a 2xx that answered fine, with the
+    // model having spent its budget. Asserted in both directions, because "not a provider
+    // error" is the whole content of the change.
     const provider = providerFor(`http://127.0.0.1:${port}/api`);
     responder = () => ({
       status: 200,
@@ -515,8 +526,11 @@ unitSuite('OpenRouter provider — Anthropic /v1/messages wire mapping', () => {
       assert.rejects(
         provider.complete({ system: 's', messages: [{ role: 'user', content: 'hi' }], tools: [] }),
         (err) => {
-          assert.ok(err instanceof AiProviderError);
-          assert.match(err.message, /cut off/);
+          assert.ok(err instanceof AiOutputLimit);
+          assert.equal(err.code, AI_OUTPUT_LIMIT);
+          assert.equal(err instanceof AiProviderError, false, 'nothing upstream failed: the gateway answered 2xx');
+          assert.match(err.message, /out of room|length limit/i);
+          assert.doesNotMatch(err.message, /unavailable|in a moment/i);
           return true;
         }
       )
@@ -719,7 +733,7 @@ unitSuite('OpenRouter provider — AI loop compatibility (DB-free)', () => {
     }
   });
 
-  it('surfaces a truncated (max_tokens) reply as a provider error, not as empty text', async () => {
+  it('surfaces a truncated (max_tokens) reply as the output limit, not as empty text and not as an outage (AI-10)', async () => {
     const restores = useOpenrouter();
     try {
       responder = () => ({
@@ -728,8 +742,8 @@ unitSuite('OpenRouter provider — AI loop compatibility (DB-free)', () => {
       });
       await quiet(() =>
         assert.rejects(runAiChat({ ...ctx, message: 'a very long question' }), (err) => {
-          assert.ok(err instanceof AiProviderError);
-          assert.match(err.message, /cut off/);
+          assert.equal(err.code, AI_OUTPUT_LIMIT);
+          assert.equal(err instanceof AiProviderError, false, 'a limit is not an outage');
           assert.ok(!err.message.includes(TEST_KEY));
           return true;
         })

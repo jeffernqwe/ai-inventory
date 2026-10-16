@@ -30,6 +30,7 @@
     "seed:accounts": "node scripts/seed-accounts.mjs",
     "verify:demo": "node scripts/verify-demo-data.mjs",
     "cleanup:perf": "node scripts/cleanup-perf-data.mjs",
+    "ai:usage": "node scripts/ai-usage.mjs",
     "perf:measure": "node scripts/measure-ai-tools.mjs",
     "perf:golden": "node scripts/capture-ai-golden.mjs",
     "perf:turns": "node scripts/measure-ai-turns.mjs"

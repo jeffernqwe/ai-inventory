@@ -92,6 +92,7 @@ read them before reporting:
 | **OD-10** — deriving the credential-change marker server-side instead of from the device-local marker | **Deferred by owner decision**; not implemented |
 | **L-17** — reset/verification email **delivery** has never been inspected end-to-end against a real mailbox | Open; a mail-provider delivery issue is not a code vulnerability |
 | A dependency-level **PII logging** finding noted in that checklist | Open |
+| Four dependency advisories in the **mobile** lockfile — `braces`, `node-forge` (high), `sprintf-js`, `decode-uri-component` (medium) | Open; **no applicable fix exists today**. Three have no published patched release at all (each one's `latest` is inside its own vulnerable range), and `decode-uri-component`'s published fix **cannot be installed** — it is ESM-only against a CommonJS consumer, and applying it breaks the app's deep-link query parsing. All four are transitive dependencies of the mobile build/tooling chain, and their advisories need attacker-controlled input to a build tool — except the deep-link decode, which is **inside the shipped apps** (measured from the production Android and iOS source maps; the other three are in neither bundle) and whose cost is a hang, with no data exposure. Recorded in full with the reproduction in roadmap **§27CJ** |
 
 Also out of scope: reports that require a rooted or jailbroken device, physical
 access to an unlocked device, or a modified client build, unless they

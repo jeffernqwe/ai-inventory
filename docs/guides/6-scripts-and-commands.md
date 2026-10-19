@@ -139,6 +139,8 @@ also create a brand-new signable account. Pick by the outcome you want:
 |---|---|---|
 | **Data inside the account you sign in with** | `seed:demo` | Yes — it uses your existing login |
 | **A throwaway test tenant you measure against** | `seed:perf` | No — it never signs in |
+| **A small, fully known demo tenant** (6 products / 3 locations / 112 units) | `seed:demo-tenant` | It creates the login — sign in as `demo-preview@example.invalid` |
+| **Removing that demo tenant** | `cleanup:demo-tenant` | No — it deletes the tenant's rows only |
 | **A brand-new signable test account** | `seed:demo` with a new email + a password setting | Yes, and it creates the login |
 
 ### A. Seed *your personal account* — the one you sign in with

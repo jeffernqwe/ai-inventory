@@ -16105,6 +16105,100 @@ work in a production-like environment before a release.
   returned to a clean Login, so it is an observation, not a defect — recorded because a screen that can
   appear before sign-in is worth knowing about.
 
+# 27DW. The demo tenant a preview build can be checked against (2026-10-20)
+
+**Server tooling and documentation only (`scripts/demo/*`, two CLIs, two npm scripts, one test file,
+two guides). No route, permission, schema, session, dependency, environment value or mobile change.**
+It closes the gap §27DV named: a production tenant with no data, so an assistant answer could only be
+read, never checked.
+
+## The problem with checking an answer against generated data
+
+`seed:demo` writes tens of thousands of documents, which is right for measuring queries and useless for
+verifying an answer — nobody can say what the total *should* be. A device test therefore needs a
+**small tenant whose every figure is known in advance**. That is what this tenant is: **6 products**
+(one deliberately with **no** inventory row, so "missing row is zero" is exercised), **3 locations**,
+**7 inventory rows**, **9 ledger rows**, and **112 units** on hand — all stated by the command that
+creates them, and re-read and compared before the command reports success.
+
+## What was added
+
+* **`scripts/demo/fixture.mjs`** — the data plus its expected answers (`expectedSummary`,
+  `expectedLocationBreakdown`, `expectedRestock`). Low stock means *at or below* the minimum, per §19;
+  the restock expectation is out-of-stock first, with a real shortfall; every ledger row's arithmetic
+  chains to exactly the stock figure it explains — the invariant `seed:perf` broke for 6 615 rows in
+  §27BG.
+* **`scripts/demo/lib.mjs`** — `assertDemoTarget` (a **named** database that must equal the resolved
+  one, the **test database refused**, a confirmation phrase), `planSeed` (pure, and it **refuses** an
+  address that already belongs to a *different* business, and a half-state, rather than repairing
+  either), `seedDemoTenant`, `verifyDemoTenant` (15 read-back checks) and `removeDemoTenant` (both
+  fingerprints must agree on one businessId; leftovers are re-counted and must be **0**).
+* **Two CLIs**: `npm run seed:demo-tenant` and `npm run cleanup:demo-tenant`, each of which prints the
+  database, whether it is production, what the assistant must answer, and every check with its number.
+* **`server/test/DEMO1-demo-tenant.test.mjs`** — 12 DB-free cases, and two guides updated
+  (`4-test-accounts-and-mock-data.md` §F, `6-scripts-and-commands.md`).
+
+## Two deliberate differences from every other seeder
+
+1. **It may run against production.** The preview APK can only reach production, so a tenant that can
+   be exercised from that build has to be seedable there. The safety is not "it is careful": the
+   database must be **named by hand** and must equal the one `config/env.ts` resolved (a production
+   database is refused from a development process, by config), the test database is refused outright,
+   and the phrase is its own.
+2. **The teardown never deletes the Firebase identity.** §27BB (F-50) records the lockout: MongoDB
+   removed and identity removed in the wrong order leaves an address that can neither sign in nor
+   register, with no repair path in the application. An identity with no MongoDB user is harmless, and
+   re-seeding reuses it.
+
+## Verification
+
+* **12 cases**, and the guard was **watched failing**: one movement's `newQuantity` mutated to a
+  self-contradictory value → **11 pass / 1 fail**, restored **byte-identical** (`cmp`), **12/12**.
+* **A local rehearsal on the development database**: seeded, `15 checks match the fixture`; then
+  `cleanup:demo-tenant` removed 7 inventory + 9 ledger + 6 products + 2 categories + 3 locations + 1
+  user + 1 business and reported **leftovers 0**; a second run answered *"no demo tenant exists —
+  nothing to remove"*.
+* **Production, seeded the same way** (`NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db`,
+  `--database=inventoryai_prod_db`): `15 checks match the fixture` — **112 units**, 3 healthy / 3 low /
+  1 out, Warehouse **75**/4 products, Shop **30**/2, Van **7**/1.
+* Server **1685 tests / 255 suites / 0 failures**, `tsc`, `eslint`, both module-graph checks and the
+  secret guard clean.
+
+## The device run — the numbers, on the preview APK against the production API
+
+Signed in as the demo tenant on the OPPO CPH1969 (preview build `4b9a79dd`, production API):
+
+| Check | Screen |
+|---|---|
+| Dashboard | **IN STOCK 3 · LOW STOCK 3 · OUT OF STOCK 1 · ACTIVE PRODUCTS 6 · TOTAL ON-HAND QTY 112** |
+| Inventory summary (*"How is my inventory doing?"*) | *"6 products with a total of **112 units**"*, **3** in stock / **3** low / **1** out, then the five newest movements with the seeded dates and quantities (5 × Paper Cups out Oct 18, 16 × Coffee Beans out Oct 17, 20 × Notebook in Oct 16, …) |
+| Location breakdown (*"How many units at each location?"*) | **Demo Warehouse 75 · Demo Shop 30 · Demo Van 7**, total **112** — one tool call (`Read: Stock by location`), AI-23's single-lookup path |
+| Restock list (*"What needs restocking?"*) | **3 products**: Demo Desk Lamp **out** (0), Demo Coffee Beans **low** (4), Demo Paper Cups **low** (15) — plus the AI-26 **"Open the full restock list"** link, which opened the **Restock** screen showing the same three with SKUs and *"All 3 products shown"* |
+| A long answer (*"Write a restock plan with two paragraphs per product"*) | ~5 screens of prose, rendered as prose with no marker leaking |
+| **Incomplete answer** (*"Write 1000 words about inventory management"*) | the provider's cap was hit and AI-26's **"This answer hit the length limit, so it may be incomplete — ask a narrower question to see the rest."** appeared; the content ended mid-clause |
+| **Stop** (tap Stop 1.5 s into *"Compare all locations and recommend what to restock"*) | the thinking bubble was replaced **immediately** by *"You stopped waiting for this answer. If the assistant had already finished, it will be here when you reopen this chat."*, **Send** returned, and nothing arrived in the following 12 s |
+
+Provider allowance: **16 → 26 requests used** across six turns (~1.7 each, tool rounds included).
+
+## Cleanup, and what it proves
+
+The demo tenant was **removed in the same session**: 7 inventory + 9 ledger + 6 products + 2 categories
++ 3 locations + 1 user + 1 business, **leftovers 0**, and the phone was signed out to Login. Only the
+Firebase identity remains (by design); one command recreates the tenant, and the guide states both.
+
+## Limits
+
+* **The abandoned turn's server-side outcome is not observable from this host.** The client's stop
+  state is measured above; AI-9's `AI_ABANDONED` cancellation was measured in §27CM and is not
+  re-measured here.
+* **The capped answer ends mid-clause**, which is what the warning is for: AI-27's trim removes a
+  structurally broken trailing *row*, and prose has no row to remove. Recorded rather than "fixed",
+  because deleting a half sentence would remove content the warning already explains.
+* **A 6-product tenant cannot exercise scale.** Query timing and the 60 k product behaviour measured
+  in §27BG/§27DT are untouched by this run.
+* **The demo identity survives teardown** — deliberate, but it means a Firebase user exists with no
+  MongoDB account until the tenant is recreated.
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

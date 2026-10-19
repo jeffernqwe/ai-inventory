@@ -16043,6 +16043,68 @@ operator rather than behaviour of the process.
 * **The three attempts are visible as three `MongoDB connection lost` lines**, because the driver's own
   events fire per failed attempt. Noise, not behaviour; left alone rather than silenced.
 
+# 27DV. The preview build, against the production API (2026-10-20)
+
+**Verification only — no code changed in this record.** It closes the item §27DT left open (*"item 5, the
+production assistant turn"*) and answers the owner's request for a **preview APK** to test the shipped
+work in a production-like environment before a release.
+
+## The artifact
+
+- EAS **`preview`** profile, build **`4b9a79dd-29db-42a7-bab6-c1162e9b5a8d`**, commit **`dfd2c62`** — the
+  same tree as the last merged PR, since every change after it (§27DU) is server-side. Finished
+  2026-10-20 03:26:29; `android.buildType` is `apk` and `EXPO_PUBLIC_API_URL` is
+  `https://ai-inventory-l1mi.onrender.com`, so **the bundle cannot reach the development server** — a
+  build-level fact, not a runtime setting.
+- Installed over the development build with `adb install -r` and **succeeded without an uninstall**: the
+  two profiles are signed with the same EAS-managed keystore, so app data was preserved. (An uninstall
+  would have destroyed the SecureStore contents, which is why this is stated rather than assumed.)
+
+## What the phone did
+
+- **Launched to Login, not into a workspace.** The stored session had been minted by the *development*
+  server, and a session is a server-side row in the database that issued it, so production had never
+  heard of it. The app showed `Loading your workspace…`, then Login — no crash, no spinner left running,
+  which is the correct behaviour for a rejected session and the one the preview build exists to prove.
+- **Signed in with the owner's account, at the owner's keyboard.** No password was shared with a tool.
+  The dashboard rendered **`jaffy royal kludge` / Owner** with **`0`** in every count.
+- **The production tenant is empty.** The `46,602` units seen on the previous device runs were the
+  **development** database's demo data for this same business; production has the `User`, the
+  `Business`, and no inventory at all. This is recorded rather than glossed, because it bounds what
+  this build could verify (below) and because *"my production account looks empty"* should have a
+  written answer.
+- **The assistant's conversation list was empty** — *"No conversations yet"* — so the development
+  server's conversations did **not** leak into the production list.
+- **One real production turn**: *"How many total units do we have?"* → *"Your inventory currently shows
+  **0 units** on hand across all locations."*, tool label **`Read: Inventory summary`**, and the bold run
+  rendered **as bold** by AI-4's renderer on the device. It answered well inside the 25 s the screenshot
+  was taken after, against a cold-ish Render instance.
+
+## The production deployment itself
+
+- `GET /api/health` answered `200` with **`commit 52113e5`** — the §27DU merge — `db: connected`,
+  `0` server errors and `232` responses counted at that boot, so the boot-budget change is **live** and
+  production still boots fail-fast (production's own budget is deliberately unchanged: 1 attempt, 5 s).
+- Provider allowance read from this host: **34 of 50 left, used 16** today, against **used 8** at the
+  §27DT reading. The production turn spent against **the same key** this repository holds, which is the
+  check that the key pasted into Render is the intended account and not the spent one.
+
+## Limits — what this build did NOT prove
+
+- **No data-bearing tool could run.** AI-26's restock link and AI-27's trimmed answer need products,
+  stock and a long answer; the production tenant has none. Both remain **device-verified against the
+  local server** (§27DS / §27DT) and are **not** re-verified here. Seeding demo data into production
+  would have changed the owner's data without being asked, so it was not done.
+- **Nothing was measured about stop/abandon or the cost line** from the phone: a turn on an empty tenant
+  finishes in seconds and never reaches the budgets those features bound.
+- **A preview build cannot be driven by Metro**, so every observation above is the bundled JavaScript,
+  not a hot-reloaded dev session — which is the point of testing this profile, and also why a fix cannot
+  be iterated on in place.
+- **A persisted, unverified Firebase identity put the Verify-your-email screen in the auth stack** while
+  the app was signed out (seen once, on the way to Login). Its **"Wrong account? Sign out"** escape
+  returned to a clean Login, so it is an observation, not a defect — recorded because a screen that can
+  appear before sign-in is worth knowing about.
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

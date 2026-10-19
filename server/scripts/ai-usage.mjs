@@ -208,6 +208,27 @@ export function capacity(remaining, requestsPerTurn) {
 }
 
 /**
+ * One sentence about a reading, for the two places that print it (`--provider-only` and the
+ * `perf:turns` preflight).
+ *
+ * IT EXISTS BECAUSE THE FIRST VERSION DID NOT: the preflight printed `${status} — ${detail}`
+ * unconditionally, and an `OK` reading with no free-model counter has no `detail`, so the live
+ * run against the stub printed `[turns] allowance: OK — undefined`. A reading that came back
+ * fine and a reading that failed must not be able to share a sentence, and a missing counter is
+ * a third case: it is not a failure, it is a key with no cap to report.
+ */
+export function allowanceLine(usage) {
+  if (usage?.status !== 'OK') {
+    return `${usage?.status ?? 'UNKNOWN'} — ${usage?.detail ?? 'no detail reported'}`;
+  }
+  const daily = usage.daily;
+  if (!daily || !Number.isFinite(daily.remaining)) {
+    return 'the provider reported no free-model daily counter (a paid key has none)';
+  }
+  return `${daily.remaining} of ${daily.limit} free-model request(s) left today (used ${daily.used})`;
+}
+
+/**
  * Is there enough allowance left for `needed` more requests?
  *
  * The one place this judgement lives, so `perf:turns` (AI-27) refuses to spend a day's
@@ -635,15 +656,9 @@ async function main() {
     }
     console.log('[ai-usage] provider allowance — read-only, no log, no database, no model call');
     if (provider.status === 'OK') {
-      const show = (v) => (v === null || v === undefined ? 'n/a' : String(v));
       const tier = provider.isFreeTier === null ? 'not reported' : provider.isFreeTier ? 'yes' : 'no';
       console.log(`  free tier            : ${tier}`);
-      console.log(
-        provider.daily
-          ? `  free-model requests  : ${show(provider.daily.used)} used of ${show(provider.daily.limit)} · ` +
-            `${show(provider.daily.remaining)} remaining today (UTC day; resets 00:00 UTC)`
-          : '  free-model requests  : not reported by this key (a paid key has no free-model cap)',
-      );
+      console.log(`  free-model requests  : ${allowanceLine(provider)} (UTC day; resets 00:00 UTC)`);
     } else {
       console.log(`  ${provider.status}: ${provider.detail}`);
     }

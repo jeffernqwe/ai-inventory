@@ -25,7 +25,7 @@ import path from 'node:path';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { readProviderUsage, shortfall } from '../scripts/ai-usage.mjs';
+import { allowanceLine, readProviderUsage, shortfall } from '../scripts/ai-usage.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER_ROOT = path.resolve(HERE, '..');
@@ -120,11 +120,33 @@ describe('AI-27 — the provider allowance, read before a measurement spends it'
     assert.ok(elapsed < 2000, `the read must give up at its bound (took ${elapsed} ms)`);
   });
 
+  it('one sentence for every reading — a failure, a paid key and a number are never confused', () => {
+    assert.equal(
+      allowanceLine(SPENT),
+      '0 of 50 free-model request(s) left today (used 50)',
+      'the spent day names all three numbers',
+    );
+    assert.match(
+      allowanceLine({ status: 'OK', isFreeTier: false, daily: null }),
+      /reported no free-model daily counter/,
+      'a paid key is not a zero and not a failure',
+    );
+    // THE BUG THIS CASE EXISTS FOR: the first preflight printed `${status} — ${detail}`
+    // unconditionally, and a successful reading has no `detail`, so a live run against the
+    // stub printed `allowance: OK — undefined`.
+    for (const reading of [SPENT, { status: 'OK', isFreeTier: false, daily: null }]) {
+      assert.equal(allowanceLine(reading).includes('undefined'), false, 'no reading may print undefined');
+    }
+    assert.match(allowanceLine({ status: 'UNREADABLE', detail: 'HTTP 500' }), /^UNREADABLE — HTTP 500$/);
+    assert.match(allowanceLine({ status: 'NOT_CONFIGURED', detail: 'no key' }), /^NOT_CONFIGURED — no key$/);
+    assert.match(allowanceLine(undefined), /^UNKNOWN — /, 'a missing reading still says something');
+  });
+
   it('the probe reads the allowance BEFORE it mints a session, and only refuses on a KNOWN shortfall', () => {
     assert.match(
       PROBE_SOURCE,
-      /import \{ DEFAULT_BASE_URL, readProviderUsage, shortfall \} from '\.\/ai-usage\.mjs';/,
-      'the probe must reuse the report\'s reader, not a second copy of the provider contract',
+      /import \{ DEFAULT_BASE_URL, allowanceLine, readProviderUsage, shortfall \} from '\.\/ai-usage\.mjs';/,
+      'the probe must reuse the report\'s reader and its sentence, not a second copy of the provider contract',
     );
     const readAt = PROBE_SOURCE.indexOf('await readProviderUsage(');
     const mintAt = PROBE_SOURCE.indexOf('createSessionForToken({');

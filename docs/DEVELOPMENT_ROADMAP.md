@@ -15864,6 +15864,8 @@ unchanged).
   answers said `8976`; the prompt now asks for `8,976`, and **no turn has yet confirmed the model
   obeys it** — it is a request, not a guarantee, and a deterministic separator pass was **rejected**
   because it would rewrite the five-digit code inside every product name (`Deluxe Kettle 60980`).
+  *(Annotated 2026-10-20: **confirmed by live turns** — `8,976` and `14,928,688` in answers at the
+  60 000-product tenant, and `46,602` on the phone. See §27DT's Verification.)*
 * **The restock footer is not device-verified.** It was written after the 36-item phone pass, and at
   8,976 rows the next page loads before the footer is on screen for long; it is asserted by test only.
 * **The trim can only remove one unit.** A model that ends inside the *middle* of a table (a cut row
@@ -15907,17 +15909,22 @@ in the measurement path, and **`ai:usage` could not be asked that question alone
   the same run's output as `[turns] allowance: 0 of 50 … ; 2 question(s) selected`. `--force` overrides.
   The `--only=` filter is now computed first, because the refusal is a function of how many questions
   were actually selected.
+* **`allowanceLine(usage)`** — one sentence for both printers, so a failure, a paid key and a number
+  cannot share a line. It exists because the first preflight printed `${status} — ${detail}`
+  unconditionally, and the live stub run then printed `[turns] allowance: OK — undefined`: a bug found
+  by running the tool, not by the suite that had just passed.
 * **`npm run ai:usage -- --provider-only`** — the allowance and nothing else: no log, no database, no
   model, no quota. The provider contract (`DEFAULT_BASE_URL`) is now exported from `ai-usage.mjs` rather
   than copied, so the probe and the report cannot ask two different hosts about the same account.
 
 ## Verification
 
-* `server/test/AI27-allowance-preflight.test.mjs` — **11 cases**, unit only: the spent day, one request
+* `server/test/AI27-allowance-preflight.test.mjs` — **12 cases**, unit only: the spent day, one request
   short of three questions, **exactly enough is allowed** and one fewer is not, three failed-reading
   statuses that must not refuse, a paid key with no counter, a counter with `remaining: null`, zero
   questions, the real `/v1/key` body mapping to `{used, limit, remaining}` with the masked `label` never
-  becoming a value, an **abort-aware hanging fetch** that must settle at its bound (it is the shape of
+  becoming a value, one sentence for every reading (with a case that forbids the string `undefined`
+  reaching the output), an **abort-aware hanging fetch** that must settle at its bound (it is the shape of
   a hang — a stub that rejects only when aborted), and the probe's own source: it imports **this**
   reader, reads the allowance **before** `createSessionForToken`, exits `2`, says nothing was sent, and
   names the reset. Last, `ai-usage.mjs --provider-only --json` runs as a **child process** with an
@@ -15930,7 +15937,29 @@ in the measurement path, and **`ai:usage` could not be asked that question alone
   `free-model requests : 50 used of 50 · 0 remaining today (UTC day; resets 00:00 UTC)`, and
   `npm run perf:turns -- --business=<60k tenant> --only=1,2` refused with **exit 2** and the sentence
   above — no request reached the provider and no session row was created.
-* `server` `tsc` and `eslint` clean; full suite **1665 tests / 254 suites / 0 failures** (1654 + 11).
+* `server` `tsc` and `eslint` clean; full suite **1666 tests / 254 suites / 0 failures** (1654 + 12).
+
+**The trim was then exercised END TO END on the phone, at ZERO provider quota** — the allowance was spent
+until 00:00 UTC, so the provider was replaced by a local stub answering in the Anthropic wire shape with
+`stop_reason: max_tokens` and a table cut inside its last cell (the shape of all four stored `OUTPUT_LIMIT`
+answers); everything after the provider was real. Over the real route and database the turn reported
+`degraded=OUTPUT_LIMIT`, `trimmed=43`, the cut row gone and the statuses humanised; on the OPPO the two
+**complete** rows drew as cards with no pipe, no separator row and no `OUT_OF_STOCK` on screen, the cut row
+**absent**, and the length note still shown (*"This answer hit the length limit, so it may be incomplete…"*).
+That is the composition §27DS left unobserved: a **trimmed** answer on hardware.
+
+**Live turns the same evening, once the owner moved the key to an unspent account** (the preflight read
+`50 of 50 left, used 0` BEFORE anything ran — its first real use): at the 60 000-product tenant, three
+questions were **3/3 grounded and numerically exact** — *"You have 60,000 active products with a total of
+14,928,688 units on hand. 51,024 of those products are in stock …, 8,976 are low‑stock, and 3,654 are out of
+stock."* (`getInventorySummary`, 10.4 s), *"Main Warehouse: 60,000 products / Shop Front: 39,982 / Overflow
+Store: 20,149"* (`getLocationBreakdown`, 17.6 s), and *"**8,976 products need restocking**; the 5 most urgent
+are below."* (`getReorderNeededProducts`, 23.9 s) — and on the phone, in the fixture tenant, the simplest
+question answered *"You have **46,602** units in stock across all locations."*, equal to the dashboard
+figure on the same screen. **Six provider requests of fifty were used** for all of it, which the counter
+confirmed (`used 6`). Two of §27DS's stated limits are therefore closed by observation rather than by
+argument: the **thousands separator** the prompt asks for is what the model actually writes (`8,976`,
+`14,928,688`), and rule 15's *total in the first sentence* is obeyed.
 
 ## Limits
 

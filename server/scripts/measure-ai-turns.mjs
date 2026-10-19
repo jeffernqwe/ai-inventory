@@ -71,7 +71,7 @@ import { createSessionForToken, newSessionId } from '../src/services/session.ser
 // account (`GET /v1/key`) and already knows how to read a free-model counter. Imported
 // rather than re-implemented: a second copy of that knowledge is how two tools end up
 // disagreeing about the same day's budget.
-import { DEFAULT_BASE_URL, readProviderUsage, shortfall } from './ai-usage.mjs';
+import { DEFAULT_BASE_URL, allowanceLine, readProviderUsage, shortfall } from './ai-usage.mjs';
 
 function argValue(flag) {
   const hit = process.argv.find((a) => a.startsWith(`${flag}=`));
@@ -204,14 +204,7 @@ async function main() {
     baseUrl: process.env.OPENROUTER_BASE_URL || DEFAULT_BASE_URL,
   });
   const short = shortfall(allowance, picked.length);
-  if (allowance.status === 'OK' && allowance.daily) {
-    console.log(
-      `[turns] allowance: ${allowance.daily.remaining} of ${allowance.daily.limit} free-model ` +
-        `request(s) left today (used ${allowance.daily.used}); ${picked.length} question(s) selected`,
-    );
-  } else {
-    console.log(`[turns] allowance: ${allowance.status} — ${allowance.detail}`);
-  }
+  console.log(`[turns] allowance: ${allowanceLine(allowance)}; ${picked.length} question(s) selected`);
   if (short && !process.argv.includes('--force')) {
     console.error(
       `[turns] refusing to spend ${short.needed} turn(s): ${short.remaining} of ${short.limit} ` +

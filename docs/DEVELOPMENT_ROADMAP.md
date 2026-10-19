@@ -15864,6 +15864,8 @@ unchanged).
   answers said `8976`; the prompt now asks for `8,976`, and **no turn has yet confirmed the model
   obeys it** — it is a request, not a guarantee, and a deterministic separator pass was **rejected**
   because it would rewrite the five-digit code inside every product name (`Deluxe Kettle 60980`).
+  *(Annotated 2026-10-20: **confirmed by live turns** — `8,976` and `14,928,688` in answers at the
+  60 000-product tenant, and `46,602` on the phone. See §27DT's Verification.)*
 * **The restock footer is not device-verified.** It was written after the 36-item phone pass, and at
   8,976 rows the next page loads before the footer is on screen for long; it is asserted by test only.
 * **The trim can only remove one unit.** A model that ends inside the *middle* of a table (a cut row
@@ -15872,6 +15874,109 @@ unchanged).
 * **The role fixture's password was rotated** through the documented `npm run seed:roles` path so the
   phone could sign in (the committed scripts never print it); the temporary 60 000-product account was
   deleted after the run, and the perf tenant was otherwise untouched.
+
+# 27DT. The allowance is read before it is spent (2026-10-19)
+
+**Server tooling only (`perf:turns` + `ai:usage`). No route, permission, schema, session, dependency,
+application behaviour or environment-value change; no model call and no quota spent by the change.**
+
+## The defect, paid for twice in one afternoon
+
+`perf:turns` is the only instrument that measures a **real** assistant turn, and the provider behind it
+meters those turns against a hard daily cap. On 2026-10-19 the cap was reached in the middle of a
+device session. Two `perf:turns` questions were then sent anyway and both came back
+`429 AI_QUOTA_EXCEEDED` (`[ai] turn outcome=AI_QUOTA_EXCEEDED total=764ms providerMs=764ms calls=1`,
+then `116ms`): **the run spent requests to learn that there were none left**, and its only finding was
+the spentness itself. The provider reports the counter for free (`GET /v1/key` →
+`free_model_daily_requests`), and this repository already read it — in `npm run ai:usage` — but nowhere
+in the measurement path, and **`ai:usage` could not be asked that question alone**: it needs a log file
+(or `--db`), so the cheapest question in the toolset was the one that demanded the most.
+
+## What was added
+
+* **`shortfall(usage, needed)` in `scripts/ai-usage.mjs`** — the judgement, in one place: a run is short
+  only when the provider **said** a number and that number is below the questions selected. Everything
+  else — `NOT_CONFIGURED`, `UNREADABLE`, `SKIPPED`, a paid key that reports no free counter, a counter
+  with `remaining: null` — returns `null` and blocks nothing. **Exactly enough is not a shortfall**
+  (`<`, not `<=`), pinned as a case.
+* **`readProviderUsage` is bounded.** It had no timeout at all, so an unanswered socket held the report
+  (and now the preflight) open indefinitely. It now aborts at 15 s and reports
+  `no answer within 15000 ms` — the same contract every other failure here follows: a reading that
+  failed is a row, never a hang and never a pass.
+* **`perf:turns` reads the allowance before the first turn** and refuses with **exit 2** when the
+  shortfall is known, naming the remaining count, the limit and the window (`00:00 UTC`). The refusal
+  happens **before a session is minted**, so a refused run leaves no row behind, and it is appended to
+  the same run's output as `[turns] allowance: 0 of 50 … ; 2 question(s) selected`. `--force` overrides.
+  The `--only=` filter is now computed first, because the refusal is a function of how many questions
+  were actually selected.
+* **`allowanceLine(usage)`** — one sentence for both printers, so a failure, a paid key and a number
+  cannot share a line. It exists because the first preflight printed `${status} — ${detail}`
+  unconditionally, and the live stub run then printed `[turns] allowance: OK — undefined`: a bug found
+  by running the tool, not by the suite that had just passed.
+* **`npm run ai:usage -- --provider-only`** — the allowance and nothing else: no log, no database, no
+  model, no quota. The provider contract (`DEFAULT_BASE_URL`) is now exported from `ai-usage.mjs` rather
+  than copied, so the probe and the report cannot ask two different hosts about the same account.
+
+## Verification
+
+* `server/test/AI27-allowance-preflight.test.mjs` — **12 cases**, unit only: the spent day, one request
+  short of three questions, **exactly enough is allowed** and one fewer is not, three failed-reading
+  statuses that must not refuse, a paid key with no counter, a counter with `remaining: null`, zero
+  questions, the real `/v1/key` body mapping to `{used, limit, remaining}` with the masked `label` never
+  becoming a value, one sentence for every reading (with a case that forbids the string `undefined`
+  reaching the output), an **abort-aware hanging fetch** that must settle at its bound (it is the shape of
+  a hang — a stub that rejects only when aborted), and the probe's own source: it imports **this**
+  reader, reads the allowance **before** `createSessionForToken`, exits `2`, says nothing was sent, and
+  names the reset. Last, `ai-usage.mjs --provider-only --json` runs as a **child process** with an
+  empty key: exit 0, `source=not requested (--provider-only)`, `provider.status=NOT_CONFIGURED` —
+  proving the flag exists and no longer needs a log.
+* **The guard was watched failing, twice.** `remaining >= needed` mutated to `>` broke the boundary
+  case; `process.exit(2)` mutated to `process.exit(0)` broke the wiring case — **2 failures, exactly
+  those two**, and both files were then restored **byte-identical** (`cmp`) and re-ran green.
+* **Live, against the real provider and the real probe:** `npm run ai:usage -- --provider-only` printed
+  `free-model requests : 50 used of 50 · 0 remaining today (UTC day; resets 00:00 UTC)`, and
+  `npm run perf:turns -- --business=<60k tenant> --only=1,2` refused with **exit 2** and the sentence
+  above — no request reached the provider and no session row was created.
+* `server` `tsc` and `eslint` clean; full suite **1666 tests / 254 suites / 0 failures** (1654 + 12).
+
+**The trim was then exercised END TO END on the phone, at ZERO provider quota** — the allowance was spent
+until 00:00 UTC, so the provider was replaced by a local stub answering in the Anthropic wire shape with
+`stop_reason: max_tokens` and a table cut inside its last cell (the shape of all four stored `OUTPUT_LIMIT`
+answers); everything after the provider was real. Over the real route and database the turn reported
+`degraded=OUTPUT_LIMIT`, `trimmed=43`, the cut row gone and the statuses humanised; on the OPPO the two
+**complete** rows drew as cards with no pipe, no separator row and no `OUT_OF_STOCK` on screen, the cut row
+**absent**, and the length note still shown (*"This answer hit the length limit, so it may be incomplete…"*).
+That is the composition §27DS left unobserved: a **trimmed** answer on hardware.
+
+**Live turns the same evening, once the owner moved the key to an unspent account** (the preflight read
+`50 of 50 left, used 0` BEFORE anything ran — its first real use): at the 60 000-product tenant, three
+questions were **3/3 grounded and numerically exact** — *"You have 60,000 active products with a total of
+14,928,688 units on hand. 51,024 of those products are in stock …, 8,976 are low‑stock, and 3,654 are out of
+stock."* (`getInventorySummary`, 10.4 s), *"Main Warehouse: 60,000 products / Shop Front: 39,982 / Overflow
+Store: 20,149"* (`getLocationBreakdown`, 17.6 s), and *"**8,976 products need restocking**; the 5 most urgent
+are below."* (`getReorderNeededProducts`, 23.9 s) — and on the phone, in the fixture tenant, the simplest
+question answered *"You have **46,602** units in stock across all locations."*, equal to the dashboard
+figure on the same screen. **Six provider requests of fifty were used** for all of it, which the counter
+confirmed (`used 6`). Two of §27DS's stated limits are therefore closed by observation rather than by
+argument: the **thousands separator** the prompt asks for is what the model actually writes (`8,976`,
+`14,928,688`), and rule 15's *total in the first sentence* is obeyed.
+A detail worth keeping for ISS-22: all four turns logged `outcome=ok`, `calls=2`, `empty=0` — no
+retry, no degraded mark and no empty completion on this model today, against the 3-in-5 defect rate
+the free tier showed on the previous one (2026-10-12).
+
+## Limits
+
+* **The check is a floor, not a budget.** A turn with tool rounds costs **1–3** provider requests
+  (AI-5 measured 3 requests for 1 tool run), so `remaining >= questions` means the run *can* fit, not
+  that it *will*: a run can still meet a `429` mid-way and the probe still reports it per question. The
+  conservative alternative — assuming 2–3 requests per question — was rejected because it would refuse
+  runs that would have succeeded, which is a worse failure for an instrument.
+* **The reading is the account's, not the model's.** A model-specific outage or a per-minute limit is
+  invisible here; the preflight can only see the daily free-model counter.
+* **A stale counter is trusted.** If the provider's own figure lags, the probe refuses a run that would
+  have worked; `--force` is the recorded escape.
+* **Nothing here makes the assistant cheaper.** It converts a discovered-after-the-fact refusal into a
+  refusal before the fact, for the operator only; the member-facing path is unchanged.
 
 # 28. Phase Gate System
 

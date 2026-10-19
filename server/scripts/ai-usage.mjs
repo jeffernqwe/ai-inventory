@@ -69,7 +69,10 @@ const TURN_FIELDS = [
   'tools',
 ];
 
-const DEFAULT_BASE_URL = 'https://openrouter.ai/api';
+// Exported since AI-27: `perf:turns` reads the same allowance through this module's reader,
+// and a second copy of the provider's base URL is how two tools end up asking two different
+// hosts about the same account.
+export const DEFAULT_BASE_URL = 'https://openrouter.ai/api';
 
 /** First match of `name=<value>` in a line, or null. Values stop at whitespace. */
 function field(line, name) {
@@ -205,18 +208,75 @@ export function capacity(remaining, requestsPerTurn) {
 }
 
 /**
+ * One sentence about a reading, for the two places that print it (`--provider-only` and the
+ * `perf:turns` preflight).
+ *
+ * IT EXISTS BECAUSE THE FIRST VERSION DID NOT: the preflight printed `${status} — ${detail}`
+ * unconditionally, and an `OK` reading with no free-model counter has no `detail`, so the live
+ * run against the stub printed `[turns] allowance: OK — undefined`. A reading that came back
+ * fine and a reading that failed must not be able to share a sentence, and a missing counter is
+ * a third case: it is not a failure, it is a key with no cap to report.
+ */
+export function allowanceLine(usage) {
+  if (usage?.status !== 'OK') {
+    return `${usage?.status ?? 'UNKNOWN'} — ${usage?.detail ?? 'no detail reported'}`;
+  }
+  const daily = usage.daily;
+  if (!daily || !Number.isFinite(daily.remaining)) {
+    return 'the provider reported no free-model daily counter (a paid key has none)';
+  }
+  return `${daily.remaining} of ${daily.limit} free-model request(s) left today (used ${daily.used})`;
+}
+
+/**
+ * Is there enough allowance left for `needed` more requests?
+ *
+ * The one place this judgement lives, so `perf:turns` (AI-27) refuses to spend a day's
+ * allowance on turns that cannot succeed, using the same reading this report prints.
+ *
+ * Returns `null` when there is nothing to refuse on — a reading that FAILED
+ * (`UNREADABLE`, `NOT_CONFIGURED`, `SKIPPED`) or one where the provider reported no
+ * free-model counter (a paid key has none). A diagnostic that cannot see must not
+ * pretend a shortfall it cannot measure: the caller reports the reading and proceeds,
+ * and the turn itself remains the source of truth about a 429.
+ *
+ * Returns `{ remaining, limit, used, needed }` when the shortfall is KNOWN.
+ */
+export function shortfall(usage, needed) {
+  if (usage?.status !== 'OK') return null;
+  const remaining = usage?.daily?.remaining;
+  if (!Number.isFinite(remaining)) return null;
+  if (!Number.isFinite(needed) || needed <= 0) return null;
+  if (remaining >= needed) return null;
+  return { remaining, limit: usage.daily.limit, used: usage.daily.used, needed };
+}
+
+/**
  * Ask the provider's own account. A GET, so it is free and reads no model.
  *
  * Nothing here can throw: an unreachable or undecodable answer is `UNREADABLE`, which the
  * report prints as a row. That is the same rule the upgrade watches follow — a reading that
  * failed must not look like a reading that came back clean.
  */
-export async function readProviderUsage({ apiKey, baseUrl = DEFAULT_BASE_URL, fetchImpl = fetch } = {}) {
+export async function readProviderUsage({
+  apiKey,
+  baseUrl = DEFAULT_BASE_URL,
+  fetchImpl = fetch,
+  // BOUNDED, because a report and a preflight are both things a person waits for. An
+  // unanswered socket used to hold the command open indefinitely; the same reading now
+  // gives up and says so, which is the same contract every other failure here follows.
+  timeoutMs = 15000,
+} = {}) {
   const key = (apiKey ?? '').trim();
   if (!key) return { status: 'NOT_CONFIGURED', detail: 'OPENROUTER_API_KEY is not set in this environment' };
   const url = `${String(baseUrl).trim().replace(/\/+$/, '')}/v1/key`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetchImpl(url, { headers: { authorization: `Bearer ${key}` } });
+    const res = await fetchImpl(url, {
+      headers: { authorization: `Bearer ${key}` },
+      signal: controller.signal,
+    });
     if (!res.ok) return { status: 'UNREADABLE', detail: `HTTP ${res.status}` };
     let body;
     try {
@@ -226,7 +286,12 @@ export async function readProviderUsage({ apiKey, baseUrl = DEFAULT_BASE_URL, fe
     }
     return { status: 'OK', ...providerUsage(body) };
   } catch (err) {
+    if (err?.name === 'AbortError') {
+      return { status: 'UNREADABLE', detail: `no answer within ${timeoutMs} ms` };
+    }
     return { status: 'UNREADABLE', detail: `the request failed (${err?.name ?? 'error'})` };
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -566,6 +631,37 @@ async function main() {
     console.log(
       `[ai-usage] ${total} control(s) passed (${controls.mustFire.length} must-fire, ${controls.mustNotFire.length} must-not-fire)`,
     );
+    process.exit(0);
+  }
+
+  // THE ALLOWANCE ON ITS OWN (AI-27). "Is there quota left to run a measurement?" is the
+  // cheapest question this tool can answer and used to be the most expensive to ask: the
+  // report needs a log file (or `--db`), so a person holding a spent day had to produce a
+  // log before they could be told the day was spent. `--provider-only` reads the provider's
+  // own counters and nothing else — no log, no database, no model, no quota.
+  if (process.argv.includes('--provider-only')) {
+    const provider = await readProviderUsage({
+      apiKey: process.env.OPENROUTER_API_KEY,
+      baseUrl: process.env.OPENROUTER_BASE_URL || DEFAULT_BASE_URL,
+    });
+    if (process.argv.includes('--json')) {
+      console.log(
+        JSON.stringify(
+          { readAt: new Date().toISOString(), source: 'not requested (--provider-only)', provider },
+          null,
+          2,
+        ),
+      );
+      process.exit(0);
+    }
+    console.log('[ai-usage] provider allowance — read-only, no log, no database, no model call');
+    if (provider.status === 'OK') {
+      const tier = provider.isFreeTier === null ? 'not reported' : provider.isFreeTier ? 'yes' : 'no';
+      console.log(`  free tier            : ${tier}`);
+      console.log(`  free-model requests  : ${allowanceLine(provider)} (UTC day; resets 00:00 UTC)`);
+    } else {
+      console.log(`  ${provider.status}: ${provider.detail}`);
+    }
     process.exit(0);
   }
 

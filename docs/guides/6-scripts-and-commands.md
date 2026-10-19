@@ -380,6 +380,7 @@ against the database**, and only `perf:turns` spends AI quota.
 | `npm run perf:golden -- --business=<id> --out=before.json` | Records the exact answers those queries produce, with a fingerprint of each |
 | `npm run perf:turns -- --business=<id> --only=2` | One or two **real** assistant conversations, timed end to end |
 | `npm run ai:usage -- --log=<path>` | What the assistant has actually cost and how it failed — **no AI calls, no database, no quota** |
+| `npm run ai:usage -- --provider-only` | **Just the allowance left today** — no log, no database, no model call, no quota |
 
 ```bash
 cd C:/Users/jeffe/inventory-ai/server
@@ -406,6 +407,14 @@ npm run perf:turns -- --business=PUT_THE_BUSINESS_ID_HERE --only=1,3
   of requests per day in total, so keep the question list short and use `--only=` to re-check one
   question instead of all of them. It defaults to `http://localhost:4000`; `--base=` overrides that,
   and `--out=` says where to save the answers.
+- **`perf:turns` reads the allowance before it spends it.** It asks the provider for the day's
+  remaining free-model requests and, when there are **provably** too few for the questions selected,
+  refuses with exit **2** — before a session is minted and before anything is sent — naming the
+  numbers and the window (`00:00 UTC`). A reading it could not make (no key, no network, an
+  unfamiliar body) never blocks a run: the numbers are printed and the run continues, because a
+  diagnostic that cannot see must not pretend to know. `--force` overrides a refusal. Note what it
+  does **not** guarantee: a turn with tool rounds costs more than one request, so the check only
+  catches the run that cannot possibly fit — a run can still meet a `429` mid-way.
 - **`ai:usage` is the one to run *before* spending anything.** It reads two things that cost nothing
   and joins them. **The log** — the server's own per-turn lines (`[ai] turn …`, written for every turn
   including the ones that fail) — gives turns, which ones failed and how, how many provider
@@ -418,7 +427,9 @@ npm run perf:turns -- --business=PUT_THE_BUSINESS_ID_HERE --only=1,3
 
   `--log=<path>` reads a saved log and **stdin** reads a pipe; `--db` reads the database and is
   **opt-in** (no flag, no connection), scoped by `--days=N` (default 7) and `--business=<id>`;
-  `--no-provider` keeps it fully offline; `--json` prints the same figures as one object. The two
+  `--no-provider` keeps it fully offline; `--json` prints the same figures as one object;
+  **`--provider-only`** prints the allowance and nothing else, and is the one form that needs no log
+  at all (it used to be impossible to ask "is there quota?" without first producing a log). The two
   halves are **complements, not alternatives**: a failed turn persists nothing, so timeouts,
   abandonment, output limits and quota refusals appear only in the log.
 
@@ -729,6 +740,7 @@ than nothing, which is the current answer.)
 | `npm run perf:turns -- --business=…` | real assistant turns | ⚠️ spends AI quota |
 | `npm run ai:usage -- --log=…` | turns, failures and the allowance left | ✅ reads only (offline with `--no-provider`) |
 | `npm run ai:usage -- --db --days=30` | what was **answered**, and its degraded rate | ✅ reads only |
+| `npm run ai:usage -- --provider-only` | the free-model requests **left today** (AI-27: run it before `perf:turns`) | ✅ reads only |
 | `npm run restore:db -- --from=…` | put a `backup:db` copy back | ⚠️⚠️ **destructive** — refuses production; `--dry-run` first |
 | `npm run cleanup:test-mongodb` | wipe the test database | ⚠️ destructive, throwaway data |
 | `npm run cleanup:dev-mongodb` | wipe the development database | ⚠️⚠️ **your data** |

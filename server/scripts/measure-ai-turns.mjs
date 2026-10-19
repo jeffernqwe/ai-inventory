@@ -42,7 +42,10 @@
 // requests a day IN TOTAL, roadmap §27BF), and a turn with tool iterations spends
 // more than one request. Keep the question list short — and when you only need ONE
 // of them (`--only=1`, or `--only=1,3`), say so: re-checking a single question
-// should not cost the others. The turn's own split now arrives in the SERVER's
+// should not cost the others. The provider's remaining allowance is read BEFORE the
+// first turn (AI-27), and a run that cannot fit its questions is refused with exit 2
+// rather than spent discovering it — `--force` overrides. `npm run ai:usage --
+// --provider-only` answers the same question on its own, for free. The turn's own split now arrives in the SERVER's
 // log (`[ai] turn outcome=… providerMs=… calls=… toolMs=…`, AI-5), so a single
 // question is often all that is needed to see where the time went.
 
@@ -64,6 +67,11 @@ import dashboardService from '../src/services/dashboard.service.ts';
 import inventoryService from '../src/services/inventory.service.ts';
 import productService from '../src/services/product.service.ts';
 import { createSessionForToken, newSessionId } from '../src/services/session.service.ts';
+// The allowance reading lives in `ai-usage.mjs`, which already asks the provider's own
+// account (`GET /v1/key`) and already knows how to read a free-model counter. Imported
+// rather than re-implemented: a second copy of that knowledge is how two tools end up
+// disagreeing about the same day's budget.
+import { DEFAULT_BASE_URL, allowanceLine, readProviderUsage, shortfall } from './ai-usage.mjs';
 
 function argValue(flag) {
   const hit = process.argv.find((a) => a.startsWith(`${flag}=`));
@@ -169,6 +177,44 @@ async function main() {
     },
   ];
 
+  // Which questions this run asks — computed BEFORE anything is minted or spent, because
+  // the allowance check below is a function of this list's length.
+  const only = (argValue('--only') ?? '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const picked = questions.filter((_question, i) => only.length === 0 || only.includes(String(i + 1)));
+  if (picked.length === 0) {
+    throw new Error(`--only=${only.join(',')} matched no question (the list has 1..${questions.length})`);
+  }
+
+  // AI-27 — read the provider's own remaining allowance BEFORE the first turn.
+  //
+  // Measured 2026-10-19: two questions here answered `429 AI_QUOTA_EXCEEDED`, and the
+  // run's only finding was that the day had already been spent. The same fact is
+  // available for free (the provider reports its own counters), so it is read first and
+  // the probe refuses rather than spends. It refuses only on a KNOWN shortfall: an
+  // unreadable allowance — no key, no network, an unfamiliar body — is printed and the run
+  // continues, because a diagnostic that cannot see must not stop work it might be wrong
+  // about. `--force` overrides, for the case where the provider's counter is stale but its
+  // answers are not. The refusal happens BEFORE a session is minted, so a refused run
+  // leaves nothing behind.
+  const allowance = await readProviderUsage({
+    apiKey: process.env.OPENROUTER_API_KEY,
+    baseUrl: process.env.OPENROUTER_BASE_URL || DEFAULT_BASE_URL,
+  });
+  const short = shortfall(allowance, picked.length);
+  console.log(`[turns] allowance: ${allowanceLine(allowance)}; ${picked.length} question(s) selected`);
+  if (short && !process.argv.includes('--force')) {
+    console.error(
+      `[turns] refusing to spend ${short.needed} turn(s): ${short.remaining} of ${short.limit} ` +
+        'free-model request(s) are left for today. Nothing was sent to the provider. Re-run once ' +
+        'the window rolls over (00:00 UTC), ask fewer questions with --only=, or pass --force.',
+    );
+    await mongoose.disconnect();
+    process.exit(2);
+  }
+
   // Mint a session the way login does, then let go of the database entirely: the
   // probe must measure the SERVER's turn, not share its connection pool.
   const jti = newSessionId();
@@ -180,15 +226,6 @@ async function main() {
     deviceLabel: 'perf:turn probe',
   });
   await mongoose.disconnect();
-
-  const only = (argValue('--only') ?? '')
-    .split(',')
-    .map((value) => value.trim())
-    .filter(Boolean);
-  const picked = questions.filter((_question, i) => only.length === 0 || only.includes(String(i + 1)));
-  if (picked.length === 0) {
-    throw new Error(`--only=${only.join(',')} matched no question (the list has 1..${questions.length})`);
-  }
 
   console.log(`[turns] tenant ${business.name}`);
   console.log(`[turns] base   ${base}`);

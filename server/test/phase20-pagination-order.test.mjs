@@ -393,6 +393,53 @@ dbSuite('Phase 20A — paginated list ordering is deterministic', dbOk, () => {
     });
   });
 
+  it('orders and pages the inventory list when a PRODUCT filter is applied (§27DD)', async () => {
+    // §27DD moved the `q`/`status` page onto a product-first path (resolve the matching
+    // products in one query, then page the inventory index). The order is the contract that
+    // could silently move with it — including the `_id` tiebreaker a transfer relies on — so
+    // both filtered shapes run the SAME three-step contract the unfiltered list does.
+    for (const params of [{ status: 'ACTIVE' }, { q: 'P20' }]) {
+      await assertPaginationContract({
+        label: `GET /api/inventory?${new URLSearchParams(params)}`,
+        path: '/api/inventory',
+        token: stock.token,
+        model: Inventory,
+        filter: { businessId: stock.businessId },
+        field: 'updatedAt',
+        direction: 'desc',
+        params,
+      });
+    }
+  });
+
+  it('a selective product search returns exactly its rows, and a total that agrees', async () => {
+    // The new path resolves products first, so a filter that matches ONE product must yield
+    // that product's rows and no others — the failure mode a pre-resolved id set can produce
+    // (`$in` built from the wrong scope) shows up here as extra rows or a wrong count.
+    const all = await listPage('/api/inventory', stock.token, { limit: 100 });
+    const target = all.items[0];
+    assert.ok(target, 'the fixture has inventory rows');
+
+    const filtered = await listPage('/api/inventory', stock.token, { limit: 100, q: target.product.name });
+    assert.equal(filtered.total, filtered.items.length, 'the total is the filtered set');
+    assert.ok(filtered.items.length >= 1, 'the matching row is returned');
+    assert.deepEqual(
+      [...new Set(filtered.items.map((i) => i.product.id))],
+      [target.product.id],
+      'only the searched product is returned'
+    );
+    assert.ok(
+      filtered.items.some((i) => i.id === target.id),
+      'the row the unfiltered list showed first is in the filtered set'
+    );
+
+    // A term that matches nothing must be an empty page with a zero total, not a fallback
+    // to the unfiltered listing.
+    const none = await listPage('/api/inventory', stock.token, { limit: 100, q: 'no-such-product-xyz' });
+    assert.equal(none.items.length, 0);
+    assert.equal(none.total, 0);
+  });
+
   it('orders and pages the purchase order list', async () => {
     await assertPaginationContract({
       label: 'GET /api/purchase-orders',

@@ -884,35 +884,79 @@ export const inventoryService = {
 
     const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-    /** The product document the row DTO carries, scoped to the business. */
+    /**
+     * The product document the row DTO carries, scoped to the business.
+     *
+     * THE LOOKUP IS THE SIMPLE FORM, AND THAT IS A MEASUREMENT (§27DE). These two lookups
+     * used to be `$lookup` pipelines matched with `$expr` against the row's id, which is
+     * correct and **~9x slower per row** than `localField`/`foreignField`: measured on the
+     * 50 000-product tenant (100 143 inventory rows), a full scan of the partition cost
+     * **19 965 ms** with the `$expr` form and **2 166 ms** with the simple form, same rows
+     * in the same order. The `$expr` form cannot use the equivalent of a batched index
+     * join, and the cost is per row, so it multiplied exactly where it hurt.
+     *
+     * TENANT ISOLATION IS PRESERVED, IN A DIFFERENT PLACE. The simple form resolves a
+     * document by `_id` alone, so a row that referenced another business's product would
+     * resolve it — the filter below drops any joined document whose `businessId` is not
+     * this business, before the row is unwound or returned. Every row is already scoped by
+     * `businessId` in `$match`, so this is defence in depth for a reference the application
+     * cannot create, and it keeps the old guarantee exactly: a foreign document never
+     * reaches a DTO.
+     */
     const productLookup: PipelineStage = {
-      $lookup: {
-        from: 'products',
-        let: { pid: '$productId' },
-        pipeline: [
-          { $match: { $expr: { $and: [{ $eq: ['$businessId', bizOid] }, { $eq: ['$_id', '$$pid'] }] } } },
-        ],
-        as: 'product',
+      $lookup: { from: 'products', localField: 'productId', foreignField: '_id', as: 'product' },
+    };
+    const productTenantGuard: PipelineStage = {
+      $addFields: {
+        product: { $filter: { input: '$product', cond: { $eq: ['$$this.businessId', bizOid] } } },
       },
+    };
+
+    /**
+     * The row's own availability, `quantity - reservedQuantity` (§19). It exists as an
+     * expression, not only as {@link availableField}, because the row-local `outOfStock`
+     * predicate has to be evaluable BEFORE the page window and before the product join
+     * (§27DF) — the same arithmetic, in the two positions it is needed.
+     */
+    const rowAvailableExpr = {
+      $subtract: [{ $ifNull: ['$quantity', 0] }, { $ifNull: ['$reservedQuantity', 0] }],
     };
 
     /** availableQuantity = quantity - reservedQuantity, as §19 defines it. */
     const availableField: PipelineStage = {
+      $addFields: { availableQuantity: rowAvailableExpr },
+    };
+
+    /** The location document the row DTO carries, scoped to the business — same shape and
+     *  same tenant guard as {@link productLookup}, for the same measured reason. */
+    const locationLookup: PipelineStage = {
+      $lookup: { from: 'locations', localField: 'locationId', foreignField: '_id', as: 'location' },
+    };
+    const locationTenantGuard: PipelineStage = {
       $addFields: {
-        availableQuantity: {
-          $subtract: [{ $ifNull: ['$quantity', 0] }, { $ifNull: ['$reservedQuantity', 0] }],
-        },
+        location: { $filter: { input: '$location', cond: { $eq: ['$$this.businessId', bizOid] } } },
       },
     };
+    const locationUnwind: PipelineStage = { $unwind: { path: '$location', preserveNullAndEmptyArrays: true } };
 
     /**
      * A product-dependent filter cannot be evaluated from the inventory row alone,
      * so the product join has to happen BEFORE the page window for these requests —
      * which is the slow shape, kept deliberately and covered by the comment on the
      * fast path below.
+     *
+     * `outOfStock` IS NOT ONE OF THEM (§27DF). Its predicate is `available <= 0`, read
+     * from the row's own `quantity`/`reservedQuantity`; no product field participates. It
+     * was routed here only because it sits beside `lowStock` in the same request, and the
+     * join is what a partition-sized scan pays for: measured on the 131 000-product tenant
+     * (261 918 inventory rows), the product join costs ~55 µs PER ROW, so using it to
+     * evaluate a row-local predicate made a 15-row page cost **5.4 s**; the identical
+     * predicate with no join is ~0.45 s and lands on the fast path below.
      */
-    const filtersOnProduct =
-      Boolean(q) || status === 'ACTIVE' || status === 'ARCHIVED' || Boolean(lowStock) || Boolean(outOfStock);
+    const productOnlyFilters = Boolean(q) || status === 'ACTIVE' || status === 'ARCHIVED';
+    const filtersOnProduct = productOnlyFilters || Boolean(lowStock);
+    /** `outOfStock` alone: row-local, so the page window stays above every join. */
+    const rowLocalOutOfStock = Boolean(outOfStock) && !filtersOnProduct;
 
     if (!filtersOnProduct) {
       // THE FAST PATH: page first, join the page.
@@ -939,33 +983,38 @@ export const inventoryService = {
       // in an application-written database; the filter is retained as read-path
       // hygiene, and the total counts the rows the query scoped, not the rows a join
       // happened to resolve.
+      // The scope this page and its count share. It is exactly `[$match]` for an
+      // unfiltered request — the shape this path has always had — and gains ONE row-local
+      // `$match` when the request asked for `outOfStock` (§27DF): the predicate reads only
+      // the row, so applying it above the window is both correct and free of joins, and the
+      // count runs over the same scope so the total and the page cannot disagree.
+      const scope: PipelineStage[] = [{ $match: match }];
+      if (rowLocalOutOfStock) scope.push({ $match: { $expr: { $lte: [rowAvailableExpr, 0] } } });
+
       const pipeline: PipelineStage[] = [
-        { $match: match },
+        ...scope,
         { $sort: { updatedAt: -1, _id: -1 } },
         { $skip: skip },
         { $limit: limit },
         productLookup,
+        productTenantGuard,
         { $match: { 'product.0': { $exists: true } } },
         { $unwind: '$product' },
         availableField,
-        {
-          $lookup: {
-            from: 'locations',
-            let: { lid: '$locationId' },
-            pipeline: [
-              { $match: { $expr: { $and: [{ $eq: ['$businessId', bizOid] }, { $eq: ['$_id', '$$lid'] }] } } },
-            ],
-            as: 'location',
-          },
-        },
-        { $unwind: { path: '$location', preserveNullAndEmptyArrays: true } },
+        locationLookup,
+        locationTenantGuard,
+        locationUnwind,
       ];
 
-      // The count is a separate aggregation over the SAME `$match`, run in parallel
+      // The count is a separate aggregation over the SAME scope, run in parallel
       // with the page: `$count` on this indexed match never touches a document.
+      // `allowDiskUse` on the page only, and only as the backstop it is elsewhere: an
+      // unfiltered request sorts by index and never spills, while the row-local `outOfStock`
+      // predicate above the window makes the sort re-order whatever survives it, which is a
+      // set MongoDB sizes in memory.
       const [rows, counted] = await Promise.all([
-        Inventory.aggregate(pipeline),
-        Inventory.aggregate([{ $match: match }, { $count: 'total' }]),
+        Inventory.aggregate(pipeline, { allowDiskUse: true }),
+        Inventory.aggregate([...scope, { $count: 'total' }]),
       ]);
       return {
         items: rows.map((row) => inventoryRowPublic(row)),
@@ -973,14 +1022,88 @@ export const inventoryService = {
       };
     }
 
+    // THE PRODUCT-FIRST PATH: the filter is on the PRODUCT's own fields (`q` against its
+    // name/sku/barcode, `status` against its status), so the matching products are resolved
+    // in ONE query and the page is then an index read over `productId`, joined only for the
+    // rows actually returned.
+    //
+    // WHY (measured 2026-10-18, §27DD). This branch used to run the product `$lookup` once per
+    // INVENTORY row before the page window. On a 50 000-product tenant (100 143 inventory rows)
+    // that cost **14 795–28 950 ms** for a 25-row page, through the service the Inventory screen
+    // itself calls and through the assistant's `getInventory` tool — the 499-row `q`
+    // "Professional Towel" case proved the cost was the partition, not the result. The same four
+    // shapes now cost **546–1 063 ms**, with **identical rows, order and totals** (checked against
+    // the old path on every shape, and against `perf:golden` before/after).
+    //
+    // THE ORDER IS THE SAME ORDER. `{ updatedAt: -1, _id: -1 }` is applied before `$skip`/`$limit`
+    // exactly as it was, so a page boundary lands on the same row; the `$in` only narrows which
+    // rows can appear in it. `lowStock` is deliberately NOT on this path: it compares a row's
+    // availability with its PRODUCT's `minimumStock`, a per-row joined value, so it keeps the
+    // shape below rather than pretending to be a product-only filter. `outOfStock` is not on
+    // this path either, and for the opposite reason — it needs no product at all, so it rides
+    // the fast path above with one row-local predicate (§27DF).
+    if (!lowStock) {
+      const productFilter: Record<string, unknown> = { businessId: bizOid };
+      if (status === 'ACTIVE' || status === 'ARCHIVED') productFilter.status = status;
+      if (q) {
+        const re = { $regex: escapeRegExp(q), $options: 'i' };
+        productFilter.$or = [{ name: re }, { sku: re }, { barcode: re }];
+      }
+      const productIds = await Product.find(productFilter).select('_id').lean();
+      if (productIds.length === 0) return { items: [], total: 0 };
+
+      const scoped: Record<string, unknown> = { ...match, productId: { $in: productIds.map((p) => p._id) } };
+      const [rows, counted] = await Promise.all([
+        Inventory.aggregate([
+          { $match: scoped },
+          { $sort: { updatedAt: -1, _id: -1 } },
+          { $skip: skip },
+          { $limit: limit },
+          productLookup,
+          productTenantGuard,
+          { $match: { 'product.0': { $exists: true } } },
+          { $unwind: '$product' },
+          availableField,
+          locationLookup,
+          locationTenantGuard,
+          locationUnwind,
+        ]),
+        // The same scope the page used: rows whose product matched. A separate `$count` over an
+        // indexed match, so the total does not pay for the page's joins.
+        Inventory.countDocuments(scoped),
+      ]);
+      return { items: rows.map((row) => inventoryRowPublic(row)), total: counted };
+    }
+
     // THE FILTERED PATH: the join runs above the window because the filter needs the
     // joined product (`q` against its name/sku/barcode, `status` against its status,
-    // low/out stock against its `minimumStock`). Output shape and total are exactly
-    // what this method has always returned.
-    const pipeline: PipelineStage[] = [
-      { $match: match },
-      productLookup,
-    ];
+    // `lowStock` against its `minimumStock`). Output shape and total are exactly what
+    // this method has always returned.
+    //
+    // `lowStock` gets a row-local pre-filter ABOVE the join, read from the products
+    // themselves (§27DF): the predicate is `available <= minimumStock`, so a row whose own
+    // availability exceeds the LARGEST `minimumStock` in the business cannot satisfy it for
+    // any product and need not be joined at all. That is exact rather than a heuristic — the
+    // maximum is a property of the stored data, not a schema assumption, and a product with
+    // no `minimumStock` never satisfies the `$lte` comparison either way. On the
+    // 131 000-product tenant it keeps 147 225 of 261 918 rows out of the join.
+    const pipeline: PipelineStage[] = [{ $match: match }];
+
+    if (lowStock) {
+      const [threshold] = await Product.aggregate(
+        [
+          { $match: { businessId: bizOid } },
+          { $group: { _id: null, max: { $max: '$minimumStock' } } },
+        ],
+        { allowDiskUse: true }
+      );
+      const maxMinimumStock = threshold?.max;
+      if (typeof maxMinimumStock === 'number') {
+        pipeline.push({ $match: { $expr: { $lte: [rowAvailableExpr, maxMinimumStock] } } });
+      }
+    }
+
+    pipeline.push(productLookup, productTenantGuard);
 
     const productMatch: Record<string, unknown> = { 'product.0': { $exists: true } };
     if (status === 'ACTIVE' || status === 'ARCHIVED') productMatch['product.status'] = status;
@@ -994,31 +1117,136 @@ export const inventoryService = {
     if (outOfStock) pipeline.push({ $match: { $expr: { $lte: ['$availableQuantity', 0] } } });
     if (lowStock) pipeline.push({ $match: { $expr: { $lte: ['$availableQuantity', '$product.minimumStock'] } } });
 
-    pipeline.push({
-      $lookup: {
-        from: 'locations',
-        let: { lid: '$locationId' },
-        pipeline: [
-          { $match: { $expr: { $and: [{ $eq: ['$businessId', bizOid] }, { $eq: ['$_id', '$$lid'] }] } } },
-        ],
-        as: 'location',
-      },
-    });
-    pipeline.push({ $unwind: { path: '$location', preserveNullAndEmptyArrays: true } });
+    // The location join is BELOW the page window, inside the data branch, because it
+    // cannot change the result set: it augments a row with the location document and
+    // unwinds with `preserveNullAndEmptyArrays`, so it neither filters a row nor moves
+    // it (§27DF). Running it above the window made it pay for every row the low/out
+    // filter had just admitted — at 131 000 products that is the whole partition — while
+    // only `limit` rows ever carry a location into a DTO. The count branch reads the
+    // filtered stream independently, exactly as before, so the total is unchanged.
     pipeline.push({
       $facet: {
         metadata: [{ $count: 'total' }],
         // Most-recently-changed first. A transfer updates its two rows in the
         // same millisecond, so `_id` is what keeps an offset page boundary
         // inside that tie stable.
-        data: [{ $sort: { updatedAt: -1, _id: -1 } }, { $skip: skip }, { $limit: limit }],
+        data: [
+          { $sort: { updatedAt: -1, _id: -1 } },
+          { $skip: skip },
+          { $limit: limit },
+          locationLookup,
+          locationTenantGuard,
+          locationUnwind,
+        ],
       },
     });
 
-    const [result] = await Inventory.aggregate(pipeline);
+    // `allowDiskUse` is the backstop for the one sort this path still runs above the page
+    // window, and it is belt-and-braces rather than a fix: the low/out predicates are
+    // evaluated with the row's own `availableQuantity` against its product's
+    // `minimumStock`, so this scan is inherent to the semantics and the only lever left
+    // is the sort's memory (§27DF).
+    const [result] = await Inventory.aggregate(pipeline, { allowDiskUse: true });
     const items = (result?.data ?? []).map(inventoryRowPublic);
     const total = result?.metadata?.[0]?.total ?? 0;
     return { items, total };
+  },
+
+  /**
+   * AI-23 — stock per location, as ONE read.
+   *
+   * WHY THIS IS A SERVICE METHOD RATHER THAN SOMETHING THE ASSISTANT COMPOSED. Before it,
+   * "how many products are in each location?" had to be asked one location at a time, and the
+   * member's own words do not name them — so the measured device turn spent a provider call
+   * learning the names and then a call per location (3 calls / 29.3 s, §27DO). The shape that
+   * answers the question in one round-trip is a per-location aggregate, and a read the
+   * Inventory screen may also want belongs in the service, not in a tool.
+   *
+   * WHAT THE NUMBERS MEAN. `products` is the number of DISTINCT products with a row at that
+   * location — a product held on two shelves is one product on each, which is why the
+   * per-location counts deliberately sum to more than `totals.products`. `units` is the
+   * on-hand quantity (`quantity`, not `quantity - reservedQuantity`), so it matches what the
+   * location's own rows show.
+   *
+   * WHAT IS DELIBERATELY NOT FILTERED. Every location is returned, including one with no
+   * stock (`0 / 0`) and one that is ARCHIVED — archiving retains its inventory (§Product
+   * archive-only lifecycle), so hiding it would understate the business's stock and make
+   * "which location is empty" unanswerable. A row whose location document no longer exists
+   * would otherwise vanish from the report while still holding stock, so those are summed
+   * into an `Unassigned` entry instead of being dropped quietly.
+   */
+  async locationBreakdown(businessId: string) {
+    const bizOid = oid(businessId);
+
+    // Two stages, both inside the database: collapse the ledger to one entry per
+    // (location, product) pair, then answer both questions from that reduced set. The
+    // `$facet` is what keeps `totals.products` honest — counting distinct products across
+    // the business from the SAME reduced rows, rather than summing the per-location counts,
+    // which deliberately double-count a product held in two places.
+    const [result] = await Inventory.aggregate(
+      [
+        { $match: { businessId: bizOid } },
+        {
+          $group: {
+            _id: { locationId: '$locationId', productId: '$productId' },
+            units: { $sum: '$quantity' },
+          },
+        },
+        {
+          $facet: {
+            perLocation: [
+              { $group: { _id: '$_id.locationId', products: { $sum: 1 }, units: { $sum: '$units' } } },
+            ],
+            overall: [{ $group: { _id: '$_id.productId' } }, { $count: 'products' }],
+          },
+        },
+      ],
+      // The reduced set is one entry per (location, product), so a tenant far larger than
+      // the engine's memory group limit is bounded by disk rather than by luck.
+      { allowDiskUse: true }
+    );
+
+    const counted = new Map<string, { products: number; units: number }>();
+    for (const row of result?.perLocation ?? []) {
+      counted.set(String(row._id), { products: Number(row.products), units: Number(row.units) });
+    }
+
+    const locations = await Location.find({ businessId: bizOid }).select('name status').lean();
+    const rows: {
+      id: string | null;
+      name: unknown;
+      status: unknown;
+      products: number;
+      units: number;
+    }[] = locations.map((loc) => {
+      const key = String(loc._id);
+      const own = counted.get(key) ?? { products: 0, units: 0 };
+      // Removed as we go: whatever is left afterwards is stock whose location is gone.
+      counted.delete(key);
+      return { id: key, name: loc.name, status: loc.status, products: own.products, units: own.units };
+    });
+
+    const orphaned = [...counted.values()];
+    if (orphaned.length > 0) {
+      rows.push({
+        id: null,
+        name: 'Unassigned',
+        status: null,
+        products: orphaned.reduce((n, row) => n + row.products, 0),
+        units: orphaned.reduce((n, row) => n + row.units, 0),
+      });
+    }
+
+    // Biggest shelf first, then by name so the order of two equal locations is stable.
+    rows.sort((a, b) => b.units - a.units || String(a.name).localeCompare(String(b.name)));
+
+    return {
+      locations: rows,
+      totals: {
+        products: Number(result?.overall?.[0]?.products ?? 0),
+        units: rows.reduce((n, row) => n + row.units, 0),
+      },
+    };
   },
 };
 

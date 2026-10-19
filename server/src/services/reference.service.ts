@@ -48,6 +48,18 @@ type ReferenceWritePayload = {
 /** The parsed list query the controller forwards, plus the resolved paging. */
 type ReferenceListFilters = {
   q?: string;
+  /**
+   * AI-15 — an EXACT name, matched case- and surrounding-whitespace-insensitively.
+   *
+   * `q` is a substring search over name *and description*, so it cannot answer "which
+   * record is called exactly this". The assistant needs that when a member names a
+   * location: an unanchored search for "Main" returns every location whose description
+   * mentions it, and truncating that list to a page could push the exact match out of
+   * view entirely. Anchored here, in the service that owns the collection, rather than in
+   * the AI tool, so the REST list and the assistant read the same records through the same
+   * code path (the controller simply never passes it).
+   */
+  exactName?: string;
   status?: string;
   skip: number;
   limit: number;
@@ -124,13 +136,18 @@ export function createReferenceService<Doc extends ReferenceDocShape>({
       return doc;
     },
 
-    async list(businessId: string, { q, status, skip, limit }: ReferenceListFilters) {
+    async list(businessId: string, { q, exactName, status, skip, limit }: ReferenceListFilters) {
       const filter: QueryFilter<Doc> = { businessId };
       // Phase 20D: the controller validates `status` against the ACTIVE/ARCHIVED
       // enum, so an unrecognized value can no longer reach here. The guard is
       // unconditional because the old inline enum comparison silently DROPPED the
       // filter, answering with every row while appearing to be filtered.
       if (status) filter.status = status;
+      if (exactName != null) {
+        // Anchored and escaped, so a name containing a regex metacharacter is a name and
+        // not a pattern, and `$` cannot be used to skip the end of the comparison.
+        filter.name = { $regex: `^${escapeRegExp(exactName.trim())}$`, $options: 'i' };
+      }
       if (q) {
         filter.$or = [
           { name: { $regex: escapeRegExp(q), $options: 'i' } },

@@ -20,6 +20,7 @@ import { aiConfig } from '../services/ai/aiConfig.ts';
 import {
   AiAbandoned,
   AiNotConfigured,
+  AiOutputLimit,
   AiProviderError,
   AiQuotaExceeded,
   AiTimeout,
@@ -128,6 +129,19 @@ function mapAiFailure(err: unknown) {
       429,
       'The AI assistant has reached its usage limit. Please try again later.',
       'AI_QUOTA_EXCEEDED'
+    );
+  }
+  // AI-10 — the model spent its whole output budget before producing anything usable.
+  // Checked BEFORE the provider branch because it is a different fact with a different
+  // remedy: nothing is unavailable, and "try again in a moment" cannot help, since the
+  // same question spends the same budget again. The status stays in the 502 family (the
+  // upstream response was unusable) while the CODE and the sentence carry the meaning —
+  // which is the distinction the mobile client switches on.
+  if (err instanceof AiOutputLimit) {
+    return new ApiError(
+      502,
+      'The assistant ran out of room before it could answer. Please ask a shorter or more specific question.',
+      'AI_OUTPUT_LIMIT'
     );
   }
   if (err instanceof AiProviderError) {
@@ -262,6 +276,22 @@ const aiController = {
     // to its deadline and pay for a model call nobody will ever read.
     if (res.destroyed) clientGone.abort();
 
+    // AI-24 — when the member ASKED, recorded before the model is called.
+    //
+    // The turn is persisted only after the provider succeeds (Phase 07E / M7), so the
+    // default `createdAt` Mongoose would stamp on the USER message is the moment the turn
+    // COMPLETED — the answer's clock on the question. Two timestamps made of that are
+    // seconds apart however long the member waited, which is exactly the interval the
+    // question/answer pair exists to show. Taking the time here makes the stored question
+    // carry its own send time, on the server's clock like the answer beside it, so the
+    // difference is the real turn duration anywhere it is read: on screen live, in a
+    // reloaded thread, and straight out of the database.
+    //
+    // A supplied `createdAt` is honoured by Mongoose (measured 2026-10-19 against the
+    // schema: a value 45 s in the past was stored unchanged), so no schema change is
+    // needed and none was made.
+    const askedAt = new Date();
+
     let result;
     try {
       result = await runAiChat({ businessId, userId, role, history, message, signal: clientGone.signal });
@@ -286,6 +316,8 @@ const aiController = {
       conversationId: conversation._id,
       role: 'USER',
       content: message,
+      // AI-24 — the member's clock time, not the persistence time.
+      createdAt: askedAt,
     });
     const assistantMessage = await AIMessage.create({
       conversationId: conversation._id,

@@ -399,6 +399,23 @@ dbSuite('Phase 26A — session lifecycle over real HTTP', dbOk, () => {
 
     assert.equal((await me(token)).status, 200, 'precondition: the session is live');
 
+    // READ THE ROW BEFORE EXPIRING IT, and that order is the whole point of this line.
+    //
+    // `sessions` carries a TTL index on `expiresAt` (`expireAfterSeconds: 0`, declared in the
+    // model) whose sweep runs about once a minute, so the moment this test pushes `expiresAt`
+    // into the past the document becomes deletable and the sweep does not care that the test
+    // still wants to look at it. Re-reading it afterwards is therefore a race, and it lost that
+    // race once: 2026-10-17, in a full run, with `Cannot read properties of null (reading
+    // '_id')` at the assertion below — not a product defect and not "flakiness", but a measured
+    // one: a probe inserted a session with a past `expiresAt` and the TTL monitor removed it
+    // **21 789 ms** later.
+    //
+    // The fix is the order, not a weaker assertion: the id this case needs is knowable before
+    // the expiry, and the claim it makes (the session list must not offer that session) is
+    // exactly as strong with the id captured up front.
+    const row = await Session.findOne({ jti });
+    assert.ok(row, 'precondition: the session row exists before it is expired');
+
     // Expire the SESSION only — the token is untouched. The row is what the
     // liveness check reads, so the session cannot outlive its own expiry.
     await Session.updateOne({ jti }, { $set: { expiresAt: new Date(Date.now() - 1000) } });
@@ -411,9 +428,8 @@ dbSuite('Phase 26A — session lifecycle over real HTTP', dbOk, () => {
     const other = (await login(user.email, PASSWORD)).json.token;
     const listed = await api('GET', '/api/auth/sessions', { token: other });
     assert.equal(listed.status, 200);
-    const expiredRow = await Session.findOne({ jti });
     assert.equal(
-      listed.json.sessions.some((s) => s.id === String(expiredRow._id)),
+      listed.json.sessions.some((s) => s.id === String(row._id)),
       false,
       'an expired session is not offered as an active one'
     );

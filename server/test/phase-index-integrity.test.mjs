@@ -164,6 +164,36 @@ dbSuite('Index integrity — declared indexes exist in the database', dbOk, () =
     );
   });
 
+  it('★ the location-filtered inventory page index is DECLARED and EXISTS (§27DG)', async () => {
+    // The companion to the AI-3 key above, for the request that names ONE location. The
+    // measured failure it exists for: at 523 918 inventory rows the location-filtered page
+    // took 2 395 ms with a blocking `SORT` winning plan and 2 052 ms of planner time,
+    // because neither `{ businessId, locationId }` (no sort key) nor
+    // `{ businessId, updatedAt, _id }` (no locationId) could supply equality PLUS order.
+    //
+    // Both halves are asserted for the same reason as its neighbour: the declaration can
+    // be deleted while every other suite stays green — nothing in the tree named this key
+    // before this file did — and a declaration alone cannot prove the database built it.
+    const Inventory = models.find((model) => model.modelName === 'Inventory');
+    assert.ok(Inventory, 'the Inventory model must be exported by the barrel');
+
+    const key = 'businessId:1,locationId:1,updatedAt:-1,_id:-1';
+    assert.ok(
+      declaredIndexes(Inventory).has(key),
+      `inventory.model.ts no longer DECLARES the location-filtered page index ${key} — the ` +
+        `location page would fall back to a plan the planner may answer with a blocking sort ` +
+        `(declared: ${[...declaredIndexes(Inventory).keys()].join(' | ') || 'none'})`,
+    );
+
+    await Inventory.init();
+    const actual = await actualIndexes(Inventory);
+    assert.ok(
+      actual.has(key),
+      `the location-filtered inventory page index ${key} is missing from ` +
+        `${Inventory.collection.collectionName} (present: ${[...actual.keys()].join(' | ')})`,
+    );
+  });
+
   it('★ the TTL keys are declared AND exist — what actually expires sessions and one-time tokens', async () => {
     // A TTL index that is declared but absent means the collection grows forever:
     // AUTH-02 bounds a session's LIFETIME in code, but only the TTL key removes the

@@ -97,12 +97,15 @@ The application must use an AI provider abstraction.
 
 Providers:
 
-- Anthropic Claude
-- Google Gemini
-- **OpenRouter** — an Anthropic-compatible gateway, and the **currently deployed provider**. It speaks
-  the same Anthropic Messages wire as the Claude provider through one shared mapping layer, so it is a
-  configuration over that layer rather than a second protocol implementation. Because it fronts many
-  models with differing tool-calling ability, `AI_MODEL_OPENROUTER` is required and has no default.
+- **OpenRouter** — an Anthropic-compatible gateway, and the **only shipped provider** (owner decision,
+  **AI-25**, 2026-10-19). It speaks the Anthropic Messages wire through one shared mapping layer, so it
+  is a configuration over that layer rather than a second protocol implementation. Because it fronts
+  many models with differing tool-calling ability, `AI_MODEL_OPENROUTER` is required and has no default.
+- Anthropic Claude and Google Gemini are reachable **through that gateway as model choices** — changing
+  `AI_MODEL_OPENROUTER` is the whole change. Their direct provider implementations were **removed** in
+  AI-25: both needed their own API key, model variable and billing to be usable, and neither was
+  exercised in production. The provider **interface** and the shared wire layer remain, so restoring a
+  direct provider is one small factory plus one registry entry.
 - The retired AgentRouter gateway is **not** a provider: it was removed and must not be reintroduced.
 
 The application must not tightly couple the business logic to one AI provider.
@@ -112,9 +115,7 @@ Example conceptual architecture:
 ```text
 AI Service
 ├── Provider Interface
-├── Claude Provider
-├── Gemini Provider
-└── OpenRouter Provider
+└── OpenRouter Provider  (Claude/Gemini models are chosen here via AI_MODEL_OPENROUTER)
 ```
 
 The active provider should be configurable through server-side environment variables.
@@ -951,7 +952,28 @@ getOutOfStockProducts
 getInventorySummary
 getInventoryHistory
 getProductsByLocation
+getReorderNeededProducts
+listLocations
+listCategories
 ```
+
+The list above is the V1 set as implemented. `getReorderNeededProducts` (Phase 11A)
+returns the ACTIVE products at or below their minimum, flagged `OUT_OF_STOCK` or
+`LOW_STOCK`. `listLocations` and `listCategories` (AI-14) are reference lookups: they answer *"which
+locations/categories do I have"* and resolve a name whose exact form is unknown. They read the
+same records as `GET /api/locations` and `GET /api/categories`, which are authentication-only,
+and are gated on `inventory.view` / `products.view`. No tool writes.
+
+`getInventory`, `getProductsByLocation` and `getInventoryHistory` accept a location by
+`locationId` **or** by its exact `location` name (AI-15); `searchProducts` and
+`getReorderNeededProducts` accept a category by `categoryId` **or** its exact `category` name
+(AI-16), so a member's own words reach the query without a separate lookup turn. Only an exact,
+ACTIVE record of the caller's own business resolves; an ambiguous name returns the candidates
+instead of choosing one, and passing both forms is refused.
+
+Every list result states its own page — `count`, `returned` and `hasMore` (AI-18) — so the model
+can distinguish a complete answer from a window on a larger set, and a list answer shows at most a
+handful of rows as examples with the remainder read in the app.
 
 Each tool must:
 
@@ -1067,14 +1089,13 @@ AIService
 Providers:
 
 ```text
-ClaudeProvider            (Anthropic Messages API)
-GeminiProvider            (Google Generative Language API)
-OpenRouterProvider        (Anthropic-compatible gateway)
+OpenRouterProvider        (Anthropic-compatible gateway; the only shipped provider, AI-25)
 ```
 
-The gateway provider speaks the same Anthropic Messages wire as ClaudeProvider through one shared
-mapping layer, so a gateway is a configuration over that layer rather than a second protocol
-implementation. `openrouter` additionally requires `AI_MODEL_OPENROUTER`: it fronts many models with
+The gateway provider speaks the Anthropic Messages wire through one shared mapping layer, so a
+gateway is a configuration over that layer rather than a second protocol implementation. The direct
+Claude and Gemini providers were removed in AI-25 (both are reachable through this gateway as model
+choices); the interface and the wire layer stay so a direct provider can return cheaply. `openrouter` additionally requires `AI_MODEL_OPENROUTER`: it fronts many models with
 different tool-calling ability, so the assistant model is named explicitly rather than defaulted.
 
 Provider selection is server-side only (`AI_PROVIDER`). Keys never reach the mobile application, and
@@ -2276,8 +2297,6 @@ JWT_ISSUER
 JWT_AUDIENCE
 JWT_REFRESH_SECRET
 AI_PROVIDER
-ANTHROPIC_API_KEY
-GEMINI_API_KEY
 OPENROUTER_API_KEY
 OPENROUTER_BASE_URL
 AI_MODEL_OPENROUTER

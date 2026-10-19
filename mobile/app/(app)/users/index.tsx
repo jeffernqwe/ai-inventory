@@ -56,7 +56,30 @@ function UserRow({ item, actor }: { item: ApiResponse; actor: AuthUser | null })
   );
 }
 
+/**
+ * Role guard (MOD-07). The permission check lives here and nowhere else, so the
+ * list below mounts only for a role that may manage users. Declaring its hooks
+ * under this return would run them on a denied render — `usePagedList` loads on
+ * mount and `useRefetchOnFocus` subscribes — so a MANAGER or STAFF visit would
+ * issue `GET /api/users` and be refused by the server for no reason. The server
+ * stays the boundary; this stops the client asking at all.
+ */
 export default function UsersScreen() {
+  const { user } = useSession();
+
+  if (!canManageUsers(user)) {
+    return (
+      <>
+        <Stack.Screen options={{ title: 'Users' }} />
+        <AccessDenied message="Only the business owner and admins can manage users." />
+      </>
+    );
+  }
+
+  return <UsersList />;
+}
+
+function UsersList() {
   const { user, token, signOut } = useSession();
   const manage = canManageUsers(user);
 
@@ -102,27 +125,23 @@ export default function UsersScreen() {
   return (
     <>
       <Stack.Screen options={{ title: 'Users' }} />
-      {!manage ? (
-        <AccessDenied message="Only the business owner and admins can manage users." />
-      ) : (
-        <ListScreen
-          items={list.items}
-          keyExtractor={(item) => item.id}
-          renderItem={({ item }) => <UserRow item={item} actor={user} />}
-          header={header}
-          loading={list.loading}
-          error={list.error}
-          onRetry={list.reload}
-          errorTitle="Couldn't load users"
-          refreshing={list.refreshing}
-          onRefresh={list.refresh}
-          onEndReached={list.loadMore}
-          loadingMore={list.loadingMore}
-          loadingLabel="Loading users…"
-          emptyTitle="Nothing to show"
-          emptyMessage={emptyMessage()}
-        />
-      )}
+      <ListScreen
+        items={list.items}
+        keyExtractor={(item) => item.id}
+        renderItem={({ item }) => <UserRow item={item} actor={user} />}
+        header={header}
+        loading={list.loading}
+        error={list.error}
+        onRetry={list.reload}
+        errorTitle="Couldn't load users"
+        refreshing={list.refreshing}
+        onRefresh={list.refresh}
+        onEndReached={list.loadMore}
+        loadingMore={list.loadingMore}
+        loadingLabel="Loading users…"
+        emptyTitle="Nothing to show"
+        emptyMessage={emptyMessage()}
+      />
     </>
   );
 }

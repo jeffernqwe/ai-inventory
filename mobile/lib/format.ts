@@ -74,6 +74,26 @@ export function formatTime(value: unknown): string {
   return `${p.hours}:${p.minutes}`;
 }
 
+/**
+ * A message-footer clock time, e.g. "2:05 PM". Invalid/absent -> ''.
+ *
+ * WHY 12-HOUR, AND WHY ONLY HERE. The chat bubble used to print `formatTime` — a bare
+ * "14:05" in the bottom corner of every reply — and the owner read it as a metric and
+ * asked whether it was a response time, which is the defect: a four-digit number beside
+ * an answer has no stated meaning. "2:05 PM" cannot be read as a duration, and the bubble
+ * labels it ("Sent" / "Answered") so nothing is left to infer. It is deliberately not
+ * applied to the history and audit rows, which pair a time with a date ("Aug 8, 2026 ·
+ * 14:05") and therefore have the meaning the chat footer was missing.
+ */
+export function formatClock12(value: unknown): string {
+  const d = parseDate(value);
+  if (!d) return '';
+  const hours24 = d.getHours();
+  const suffix = hours24 < 12 ? 'AM' : 'PM';
+  const hour12 = hours24 % 12 === 0 ? 12 : hours24 % 12;
+  return `${hour12}:${pad(d.getMinutes())} ${suffix}`;
+}
+
 /** Days since a date, used for relative labels like "2d ago" / "today". */
 export function daysAgo(value: unknown): string {
   const d = parseDate(value);

@@ -381,6 +381,40 @@ dbSuite('Phase 04 — inventory core + dashboard', dbOk, () => {
     assert.equal(ownList.json.items[0].quantity, 7);
   });
 
+  it('isolation: a row that points at ANOTHER business\'s product exposes nothing (§27DE)', async () => {
+    // The application cannot create this row — every write path resolves the product inside the
+    // caller's business first. The listing's product lookup is now the simple `localField` form,
+    // which resolves a document by `_id` ALONE, so this is the case that would leak if the tenant
+    // guard beside it were ever dropped: the row's own `businessId` is the owner's, while its
+    // product belongs to someone else.
+    const foreignProduct = await newProduct(other, { name: 'FOREIGN-PRODUCT-SHOULD-NEVER-APPEAR' });
+    const foreignLocation = await newLocation(other);
+    const leaked = await Inventory.create({
+      businessId: owner.businessId,
+      productId: foreignProduct,
+      locationId: foreignLocation,
+      quantity: 42,
+      reservedQuantity: 0,
+    });
+
+    try {
+      const list = await api('GET', '/api/inventory?limit=100', { token: owner.token });
+      assert.equal(list.status, 200);
+      const asText = JSON.stringify(list.json);
+      assert.ok(!asText.includes('FOREIGN-PRODUCT-SHOULD-NEVER-APPEAR'), 'the foreign product never appears');
+      assert.ok(
+        !list.json.items.some((i) => i.product?.id === foreignProduct),
+        'no row carries the foreign product'
+      );
+      assert.ok(
+        !list.json.items.some((i) => i.location?.id === foreignLocation),
+        'no row carries the foreign location'
+      );
+    } finally {
+      await Inventory.deleteOne({ _id: leaked._id });
+    }
+  });
+
   it('inventory list flags low stock / out of stock per spec §19', async () => {
     const l = await newLocation(status);
     // healthy (10 >= min 5)

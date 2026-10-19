@@ -1,0 +1,326 @@
+// OPS-1 — the backup is a restore point, or it is nothing.
+//
+// WHY THIS EXISTS. On 2026-10-18 the deployed cluster was an Atlas M0 and MongoDB's
+// documentation says plainly that Free clusters have no backups; `mongodump` is the
+// documented answer for exactly this tier. So `backup:db` exists to be the thing that is
+// still there on the day it is needed — which makes the interesting tests the ones about
+// what happens when it is WRONG, not when it works:
+//
+//   * a round trip that proves the dump reproduces documents exactly, including the BSON
+//     types a plain JSON dump silently degrades (ObjectId, Date, Decimal128, null);
+//   * a corrupted byte that must fail the restore with the database UNTOUCHED — the order
+//     in `restoreBackup` (verify every file, then drop) is the property, so the test
+//     asserts the pre-existing row survived the refusal;
+//   * the guards: a production and an unknown restore target, a dump directory inside the
+//     repository, a wrong confirmation phrase, a missing file, an empty manifest.
+//
+// IT RUNS AGAINST ITS OWN SCRATCH DATABASE, and that is not tidiness either. `node --test`
+// runs test FILES in parallel, so a suite that dumps and restores the whole test database
+// would drop collections other suites are using at that moment — the first version of this
+// file did exactly that before the listing assertion exposed it. The scratch database lives
+// on the same connection (no second cluster, no second credential), is dropped by this
+// suite's `after`, and gives `createBackup` the real whole-database path to exercise rather
+// than a test-only subset parameter that production would never use.
+//
+// The comparisons use a small `canonical()` rather than `deepStrictEqual` on purpose: the
+// property is BYTE-equality of the canonical Extended JSON form, which is what a restore
+// actually reproduces. It carries its own negative control below, because an equality
+// helper that always returned true would make every assertion in this file vacuous.
+import { after, before, it } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import mongoose from 'mongoose';
+
+import { ensureDb, disconnectDb } from './helpers.mjs';
+import { dbSuite } from './testEnv.mjs';
+import { DATABASE_NAMES } from '../src/config/env.ts';
+import {
+  BACKUP_CONFIRM_PHRASE,
+  BACKUP_FORMAT,
+  MANIFEST_NAME,
+  RESTORE_ALLOWED_DATABASES,
+  RESTORE_CONFIRM_PHRASE,
+  BackupIntegrityError,
+  BackupSafetyError,
+  assertBackupDir,
+  assertConfirm,
+  assertRestoreTarget,
+  backupDirectoryName,
+  createBackup,
+  readManifest,
+  restoreBackup,
+  verifyBackup,
+} from '../scripts/backup/lib.mjs';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = path.resolve(here, '../..');
+
+/** A database of this suite's own, on the connection `helpers.mjs` already proved. */
+const SCRATCH_DB = 'inventoryai_ops1_scratch_db';
+const A = 'ops1_backup_a';
+const B = 'ops1_backup_b';
+
+const dbOk = await ensureDb();
+
+/** Canonical Extended JSON string — the exact form a backup stores and a restore rebuilds. */
+function canonical(doc) {
+  return JSON.stringify(mongoose.mongo.BSON.EJSON.stringify(doc, { relaxed: false }));
+}
+
+function ejsonEqual(left, right) {
+  return canonical(left) === canonical(right);
+}
+
+/** The documents a JSON dump would flatten and we must not. */
+function fixtures() {
+  const { ObjectId, Decimal128 } = mongoose.mongo;
+  return [
+    { _id: new ObjectId(), sku: 'SKU-1', quantity: 12, seen: new Date('2026-10-18T08:15:30.250Z') },
+    {
+      _id: new ObjectId(),
+      sku: 'SKU-2',
+      quantity: 0,
+      unit: Decimal128.fromString('3.25'),
+      nested: { tags: ['a', 'b'], meta: null, flag: true },
+    },
+    { _id: new ObjectId(), label: 'unicode: ñ 需要 Поднебесье 🧾', maybe: null },
+  ];
+}
+
+let tmpDir = '';
+let scratch = null;
+
+before(async () => {
+  tmpDir = await mkdtemp(path.join(os.tmpdir(), 'inventory-ai-ops1-'));
+  if (dbOk) scratch = mongoose.connection.getClient().db(SCRATCH_DB);
+});
+
+after(async () => {
+  if (scratch) await scratch.dropDatabase().catch(() => {});
+  if (tmpDir) await rm(tmpDir, { recursive: true, force: true });
+  await disconnectDb();
+});
+
+/** A fresh directory per case, so no case can read another's manifest. */
+function caseDir(label) {
+  return path.join(tmpDir, `${label}-${Date.now()}-${Math.floor(Math.random() * 1e6)}`);
+}
+
+dbSuite('OPS-1 — backup and restore', dbOk, () => {
+  it('round-trips documents exactly, including ObjectId, Date and Decimal128', async () => {
+    const docs = fixtures();
+    // Two collections: one would not prove the listing covers more than its first entry.
+    await scratch.collection(A).drop().catch(() => {});
+    await scratch.collection(B).drop().catch(() => {});
+    await scratch.collection(A).insertMany(docs);
+    await scratch.collection(B).insertMany([{ _id: new mongoose.mongo.ObjectId(), note: 'second collection' }]);
+
+    const outDir = caseDir('roundtrip');
+    const manifest = await createBackup({ db: scratch, outDir, databaseName: SCRATCH_DB });
+
+    assert.equal(manifest.format, BACKUP_FORMAT);
+    assert.equal(manifest.database, SCRATCH_DB);
+    const names = manifest.collections.map((entry) => entry.name);
+    assert.deepEqual(names, [...names].sort(), 'collections are listed in sorted order, deterministically');
+    assert.ok(names.includes(A) && names.includes(B), 'both seeded collections are in the dump');
+    const entryA = manifest.collections.find((entry) => entry.name === A);
+    assert.equal(entryA.count, docs.length);
+    assert.match(entryA.sha256, /^[0-9a-f]{64}$/);
+    assert.equal(manifest.totals.documents, docs.length + 1);
+
+    // Destroy the originals — a restore tested against rows that are already there proves nothing.
+    await scratch.collection(A).drop();
+    await scratch.collection(B).drop();
+
+    const result = await restoreBackup({ db: scratch, dir: outDir });
+    assert.equal(result.insertedTotal, manifest.totals.documents);
+
+    const restored = await scratch.collection(A).find({}).toArray();
+    assert.equal(restored.length, docs.length);
+    for (const original of docs) {
+      const match = restored.find((doc) => String(doc._id) === String(original._id));
+      assert.ok(match, `document ${String(original._id)} came back`);
+      assert.ok(ejsonEqual(original, match), 'the restored document is byte-identical in canonical form');
+    }
+    assert.equal(restored[1].unit.constructor.name, 'Decimal128', 'Decimal128 survives as Decimal128');
+    assert.ok(restored[0].seen instanceof Date, 'a Date survives as a Date');
+  });
+
+  it('the comparison helper can fail — otherwise every comparison above is vacuous', () => {
+    const [first, second] = fixtures();
+    assert.ok(ejsonEqual(first, { ...first }), 'control: equal documents compare equal');
+    assert.ok(!ejsonEqual(first, second), 'control: different documents compare different');
+    assert.ok(
+      !ejsonEqual(first, { ...first, quantity: first.quantity + 1 }),
+      'control: a changed field is detected'
+    );
+  });
+
+  it('a corrupted file is refused BEFORE anything is dropped', async () => {
+    await scratch.collection(A).drop().catch(() => {});
+    await scratch.collection(B).drop().catch(() => {});
+    await scratch.collection(A).insertMany(fixtures());
+    const outDir = caseDir('corrupt');
+    await createBackup({ db: scratch, outDir, databaseName: SCRATCH_DB });
+
+    // Flip one byte inside the gzip stream: the file still exists and still has the right
+    // name, which is exactly the corruption a filename-based check misses.
+    const target = path.join(outDir, `${A}.jsonl.gz`);
+    const bytes = await readFile(target);
+    bytes[Math.floor(bytes.length / 2)] ^= 0xff;
+    await writeFile(target, bytes);
+
+    const sentinel = { _id: new mongoose.mongo.ObjectId(), note: 'live row that must survive' };
+    await scratch.collection(A).insertOne(sentinel);
+
+    await assert.rejects(
+      () => restoreBackup({ db: scratch, dir: outDir }),
+      (error) => {
+        assert.ok(error instanceof BackupIntegrityError, `expected an integrity error, got ${error?.name}`);
+        assert.match(error.message, /SHA-256/);
+        assert.match(error.message, /Nothing was restored/);
+        return true;
+      }
+    );
+
+    const after = await scratch.collection(A).find({}).toArray();
+    assert.ok(
+      after.some((doc) => String(doc._id) === String(sentinel._id)),
+      'the refusal happened before the drop — the live row is still there'
+    );
+  });
+
+  it('a file missing from disk is refused, and an empty manifest is not a restore point', async () => {
+    const outDir = caseDir('missing');
+    const manifest = await createBackup({ db: scratch, outDir, databaseName: SCRATCH_DB });
+
+    await rm(path.join(outDir, `${A}.jsonl.gz`));
+    await assert.rejects(
+      () => verifyBackup(outDir, manifest),
+      (error) => error instanceof BackupIntegrityError && /not on disk/.test(error.message),
+      'a manifest entry with no file fails verification'
+    );
+
+    const emptyDir = caseDir('empty-manifest');
+    await createBackup({ db: scratch, outDir: path.join(emptyDir, 'inner'), databaseName: SCRATCH_DB });
+    await writeFile(path.join(emptyDir, MANIFEST_NAME), JSON.stringify({ ...manifest, collections: [] }));
+    await assert.rejects(
+      () => readManifest(emptyDir),
+      (error) => error instanceof BackupSafetyError && /lists no collections/.test(error.message),
+      'an empty backup is refused as a restore source'
+    );
+  });
+
+  it('a dry run verifies without writing', async () => {
+    await scratch.collection(A).drop().catch(() => {});
+    await scratch.collection(B).drop().catch(() => {});
+    await scratch.collection(A).insertMany(fixtures());
+    const outDir = caseDir('dry');
+    await createBackup({ db: scratch, outDir, databaseName: SCRATCH_DB });
+    await scratch.collection(A).drop();
+
+    const result = await restoreBackup({ db: scratch, dir: outDir, dryRun: true });
+    assert.ok(result.verified.length >= 1, 'every file was verified in the dry run');
+    assert.equal(result.insertedTotal, 0);
+
+    const stillGone = await scratch.listCollections({ name: A }, { nameOnly: true }).toArray();
+    assert.equal(stillGone.length, 0, 'a dry run writes nothing at all');
+  });
+
+  it('writes a manifest a reader can trust: format, hashes, totals', async () => {
+    // Each case seeds what it needs: the dry-run case above deliberately leaves the
+    // scratch database empty, and `createBackup` refusing an empty database is itself a
+    // property under test (below). Depending on a sibling's leftovers would make this
+    // case's result depend on test order.
+    await scratch.collection(A).drop().catch(() => {});
+    await scratch.collection(A).insertMany(fixtures());
+    const outDir = caseDir('manifest');
+    const manifest = await createBackup({ db: scratch, outDir, databaseName: SCRATCH_DB });
+
+    const onDisk = JSON.parse(await readFile(path.join(outDir, MANIFEST_NAME), 'utf8'));
+    assert.deepEqual(onDisk, manifest, 'the file on disk is the manifest that was returned');
+    assert.equal(onDisk.totals.collections, onDisk.collections.length);
+    assert.equal(
+      onDisk.totals.documents,
+      onDisk.collections.reduce((sum, entry) => sum + entry.count, 0)
+    );
+    assert.equal((await verifyBackup(outDir, onDisk)).length, onDisk.collections.length);
+  });
+
+  it('refuses to produce a backup of an empty database', async () => {
+    const emptyDb = mongoose.connection.getClient().db('inventoryai_ops1_empty_db');
+    await emptyDb.dropDatabase().catch(() => {});
+    try {
+      await assert.rejects(
+        () => createBackup({ db: emptyDb, outDir: caseDir('empty-db'), databaseName: 'inventoryai_ops1_empty_db' }),
+        (error) => error instanceof BackupSafetyError && /no collections to back up/.test(error.message),
+        'an empty dump is refused rather than written as a restore point'
+      );
+    } finally {
+      await emptyDb.dropDatabase().catch(() => {});
+    }
+  });
+
+  it('a backup directory is named for the database and is refused inside the repository', () => {
+    assert.equal(backupDirectoryName('inventoryai_prod_db', new Date('2026-10-18T14:25:30.000Z')), 'inventoryai_prod_db-20261018T142530Z');
+    assert.equal(backupDirectoryName('db', new Date('2026-01-02T03:04:05.006Z')), 'db-20260102T030405Z');
+
+    assert.throws(
+      () => assertBackupDir(path.join(REPO_ROOT, 'backups'), { repoRoot: REPO_ROOT }),
+      (error) => error instanceof BackupSafetyError && /inside the repository/.test(error.message)
+    );
+    assert.throws(
+      () => assertBackupDir(REPO_ROOT, { repoRoot: REPO_ROOT }),
+      (error) => error instanceof BackupSafetyError && /repository root/.test(error.message)
+    );
+    assert.throws(
+      () => assertBackupDir('', { repoRoot: REPO_ROOT }),
+      (error) => error instanceof BackupSafetyError && /no output directory/.test(error.message)
+    );
+    assert.equal(assertBackupDir(tmpDir, { repoRoot: REPO_ROOT }), path.resolve(tmpDir));
+
+    assert.equal(assertConfirm(BACKUP_CONFIRM_PHRASE, BACKUP_CONFIRM_PHRASE), true);
+    assert.equal(assertConfirm(RESTORE_CONFIRM_PHRASE, RESTORE_CONFIRM_PHRASE), true);
+    assert.throws(
+      () => assertConfirm('', RESTORE_CONFIRM_PHRASE),
+      (error) => error instanceof BackupSafetyError && /confirmation phrase/.test(error.message)
+    );
+    assert.throws(
+      () => assertConfirm(BACKUP_CONFIRM_PHRASE, RESTORE_CONFIRM_PHRASE),
+      'the two commands do not accept each other’s phrase'
+    );
+  });
+
+  it('a restore may only ever target a disposable database', () => {
+    for (const allowed of RESTORE_ALLOWED_DATABASES) {
+      assert.equal(assertRestoreTarget(allowed), allowed);
+    }
+    assert.deepEqual(
+      [...RESTORE_ALLOWED_DATABASES].sort(),
+      [DATABASE_NAMES.test, DATABASE_NAMES.development].sort(),
+      'the restore allowlist is exactly the disposable set the cleanup tools own'
+    );
+    for (const forbidden of [
+      DATABASE_NAMES.production,
+      'inventoryai_live_db',
+      'inventoryai_test_db_backup',
+      '',
+      'InventoryAI_Test_DB',
+    ]) {
+      assert.throws(
+        () => assertRestoreTarget(forbidden),
+        (error) => error instanceof BackupSafetyError,
+        `"${forbidden}" must be refused`
+      );
+    }
+    assert.throws(
+      () => assertRestoreTarget(DATABASE_NAMES.production),
+      (error) => /production database/.test(error.message),
+      'a production target is refused for the real reason, not merely as an unknown name'
+    );
+  });
+});

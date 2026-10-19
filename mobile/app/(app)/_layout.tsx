@@ -1,8 +1,11 @@
 import { Redirect, Stack } from 'expo-router';
+import { StyleSheet, View } from 'react-native';
 
 import { CenterLoader } from '../../components/ListState';
+import ProfileIcon from '../../components/ProfileIcon';
 import SignOutIcon from '../../components/SignOutIcon';
 import { useSession } from '../../lib/auth';
+import { spacing } from '../../lib/theme';
 import { useTheme } from '../../lib/theme-context';
 
 /**
@@ -17,6 +20,10 @@ import { useTheme } from '../../lib/theme-context';
  * app. Screens that declare their own `<Stack.Screen options={{ title }} />`
  * keep doing so — those set the title only and inherit these themed options.
  */
+const styles = StyleSheet.create({
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+});
+
 export default function AppLayout() {
   const { status } = useSession();
   const { colors } = useTheme();
@@ -50,9 +57,21 @@ export default function AppLayout() {
       <Stack.Screen name="suppliers" options={{ title: 'Suppliers' }} />
       <Stack.Screen
         name="inventory"
-        options={{ title: 'Inventory', headerRight: () => <SignOutIcon /> }}
+        options={{
+          title: 'Inventory',
+          // Inventory is STAFF's home screen — the Dashboard (and its Profile tile)
+          // is not reachable for them — so the account link lives in this header
+          // too, beside sign out.
+          headerRight: () => (
+            <View style={styles.headerActions}>
+              <ProfileIcon />
+              <SignOutIcon />
+            </View>
+          ),
+        }}
       />
       <Stack.Screen name="inventory/[id]" options={{ title: 'Stock Record' }} />
+      <Stack.Screen name="restock" options={{ title: 'Restock' }} />
       <Stack.Screen name="purchase-orders/index" options={{ title: 'Purchase Orders' }} />
       <Stack.Screen name="purchase-orders/[id]/index" options={{ title: 'Purchase Order' }} />
       <Stack.Screen name="purchase-orders/[id]/receive" options={{ title: 'Receive Stock' }} />

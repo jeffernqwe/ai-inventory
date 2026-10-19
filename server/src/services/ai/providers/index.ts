@@ -2,19 +2,25 @@
  * AI provider registry.
  *
  * selectProvider() resolves the provider named by AI_PROVIDER at call time by
- * reading process.env lazily (see aiConfig.ts for why). Built-in providers are
- * Claude, Gemini and openrouter (an Anthropic-compatible gateway, see
- * openrouterProvider.ts); test suites register a 'fake' provider via
- * registerProvider so the full orchestration loop and routes can be exercised
- * without an API key.
+ * reading process.env lazily (see aiConfig.ts for why). ONE built-in provider
+ * exists: `openrouter`, an Anthropic-compatible gateway (see openrouterProvider.ts).
+ * Test suites register a 'fake' provider via registerProvider so the full
+ * orchestration loop and routes can be exercised without an API key.
+ *
+ * AI-25 (owner decision, 2026-10-19) — the direct Claude and Gemini providers were
+ * REMOVED, not disabled. Both were reachable through OpenRouter as MODEL choices, so the
+ * direct implementations bought no capability, while they cost two API keys, two model
+ * variables, a second wire mapping and parser, and a production path nothing exercised (a
+ * "fallback" that would need its own account and billing to be real). The abstraction is
+ * deliberately KEPT: `AIProvider`, this registry and the shared Anthropic-compatible wire
+ * all remain — OpenRouter is built on that wire — so restoring a direct provider later is
+ * one small factory plus one entry here, and git keeps the Gemini mapping if it is wanted.
  *
  * Never expose provider keys to the mobile app — selection happens server-side
  * and only the resulting text reaches the client.
  */
 
 import { AiNotConfigured } from '../aiErrors.ts';
-import { createClaudeProvider } from './claudeProvider.ts';
-import { createGeminiProvider } from './geminiProvider.ts';
 import { createOpenrouterProvider } from './openrouterProvider.ts';
 
 /**
@@ -41,7 +47,7 @@ export interface ToolDefinition {
 
 /**
  * One entry of the neutral message list handed to a provider (the contract is
- * spelled out in claudeProvider.js). `toolCalls` belongs to assistant turns and
+ * spelled out in anthropicWire.ts). `toolCalls` belongs to assistant turns and
  * `name`/`toolCallId` to tool turns; `content` is a JSON string on a tool turn.
  */
 export interface ProviderMessage {
@@ -127,16 +133,9 @@ const registry = new Map<string, AIProviderFactory>();
  * override (tests) is not covered here; those run outside production.
  */
 const BUILTINS: Record<string, AIProviderEntry> = {
-  claude: {
-    factory: createClaudeProvider,
-    requiredEnv: ['ANTHROPIC_API_KEY'],
-  },
-  gemini: {
-    factory: createGeminiProvider,
-    requiredEnv: ['GEMINI_API_KEY'],
-  },
-  // OpenRouter also demands a model: it fronts hundreds of models with different
-  // tool-calling ability, so there is no safe default to fall back on.
+  // The one shipped provider (AI-25). OpenRouter also demands a model: it fronts
+  // hundreds of models with different tool-calling ability, so there is no safe
+  // default to fall back on.
   openrouter: {
     factory: createOpenrouterProvider,
     requiredEnv: ['OPENROUTER_API_KEY', 'OPENROUTER_BASE_URL', 'AI_MODEL_OPENROUTER'],
@@ -165,7 +164,9 @@ export function providerRequiredEnv(name: unknown) {
 /**
  * Resolve the configured provider. Throws AiNotConfigured when AI_PROVIDER is
  * unset/unknown or the provider's API key is missing, so the chat route can
- * return a clean 503 instead of crashing.
+ * return a clean 503 instead of crashing. An unknown name includes the two
+ * removed built-ins: `claude` and `gemini` are refused as unsupported (AI-25),
+ * never reported as a missing key for a provider that no longer exists.
  */
 export function selectProvider(): AIProvider {
   const raw = (process.env.AI_PROVIDER || '').trim();
@@ -177,7 +178,7 @@ export function selectProvider(): AIProvider {
   const builtin = BUILTINS[name];
   if (builtin) return builtin.factory();
   throw new AiNotConfigured(
-    `The configured AI provider "${raw}" is not supported. Set AI_PROVIDER to "claude", "gemini", or "openrouter".`
+    `The configured AI provider "${raw}" is not supported. Set AI_PROVIDER to "openrouter", or leave it empty to disable the AI assistant.`
   );
 }
 

@@ -2,6 +2,8 @@ import express from 'express';
 import helmet from 'helmet';
 
 import env from './config/env.ts';
+import { INSTANCE_ID, INSTANCE_ID_HEADER } from './config/instanceIdentity.ts';
+import { recordResponse } from './config/operationalCounters.ts';
 import { createCors } from './middlewares/cors.ts';
 import requestId from './middlewares/requestId.ts';
 import requestLogger from './middlewares/httpLogger.ts';
@@ -73,6 +75,26 @@ export function createApp({
   // log then records one structured line per completed request.
   app.use(requestId);
   app.use(requestLogger({ enabled: requestLogging }));
+
+  // 2026-10-18: every response names the process that wrote it. This is what makes a stale server on the same
+  // port detectable at all (see config/portGuard.ts) — a readiness probe answers identically from either process,
+  // so the boot asks the port to say its own instance id and compares it with its own. It is an identity, not a
+  // credential: nothing authorizes on it and it changes on every restart. Registered before any route so error
+  // and 404 responses carry it too.
+  app.use((_req, res, next) => {
+    res.setHeader(INSTANCE_ID_HEADER, INSTANCE_ID);
+    next();
+  });
+
+  // OPS-2: count every finished response, including the ones the error handler and
+  // `notFound` produce. `finish` fires after the response is sent, so this can never delay
+  // a response or change one — and it is the reason the counter sees 5xx answers at all,
+  // which is the signal an outside watcher polls `/api/health` for. See
+  // config/operationalCounters.ts for what is deliberately NOT published.
+  app.use((_req, res, next) => {
+    res.on('finish', () => recordResponse(res.statusCode));
+    next();
+  });
 
   // M4: only trust a known number of reverse-proxy hops when explicitly
   // configured (TRUST_PROXY, numeric hop count). Default 0 = trust no proxy:

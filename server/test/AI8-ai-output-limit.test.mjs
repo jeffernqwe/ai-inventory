@@ -92,11 +92,13 @@ unitSuite('AI-8 a truncated answer is marked (DB-free)', () => {
   });
 
   it('still refuses a truncated response that carries nothing usable', () => {
-    // A guard, not a driver: the existing throw is about a response with no text and no
-    // tool call, and widening the marker must not turn that failure into a success.
+    // A guard, not a driver: the throw is about a response with no text and no tool
+    // call, and widening the marker must not turn that failure into a success. The
+    // CLASS is AI-10's (an output limit, not a provider error); what AI-8 owns here is
+    // that the refusal still happens at all.
     assert.throws(
       () => parseAnthropicResponse({ content: [], stop_reason: 'max_tokens' }),
-      (err) => err.name === 'AiProviderError',
+      (err) => err.name === 'AiOutputLimit' && err.code === 'AI_OUTPUT_LIMIT',
     );
   });
 

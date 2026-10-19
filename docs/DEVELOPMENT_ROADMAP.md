@@ -6864,7 +6864,9 @@ Next: **both owner decisions this section was waiting on are taken (2026-10-11)*
 
 | **ISS-27** | **High** | **A table with three columns or fewer renders as a collapsed strip — the answer is unreadable and the message area looks empty** — the assistant was asked for a two-column table; the answer was stored correctly and returned by the API, but on the phone its cells measured **48 px wide and up to 1 452 px tall**, the whole answer sat in a ~200 px column, the question was pushed above the viewport, and the screen presented as **blank** | Found **on the device 2026-10-14**, minutes after §27BS verified the four-column card path: the accessibility tree (`uiautomator`) showed real `android.widget.TextView` cells of the stored answer carrying those bounds, while a pixel scan at threshold 40 found **no ink at all** — it was a threshold lowered to 20 that turned *"nothing is drawn"* into *"a collapsed column is drawn"*. The **card** path escaped the same defect only because a card title is long enough to give the bubble a wide intrinsic width | **FIXED 2026-10-14 — §27BT (mobile only).** A table-bearing answer now takes the full bubble width (`bubbleWide: { flex: 1 }`, still capped by `maxWidth: '84%'`), so the grid's `flex: 1` columns have a width to share; applied to **both** rendering paths, because the card path's escape was luck rather than design. `isTableAnswer` is an O(n) `includes('|')` — a superset of the parser's own detection, so the keystroke-driven render path pays nothing. **5 cases** in `mobile/__tests__/iss-27-narrow-table-width.test.tsx`, the ★ case **watched failing first** (`Expected: 1 / Received: undefined`); mobile **60 suites / 807 tests / 0 failures**, `tsc`/`eslint` clean. **DEVICE-VERIFIED:** the same stored answer re-rendered after the fix and the tree now measures `Product Name [102,1086][566,1182]` and `Quantity [565,1086][821,1182]` — **464 × 96** and **256 × 96** — with all five rows on screen, every `0` present, and the card answer unchanged |
 | **ISS-28** | Low → **`[✓]`** | **A continued conversation never moved up the list, and its displayed time never advanced** — the conversation list is sorted on `updatedAt` and each row renders it, but no write path touched a conversation when a message was added, so `updatedAt` was frozen at creation and "newest first" was in practice "newest *created* first" | Found **on the device 2026-10-14** (§27BT: a conversation continued at 17:14 was still listed as 17:02) and traced to the missing update path on `AIConversation`; the Phase 20F index comment had already anticipated it | **FIXED 2026-10-14 — AI-7 (§27BU), server only:** a persisted turn now advances the conversation's `updatedAt`, on the success path only, because a failed turn persists nothing. 4 cases in `server/test/AI7-conversation-activity.test.mjs`, the ★ case watched failing first; CI green. **DEVICE-VERIFIED:** continuing the oldest of four conversations moved it from last to first with its time advanced **16:22 → 18:11**, and continuing the third did it again **17:02 → 18:17** |
-| **ISS-29** | Medium → **`[✓]`** | **An answer cut off by `AI_MAX_OUTPUT_TOKENS` is stored and served as a complete one** — the turn reaches its cap, the text stops mid-list, and nothing marks it: the member cannot tell a truncated answer from a finished one, and neither the log nor the HTTP response says so | Found **on the device 2026-10-14** (§27BU): the low-stock answer's `out=800` is exactly the default cap and its body ends mid-list (`3. Ultra Sponge 18982 - available 2`), yet it was stored and rendered as an answer. The guard in `parseAnthropicResponse` throws only when `stop_reason === 'max_tokens'` **and there is no text**, so a truncation that carries text passes through by construction. The very next answer used `out=788` and finished, so the frequency is unmeasured | **OPEN — recorded, not fixed (§27BU).** The remedy is a decision rather than a patch: widen the guard into a third degraded reason with its own sentence, or raise the cap and accept the added latency and cost. **FIXED 2026-10-15 — AI-8 (§27BV), server + mobile.** The cap is now **reported by both provider wires** (`stop_reason === 'max_tokens'`, `finishReason === 'MAX_TOKENS'`) instead of only being tested for whether to throw, which is why a truncation carrying any text was invisible at every layer. The partial answer is **kept** and the turn marked `OUTPUT_LIMIT` — a third `DegradedReason` deliberately **not** in the canned-sentence table, because replacing a partial answer would throw away the useful half — and the mark is persisted on the message and returned on reload, so a reopened thread is never cleaner than the screen that produced it. The sentence lives on the client, beside the answer it qualifies, so the stored content stays the model's own words. 9 server cases + 6 mobile cases, each written first and watched failing; both halves proved able to fail by mutation with the files restored **byte-identically**. **DEVICE-VERIFIED 2026-10-15 (§27BV)** with a temporary 40-token cap: `out=40` exactly at the cap, `[ai] degraded turn reason=OUTPUT_LIMIT` beside `outcome=degraded … out=40`, the partial answer **and** the note on the phone, and the same note still there after reopening the thread from the hub — the store and the loaded-history path both keep the mark. The `.env` was restored byte-identically and the backend restarted, so the shipped cap of 800 is what is deployed. **The cap itself is DECIDED, not merely unchanged — §27BY**: it stays at **800**, because both turns that reached it had already spent **48.6 s and 57.4 s of the 60 s turn budget**, so raising it would convert a *marked partial answer* into a `504 AI_TIMEOUT` with **no answer at all**, and the derived generation rate (10–42 tokens/s) is recorded with the decision; **the frequency is still unmeasured** |
+| **ISS-29** | Medium → **`[✓]`** | **An answer cut off by `AI_MAX_OUTPUT_TOKENS` is stored and served as a complete one** — the turn reaches its cap, the text stops mid-list, and nothing marks it: the member cannot tell a truncated answer from a finished one, and neither the log nor the HTTP response says so | Found **on the device 2026-10-14** (§27BU): the low-stock answer's `out=800` is exactly the default cap and its body ends mid-list (`3. Ultra Sponge 18982 - available 2`), yet it was stored and rendered as an answer. The guard in `parseAnthropicResponse` throws only when `stop_reason === 'max_tokens'` **and there is no text**, so a truncation that carries text passes through by construction. The very next answer used `out=788` and finished, so the frequency is unmeasured | **OPEN — recorded, not fixed (§27BU).** The remedy is a decision rather than a patch: widen the guard into a third degraded reason with its own sentence, or raise the cap and accept the added latency and cost. **FIXED 2026-10-15 — AI-8 (§27BV), server + mobile.** The cap is now **reported by both provider wires** (`stop_reason === 'max_tokens'`, `finishReason === 'MAX_TOKENS'`) instead of only being tested for whether to throw, which is why a truncation carrying any text was invisible at every layer. The partial answer is **kept** and the turn marked `OUTPUT_LIMIT` — a third `DegradedReason` deliberately **not** in the canned-sentence table, because replacing a partial answer would throw away the useful half — and the mark is persisted on the message and returned on reload, so a reopened thread is never cleaner than the screen that produced it. The sentence lives on the client, beside the answer it qualifies, so the stored content stays the model's own words. 9 server cases + 6 mobile cases, each written first and watched failing; both halves proved able to fail by mutation with the files restored **byte-identically**. **DEVICE-VERIFIED 2026-10-15 (§27BV)** with a temporary 40-token cap: `out=40` exactly at the cap, `[ai] degraded turn reason=OUTPUT_LIMIT` beside `outcome=degraded … out=40`, the partial answer **and** the note on the phone, and the same note still there after reopening the thread from the hub — the store and the loaded-history path both keep the mark. The `.env` was restored byte-identically and the backend restarted, so the shipped cap of 800 is what is deployed. **The cap itself is DECIDED, not merely unchanged — §27BY**: it stays at **800**, because both turns that reached it had already spent **48.6 s and 57.4 s of the 60 s turn budget**, so raising it would convert a *marked partial answer* into a `504 AI_TIMEOUT` with **no answer at all**, and the derived generation rate (10–42 tokens/s) is recorded with the decision; **the frequency is still unmeasured** *(Amended 2026-10-19 — **§27DM**: the cap it decided is raised to **1200**, on device evidence rather than preference — three free-tier turns hit exactly 800, two of them while obeying the prompt's own five-item bound, and the same history question then completed at `out=1078` in **20.7 s**. §27BY's slow-path caveat is carried forward in that record, not dropped: at the 13.9–16.5 tok/s it measured, a 1200-token answer cannot finish inside the 60 s turn budget.)* |
+| **ISS-31** | **High** | **The Inventory screen's search and status filter take 14–29 s at 50 000 products** — `inventory.listRows`' filtered path runs the product `$lookup` once per inventory row *before* the page window, so every filter shape pays for the whole tenant while the unfiltered list costs 0.9 s on the same data | Measured 2026-10-18 on the 50 000-product perf tenant (`6acfc07c…`) through the service the screen calls (`skip: 0, limit: 25`): **no filter 922 ms** · **`q` "a" 25 234 ms** (71 964 rows) · **`q` "pro" 19 088 ms** · **`q` "Professional Towel" 14 812 ms** (499 rows) · **`status` ACTIVE 28 950 ms** · **`q` "pro" + ACTIVE 17 516 ms**. The 499-row case is the tell: the cost is the **partition** (100 143 joined rows), not the result. The same probe measured the AI tool `getInventory` on this path at **25 346 ms** | **PARTIALLY FIXED 2026-10-18 — §27DD.** The `q`/`status` page is now resolved **product-first** (one products query, then an index read over `productId`, joined only for the returned rows, counted separately): **922 → 693 ms** unfiltered, `q` "a" **25 234 → 1 561 ms**, `q` "pro" **19 088 → 758 ms**, `status` ACTIVE **28 950 → 1 019 ms**, page 2 **28 521 → 831 ms**, and the assistant's `getInventory {q:"a"}` **25 346 → 1 342 ms** — with **`perf:golden` 17/17 byte-identical** and the Phase 20A ordering/paging contract extended to both filtered shapes. **What remains open:** the id resolution (0.4–0.8 s of each filtered page) is now the largest term and is bounded by BSON as catalogues grow. **The `lowStock`/`outOfStock` half was fixed the same day — §27DE:** those shapes were ~20 s because of the **`$expr` pipeline `$lookup`** itself (19 965 ms vs **2 166 ms** for the simple `localField`/`foreignField` form on the same partition), so both lookups are now the simple form with an explicit tenant `$filter` where the `$expr` match used to be — `lowStock` **20 361 → 3 801 ms**, `outOfStock` **2 612 ms**, `q`+`lowStock` **2 554 ms**, still a full-partition pass but no longer a per-row fan-out. `perf:golden` 17/17 byte-identical again, and a new isolation case writes a row that points at **another business's** product and asserts it exposes nothing |
+| **ISS-32** | **High → `[✓]`** | **Four assistant tools and the products low-stock list failed outright once the catalogue passed ~130 000 products** — `getLowStockProducts`, `getOutOfStockProducts`, `getReorderNeededProducts` and `getProductsByLocation` answered `TOOL_ERROR (“The tool failed to run”)`, and `GET /api/products?lowStock=true` — the source of the **Restock** screen and the Inventory low-stock filter — answered 500 | Measured 2026-10-18 on a 131 000-product tenant (261 918 inventory rows): MongoDB's own sentence, logged by the tool layer, was **`Exceeded memory limit for $group, but didn't allow external sort. Pass allowDiskUse:true to opt in.`** The availability merge (`availabilityStages`, AI-3) is one `$group` over the union of the catalogue and its inventory rows, and `$group` memory is per GROUP — so the payload, not the row count, was the cost: it carried the **whole product document** (`__product: '$$ROOT'`) into a group with one entry per product, i.e. the catalogue in RAM. | **FIXED 2026-10-18 — §27DF.** The merge carries four scalars (`__product` as a `$literal` presence marker, `minimumStock`, `createdAt`, plus the two inventory sums) and the page — at most `limit` rows by construction — is hydrated afterwards (`hydrateStockPage`), with `allowDiskUse` on both paged aggregates as a backstop. **The four tools now answer**: 2.1–2.7 s each on the same tenant, **`perf:golden` 17/17 byte-identical** before and after (payload hash + total). The same measurement run fixed the **inventory list**: `outOfStock` is row-local and no longer takes the per-row product join (**5.4 s → 0.6 s** at 131 000 products) and `lowStock` prefilters against the tenant's largest `minimumStock` above the join (11.3 s → **4.8 s**), both re-verified byte-identical. Guard `server/test/scale-stock-query-shape.test.mjs` pins the shape with an in-memory positive control per property. **Still open at this size:** `lowStock` remains a full-partition pass (4.8 s at 262 000 rows, 8.9 s at 523 918) because the per-row predicate needs each product's minimum, and the **location-filtered inventory page** was seen taking 2.4 s at 131 000 products when the planner chooses a blocking sort — **FIXED 2026-10-18, §27DG:** the dedicated `{ businessId, locationId, updatedAt: -1, _id: -1 }` index is declared and built, `explain` now shows `IXSCAN` on it with no `SORT` stage and `optimizationTimeMillis: 0`, `perf:golden` stayed 17/17 byte-identical, and the device's Location filter answered `GET /api/inventory` **200 in 365.5 ms**. The slow plan itself **could not be re-measured** — the tenant that showed it was deleted to free the cluster — so that fix is prevention with a captured `explain`, stated as such. |
 
 **Correctly recorded as open or deferred — not issues:** L-17 (recovery-mail delivery never inspected end-to-end),
 B1's residual timing term, B2 / E3 / OD-10 (V4), owner decisions O-5 / O-6 / O-10 / O-11, P-4 (device-time),
@@ -6872,7 +6874,7 @@ P-6 + Gate 1 + iOS app registration (environment-blocked), and the new-identity 
 
 ## Pending
 
-**Fixes:** ~~ISS-21~~ (**FIXED and device-verified 2026-10-12 — §27BD/§27BE**: the 15 s client abort against the AI path's 60 s budget; only **AI-1's abandoned-turn cancellation remains unmeasured on hardware**) · ~~ISS-23~~ (**FIXED 2026-10-13 — AI-2, §27BF**: raw Markdown stripped at the assistant bubble) · ~~ISS-24~~ (**FIXED 2026-10-13 — AI-3, §27BG**: the assistant's tool queries no longer pay for the whole tenant partition — 9 of 9 tools ≤ 650 ms at 10 000 products, with the answers proven **byte-identical** by `perf:golden`) · **ISS-22** (**code half complete 2026-10-14 — §27BF + §27BL**: the zero-length `200` is retried once and a degraded turn is marked and logged, so it is countable, **and** a reached limit is now its own `429 AI_QUOTA_EXCEEDED` with its own sentence instead of a `502` outage — the distinct code and sentence this row asked for; **still open as the provider-tier decision alone**, which the owner declined to spend on) · ~~ISS-06~~ (**CLOSED 2026-10-12 — §27AZ**, measured from the built APK: `compileSdk` 36 / `minSdk` 24 / `targetSdk` 36, no raise needed) · ~~ISS-25~~ (**FIXED 2026-10-13 — AI-4, §27BH**: the answer is now rendered rather than de-markered — tables, headings and lists become real layout with no marker on screen; the server and the prompt are untouched, so latency and token cost are unchanged; **DEVICE-VERIFIED 2026-10-14 — §27BS**: two real stored answers were read on the phone, one of them a **4-column, 5-row table** the assistant was asked for directly — rendered as **one card per row**, the row's own name as the title and the header's other columns as label/value lines, with the header row not drawn as a row, **no `|`, no `------` and no `**` anywhere on the screen**, the closing sentence as prose, and the one-character `0` measured **drawn on all five cards** (267 ink pixels, bbox `428..445`, the same glyph signature five times). What stays open is the judgement and the sample, not the behaviour: *"does it read well"* is the owner's call, and the stored **6-column** table — which belongs to another business, so the phone cannot see it — has not been seen on hardware. *(Corrected 2026-10-15: the **grid** path this row also listed as unseen **was** seen — §27BT's device run re-rendered a two-column table as a **464 × 96 / 256 × 96** grid with every value on screen, which is the ≤ 3-column path. The stale clause was left in the row for two days; only the 6-column card case is genuinely unverified, and it is the remaining measurement this record names. **Attempted on hardware 2026-10-15, BLOCKED for an instrument reason, then MEASURED — §27CE:** the first attempt recorded zero requests reaching the local backend while the screen still held data, and inferred from `mobile/eas.json` that the installed build was talking to the deployed backend. **That inference was wrong**, and the mechanism is worth keeping: `adb shell uiautomator dump` was being read back through paths Git Bash and Node disagree about (`/sdcard/…` mangled into a Windows path; Node's `/tmp` is `C:\tmp` while the shell's is `AppData\Local\Temp`), so every "screen" read back was a **stale file from an earlier session** — and the app was in fact sitting on the **Expo dev launcher**, not running at all, which is why no request could arrive. Once the dump was fixed and a Metro-launched **development** build was connected over `adb reverse` — the same path §27BS and §27BT used — the phone authenticated against the local server and the stored **six-column** answer was brought to a screen: **3 cards, 6 columns, title 647 px, labels 288 px, values 359 px, and zero pipes, rules or `**` anywhere in the dump** (§27CE). The case this row names as its remaining measurement is therefore **closed on hardware**; what stays open is the owner's judgement of how it reads, and the sample size.)* · ~~ISS-28~~ (**FIXED and device-verified 2026-10-14 — AI-7, §27BU**: a continued conversation now rises to the top of the list and its displayed time advances — observed twice on the phone, **16:22 → 18:11** and **17:02 → 18:17**) · **ISS-29** (**OPEN, recorded 2026-10-14 — §27BU**: an answer truncated by the 800-token cap is served as a complete one, because the existing `max_tokens` guard fires only when the response carries no text; the remedy is a decision, not a patch) · ISS-17/ISS-18 (decided and recorded, no action pending) · ISS-13 (**fixed, §27AM**; its device half is now **measured as far as the hardware allows — §27CE**: the file the fix controls is `MediaBox [0 0 594.96 339.12]`, the label page, while the print dialog's page is the OS's at 612×792 and cannot be set from the app; only the **print → paper → scan** round trip still needs a printer) · ~~ISS-27~~ (**FIXED and device-verified 2026-10-14 — §27BT**: a two- or three-column table collapsed to **48 px cells** and made the whole message area look empty; a table answer now takes the full bubble width, and the same stored answer re-rendered as a **464 × 96 / 256 × 96** two-column grid with every value on screen) · ~~ISS-26~~ (**FIXED 2026-10-13, recorded §27BQ**: the assistant's LaTeX now decodes into plain text instead of reaching the screen as source — no dependency, no renderer, no prompt change, so no per-turn token cost; **device-verified 2026-10-14, and the device found the decoder hiding a different number — §27BS**: `\frac{17 + 5}{113}` rendered as `17+ 5/113` (17.04 instead of the 19.5% the model computed), so a fraction side carrying an operator now keeps its brackets, and the same rule covers `× · ÷ /` because `\frac{1}{2 \times 3}` decoded to `1/2 × 3` — one and a half instead of one sixth). *(ISS-01 fixed in #36; ISS-16 disposed in #37; ISS-02 remediated — §27AJ; the 7 advisories dispositioned — §27AK; all 2026-10-10.)*
+**Fixes:** ~~ISS-21~~ (**FIXED and device-verified 2026-10-12 — §27BD/§27BE**: the 15 s client abort against the AI path's 60 s budget. **§27BE's residual is CLOSED:** the abandoned-turn cancellation was **measured on hardware 2026-10-17 — §27CM** — Stop on a held stub produced `outcome=AI_ABANDONED` with `calls=1` and the stub logging *"caller had already gone away; nothing sent"*, so the abort closed the **upstream** connection; **measured again in §27CW**, which also observed that an aborted turn leaves **no** conversation in the member's list. The one path still unprovoked is §27CM's other half — a stop landing *after* the model had already finished — where the note's promise rests on Phase 07E / M7 and stays untested end-to-end) · ~~ISS-23~~ (**FIXED 2026-10-13 — AI-2, §27BF**: raw Markdown stripped at the assistant bubble) · ~~ISS-24~~ (**FIXED 2026-10-13 — AI-3, §27BG**: the assistant's tool queries no longer pay for the whole tenant partition — 9 of 9 tools ≤ 650 ms at 10 000 products, with the answers proven **byte-identical** by `perf:golden`) · **ISS-22** (**code half complete 2026-10-14 — §27BF + §27BL**: the zero-length `200` is retried once and a degraded turn is marked and logged, so it is countable, **and** a reached limit is now its own `429 AI_QUOTA_EXCEEDED` with its own sentence instead of a `502` outage — the distinct code and sentence this row asked for; **still open as the provider-tier decision alone**, which the owner declined to spend on) · ~~ISS-06~~ (**CLOSED 2026-10-12 — §27AZ**, measured from the built APK: `compileSdk` 36 / `minSdk` 24 / `targetSdk` 36, no raise needed) · ~~ISS-25~~ (**FIXED 2026-10-13 — AI-4, §27BH**: the answer is now rendered rather than de-markered — tables, headings and lists become real layout with no marker on screen; the server and the prompt are untouched, so latency and token cost are unchanged; **DEVICE-VERIFIED 2026-10-14 — §27BS**: two real stored answers were read on the phone, one of them a **4-column, 5-row table** the assistant was asked for directly — rendered as **one card per row**, the row's own name as the title and the header's other columns as label/value lines, with the header row not drawn as a row, **no `|`, no `------` and no `**` anywhere on the screen**, the closing sentence as prose, and the one-character `0` measured **drawn on all five cards** (267 ink pixels, bbox `428..445`, the same glyph signature five times). What stays open is the judgement and the sample, not the behaviour: *"does it read well"* is the owner's call, and the stored **6-column** table — which belongs to another business, so the phone cannot see it — has not been seen on hardware. *(Corrected 2026-10-15: the **grid** path this row also listed as unseen **was** seen — §27BT's device run re-rendered a two-column table as a **464 × 96 / 256 × 96** grid with every value on screen, which is the ≤ 3-column path. The stale clause was left in the row for two days; only the 6-column card case is genuinely unverified, and it is the remaining measurement this record names. **Attempted on hardware 2026-10-15, BLOCKED for an instrument reason, then MEASURED — §27CE:** the first attempt recorded zero requests reaching the local backend while the screen still held data, and inferred from `mobile/eas.json` that the installed build was talking to the deployed backend. **That inference was wrong**, and the mechanism is worth keeping: `adb shell uiautomator dump` was being read back through paths Git Bash and Node disagree about (`/sdcard/…` mangled into a Windows path; Node's `/tmp` is `C:\tmp` while the shell's is `AppData\Local\Temp`), so every "screen" read back was a **stale file from an earlier session** — and the app was in fact sitting on the **Expo dev launcher**, not running at all, which is why no request could arrive. Once the dump was fixed and a Metro-launched **development** build was connected over `adb reverse` — the same path §27BS and §27BT used — the phone authenticated against the local server and the stored **six-column** answer was brought to a screen: **3 cards, 6 columns, title 647 px, labels 288 px, values 359 px, and zero pipes, rules or `**` anywhere in the dump** (§27CE). The case this row names as its remaining measurement is therefore **closed on hardware**; what stays open is the owner's judgement of how it reads, and the sample size.)* · ~~ISS-28~~ (**FIXED and device-verified 2026-10-14 — AI-7, §27BU**: a continued conversation now rises to the top of the list and its displayed time advances — observed twice on the phone, **16:22 → 18:11** and **17:02 → 18:17**) · ~~ISS-29~~ (**FIXED 2026-10-15 — AI-8, §27BV**: the truncation is marked `OUTPUT_LIMIT`, persisted and annotated on screen — seen again on the phone 2026-10-19, §27DM, twice; the cap itself was revisited 2026-10-19 — §27DM — 800 → 1200 on device evidence) · ISS-17/ISS-18 (decided and recorded, no action pending) · ISS-13 (**fixed, §27AM**; its device half is now **measured as far as the hardware allows — §27CE**: the file the fix controls is `MediaBox [0 0 594.96 339.12]`, the label page, while the print dialog's page is the OS's at 612×792 and cannot be set from the app; only the **print → paper → scan** round trip still needs a printer) · ~~ISS-27~~ (**FIXED and device-verified 2026-10-14 — §27BT**: a two- or three-column table collapsed to **48 px cells** and made the whole message area look empty; a table answer now takes the full bubble width, and the same stored answer re-rendered as a **464 × 96 / 256 × 96** two-column grid with every value on screen) · ~~ISS-26~~ (**FIXED 2026-10-13, recorded §27BQ**: the assistant's LaTeX now decodes into plain text instead of reaching the screen as source — no dependency, no renderer, no prompt change, so no per-turn token cost; **device-verified 2026-10-14, and the device found the decoder hiding a different number — §27BS**: `\frac{17 + 5}{113}` rendered as `17+ 5/113` (17.04 instead of the 19.5% the model computed), so a fraction side carrying an operator now keeps its brackets, and the same rule covers `× · ÷ /` because `\frac{1}{2 \times 3}` decoded to `1/2 × 3` — one and a half instead of one sixth). *(ISS-01 fixed in #36; ISS-16 disposed in #37; ISS-02 remediated — §27AJ; the 7 advisories dispositioned — §27AK; all 2026-10-10.)*
 **Upgrades, in issue #32's order:** Expo SDK 58 — **deferred by Gate 0 until Expo promotes it to `latest`** (§27AI records the decision and the runbook; the pins differ from PR #34's set — RN 0.88 family, not 0.87.1) → the React 19 type fixes (ISS-01 is the first of them) → TypeScript 7 →
 jest 30 → ~~the `actions/*` v7 re-pin~~ (**taken early 2026-10-11 — ISS-12 resolved, §27AO**) → ~~`dotenv` 18 and `@types/bcryptjs` 3~~ (**taken 2026-10-11 — §27AP**: `dotenv` 18 taken with the preload path measured; the `@types/bcryptjs` row's premise was wrong — 3.0.0 is a deprecated stub, so the dependency was **removed** instead and `tsc` proves it). **The two that remain are now measured, not pending:** jest 30 arrives *with* the SDK 58 promotion (`jest-expo@58.0.9`), and TypeScript 7 is upstream-blocked on a typescript-eslint line that admits 7 (§27AQ).
 **Testing:** the L-17 mail leg, owner-assisted; and a dated test baseline for this section.
@@ -7024,6 +7026,29 @@ pre-release.** A native SDK move on a pinned release candidate is exactly the cl
 validate (ISS-16's lesson), and majors are taken deliberately. **Watch:** run `npm view expo dist-tags` at the start
 of any session that considers executing; begin when `latest` is a 58.x release. If the pre-release path is chosen
 later, replace this paragraph with that decision, its date and its rationale.
+
+**Gate 0 is now OPEN, and the recommendation is still not to execute yet (annotated 2026-10-16, read the same way).**
+`npm view expo dist-tags` — and the new `decode-uri-component`-era watch beside it — reports **`latest = 58.0.12`**
+while this project installs **57.0.27**, so the condition this paragraph set has been met and the watch has fired for
+the first time (§27CL). Three things follow, and only the first is a green light.
+
+1. **The promotion happened, so the waiting reason is gone** — the pins are stable releases now, not the
+   `0.88.0-rc.4` candidate this section refused to build on.
+2. **The table above is stale and must be re-read, not reused.** It was taken from `expo@58.0.7` when 58 was on
+   `next`; the SDK's own `bundledNativeModules.json` for **58.0.12** is the authority at execution, and this file
+   already records a case where a proposal was wrong on two of five pins (PR #34).
+3. **Opening a gate is not a reason to move.** The owner's standing preference is **stability over currency** — *"we
+   don't need to upgrade everything just for the sake of using the latest versions"* — and this is the largest change
+   on the deferred list: RN 0.86.3 → 0.88, React 19.2 → 19.3, jest 30 riding with it, **plus the two things JS-only
+   CI cannot check** — the `patch-package` fix for the RNFirebase Auth PII finding (ISS-02) and `@react-native-firebase/auth`
+   compatibility with RN 0.88 — and it ends with a **device pass** rather than a CI result.
+
+**Recommendation (2026-10-16): defer, and keep this runbook ready.** The conditions that would reopen it are a
+**security fix or a defect that only SDK 58 resolves**, or a **native build that has to be re-cut anyway** for another
+reason — at which point the migration rides along instead of being its own risk. Nothing about V1's user-visible
+behaviour improves with SDK 58 today, and the current setup is stable, verified and green. This paragraph is a
+reading and a recommendation, not a decision to execute: no branch was cut, no dependency was touched, and the pins
+in this section remain the 2026-10-10 reading.
 
 ## Verified target set (read from the package, not guessed)
 
@@ -9500,7 +9525,7 @@ password"* rather than anything Firebase-shaped.
 3. **A quota-specific error code and sentence** (from §27BF's correction) — a `429 free-models-per-day` is still reported as a generic `502 AI_UNAVAILABLE`.
 4. **The rule this increment generalises:** never apply a page window below a fan-out. When a pipeline joins per row, either move the window above the join or replace the join with a merge — and prove the rewrite with `perf:golden`, not with a timing.
 5. **`perf:turns` reads its ground truth at run time (done 2026-10-16), and verifying that found two more things.** The three tenant-wide expectations were literals — 10 000 products, 1 492 low, 620 out — because the seed is deterministic; when the seeded tenant grew to **50 000** products the probe printed `MISSING 10000, 1492, 620` against a **completely correct** answer and scored it `grounded 0/1`. That is the one thing an instrument must never do: a false negative that sends a person back to re-read a good answer. Every fact is now read from the database when the probe runs, and the same question then reported **all expected facts present, `grounded 1/1`, 10 256 ms**. A **failed** turn is no longer given a fact verdict either: a `502` used to print `MISSING 3079, 50000` against an error body, which reads as "the model got the numbers wrong" when the model never answered. **What the fix deliberately does not prove:** because the expectation comes from the same services that produced the answer, it cannot catch a defect *inside* them — duplicating the low-stock rule here would risk an expectation that is itself wrong, and those rules already have their own suites.
-   **Two findings, measured while checking it (2026-10-16).** (a) **Q4 fails deterministically.** *"How many products are completely out of stock, and what percentage of the active catalogue is that?"* — the question whose `504 AI_TIMEOUT` at 60 341 ms on 2026-10-13 this harness was extended to catch — returned **`502 AI_UNAVAILABLE` twice, at 31 421 ms and 31 789 ms**, both after `getInventorySummary` had already run (`calls=2 toolRuns=1 iterations=2`). (b) **The cause is a misclassification that leaves no trace.** On the OpenRouter path there is exactly one `AiProviderError` throw that logs nothing — `anthropicWire.ts` raises it when `stop_reason === 'max_tokens'` with **no text and no tool call**, i.e. the model spent its own output cap before saying anything — and every sibling path in `providers/http.ts` logs before it throws. No provider line appeared in the server's log for either failure, which is what identifies that path by elimination. The member is then told the service is *temporarily unavailable* and to try again in a moment, when the truth is that the answer was cut off before it began and the wire layer's own advice was *"try a shorter question"*. Both are recorded, neither is fixed here: `providers/http.ts` is a protected file, and a new error class with its own code and sentence is an increment rather than a patch.
+   **Two findings, measured while checking it (2026-10-16).** (a) **Q4 fails deterministically.** *"How many products are completely out of stock, and what percentage of the active catalogue is that?"* — the question whose `504 AI_TIMEOUT` at 60 341 ms on 2026-10-13 this harness was extended to catch — returned **`502 AI_UNAVAILABLE` twice, at 31 421 ms and 31 789 ms**, both after `getInventorySummary` had already run (`calls=2 toolRuns=1 iterations=2`). (b) **The cause is a misclassification that leaves no trace.** On the OpenRouter path there is exactly one `AiProviderError` throw that logs nothing — `anthropicWire.ts` raises it when `stop_reason === 'max_tokens'` with **no text and no tool call**, i.e. the model spent its own output cap before saying anything — and every sibling path in `providers/http.ts` logs before it throws. No provider line appeared in the server's log for either failure, which is what identifies that path by elimination. The member is then told the service is *temporarily unavailable* and to try again in a moment, when the truth is that the answer was cut off before it began and the wire layer's own advice was *"try a shorter question"*. Both are recorded, neither is fixed here: `providers/http.ts` is a protected file, and a new error class with its own code and sentence is an increment rather than a patch. *(Annotated 2026-10-16: **FIXED — AI-10, §27CK.** The increment this paragraph asked for is the one it got: `AiOutputLimit` / `AI_OUTPUT_LIMIT` with its own sentence at 502, one greppable server line naming the cap and the model at the path that used to be silent, and the client's own copy for the code. The `max_tokens` shape is now classified as a LIMIT rather than an outage, and the harness bug that hid the fix for a round is recorded there too. The cap itself (800) is still untouched.)*
    **A fifth question (2026-10-16, owner request).** *"How many total units do we have?"* is now in the harness, checked against `totalInventoryQuantity` — the same field the mobile dashboard renders, so a mismatch is the assistant and the app disagreeing in front of a member. It is the simplest figure in the system and therefore the one worth having permanently in the list. **Run alone the same day (`--only=5`) against the 50 000-product tenant: `201` at 5 462 ms, tools `getInventorySummary`, no degraded turn, and the answer named the figure exactly — *12 425 872 total units on hand* — matched against the dashboard's own value, `grounded 1/1`.** It is also the fastest turn measured on this tenant (5.5 s against 12–40 s for the harder questions), which is what a question whose tool is one aggregate should look like, and it is the cheap way to tell "the assistant is slow" apart from "the assistant is broken" when the provider is having a bad day.
 
 # 27BH. AI-4 — the assistant's answer, rendered: a dependency-free parser for the structures the model already writes, and a word boundary that stops it deleting characters from arithmetic (2026-10-13)
@@ -12381,10 +12406,3472 @@ green alert, which is the trade this record exists to make visible rather than t
   Dependabot's five open advisories. They read different sources and ranges, and reconciling them is not attempted here.
   Dependabot's list is the authority this record was written against.
 * **Four advisories remain open**, and three of them cannot be closed by any change in this repository today. They are
-  now recorded in `SECURITY.md` as known-and-open rather than left to be re-reported as fresh findings.
-* Nothing here was merged before being read: the alert-closing is asserted **as expected** (Dependabot reads the default
-  branch), not as observed, and the alert list itself is the confirmation to re-read afterwards.
+  now recorded in `SECURITY.md` as known-and-open rather than left to be re-reported as fresh findings.* Nothing here was merged before being read: the alert-closing is asserted **as expected** (Dependabot reads the default branch), not as observed, and the alert list itself is the confirmation to re-read afterwards.
 
+**(Annotated 2026-10-16 — the expectation was re-read and holds.)** `gh api repos/…/dependabot/alerts?state=open`
+answers **four**: `sprintf-js` (GHSA-hp3w-g68c-fv3c, medium), `braces` (GHSA-vfj7-8cjw-p6xm, high), `node-forge`
+(GHSA-86w9-cpqp-85rv, high) and `decode-uri-component` (GHSA-vcc3-ghjq-m6fr, medium) — the four this section leaves
+open, each for the reason recorded above, with the **fifth (`uuid`) gone**. The API's own `first_patched_version` field
+is what makes that reading checkable from outside this document rather than taken on trust: it is **absent** for the
+three *"no published fix at all"* advisories, and **`0.5.0`** for `decode-uri-component` — the ESM-only release this
+section measured as unusable. The count went **5 → 4**, which is the uuid override doing exactly what it was expected
+to do and nothing more: the other four are untouched by it.
+
+
+
+# 27CK. AI-10 — The answer the model could not fit, and the harness that hid the fix (2026-10-16)
+
+Server + mobile; **no new dependency, no model or provider change, no route, permission, schema, session or
+environment change**, and the output cap itself (`AI_MAX_OUTPUT_TOKENS`, default 800) is deliberately **untouched** —
+this increment names the failure and gives it a remedy, it does not raise the ceiling.
+
+## The defect, and why it was invisible
+
+§27BG recorded it as a finding rather than a fix: *"How many products are completely out of stock, and what
+percentage of the active catalogue is that?"* — the question the whole 50 000-product harness was extended to catch —
+answered **`502 AI_UNAVAILABLE` twice, at 31 421 ms and 31 789 ms**, each after `getInventorySummary` had already run
+and answered (`calls=2 toolRuns=1 iterations=2`). Three things were wrong at once, and only one of them was the
+sentence:
+
+1. **It named the wrong component.** Nothing upstream was unavailable: the gateway answered **2xx**, and the model had
+   spent its whole output budget before producing a single token of answer or a tool call. `parseAnthropicResponse` saw
+   `stop_reason: 'max_tokens'` with nothing usable and threw `AiProviderError` — the one class the controller maps to
+   *"The AI service is temporarily unavailable. Please try again in a moment."*
+2. **It prescribed an action that cannot work.** A retry spends the same budget again, so *"try again in a moment"*
+   walks the member round the same loop. The wire layer's own advice — *"try a shorter question"* — was already the
+   right remedy, and it never reached the screen.
+3. **It left no trace at all.** Every sibling path in `providers/http.ts` logs before it throws; this shape is a 2xx, so
+   it had no status line either. A repository-wide search for the canned sentence found exactly one occurrence, its own
+   assignment, and the only evidence of the failure was a **missing answer** — which is why identifying it took
+   elimination (§27BG).
+
+## What changed
+
+* **`src/services/ai/aiErrors.ts`** — `AiOutputLimit` / `AI_OUTPUT_LIMIT`, deliberately **not** an `AiProviderError`,
+  for the same reason `AiTimeout`, `AiAbandoned` and `AiQuotaExceeded` are not: *"we gave up waiting"*, *"the caller
+  left"*, *"an allowance is spent"* and *"the model ran out of room"* are four different facts with four different
+  remedies, and collapsing any of them into *"temporarily unavailable"* is the defect this increment exists to
+  prevent. `isAiError` covers it, so `ai.service.ts`'s provider-failure catch lets it through untouched.
+* **`src/services/ai/providers/anthropicWire.ts`** — the `max_tokens`-with-nothing-usable throw becomes
+  `AiOutputLimit`, and the one path that used to be silent now logs before it throws:
+  `[ai:openrouter] output limit reached with nothing usable (model=…, maxTokens=800, stop=max_tokens)`. Logged at the
+  call site rather than in the parser because **that is where the cap is known**, and the cap is the number an operator
+  acts on.
+* **`src/controllers/ai.controller.ts`** — its own mapping, checked **before** the provider branch: `502` with
+  `AI_OUTPUT_LIMIT` and *"The assistant ran out of room before it could answer. Please ask a shorter or more specific
+  question."* The status stays in the 502 family (the upstream response was unusable) while the **code and the sentence**
+  carry the meaning — which is what the client switches on.
+* **`mobile/components/AiChat.tsx`** — the client owns its copy for the new code, as it does for every other one, so
+  the sentence the member reads is not inherited from a server string that could change under it.
+
+The cap is left alone on purpose. Raising `AI_MAX_OUTPUT_TOKENS` would make this failure rarer and the free tier's
+answers more expensive; that is a provider decision (**ISS-22**, still the owner's), not a classification one.
+
+## The harness defect this increment found on the way
+
+The wire case above drives the **real** Anthropic-compatible provider against a stub gateway on localhost, so nothing
+can spend provider quota. Its first version failed with `ECONNREFUSED` on the stub's own port — while the DB-free
+cases in the same file passed, and a direct `fetch` from the same process to the same port also failed. The stub was
+not misconfigured: **`node --test` ran the suite's cleanup hook early and closed it.** A root-level `after()` registered
+before the file's first `await` belongs to the root suite as it existed then, and the runner executes it as soon as
+that root's first child finishes — which, in a file whose second suite is registered after `await startServer()`,
+means *before that suite runs*. The hook that closes the app server and the database sits **after** that await and has
+never had the problem, which is why the pattern is invisible until a stub is created above it.
+
+This is recorded because it was expensive and because it is a property of the runner, not of this test: the symptom
+(*a provider that cannot reach a gateway that is listening*) looks exactly like the defect the suite was written to
+classify, so the fake failure was indistinguishable from the real one until the stub's own `listening` flag was
+printed. The stub now closes in the **last** root-level hook, beside the app server and the database.
+
+## Verification
+
+* **`server/test/AI10-output-limit-not-an-outage.test.mjs`** — 10 cases, **10/10 in full mode**; in `TEST_MODE=db` the
+  four wire cases run **4/4**, the headline one driving stub → `postJson` → `parseAnthropicResponse` → `AiOutputLimit` →
+  the service's pass-through → the controller's mapping → the HTTP answer, with `hits === 1` as the **positive control**
+  that the turn really reached the stub (without it, the assertions would pass against a provider that never spoke).
+  It also pins that the limit is **never retried** (one provider call — paying twice cannot buy room that was already
+  spent), that the turn's `outcome=` uses the same word as the error code, and that **AI-8's** truncated-but-present
+  answer still keeps its text and its `truncated` mark.
+* **`mobile/__tests__/ai10-output-limit-copy.test.ts`** — 10 cases, written first and **watched failing**: with the
+  client branch neutered, **5 of 10 red**; restored, 10/10. It asserts the sentence by value, that it is not the outage,
+  quota, timeout, rate-limit or unreachable sentence, that the **code wins over the server's message carried on the same
+  object**, and it reads `AI_OUTPUT_LIMIT` out of the **server's own source** so the client cannot be correct against a
+  string the server never emits — the guard AI-6 (§27BL) established, applied here.
+* `tsc --noEmit`, `eslint`, and both module-graph checks clean on both sides; the docs guards pass with this record in
+  place (the section-integrity guard failed on the dangling `§27CK` citation **before** this section existed, which is
+  the guard working exactly as §27CG designed it).
+
+## Limits
+
+* **NOT device-verified — attempted twice on 2026-10-16 and BLOCKED, recorded as blocked rather than as passing.** The
+  run was staged to be **deterministic and quota-free** rather than lucky: the server was started with
+  `OPENROUTER_BASE_URL` pointed at a local stub that replays the **exact captured Q4 body** (`content: []`,
+  `stop_reason: 'max_tokens'`) — the technique the wire suite already uses — with `adb reverse tcp:4000`/`tcp:8081`
+  tunnels and Metro serving on 8081, all three verified answering before the phone was touched. The first attempt died
+  on a **password-protected lock screen** (`wm dismiss-keyguard` does not clear it). The second, on an unlocked device,
+  got further and found the **real blocker, which is not the phone's state at all**.
+
+  **Why the app can never load this branch's bundle on that device (the actual reason).** The installed
+  `com.inventoryai.app` is a **release APK**: its package flags carry **no `DEBUGGABLE`**, and the package dump contains
+  **zero** dev-launcher classes, so `inventoryai://expo-development-client/?url=…` resolves to `MainActivity` and does
+  nothing — the app is not a development client and has no packager to be pointed at. Its JS is therefore the bundled
+  release JS, aimed at the **deployed** backend: Metro never logged a bundle request for any launch, and the sign-in
+  test produced `REGISTRATION_REQUIRED` for an identity that exists in the **development** database only, which is what
+  proves the request went to the deployed API rather than to this machine's server. **Reaching the phone with working-tree
+  code therefore requires a development build (an EAS `development` profile or a local native build), which is exactly the
+  Phase 30B work this project deliberately defers** — so this gap is now correctly scoped as *"needs a dev build"* rather
+  than *"needs another attempt"*.
+
+  **Three findings worth the next attempt's time, all observed rather than reasoned:**
+  1. **ColorOS freezes the app, and a frozen app is indistinguishable from a broken UI.** Taps put the IME on screen but
+     `mServedView=null`, `input text` and even individual `KEYEVENT`s changed nothing, and **no `ReactNativeJS` line
+     appeared at all** — which is how *"the JS bundle is not running"* was established rather than guessed. The device's
+     own log names the cause:
+     `ColorHansManager: stateRToFFreeze … pkgName: com.inventoryai.app, reason: top`. Raising the standby bucket to
+     active and whitelisting the package from Doze fixed it immediately — typing then landed (`EditText text="abc"`) and
+     `ReactNativeJS: Running "main"` appeared. **Any device run on this handset should do that first**, and both changes
+     were reverted afterwards.
+  2. **The soft keyboard covers a submit button**, which is how the first sign-in attempt silently did nothing: the button
+     sits far enough down that the IME overlaps it, so the tap went to a key. Press `KEYCODE_BACK` to hide the keyboard
+     before tapping, and re-read coordinates from a fresh dump afterwards — the form scrolls while the IME is up (the
+     email field moved 77 px).
+  3. **Node and Git Bash do not agree about `/tmp`** (Node resolves it to `C:\tmp`, the shell to
+     `%TEMP%`) and Git Bash rewrites `/sdcard/…` unless `MSYS_NO_PATHCONV=1` is set, so an empty `uiautomator` dump reads
+     as a blank screen and is really a dump that never left the host (§27CE's finding, still live). Also: the machine's
+     own dev server is normally **already running on `:4000` with the old code**, so it has to be replaced rather than
+     reused, and `seed:accounts` refuses any `--accounts` size below 100.
+
+  **Left behind, declared rather than silent:** one seeded development tenant created for the sign-in test —
+  `ai10device@example.com`, business `6ad221fd386e211e7596f09b`, OWNER, 23 products — which the run never needed. It is
+  **not** removed here on purpose: `cleanup:test-firebase` deletes *every* identity in the project, and
+  `cleanup:firebase-accounts --email=…` refuses while a MongoDB user still references the address (§27BB's trap), so a
+  targeted removal needs the business's rows deleted first, which no existing script does scoped. Deleting it is the
+  owner's call. **Staging was torn down afterwards** — Metro, the stub and both tunnels removed, the doze whitelist
+  entry dropped, the normal dev server restarted — so nothing on this machine is left pointed at a stub. *(Annotated
+  2026-10-17: **RESOLVED AND VERIFIED — §27CM.** The owner approved a fresh `development`-profile EAS build of this
+  branch and it was installed over the preview APK (an update, not a wipe), Metro served the working-tree bundle to
+  the phone (`Android Bundled 2380ms … entry.js (1568 modules)`), sign-in was done with the device's own Google
+  account — no password created, typed or stored — and all three items this section left open were then measured on
+  hardware: the sentence below rendered on screen against a stub replaying the captured Q4 body, `[ai] turn
+  outcome=AI_OUTPUT_LIMIT` beside `502`, and **no** *"Cannot reach the server"*. The same run exposed a second, small
+  defect on this path — the turn reported `in=0 out=0 model=unknown` for the one turn that spends a whole output
+  budget — which §27CM fixes and pins with four new cases. The leftover `ai10device@example.com` tenant named above is
+  still present and is still the owner's call.)*
+* **The failure is named, not prevented.** A free-tier model that spends `AI_MAX_OUTPUT_TOKENS` without answering still
+  cannot answer; the member now gets a true, actionable sentence and an operator gets a line, instead of a false outage.
+* The `[ai:openrouter]` line is written **once per failed call**, so a retried turn would log twice; no counter is kept,
+  because the turn's own cost line (`outcome=AI_OUTPUT_LIMIT`, AI-5) is where the count belongs.
+
+
+# 27CL. The advisory that stays open is now watched, and the gate the watch says has opened (2026-10-16)
+
+`scripts/check-upgrade-watches.mjs` only; **no application behaviour, dependency, route, permission, schema,
+session or environment change**, no alert dismissed, and no upgrade started.
+
+## A fourth watch, because "plan a safe upgrade" needs a trigger
+
+§27CJ left `decode-uri-component` open for a measured reason — its only patched release (0.5.0) is **ESM-only**
+while its consumer here, `query-string@7.1.3`, is CommonJS and calls the export directly, so applying the fix breaks
+the app's deep-link query parsing — and left the monitoring as prose: *"re-read the alert list afterwards."* A prose
+instruction is a thing someone has to remember. The project already owns the mechanism for "waiting on other people
+to publish" (three watches, one read-only command, `--self-test` controls), so the advisory became a watch:
+
+* **the gate is conjunctive** — a release that is **patched** *and* **requireable from CommonJS**. Both halves are
+  read from a source rather than remembered: the patched floor from the advisory itself, and the CommonJS shape from
+  the published manifest (`exports.require`, or a `main` on a package that does not declare `"type": "module"`).
+* **a patched-but-ESM-only release is `DEFERRED` and says so by name**, so the state §27CJ measured is reproduced by
+  the tool rather than described by it.
+* it is **read-only** and stays **outside CI** for the same reason the others are: it needs the network.
+
+## Two corrections of the record, found by running it rather than reading it
+
+1. **The public advisory carries no `first_patched_version` for this GHSA** — the field is `null`, while Dependabot's
+   own alert API reports `0.5.0` from the same database. The first version of this watch trusted the field first and
+   therefore reported `UNREADABLE`. The floor is now derived from what the advisory *does* carry and is exact:
+   **`vulnerable_version_range: <= 0.4.2`** — a release is patched when the advisory's own range does not admit it.
+   (This is the same class of mistake §27CJ corrected twice already: a copied number where a read one exists.)
+2. **A range parser bug in the new code, caught by its own controls and not by the report:** the first
+   implementation split a clause on whitespace, so `<= 0.4.2` became the bounds `<=` and `0.4.2`, gave the operator an
+   empty version, and answered *unparsed*. Four controls failed at once (`expected [READY], got [UNREADABLE]`, and the
+   three range cases beside it) — a good illustration of why the controls are the second thing written and the first
+   thing read. The operator and its version are now taken together in one expression, and anything the expression does
+   not consume is reported rather than treated as "not vulnerable".
+
+## The finding, which is not about this advisory at all
+
+Run live on **2026-10-16**, the report is no longer "everything deferred":
+
+```text
+READY      expo        dist-tags: latest=58.0.12 next=58.0.11
+DEFERRED   jest-expo   installed SDK 57.0.27 pins jest-expo ~57.0.5 | pinned 57.0.6: @jest/globals=^29.2.1 — no jest 30 on the installed SDK's line
+DEFERRED   typescript-eslint  server 8.71.2 peers typescript <6.1.0 | mobile parser 8.71.2 peers <6.1.0
+DEFERRED   decode-uri-component  0.5.0 is patched (outside the advisory range <= 0.4.2) but ESM-only (type=module, no require condition)
+```
+
+**§27AI's Gate 0 — *`latest` must be 58* — is open.** SDK 58 is published on `latest` (58.0.12) while this project
+installs 57.0.27, which is the trigger the watch exists to announce, and the first time any of the four has fired.
+Recorded as a **reading with its date**, not as a reason to start: the SDK 58 train is a major promotion (React Native
+0.88, the jest-expo 58 line, every SDK-pinned module), it is the subject of its own runbook, and it is the owner's
+call — nothing here has begun it. The two neighbours stay shut for the reason they already recorded: jest 30 rides
+with that promotion, and TypeScript 7 is still refused by both linters' declared peers.
+
+## Verification
+
+* **26 controls pass** (5 must-fire, 19 must-not-fire, 2 range), up from 17 — the new set pins the READY case, the
+  ESM-only case that must not fire, the real advisory shape (no `first_patched_version`, `<= 0.4.2`, newest 0.5.0
+  requireable → READY), the range boundary (`0.4.2` still admitted → DEFERRED), an open-ended range, a compound one,
+  and two unreadable shapes.
+* The live report was read from the registry and the public advisory API, and its four rows are quoted above verbatim.
+* The Dependabot alert list was re-read the same day and answers **four** open, the `uuid` advisory having cleared when
+  §27CJ's override reached the default branch (annotated in §27CJ, and in `SECURITY.md` with the GHSA identifiers).
+
+## Limits
+
+* **The watch can see a release; it cannot test one.** Whether a future patched-and-requireable release actually keeps
+  the app's deep-link parsing working is still a bundle-and-run question, and §27CJ's source-map method plus a device
+  run are what answer it.
+* **The CommonJS rule is deliberately conservative but not a resolver**: a package that keeps a stale `main` beside an
+  `exports` map with no `require` condition is read as requireable, and Node would not resolve it that way. The
+  conservative direction is chosen so the failure mode is an alert that stays open rather than one closed wrongly.
+* Prerelease bounds are compared on their numeric prefix (this file's semver helper ignores prerelease tags), and the
+  advisory API is rate-limited when unauthenticated — a failure there is reported as `UNREADABLE`, never as a pass.
+
+
+# 27CM. AI-10 and AI-9 on the phone — and the cost line that called a spent output budget nothing (2026-10-17)
+
+Verification of already-shipped work, plus one small server fix it exposed. **No new dependency, no route,
+permission, schema, session, environment or mobile change**; the output cap (`AI_MAX_OUTPUT_TOKENS`, 800) is
+untouched, no model or provider changed, and the sentence the phone now displays is **byte-identical to what §27CK
+shipped** — this section changes only what the server writes in its own log.
+
+## Why two items were stuck, and what actually unstuck them
+
+§27CK's device attempt ended by identifying the real blocker rather than the visible one: the installed
+`com.inventoryai.app` was a **release APK** (no `DEBUGGABLE` flag, zero dev-launcher classes), whose JS is the
+bundled release JS pointed at the **deployed** backend. Metro never logged a bundle request for any launch, and the
+sign-in test produced `REGISTRATION_REQUIRED` for an identity that exists only in the **development** database —
+which is what proves the request went to the cloud. Reaching the phone with working-tree code therefore needed a
+**development build**, which is the owner's call and was made: a fresh `development`-profile build of this branch on
+EAS (**`f6f852bd-3dfa-43e2-8a63-f60d6fd94c6e`**, SDK 57.0.0, `com.inventoryai.app`, version `1.0.0`/build `1`,
+created `13:40:21Z`, completed `13:57:51Z`, queue 231 s + build 818 s) and `adb install -r` over the preview APK.
+Same package and same EAS keystore, so it was an **update rather than a wipe** — established, not assumed: the app's
+`firstInstallTime` stayed `2026-10-11` and only `lastUpdateTime` moved.
+
+Then the phone ran this branch, and Metro's own log is the proof of it:
+`Android Bundled 2380ms node_modules\expo-router\entry.js (1568 modules)`. The launch is the dev-client deep link
+(`inventoryai://expo-development-client/?url=http%3A%2F%2Flocalhost%3A8081`) with `adb reverse tcp:4000` and
+`tcp:8081` in place, so the phone's loopback is this machine — which is why the app's configured
+`EXPO_PUBLIC_API_URL=http://localhost:4000` is correct here and would be a phone talking to itself without the tunnel
+(§27CI's third defect).
+
+**Sign-in was done without a password, and that is a finding in its own right.** The login screen's *Continue with
+Google* button (Phase C's native path) signed in with the identity the device already holds, so no credential was
+created, typed, logged or stored, and the previously seeded test identity (below) turned out to be unnecessary. The
+server saw `/api/auth/firebase/exchange` **200** (1 394 ms) and then `/api/dashboard` **200** for user
+`6acf1fc36e396b95a2c20aef` on `inventoryai_dev_db` — so the device was reading the **development** database through
+this machine, which is the state the previous attempt could not reach.
+
+## AI-10, on the phone, deterministically
+
+The provider was pointed at a **local stub** that replays the exact captured Q4 body (`content: []`,
+`stop_reason: 'max_tokens'`) — the technique §27CK's wire suite already uses — so the run is quota-free and the shape
+is the one measured on the free tier. One question typed on the phone ("How is my inventory doing"), one tap on Send:
+
+```text
+[stub]  18:37:20.525Z POST /v1/messages mode=maxtokens asked="How is my inventory doing"
+[ai:openrouter] output limit reached with nothing usable (model=stub/stub-model, maxTokens=800, stop=max_tokens)
+[ai] turn outcome=AI_OUTPUT_LIMIT total=19ms providerMs=19ms calls=1 toolMs=0ms toolRuns=0 tools=none …
+POST /api/ai/chat 502 (213.7 ms)
+```
+
+and the phone rendered the question, then **"The assistant ran out of room before it could answer. Please ask a
+shorter or more specific question."** — with **no error banner**, no *"Cannot reach the server"*, and the composer
+live again. That is the whole increment verified through the interface a member uses: the kind of failure, the code,
+the sentence, and the absence of the wrong sentence. The stub's log line matters as much as the server's: the
+question it received is the **member's own text**, so the request really travelled phone → app → this machine's
+server → stub.
+
+## AI-9, on the phone, by doing what a member does
+
+The stub was switched to `slow:25000` (a held response, no model), a second question was typed, and the in-flight
+state was read off the screen: the thinking row (*"Analyzing your inventory… A full answer can take up to a
+minute."*) with the primary slot reading **Stop** where Send had been. Tap:
+
+```text
+[ai:openrouter] caller went away; the upstream call was cancelled
+[ai] turn outcome=AI_ABANDONED total=12794ms providerMs=12794ms calls=1 toolMs=0ms toolRuns=0 tools=none …
+[stub] 18:38:33.754Z POST /v1/messages mode=slow:25000 asked="What is low here"
+[stub] 18:38:58.761Z caller had already gone away; nothing sent
+```
+
+The screen showed the note verbatim — *"You stopped waiting for this answer. If the assistant had already finished,
+it will be here when you reopen this chat."* — with **no error banner** and Send restored, and **no `201` followed**.
+The stub's second line is the part that cannot be faked by the client: the abort closed the **upstream** connection
+12.2 s before the held answer would have been produced, so the turn stopped costing work rather than merely stopping
+being rendered.
+
+**One prediction in the record was wrong, and the measurement is the correction.** §27CF expected a stopped turn to
+log `calls=0`; it logged **`calls=1`**, because the stop landed **inside an in-flight provider call** — the case that
+same section listed as unobserved (*"between loop iterations or inside an in-flight provider call"*). So a stop saves
+the remainder of the turn (the rest of that call, and every tool round after it), which is exactly what §27CF's own
+Limits paragraph said it would: **bounded, not eliminated**.
+
+## AI-5's line, read off a real device turn
+
+With the stub answering normally, one phone turn produced
+`[ai] turn outcome=ok total=5ms providerMs=5ms calls=1 toolMs=0ms toolRuns=0 tools=none empty=0 in=320 out=48
+model=stub-model iterations=1` beside `POST /api/ai/chat 201 (513.8 ms)`, and the answer rendered on screen. The
+**split** is the point, not the magnitude: on a socket that answers instantly, `providerMs` is the whole turn — which
+is the same finding the free-tier measurements reach from the other direction (95–99 % provider, §27BS/§27BI).
+
+## The defect the run exposed: a spent budget reported as no spend at all
+
+On the cap-spent turn above, the same line read **`in=0 out=0 model=unknown`**. The phone was right and the server was
+wrong: the gateway's body carried `usage: { input_tokens: 1200, output_tokens: 800 }` and a **model name**, and
+`parseAnthropicResponse` **threw both away** — `usage` and `model` were already parsed one line above the
+`throw new AiOutputLimit()`. Because the service reports the turn **before** it rethrows, nothing downstream could
+recover them, so the **one** turn whose entire story is *"the model spent everything it had"* was the one turn that
+looked free and nameless. That is the opposite of what the line exists for: it is the number an operator decides on
+(raise the cap, or narrow the question).
+
+Fixed in three files, as a small addition to the **existing** class rather than a new one:
+
+* **`aiErrors.ts`** — `AiOutputLimit` accepts optional **accounting** (`model`, `usage`), and
+  **`aiErrorAccounting(err)`** reads exactly those two fields, defensively, so a malformed value is dropped rather
+  than logged. An absent report stays **absent and is never zeroed**, because "not measured" and "cost nothing" must
+  not be the same line.
+* **`anthropicWire.ts`** — the throw site attaches the model and the spend it had already parsed. Message, code and
+  HTTP status are unchanged, so a caller that reads only the sentence sees exactly what it saw before.
+* **`ai.service.ts`** — the AI-layer catch adopts the accounting **before** writing the turn line, for the same
+  reason every counter is incremented before the report there: the line is written once.
+
+**Written first, and watched fail** — four cases in `AI10-output-limit-not-an-outage.test.mjs`, and the failure
+output *is* the defect: `actual: '[ai] turn outcome=AI_OUTPUT_LIMIT total=3ms … in=0 out=0 model=unknown
+iterations=1'` against `expected: /in=1200 out=800/`, plus `thrown.model` reading `undefined` where `'stub-model'`
+was required. Three of the four are DB-free (the metadata carried by the parser, the **omitted-not-zeroed** control,
+and the turn line for a hand-thrown failure); the fourth goes **over the real wire** — stub gateway → `postJson` →
+parser → `AiOutputLimit` → the service's catch → the cost line — so the hand-thrown case cannot be the only proof.
+
+## Verification
+
+* `AI10-output-limit-not-an-outage.test.mjs`: **14/14 green** (10 before this change, 4 added), in full mode and over
+the real wire with `hits === 1` as the positive control that the turn reached the gateway.
+* Full server suite: **1445 tests / 213 suites / 0 failures**; `tsc --noEmit`, `eslint .`, `check:extensions` and
+`check:specifiers` clean (387 modules, 1 866 relative specifiers resolved).
+* **No mobile file was changed** — the sentence verified on the phone is the one §27CK shipped — so the mobile suite
+was not re-run; the documentation guards were, and pass.
+* Staging was torn down afterwards: stub, staging server, Metro and both `adb reverse` tunnels removed, so nothing on
+this machine is left pointed at a stub.
+
+## Limits
+
+* **A stub is a socket, not the free tier.** The classification, the sentence, the abort and the cost line are
+verified **deterministically**, which is what makes them evidence rather than luck; but the free tier's **rate** of
+empty completions and its real cap behaviour are unchanged by this run, so **ISS-22** (the provider decision) still
+rests on the counts collected earlier and remains the owner's.
+* **The device cannot by itself say which side's sentence it rendered, and that is fine.** The client's copy and the
+server's `error` for this code are the **same text by design**, so a screenshot is consistent with either. Which one
+the screen uses is pinned where it can be: `mobile/__tests__/ai10-output-limit-copy.test.ts` feeds a **diverging**
+server sentence (*"The AI service is temporarily unavailable…"*, the old outage copy) and asserts the code wins, and
+reads `AI_OUTPUT_LIMIT` out of the server's own source so the client cannot be right about a string the server never
+emits. The phone run adds the composition — the right failure producing the right sentence and not the wrong one.
+* **One path of the Stop is still unprovoked.** §27CF's note promises the answer will be there when the chat is
+reopened, because a turn the model had **already finished** is stored either way. This run's stop landed during the
+in-flight provider call, so nothing was stored and that half of the promise was not observed. The persistence rule it
+rests on (Phase 07E / M7) is unchanged and still tested.
+* **The phone now carries a development build, and that is a deliberate state change.** It has no embedded bundle and
+`expo-updates` is deliberately not installed, so the app opens **only while Metro on this machine serves it over
+USB**. A standalone build is an EAS `preview`/`production` build; anyone picking this phone up without Metro will see
+the dev launcher, not a broken app.
+* **Still present, and still the owner's call:** the leftover seeded development tenant from the previous attempt,
+`ai10device@example.com` (business `6ad221fd386e211e7596f09b`, OWNER, 23 products). This run did **not** need it —
+the Google path signed in with an existing account — and it was not removed: `cleanup:test-firebase` deletes *every*
+identity in the project, `cleanup:firebase-accounts --email=…` refuses while a MongoDB user still references the
+address (§27BB's trap), and no existing script deletes a scoped business. Removing it is a targeted cleanup that
+should be written as one, not improvised with a broad delete.
+
+
+# 27CN. AI-11 — The assistant's own usage report, and what the allowance actually says (2026-10-17)
+
+Server tooling only: a new read-only `server/scripts/ai-usage.mjs` behind `npm run ai:usage`, its test suite, and
+the two documentation references. **No application behaviour, route, permission, schema, session, dependency,
+environment, model or mobile change**, and **no model was called from anywhere in this work** — so it spent none of
+the allowance it exists to measure.
+
+## Why another tool, when three already measure the assistant
+
+The decision that is still open is **ISS-22**: whether the assistant stays on the free tier. It needs one kind of
+evidence — *how much of the allowance do real turns spend, and what is failing?* — and the instruments that existed
+could not supply it, for a reason worth stating plainly: **they consume what they measure.** `perf:turns` times real
+member turns and spends provider quota (the deployed free tier allows roughly **50 requests a day in total**, §27BF),
+so running it to ask "are we near the limit?" moves the number being asked about. The per-turn cost line (AI-5's
+`[ai] turn …`) already records what **every** real turn cost — it is written on every exit, including the ones that
+throw — but nothing read those lines back: they go to stdout and are never aggregated.
+
+This is the missing half of a pair. AI-5 made a turn's cost **visible**; AI-11 makes it **countable**, and joins it
+to what the provider says about the allowance.
+
+## What it reads, and what it refuses to guess
+
+* **The log.** Every `[ai] turn …` line: turns, outcomes, provider **requests** (`calls`), tool rounds, empty
+  completions, tokens, the model, and the provider-versus-tools time split. `--log=<path>` reads a saved file; with no
+  path it reads **stdin**, so `npm start | npm run ai:usage --silent --` works on a live server.
+* **The provider's own account.** `GET {OPENROUTER_BASE_URL}/v1/key` — a **GET**, so it is free and reads no model —
+  returning the daily free-model counter, whether the key is on the free tier, and paid usage.
+
+Nothing is written anywhere, no database is touched, and the two readings are joined in the report rather than by
+hand. Four decisions are worth recording because each could reasonably have gone the other way:
+
+1. **A turn line cut short is counted, and reported `malformed`.** A restart can kill half a line, and its `[ai] turn`
+   prefix is already written. Dropping it would **understate** usage — the one direction a quota report must not err
+   in — so what it carries is used, what it lacks contributes nothing, and the count says the columns are partial.
+2. **Absent is never a zero, in either direction.** A missing field contributes nothing to a sum; a missing provider
+   counter prints `null`. This is AI-10's rule (a failure that knows nothing must not look measured) applied to a
+   report whose whole job is to be trusted.
+3. **An AI-2 degraded warning is NOT a second turn.** It is a second line about a turn already counted, so counting it
+   would inflate usage on exactly the turns that had trouble — and those are the turns an operator is reading about.
+4. **The ratio comes from the log it was given, and the report says so.** The requests-per-turn figure is what turns a
+   request-counting allowance into a number of turns, and it is only as good as its input: a log of cheap turns
+   overstates the capacity remaining.
+
+## The reading, and the finding
+
+Taken live on **2026-10-17** against the deployed key (a GET, nothing spent):
+
+```text
+provider account (GET /v1/key — read-only):
+  free tier: true
+  free-model requests today: 37 used of 50 · 13 remaining
+  paid usage: 0 (today 0, this month 0)
+```
+
+Two things follow. **§27BF's "about 50 requests a day in total" is now a provider-confirmed figure** rather than a
+reading inferred from failure behaviour — the allowance is a **daily request counter on free models**, it is currently
+**37 of 50 spent**, and **paid usage is zero**, so nothing has been billed and nothing needs to be. And **the unit of
+that allowance is a request, not a turn**: the same run's local log measured **1 request/turn** (the staged turns had
+no tool rounds) while real device turns measured **2–3** (§27BI, §27BF), so the honest capacity figure is derived per
+log, which is precisely why the tool prints the ratio it used instead of assuming one.
+
+## Limits of the instrument, and of the number
+
+* **It reads a log it is given.** The provider half needs no log; the usage half needs wherever the server's stdout
+  goes. On a deployment that means a log sink, and until one exists the log half describes this machine. This is
+  stated rather than worked around: the alternative (persisting a per-turn metric row) is a **schema change**, which
+  is a decision rather than a patch.
+* **The day boundary is UTC**, and the daily counter resets on it — so "today" in the provider's answer is not
+  necessarily the reader's today.
+* **It cannot measure latency end to end.** `perf:turns` still does that, and still spends quota. Nothing here
+  replaces it; it replaces running it to answer a question that costs nothing to answer.
+* **Nothing about the provider changed.** No model, no cap, no tier, no dependency — the cap decision is still the
+  owner's, and this tool exists to give it a reading rather than to make it.
+* **A log of cheap turns overstates capacity**, which is why the ratio is printed beside the capacity it produces.
+
+## Verification
+
+* **Controls: 14, all passing** — 7 **must-fire** and 7 **must-not-fire**, labelled by what each asserts, run by
+  `--self-test` before any report is produced. They pin the parse, the turn/not-a-turn distinction, `malformed`, the
+  absent-not-zero rule in both directions, the share arithmetic, the capacity function's refusal to divide by an
+  unmeasured zero, the provider mapping with its masked `label` dropped, and the credential-leak property.
+* **Proven able to fail twice by mutation, each restored byte-identical (sha256 `f04c0fcb…` before and after):**
+  making `malformed` unable to increment reddens the truncated-line and share controls
+  (`malformed expected 1, got 0`); defaulting an absent provider counter to `0` reddens the absent-not-zero control
+  (`daily expected {used:4, limit:null, remaining:null}, got {used:4, limit:0, remaining:0}`). Both exit **1** and
+  refuse to produce a report.
+* **Suite: 6 cases**, `PURE_UNIT`, driving the real CLI in a child process against a fixture log: the arithmetic by
+  hand (4 turns, 7 requests, 1 malformed, 4 599 in / 1 299 out), the requests-per-turn ratio and the share as a
+  literal, **exit 2 on an unreadable log** with a message that says *NOT VERIFIED*, stdin, the provider mapping, and
+  the leak control — whose **run is asserted first**, because a leak check that passes when the tool crashes is
+  decoration.
+* Full server suite **1451 tests / 214 suites / 0 failures** (up from 1445 / 213), `tsc --noEmit` and `eslint .`
+  clean.
+
+
+# 27CO. AI-11, part two — the durable half, and the row the TTL sweep had already deleted (2026-10-17)
+
+The usage report's second source, its tests, and one repaired test in a suite this work did not otherwise touch. **No
+schema change — that is the finding, not a limitation** — no application behaviour, route, permission, session,
+dependency, environment, model or mobile change, and still **no model call anywhere**.
+
+## The data was already there, and its own model said so
+
+§27CN recorded the honest limit that the report's log half needs somewhere for the server's stdout to go: on a
+deployment that means a log sink, and until one exists the usage half describes one machine. Then the question "is
+there a durable record already?" was asked of the schema rather than assumed, and the answer was in `AIMessage`'s own
+comment: it stores `model`, `toolsUsed`, `usage` and (since AI-8) `degraded` on **every assistant turn**, and the
+reason is written beside the field — *"the rate of each reason becomes countable from the database rather than only
+from a log file that rotation will eat."*
+
+So the second source needed **no new field, no migration, no log sink and no credential**: `npm run ai:usage --
+--db --days=30` reads what production has been recording all along. Every figure is computed **inside MongoDB** — one
+aggregation returning one document per group, the rule SCALE-dashboard-counts pins for the dashboard — and only
+aggregates are read, never documents.
+
+## The reading, and the number that matters for ISS-22
+
+Run against the development database over 30 days (the shape production will have):
+
+```text
+stored turns (database inventoryai_dev_db, last 30 day(s)):
+  turns: 44 across 28 conversation(s)
+  not-marked-degraded: 30 · degraded: EMPTY_COMPLETION=11 OUTPUT_LIMIT=3
+  tokens: in 151647 · out 12166
+  models: nvidia/nemotron-3-ultra-550b-a55b:free=27 openrouter=12 nvidia/nemotron-3-super-120b-a12b:free=3 …
+  tools: getInventorySummary=11 searchProducts=9 getOutOfStockProducts=5 getInventoryHistory=3 …
+  per day (UTC): 2026-10-14=19 2026-10-15=21 2026-10-16=4
+```
+
+**14 of 44 answered turns were degraded — 11 rescued-or-spent `EMPTY_COMPLETION` and 3 `OUTPUT_LIMIT`.** That is the
+first *production-shaped* reliability figure this project has had rather than a reading from a staged run, and it is
+the number **ISS-22** was waiting for: at this tier roughly **a quarter of answered turns arrived only after the
+empty-completion retry or with a caveat attached** (AI-2's `degraded` mark is exactly the instrument that makes it
+countable). It is evidence for the decision, not the decision: the owner's call on the free tier is unchanged.
+
+Two honest notes on reading the table. **`not-marked-degraded` is a lower bound**: a message written before AI-8
+cannot carry the mark, and the report says so in place rather than in a footnote. And **12 turns carry the label
+`openrouter`**, which is the parser's `fallbackModel` used when the wire names no model — recorded rather than fixed,
+because it is a label rather than a lie, and changing how model names are stored is a data question, not a patch.
+
+The two halves also cross-check each other, and their disagreement is informative: the provider reports **37 free
+requests used today (a UTC day)** while the database shows 4 stored turns on 2026-10-16 and none on 2026-10-17. They
+are measuring different things — provider **requests** against **answered turns** — across different boundaries, which
+is precisely why both are printed and neither is presented as the whole picture.
+
+## The by-product: a test that raced a production index, measured rather than called flaky
+
+A full run after this change failed **one** test, and it was not one of this increment's:
+`phase26a-session-lifecycle.test.mjs` case 10 threw `Cannot read properties of null (reading '_id')`. The cause is a
+race the test could not win, and rather than name it *flaky* it was **measured**: a probe inserted a session whose
+`expiresAt` was already in the past — which is exactly what the case does — and MongoDB's TTL monitor deleted it
+**21 789 ms** later (the `sessions` collection declares `expireAfterSeconds: 0`, whose sweep runs about once a
+minute). The case then re-read the row after expiring it, so it was racing that sweep with a window of a few seconds,
+and it lost.
+
+**The fix is the order, not a weaker assertion:** the row's `_id` is captured *before* the expiry, and the claim is
+identical — the session list must not offer that session. Verified **still able to fail**: removing the expiry filter
+from the list query (`session.service.ts`) reddens exactly case 10, with the file restored **byte-identical**
+(sha256 `d39c09af…`). The repaired case passes twice in a row, and the whole suite passes afterwards.
+
+## Verification
+
+* The suite is now **10 cases** (7 log-side, 3 database-side), run in full mode over real MongoDB: the assistant
+  turns of one business counted (a USER message is not a turn), their tokens summed from the Mixed `usage` the
+  provider reported, tools and models tallied, the degraded split by reason with the unmarked count beside it, a turn
+  outside the window excluded and included again by `--days`, the **database name asserted** so a mis-connection
+  cannot look plausible, and `--db` proven **opt-in** (no flag, no connection).
+* **The read-only claim is pinned by a source scan**, the way §27BF pinned the assistant's own tools: the report must
+  contain no write call, with a positive control (a planted `AIMessage.create`) that the scan fails on and a negative
+  control (a `countDocuments`) that it does not.
+* **Proven able to fail once by mutation for the database half:** dropping `role: 'ASSISTANT'` from the match reddens
+  `assistant turns only — the USER message is not a turn`; restored byte-identical (sha256 `ea9dfd00…`). One earlier
+  attempt was a **no-op** — a `perl` substitution whose escaping did not match, which the project has a rule about:
+  a mutation that cannot apply is not evidence, so it was redone with the edit asserted to land.
+* Full server suite **1455 tests / 215 suites / 0 failures**, `tsc --noEmit` and `eslint .` clean, and
+  `check-secrets` clean (the two deliberate key-shaped fixtures the leak control needs carry the scanner's own
+  `secret-guard:allow` waiver for a test fixture, and its 22 self-test controls still fire).
+
+## Limits
+
+* **The development database is not production usage.** The shape is right and the mechanism is the same, but these
+  are this machine's turns; the figure worth acting on is the one production prints.
+* **Answered turns only.** A failed turn persists nothing (Phase 07E / M7), so the degraded rate is measured against
+  the turns that *completed* — the failures it omits are exactly what the log half is for.
+* **`not-marked-degraded` is a lower bound** on health, not a certificate.
+* `--db` reads the database it is pointed at by the environment; a test run is fail-closed to the test database by
+  `resolveDatabaseName`, and the suite asserts the name it saw.
+
+
+# 27CP. AI-12 — The empty completion made diagnosable, and the model the record must name (2026-10-17)
+
+The owner asked for four things: run the usage report against **production**, read-only; **investigate the 11 empty
+completions**; include **failed** turns in the analysis; and spend nothing or switch nothing while doing it. This
+section is that investigation plus the one small server increment it produced. **Diagnostics only — no application
+behaviour, route, permission, schema, session, dependency, environment, model or cap change, and no model was called
+anywhere in the work.** The only network request made was the provider's own free `GET /v1/key`.
+
+## 1. Production, read-only — and it is not empty
+
+The report's database half (§27CO) needs no schema change, no log sink and no credential beyond the one the server
+already uses. The route to production is deliberate and it is the **only** one: `resolveDatabaseName` refuses a
+non-production process the production database, so the report is run as a production-flagged process — and the tool's
+read-only property is pinned by a source scan in its own suite (no write call, with a planted-write positive control).
+
+```bash
+cd C:/Users/jeffe/inventory-ai/server
+NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db npm run ai:usage -- --db --days=30
+```
+
+Taken **2026-10-16T19:50Z** (2026-10-17 on this machine's clock, UTC+8):
+
+```text
+stored turns (database inventoryai_prod_db, last 30 day(s)):
+  turns: 10 across 6 conversation(s)
+  not-marked-degraded: 10 · degraded: none
+  tokens: in 29018 · out 2193
+  models: nvidia/nemotron-3-super-120b-a12b:free=10
+  tools: getInventorySummary=3 searchProducts=2 getOutOfStockProducts=2 getReorderNeededProducts=1 getInventoryHistory=1 getInventory=1
+  per day (UTC): 2026-10-16=10
+```
+
+**The first line corrects an assumption this project has been carrying.** Production is **not empty**: the last read of
+it recorded *"0 users / 0 businesses"* (§27BB's table, 2026-10-11) and the deployed service has since served **ten
+real turns across six conversations on one day**, 2.9 k input tokens and 104–438 output tokens per turn — **and none
+of them degraded**. That is the first *production* reliability reading this project has, and it is a good one for the
+day it covers. It is one day, one model and one tenant, so it is a reading and not a rate; what matters for the
+decision is that it is **measurable without a log sink, from a deployed database, for free**.
+
+**Production and development do not behave the same way, and the difference here is composition, not behaviour:**
+production has no failed turn to show because a failed turn persists nothing (Phase 07E / M7) *and* because the days
+the failures happened (§2) were development days. A report that only ever read development would have concluded the
+assistant fails at ~32 %; a report that only ever read production would have concluded it does not fail at all.
+Neither is a rate; together they locate the problem in the days and the model, which is the point of reading both.
+
+## 2. The 11 empty completions — what the data establishes
+
+Every stored assistant turn in the development database was read (44 turns: 30 unmarked — including one stub and one
+fixture — **11 `EMPTY_COMPLETION`** and **3 `OUTPUT_LIMIT`**), and the eleven were read **with their questions,
+their position in the conversation and their tool rounds**, not as a count.
+
+| What the records show | The number |
+|---|---|
+| When | **all eleven on 2026-10-15** (11:28Z, then 17:32–17:46Z); the three `OUTPUT_LIMIT` turns are 2026-10-14/15 |
+| Tool rounds before giving up | **9 of 11** (`searchProducts` ×6, `getInventorySummary` ×2, `getInventoryHistory` ×1); **2 had none** |
+| Model on the record | **10 of 11 carry `openrouter`** — the provider label, not a model; 1 carries `ultra-550b` |
+| What the member saw | the AI-2 canned sentence, `HTTP 201` — a *completed* turn, never an error |
+
+**What it is NOT, and each exclusion has a different mechanism rather than a different reading of the same line:**
+
+* **Not a timeout.** A turn that runs out of its 60 s deadline throws `AiTimeout` → **`504 AI_TIMEOUT`** and persists
+  nothing. All eleven are stored `201`s marked `EMPTY_COMPLETION`.
+* **Not a quota refusal.** A spent allowance is the gateway's **429/402** → `AiQuotaExceeded` → the member's own
+  429 code, and nothing is persisted. (This is the failure §27BF measured as *dominant* on 2026-10-13; it is a
+different animal, and it is why the retry was never exercised that day.)
+* **Not an outage**, and this is measured rather than assumed: at **17:32:33Z** — eleven seconds after one failing
+  turn and thirteen seconds before the next — the *same server, same tenant, same model* answered normally, and again
+  at 17:33:46, 17:44:17, 17:44:39 and 17:47:14. A healthy turn landing *between* two failures rules out an outage
+  window and rules out "the question": the failures are per-response and intermittent.
+* **Not a single blip.** `AI_EMPTY_RETRY_MAX` is **1**, so a degraded `EMPTY_COMPLETION` turn means the model returned
+  **two consecutive** unusable responses. A one-in-many random hiccup would be *rescued* far more often than it
+  degrades; the observation is a pair, moment to moment.
+
+**The strongest single correlation in the data is the model — and it is a correlation, stated with its confounds.**
+Every one of the **14 degraded turns** falls on **2026-10-14/15**, when the development server's own healthy turns on
+those same days name `nvidia/nemotron-3-ultra-550b-a55b:free` (27 turns: 23 healthy, 4 degraded). Between
+`2026-10-15T17:47Z` and `2026-10-16T10:14Z` the configured model became
+`nvidia/nemotron-3-super-120b-a12b:free`, and **every turn recorded on it — 3 in development and all 10 in
+production — is healthy** (13/13). The confounds are real and are not smoothed over: the failing responses never named
+their own model (that is the defect in §3), the failures cluster in **one 15-minute window** on 2026-10-15, so gateway
+conditions that afternoon cannot be excluded, and the sample is small. What can be said exactly is: **all 14 failures
+predate the model change and none follows it** — which is why the fix below is about being able to *name* the model,
+not about changing it.
+
+**And the change itself is not in the record anywhere.** The model lives in `.env`, which is not committed, so the
+repository cannot answer *"which model was deployed on which day?"* — the question the correlation above turns on. The
+only trace is inside the stored messages. That is recorded here as a finding, not fixed: an environment value is
+supposed to be environment-owned, and asking it to be in git is a different decision.
+
+## 3. Failed turns — what is now possible, and what is already gone
+
+The owner's third ask was to include **failed** turns in the analysis. The honest answer has two halves.
+
+**The past ones are unrecoverable, and that is measured rather than assumed.** A failed turn writes nothing to
+MongoDB (Phase 07E / M7), so a timeout, an abandoned turn, an output limit or a quota refusal exists **only** in the
+server's stdout — and every one of those lines from 2026-10-14/15 is gone, because nothing on this machine captures
+stdout to a file. The eleven empty completions *are* recoverable because a degraded turn is a `201` and is persisted;
+the failures that persist nothing are not, and no amount of analysis can bring them back.
+
+**The gap that made the eleven unidentifiable is now closed, and that is the increment.** §27BS could only report
+`in=0 out=0` for its degraded turn and had to note *"no `[ai:openrouter]` diagnostic line, so it was not an error"* —
+because a **valid JSON 2xx carrying nothing usable is the one shape that logs nothing at all**: it is not a non-2xx
+(those log), not an unparseable body (that logs diagnostics), not a timeout and not a quota refusal (both throw). The
+body an operator would need to identify was never written down, so the eleven could be counted but never explained.
+Now **every empty response logs one bounded line, per occurrence**:
+
+```text
+[ai:openrouter] empty completion (model=<the model the request named>, stop=end_turn, blocks=thinking,
+  contentBlocks=1, hasModel=true, hasUsage=true, out=137, bodyBytes=812, keys=id,type,role,content,model,stop_reason,usage)
+  — the provider answered 2xx with neither text nor a tool call; the turn retries once, then degrades (AI-2)
+```
+
+Four properties are deliberate. It fires on **every** empty response, not just the ones a turn gives up on — "the
+failure rate" includes the empties AI-2's retry rescues, and the turn-level warning appears only when a turn dies. It
+reports the **shape** and never the body: top-level field names, block TYPES, counts, booleans, `bodyBytes`, and `out`
+(the tokens the provider said the model spent) — which is what makes it safe to report the `thinking` case at all,
+since that body *does* contain the model's reasoning text. `out=none` rather than `0` when the provider reported
+nothing, because *"the model spent its budget reasoning"* and *"the gateway sent nothing"* are exactly the two
+explanations this line exists to tell apart. And it does **not** fire for AI-10's cap-spent case, which throws in the
+parser and keeps its own single line: one response, one line, never two.
+
+**For the next analysis, the sink is a file.** The lines above — like AI-5's turn line and AI-2's degraded warning —
+go to stdout, and `logs/` is already git-ignored, so `npm start > logs/server.log 2>&1` is the whole mechanism; the
+guide now carries the recipe and the two greps (`[ai] turn` for the failures, `empty completion` for this line). One
+cross-check is worth recording because it was taken: the provider reported **37 free requests** in its current UTC day
+while **13–14 answered turns** were stored in that same window — **2.6–2.8 requests per answered turn**, consistent
+with the 2–3 measured on device turns (§27BI) and with the log's own `calls` field. So the allowance that day is
+*accounted for* by answered turns, and a future unexplained gap between the provider counter and the stored turns is
+the signal that failures are eating requests invisibly.
+
+## What shipped
+
+* **`server/src/services/ai/providers/anthropicWire.ts`** — `emptyResponseShape()` (new, bounded and content-free) and
+  one `console.warn` on the empty path; and the model fallback for a response that omits `model` is now **the model
+  the request named** (`parseAnthropicResponse(data, requestedModel)`), not the provider label.
+* **`server/src/services/ai/providers/openrouterProvider.ts`**, **`claudeProvider.ts`** — the `fallbackModel` option is
+  **removed** rather than changed, so no provider can put its own name in a model column again.
+* **A real fix `tsc` found on the way, not the tests:** with `modelKey: keyof ReturnType<typeof aiConfig>`, `cfg[modelKey]`
+  carries the union of **every** config value's type — a model arrived as `string | number` and compiled only because
+  its one consumer took a loose shape. The key is now a mapped **string-valued** key, so a numeric knob cannot be
+  named as a model and the compiler is what refuses it.
+* **`server/test/AI12-empty-completion-diagnostics.test.mjs`** — **9 cases**: 7 wire-level ones, plus **2 over the real
+  route with a real database** (`MIXED`, the AI-10 pattern: real provider, real parser, real persistence, only the
+  gateway stubbed), because a line proven at the wire boundary is not yet proven in a *turn*. One updated assertion in
+  `phase-openrouter-provider.test.mjs` — the case that asserted the provider label is now named for what it asserts
+  instead (*"names the model the REQUEST asked for when the body omits one"*) and expects the configured model.
+
+## Why the model column matters more than it looks
+
+Twelve of the 44 development turns carry `openrouter` in their **model** column, and **every failing turn is among
+them**. That is the provider's name wearing a model's field, and its effect is precisely to make the owner's own
+question — *is this model the unreliable one?* — unanswerable from the record. A response that does not name a model
+is now labelled with the model the request named, which is true by construction of the request (`AI_MODEL_OPENROUTER`
+is what the body asks for), and the pre-fix records keep their old label — this is a **recording** change, not a
+migration, and no stored row was rewritten.
+
+## Verification
+
+* The suite was **written first and watched fail**: the first run had the three case failures that *are* the defect —
+  `exactly one line per occurrence, got: []`, `one line, again: 0 !== 1`, and the missing `keys=error` — with the four
+  must-not-fire cases and the output-limit disjointness case passing before the change, as guards should.
+* **Proven able to fail three times by mutation at the wire level, each restored byte-identical** (sha256
+  `1f4ac4ea0fa19c17da846b5e57096f16159e4b2342ded0841e33efef4f05f780` before and after): the line never firing again →
+  **3** failures (exactly the three ★ cases); the fallback back to the provider label → **1** failure (the model-naming
+  assertion, and only it); the line firing for *every* response → **2** failures (both must-not-fire cases). A mutation
+  that cannot apply is not evidence, so each edit asserted that it landed before the run.
+* **And once more at the route level, because the record half matters as much as the line:** putting the provider label
+  back under a real database reddened **both** DB cases (`pass 0 / fail 2`) — the log line's model, the turn line's
+  model and the **stored message's** model — with the file restored byte-identical and the same two passing again.
+* **Full server suite 1464 tests / 217 suites / 0 failures** (up from 1455 / 215), `tsc --noEmit` and `eslint .` clean,
+  `check:extensions` and `check:specifiers` clean (390 modules).
+* **No mobile file was changed**, so the mobile suite was not re-run (nothing in `mobile/` is affected by a server log
+  line). Nothing was deployed, and no route output changed.
+
+## Limits, and what is still the owner's
+
+* **The root cause is located, not proven.** The failures are a provider-side, intermittent, **2xx-with-nothing-in-it**
+  shape on turns that had usually just sent tool results; timeouts, quota and outages are excluded by mechanism. What
+  remains unproven is the upstream *reason* — a reasoning-only response and a gateway error-shaped body are still
+  indistinguishable **in the surviving records**, and the next occurrence is the first one this line can name.
+* **One of the eleven is provably the `thinking` shape** (it named `ultra-550b` and spent 90 output tokens with no text
+  and no tool call) — and the fact that only *one* of eleven can be read that way is the measure of how much the
+  missing line cost.
+* **The stored `model` and `usage` are sticky across a turn's rounds** (`response.usage || usage`), so on a multi-round
+  turn they are the last values *reported*, not necessarily the failing round's. Recorded rather than changed: the new
+  line reports each response's own fields, which is what the turn-level record cannot.
+* **`ISS-22` is untouched and remains the owner's decision** — no model, tier, cap or provider changed here. The cap
+  stays **800** for the reason §27BY measured (the turns that reach it are already near the 60 s turn budget, so a
+  larger cap converts a marked partial answer into a `504` with no answer at all).
+* **Production has been read once, for one day, and is not a rate.** The reading is reproducible with the command
+  above whenever the question comes up, and it costs nothing.
+
+
+# 27CQ. The 50 000-product phone pass — a real answer on the member's own account, and the first naturally capped turn (2026-10-17)
+
+§27BZ measured every tool at 50 000 products, answered two turns over HTTP, and closed by leaving the tenant in place
+*"most obviously for a phone pass, which is what the missing half of this would be."* This is that pass: an Android
+device, a real signed-in member, and the assistant answering from the **50 626-product** `gamdias` catalogue.
+
+## The environment, brought up and each half verified before the app was touched
+
+* **Both tunnels listed** — `8081` and `4000`, the step the device guide calls the one most often missed.
+* **The server with its database connected** — `[db] connected to MongoDB (database: inventoryai_dev_db)`, then
+  `/api/health/ready` → `{"status":"ready"}`. Its output went to a file, so the pass was read from the same
+  `[ai] turn` lines the AI-5 work exists for.
+* **Metro running**, and the dev client bundling from it — **1 513 modules in 1 492 ms**.
+* **The tunnel proven to carry the app's own traffic, not just `curl`** — the app's session probe arrived as
+  `GET /api/auth/me` → **401**, which is the *correct* answer for a signed-out device and the only observation that
+  distinguishes "the tunnel works" from "my laptop can reach my laptop".
+* **The sign-in was the owner's own action.** The app was signed out; no account's password was used, reset, handled
+  or read by this run. Which account it landed on was then confirmed from the `sessions` collection
+  (`jeffernmalinaoqwe@gmail.com`, OWNER, created 20:43:02.093Z with the 14-day `expiresAt`) rather than inferred from
+  what the screen happened to show.
+* Timestamps here are the server's UTC instants (**20:43–20:50Z**), which are **04:43–04:50 on 2026-10-17** on the
+  phone.
+
+## The dashboard, on the same account, at the same size §27BX wrote its fix for
+
+Read off the device as text rather than inferred: **IN STOCK 42,909 · LOW STOCK 7,717 · OUT OF STOCK 3,078 ·
+ACTIVE PRODUCTS 50,626 · TOTAL ON-HAND QTY 12,539,792**, with *Needs attention* populated by real rows
+(`Multi-Purpose Wipes 60625 … Out`, `0 available · minimum 100`). The merged-counts path of §27BX still answers at
+the size it was written for.
+
+## The turns
+
+| # | what was asked | HTTP | turn total | provider | tool | tool ms | tokens in/out | outcome |
+|---|---|---|---|---|---|---|---|---|
+| 1 | *"How much stock do we hold in total right now"* | 201 @ 12 194 ms | 11 617 ms | 10 849 ms | `getInventorySummary` | **768** | 3 451 / 143 | ok |
+| 2 | *"How many products need reordering right now"* | 201 @ 12 914 ms | 12 147 ms | 11 012 ms | `getReorderNeededProducts` | **1 134** | 7 850 / 149 | ok |
+| 3 | *"List all of them with their available quantities and minimum stock"* (same conversation) | 201 @ 18 598 ms | 17 909 ms | 16 718 ms | `getReorderNeededProducts` | **1 191** | 7 938 / **800** | **degraded** |
+
+**The same conclusion the lab reached, now on a member's own turn: the model is what a member waits for, not the
+database.** The heaviest tool in the family cost **1.13–1.19 s** of a 12.9 s and an 18.6 s turn — **6–9 %** — while the
+provider took **91–93 %**. Turn 1's own tool was **0.77 s** of 12.2 s.
+
+## The first naturally capped turn since AI-8 shipped
+
+§27BY recorded that *"no naturally-capped turn has been seen since AI-8 shipped, so the note's help to a member in
+practice rests on the single forced observation."* A member asking for the full restock list of a 50 626-product
+catalogue produced one by itself — which is exactly the request the cap exists for, and the realistic worst case.
+
+What the member saw, read off the screen: a numbered list cut at **8 items** (`1. … available: 0, minimum: 64`), then
+
+> *This answer hit the length limit, so it may be incomplete — ask a narrower question to see the rest.*
+
+and the **`Read: getReorderNeededProducts`** provenance chip. The turn line and the stored row agree with the screen:
+`out=800` against `AI_MAX_OUTPUT_TOKENS=800`, `degraded: "OUTPUT_LIMIT"`, `usage {inputTokens: 7938, outputTokens:
+800}`, 824 characters stored. The two healthy turns carry **no `degraded` field at all** — AI-2's absent-not-null rule,
+read on production-shaped data rather than in a suite.
+
+**And the model column is right in all three stored rows** — `nvidia/nemotron-3-super-120b-a12b:free`, the model the
+request named, never the provider label `openrouter`. §27CP's fix is confirmed where the usage report reads it, not
+only where it was tested.
+
+## Grounding, checked against the tool rather than against the screen
+
+* Turn 1's **12 539 792 units** equals the dashboard's *TOTAL ON-HAND QTY* on the same device — exact.
+* Turn 2's **7 717** equals `getReorderNeededProducts` called directly on that tenant (`total=7717`) and the
+  dashboard's *LOW STOCK* — exact. Its claim that out-of-stock items come first is supported by the payload.
+* Both answers carried the tool-provenance chip, so the member can see which read produced them.
+
+## What this does not prove, stated rather than glossed
+
+* **Three turns are a reading, not a rate.** One account, one device, one model, one provider tier, one evening.
+* **No empty completion occurred, and that is not an answer to ISS-22.** Six provider calls, `empty=0` on all three
+  turn lines, and **zero** `[ai] empty completion` lines — on a day whose model is `super-120b`, while all eleven of
+  §27CP's failures sit on 2026-10-15 with the previous model. That narrows *"is it the free tier?"* in the useful
+  direction and answers nothing else: the remaining question is a **rate over days**, which is what the capture
+  recipe is for, not something one afternoon can settle.
+* **The environment was flaky while this ran.** The first `seed:perf` connect and the first server boot both failed
+  with `connect ETIMEDOUT 159.143.161.245:27017`; three consecutive probe connects took 579 ms, 607 ms and then
+  **15 742 ms**. Nothing was written by the failed connects — they are fail-closed *before* any write, which is why
+  the perf tenant was left untouched — the server was restarted once MongoDB answered, and the pass itself ran
+  against a connected server. The caveat belongs on the numbers above.
+* **The tool timings here are a colder sample than §27BZ's** (single iterations: `getReorderNeededProducts` 1 494 ms,
+  `getLowStockProducts` 1 365 ms, `getOutOfStockProducts` 1 194 ms against warm medians of 1 277 / 1 232 / 1 180).
+  Same line, colder measurement — the difference is what the turn lines' in-turn tool ms also show.
+* **The cap's decision is untouched.** §27BY's 800 stands; this pass is a natural confirmation that a member asking
+  for everything gets a marked partial answer plus a way forward, rather than a truncated one or a `504`.
+* **Android only.** iOS remains unenvironmented on this host.
+
+## The headless recipe, written down
+
+This pass drove the app without a mirror: navigate by deep link, read the screen as text, tap coordinates taken from
+the UI dump, and verify a turn from the **server log** rather than by polling the screen. Two details cost real time
+and are now in `docs/DEVELOPING_ON_A_PHYSICAL_DEVICE.md` **§9b** — the `MSYS_NO_PATHCONV=1` that a Git Bash path
+rewrite otherwise ruins, and the fact that **opening the keyboard moves the Send button**, so a tap at its
+previous coordinates hits the keyboard and the message silently never sends.
+
+
+# 27CR. The restock list that existed only five rows deep (2026-10-17)
+
+§27CQ's phone pass measured the assistant picking up a natural member request — *"list them all with
+quantities"* — on a 50 626-product catalogue and being stopped by the 800-token answer cap after **eight**
+rows. Chasing that dead end turned up a larger one underneath it, on the screen where the same list had
+already been displayed.
+
+## The gap, measured
+
+On that account **7 717 products** were at or below minimum stock (3 078 of them out of stock), and the
+restock tool had reported exactly `total=7717` two turns earlier. The dashboard's *Needs attention*
+section previewed the first **five** (`productsApi.reorder`, `limit: 5`) and its link — labelled **"View
+inventory"** — opened `/inventory` with **no restock filter**, which lists stock *rows* per location, not
+products at or below minimum. So the number the summary had just reported could not be reached: five rows
+on the dashboard, eight rows in the assistant, and 7 709 named nowhere. Nothing in the app could show them.
+
+The data was never missing. `GET /api/products/reorder` has been **paginated, worst-first, total-bearing
+and `products.view`-scoped since Phase 11**, and the AI restock tool had used it all along. The client half
+did not exist — the dashboard read five rows of a list and had nowhere to send the member for the rest.
+
+## What shipped — mobile only, and that is the point
+
+* **`mobile/app/(app)/restock.tsx`** — the list itself: paged through the shared `usePagedList` and
+  `ListScreen` plumbing, the endpoint's own `q` for search (name/SKU/barcode), the **total stated above the
+  search field** ("7,717 products at or below minimum stock, most urgent first"), each row showing
+  `SKU · available · minimum` with an **Out** (danger) or **Low** badge, and a tap opening the product.
+* **The dashboard's *Needs attention* action now reads "View all" and opens `/restock`.** The preview depth
+  (5) is unchanged — the dashboard is a summary, and now it says so.
+* **`/inventory` carries a "Restock list →" link.** STAFF hold `products.view` and are sent to `/inventory`
+  at sign-in (`defaultHomePath`), so without this line the one role that does the restocking had **no route
+  in at all**.
+* **The truncated-answer note now offers the list** when the truncation was a stock-list answer:
+  `restockPathForTools()` maps exactly three server tool ids (`getReorderNeededProducts`,
+  `getLowStockProducts`, `getOutOfStockProducts`) to `/restock`. The sentence stays for every other
+  truncation, and **no other tool gets a link** — a truncated piece of prose has no screen, and pointing it
+  at one would invent a connection between unrelated things. The tool ids were already on the message for
+  the provenance line, so this adds **no field and no request**.
+
+**No server file, route, permission or schema changed, and no model was called.** The endpoint, its
+permission and its ordering are exactly as Phase 11 shipped them; three surfaces now read it instead of one.
+
+## Two deliberate choices
+
+* **Worst first is the endpoint's**, not the client's. Sorting the loaded rows would reorder only the rows
+  on screen and leave each page internally inconsistent.
+* **Search is the endpoint's `q`.** At catalogue scale the rows that matter are usually not on the pages
+  already fetched, so a client-side filter over loaded rows would answer "nothing matches" for a product
+  that exists.
+
+## Measured, over real HTTP at 50 626 products
+
+The screen's own request shape was exercised against the `gamdias` tenant with a minted session (the app's
+exact query — `page` + `limit`, no filters — then a search), so the numbers below are what the screen will
+actually receive rather than what the endpoint was assumed to do. The probe deleted its own session row
+afterwards and was itself deleted, so nothing it used survives in the tree.
+
+| request | status | total | rows | time |
+| --- | --- | --- | --- | --- |
+| `page=1&limit=25` | 200 | **7 717** | 25, all `OUT_OF_STOCK`, `availableQuantity` ascending | **1 563 / 1 707 ms** |
+| `page=2&limit=25` | 200 | 7 717 | 25, disjoint from page 1 | **1 314 / 1 367 ms** |
+| `q=pro&limit=20` | 200 | 1 285 | 20 | **1 100 ms** |
+
+Three facts worth keeping. **The ordering is the endpoint's and it holds at this size** — page 1 is 25 rows at
+zero availability, so the first thing a member sees is the worst of the catalogue. **Search reaches the
+server** and matches names with the query low-cased, which is why the client must not filter its own rows.
+And **a page costs 1.1–1.7 s at 50 000 products**, which is the honest number for this screen: the ordering
+key (`available`) and the filter (`available <= minimumStock`) are both computed by the availability merge,
+so no index can supply either, and every page counts and sorts the qualifying partition — the same
+structural limit §27BZ recorded for the tools (0.26–0.65 s at 10 000, ~1.3–1.7 s at 50 000, i.e. still
+linear in the tenant). **Not fixed here, and deliberately not hidden:** making this page index-provided
+needs a stored/materialised availability or a different ordering contract, which is a server design
+decision, not a client one. It is recorded as the next step this screen makes worth taking. On this tenant
+`sku` is `null` on every row, so the row's `SKU` segment simply does not render — which is why the subtitle
+is assembled from the parts a row actually has rather than assuming them.
+
+## Verification
+
+* **11 new mobile cases, written first and watched failing**: the restock suite failed to load at all
+  (`Cannot find module '../app/(app)/restock'`), and the assistant suite failed on a missing
+  `chat-restock-link` node and `restockPathForTools is not a function` — the three failures that *are* the
+  feature. The restock suite pins the stated total, both badges, `available`/`minimum` per row, a row tap
+  opening `/products/:id`, the search term reaching the API rather than a local filter, the empty state, and
+  an expired session signing out instead of rendering an empty list; the assistant cases pin the link, its
+  absence for a non-stock tool, the three-tool mapping, and the **copy distinction** — with the link present the
+  note no longer tells a member to "ask a narrower question", because that advice and a one-tap route to the
+  whole list are contradictory instructions.
+* **Mobile: 67 suites / 885 tests / 0 failures** (up **11** cases), `tsc --noEmit` and `eslint .` clean.
+  **No server file changed**, so the server suite was not re-run — the last full run stands at
+  1464 / 217 / 0 and nothing it covers moved.
+* One assertion was corrected while staying red for the right reason: the count text is built from
+  interpolated children, so it is asserted as the sentence the member sees (`"2 products"`) rather than
+  against a number inside a children array.
+
+## Verified on the phone, in a development build against the local server
+
+The earlier attempt could not run this code at all, because the installed APK was a **release-style build**
+with an embedded `assets/index.android.bundle` and zero `devlauncher` entries — `inventoryai://restock`
+answered *"Unmatched Route"* and no app request reached the local server. With the **2026-10-16 EAS
+`development`** build installed, all three independent signals agreed before anything was claimed:
+
+* Metro served the bundle — `Android Bundled 2639ms node_modules\expo-router\entry.js (1597 modules)`;
+* the app talked to **this** backend — `GET /api/dashboard` **200** in 1 193.8 ms, `/api/products/reorder`
+  **200** in 1 378.4 ms, `/api/purchase-orders` **200** in 371.3 ms, all with the signed-in `userId`;
+* the screen itself was read back as text (`uiautomator dump`), not from a screenshot.
+
+Signed in to the **`jaffy gamdias`** tenant (50 626 active · **7 717** low · 3 078 out), the walk was:
+
+| step | what the screen said | what the server said |
+| --- | --- | --- |
+| dashboard, *Needs attention* | **"View all"** (the old copy read "View inventory") | `GET /api/dashboard` 200 @ 1 193.8 ms |
+| tap it | **Restock** · *"7 717 products at or below minimum stock, most urgent first"* | `GET /api/products/reorder` 200 @ 1 378.4 ms |
+| first page | 25 rows, every one **Out** at `0 available`, worst first | total **7 717** — equal to the dashboard tile |
+| scroll | later rows are different products (`Deluxe Towel 59900`, `Ultra Tape 59899`, …) | pagination fired repeatedly; **16** reorder requests in the run |
+| search `pro` | *"1 285 products at or below minimum stock"*, names all `Pro…` | 200 @ 956.6 ms — **the probe's 1 285**, so the count comes from the server |
+| search `Pro Notebook 60295` | *"1 product at or below minimum stock"* (singular), `1 available · minimum 97`, **Low** badge | 200 — the low-but-stocked case |
+| search `zzzz` | *"Nothing matches" / No product at or below minimum stock matches “…”* | 200, empty page |
+| tap a row | the product screen (`Ultra Tape 59899`, Active, Personal Care, prices) | `GET /api/products/6acf26…` 200 @ 350 ms |
+| `/inventory` → **"Restock list →"** | the same Restock screen, first page reloaded | 200 @ 1 312.1 ms |
+
+**No React Native error or fatal exception in logcat** for the session.
+
+Two things this pass settled that a test could not. The **Low badge is real on a device**, not just in the
+renderer: page 1 cannot show it, because the first 3 078 rows of this catalogue are the out-of-stock block
+(measured: `OUT_OF_STOCK` 3 078, `LOW_STOCK` 4 639), so the case was reached by searching for a product with
+`available 1 · minimum 97`. And the **page cost is the server's, not the phone's** — durations of
+**1 298.9 / 1 378.4 / 1 359.2 / 1 312.1 ms** for pages that the phone requested over the USB tunnel, matching
+the HTTP probe above. One of those answers was a **304 Not Modified** that still cost **1 312.1 ms**: the
+conditional request saves the bytes, not the pipeline, because the aggregation runs before the comparison.
+
+## Taken on the phone, and one finding worth keeping
+
+The chat link needed a **capped** turn, so `AI_MAX_OUTPUT_TOKENS` was temporarily lowered and restored
+byte-identically (sha256 `1e8ebf77…` before and after) with the server restarted on the shipped **800**
+afterwards. Two attempts — **40** and **150** tokens — both answered the member's own natural question
+("Which products are low on stock?") with:
+
+```text
+[ai] turn outcome=AI_OUTPUT_LIMIT total=3412ms providerMs=3412ms calls=1 toolMs=0ms toolRuns=0 tools=none empty=0 in=2574 out=150 …
+```
+
+`tools=none` and no text is the finding: **this model spends its entire output budget before emitting
+anything**, so a small cap cannot produce AI-8's partial answer at all — the member gets the *"ran out of
+room"* sentence (AI-10's path) instead. The truncated-*list* note therefore appears only at a cap large
+enough for text to begin, which in practice is the natural 800-token cap already observed in §27CQ. Chasing
+that again costs a full-length turn and 2–3 of the free tier's ~50 daily requests, so it was **not** spent
+here: **`chat-restock-link` remains unit-verified only** — the rendering, the three-tool mapping and the copy
+distinction are pinned by tests, but nobody has tapped it under a real capped answer.
+
+**Also unverified:** the STAFF entry point, which needs a STAFF credential; the row was measured by a test
+and its appearance on a small screen was not judged by eye.
+
+# 27CS. The restock page's cost, measured to the mechanism — and the fix that is a design decision (2026-10-17)
+
+§27CR shipped the restock list and measured it at **1.1–1.7 s per page** on the 50 626-product tenant, with the
+dashboard paying the same cost on every load to preview five rows. This is the follow-up that cost deserves: the
+number is now attributed stage by stage, two cheap fixes were tried and **rejected on measurement**, and the one
+change that would actually move it is written down as a decision rather than smuggled in.
+
+## The method, and the tool that refused
+
+Atlas on this tier **refuses the server profiler** — `CMD_NOT_ALLOWED: profile` — so the cost was read from
+`explain(executionStats)` instead. The pipeline was rebuilt from `product.service.ts`'s own shape and the rebuild
+**proved faithful before any number was trusted**: it returned `total=7717` and a first page whose ids were
+**identical** to the live endpoint's. Without that check the explain would describe some other query.
+
+## Where the 1.2 s goes
+
+Cumulative stage estimates from the shipped pipeline on `gamdias` (50 626 products, 101 374 inventory rows):
+
+| stage | cumulative estimate | delta |
+| --- | --- | --- |
+| `$cursor` — product scan, 50 626 docs | 165 ms | 165 ms |
+| `$unionWith` — inventory grouped by product | 673 ms | **508 ms** |
+| `$group` — 101 251 docs merged by `_id` | 902 ms | **229 ms** |
+| `$match __product != null` | 950 ms | 48 ms |
+| `$replaceRoot` / `$mergeObjects` | 1 116 ms | **166 ms** |
+| `$match available <= minimumStock` | 1 173 ms | 57 ms |
+| `$facet` — count + sort 7 717 + page + category joins | 1 187 ms | **14 ms** |
+
+The page's own work — sorting the 7 717 qualifying rows, skipping, limiting and joining categories for 20
+rows — is **14 ms**. Everything else is reading and reshaping documents.
+
+Component timings, measured separately against the same tenant:
+
+| operation | time |
+| --- | --- |
+| inventory grouped by product (50 625 groups over **101 374** rows) | **1 232–1 914 ms** |
+| products ACTIVE, projected to three fields (50 626 docs) | **879 ms** (cold) |
+| `countDocuments` on the same product filter | 75 ms |
+| union(empty inventory) + group + merge over 50 626 products | **576 ms** |
+
+So the shape is clear: this endpoint is **transfer-bound on a shared tier**, and the transfer is inherent — the
+question *"which products are at or below their minimum?"* needs every inventory row summed per product and
+compared with every product's own minimum. `countDocuments` is fast because an index answers it without reading
+documents; nothing similar exists for a computed aggregate.
+
+## Two cheaper shapes tried, and why they are not the fix
+
+* **Narrow the payload through the merge.** Each product travelled as its whole document through `$unionWith` →
+  `$group` → `$mergeObjects`; the obvious move is to project the ten fields the page reads. Measured: **1 104 →
+  1 228 ms median** (3 runs each), i.e. **no gain**, while the results stayed identical. Document *size* is not
+  what costs here; the *number* of documents is.
+* **A covering index for the inventory group.** `{businessId, productId, quantity, reservedQuantity}` was built on
+  the live dev collection (**1 819 ms** to build over 101 374 rows) and measured: **1 232 → 1 368 ms**, again no
+  gain. It was **dropped**, and the collection's index list was confirmed back to exactly what it was, so the
+  probe left no schema behind. An index cannot make a `$group` cheaper when the group itself is the unit of work.
+
+## The change that would work, recorded rather than taken
+
+A stored availability would remove the whole computation: `Product.availableQuantity` (and/or a
+`needsRestock` boolean) maintained by the inventory **write paths**, plus an index
+`{businessId, status, needsRestock, availableQuantity}` so the count and the worst-first page both come from one
+index scan — the shape that makes `countDocuments` take 75 ms.
+
+It is **not** taken here, deliberately:
+
+* it must be updated by **every** write path that changes stock — stock in, stock out, adjustment, the two legs of
+  a transfer, and purchase-order receive — or it silently drifts, and a restock list that is quietly wrong is
+  worse than a slow one;
+* it needs a **backfill** and a **drift guard** (a test that recomputes the value from the rows and fails on any
+  mismatch), which is its own increment;
+* CLAUDE.md's inventory rules put transaction semantics and negative-stock protection on the write path, so this
+  is a data-model decision with business-rule consequences — the owner's call, not a performance patch.
+
+**No production file, index, schema or route changed by this section.** The numbers above are the whole
+deliverable; the next step named is the denormalisation and it needs a decision.
+
+## What this does and does not change about the shipped screen
+
+The screen behaves exactly as §27CR recorded: correct, worst-first, server-searched — and **1.1–1.7 s per page**
+at 50 000 products. On the member's own catalogue that is one loading state per page of a list that previously
+could not be opened at all, which is why it shipped; it is not claimed to be fast. The dashboard preview keeps
+its 1.3 s until the stored value exists.
+
+# 27CT. The role-boundary fixture — four working logins in one tenant, and the 96-cell matrix that proves them (2026-10-17)
+
+The owner asked for something the repository could not give: *"create test accounts for the Admin, Manager and
+Staff roles yourself so I can check each role from my side"*, without a six-digit verification code, without
+weakening real accounts, and with the permissions actually verified. Every role guard was already proved —
+Phase 23 structurally, Phase 24 at runtime — but **nothing produced a working login** a person could use, so
+"what does STAFF see?" could only be answered by reading the code.
+
+## What shipped
+
+Three commands and one shared core, all under `server/scripts/`:
+
+| command | what it does |
+| --- | --- |
+| `npm run seed:roles` | creates/refreshes **one isolated tenant** holding exactly one account per role, plus ~900 documents |
+| `npm run verify:roles` | signs the four accounts in and checks **96 cells** against the shipped routes and the users API |
+| `npm run cleanup:roles` | removes that tenant and proves nothing is left; Firebase identities are kept unless `--delete-firebase` |
+
+`role-test/lib.mjs` owns the fixture's identity — the tenant name, the four literal addresses, the one password
+variable — so the three CLIs cannot disagree about what the fixture IS. `role-test/matrix.mjs` owns the route
+matrix and the three pure comparison helpers. `phase27ct-role-fixture.test.mjs` (25 cases, DB-free) pins the
+safety properties.
+
+## No verification code — and why that is not a bypass
+
+The four Firebase identities are written by the **Admin SDK** with `emailVerified: true`, which is *exactly* the
+write the shipped AUTH-04 confirm step performs after a real 6-digit code is redeemed
+(`updateUser(uid, { emailVerified: true })`). What is skipped is the round trip to a mailbox, not a control:
+**no route, middleware, environment value or schema changed**, `EMAIL_NOT_VERIFIED` still applies to every other
+account, and the addresses are all in the reserved **`example.invalid`** domain, which cannot receive mail — so no
+code could be delivered there in the first place. The Admin SDK is never asked to list or pattern-match
+identities; four literal addresses are the entire blast radius, and the script never deletes an identity by
+default.
+
+## Isolation, in three separate places
+
+* **Tenant** — named `ROLE TEST — role boundary fixture (do not use)` and identified by **both** its name and its
+  owner address; a disagreement between the two fingerprints is an error, not a guess. Every data query and every
+  delete is filtered by that one `businessId`.
+* **Target** — `assertSafeTarget` refuses `NODE_ENV=production`, refuses any database that is not the development
+  one, and requires `SEED_CONFIRM=seed-roles`, **before a connection is opened** (on a dry run too).
+* **Rows the shared list forgets** — `audit_logs` and `ai_conversations`/`ai_messages` are keyed by `businessId`
+  but are not in `TENANT_DATA_COLLECTIONS`, so the fixture removes and **verifies** them itself. A cleanup that
+  reported "0 remaining" over a shorter list than it deleted from is the failure this avoids.
+
+## The measurement
+
+Run on 2026-10-17 against `inventoryai_dev_db`, tenant `6ad30fc8f1b55717c234abcd`, with a **real Firebase
+email/password sign-in followed by the real `POST /api/auth/firebase/exchange`** for each account (`--signin`):
+
+* all four accounts signed in **HTTP 200** with the right role from `/api/auth/me` — proving the identity exists,
+  is verified, the password is the seeded one, and the exchange resolves the right MongoDB user;
+* **96 of 96 cells matched `ROLE_PERMISSIONS` exactly** — 18 gated routes × 4 roles, 3 authenticated-only routes ×
+  4 roles, and **12 user-management rules** exercised through the app's own `POST/PATCH /api/users`;
+* the route tiers came out as the catalogue says: `users.manage`/`audit.view`/`categories.manage`/`locations.manage`
+  refuse MANAGER and STAFF; `dashboard.view`/`inventory.manage`/`products.manage`/`suppliers.manage`/`purchase-orders.manage`
+  refuse STAFF; every read and the stock in/out/receive routes admit all four.
+
+The seeding is **idempotent and read back**: 900 documents written, re-counted through the same `businessId`
+filter the screens use, and the summary fails if any collection disagrees. Cleanup removed **914** documents and a
+re-query found **0**; a second cleanup answered *"nothing to clean"*; and a reseed after a full cleanup reattached
+the **same four Firebase identities** to a new tenant — the F-50-safe direction (database first, identities kept).
+
+## What it found
+
+* **ADMIN is route-equivalent to OWNER.** No shipped route refuses ADMIN, because the two capabilities it lacks
+  (`business.manage`, `roles.manage`) are **catalogue-only** by Phase 22. ADMIN's real restriction lives inside
+  `/api/users` and is only visible to a client that disables buttons — which is exactly why the verifier checks
+  those rules separately: ADMIN cannot create another ADMIN (`403 ADMIN_RESTRICTED`), cannot change its own role
+  (`403 CANNOT_MODIFY_SELF`), and cannot modify an existing ADMIN or the OWNER.
+* **`POST /api/users` sends no mail and needs no code**, so accounts an OWNER provisions from the Users screen are
+  usable immediately — through the legacy password route, because such a user has no `firebaseUid`.
+* A first draft of the suite asserted *"every role but OWNER is refused a route"* and **failed on ADMIN**. The
+  assertion was wrong, not the code: it is now written as the property that actually holds, and it cites the reason.
+
+## Limits, stated rather than glossed
+
+The verifier proves the **server** boundary. Whether a screen *hides* a button is the mobile mirror's behaviour
+and can only be judged on the phone, as can "does this read well"; no device run was performed for this record.
+The matrix is **18 representative routes**, not all 47 — Phase 23 covers every route structurally and Phase 24
+covers the tiers at runtime, so this is an operator-facing confirmation, not a replacement. `--signin` needs a
+Firebase web API key and the fixture password in the environment; the default mode mints sessions the way login
+does, which proves the gate but not the sign-in.
+
+`phase27ct-role-fixture.test.mjs` was **proved able to fail**: collapsing `cellAgrees` to `() => true` produced
+**5 failures** (both defect directions, the 401 case, the code-less-404 case, the business-code case), the file was
+restored **byte-identically**, and the suite returned **25/25**.
+
+# 27CU. The four-role phone walkthrough — a door with no handle, and a trail that showed its own enums (2026-10-17)
+
+The owner signed in as OWNER, ADMIN, MANAGER and STAFF against the §27CT fixture and asked for the screens walked the
+way a person walks them. Three defects came out of it, all **invisible to every existing guard**, and all fixed.
+(Finding numbers continue from **F-60**; F-56…F-58 are earlier records in §27BU/§27BX/§27BW and are not reused.)
+
+## F-61 — STAFF could not reach Profile at all
+
+`defaultHomePath` sends STAFF to **Inventory** (correct: they do not hold `dashboard.view`), and Profile is reached
+from a **Dashboard tile**. Every screen involved was permission-correct, and nothing failed: the gap was a missing
+link between two screens that both worked. On the phone the only header affordance on STAFF's landing screen was
+**sign out**, so a Staff member could not change their password, see or end their own active sessions, or edit their
+name — features every other role gets from the tile.
+
+Fixed with one shared header control, `mobile/components/ProfileIcon.tsx`, shown **beside sign out on the Inventory
+header for every role** — one icon, no permission conditional, and a member who navigates to Inventory from any role
+keeps a direct way back to their own account. `mobile/__tests__/profile-reachability.test.tsx` asserts both halves:
+the icon is an accessible `Profile` button that pushes `/profile`, **and** the Inventory `Stack.Screen` actually
+renders it. Removing the wiring makes the second assertion fail (verified by mutation, then restored).
+
+## F-62 — the audit trail printed its own enum names
+
+The Audit screen kept its label table inside `app/(app)/audit.tsx`, written at Phase 16A and **never extended since**.
+Every event added afterwards fell through to the raw value: four session-lifecycle actions (Phase 26A), two
+password-recovery actions (Phase 26B-2) and two Firebase identity actions (Phase 32H) rendered as
+`SESSION_CREATED`, `PASSWORD_RESET_COMPLETED`, `FIREBASE_IDENTITY_LINK_CONFLICT` beside human labels like
+"Stock in", and the `SESSION` entity badge read `SESSION`. No test could notice, because a screen that renders
+whatever arrives has no way to know a label is missing.
+
+The table now lives in `mobile/lib/auditLabels.json` with the lookups in `mobile/lib/auditLabels.ts`, and
+`server/test/audit-label-parity.test.mjs` reads **the same file** and fails when a server enum has no label, when a
+label merely repeats its key, when a label is blank or padded, or when the table holds a value the server cannot
+emit. The two properties that make it more than a key count are stated in the suite: a label equal to its key would
+pass a presence check while leaving the screen exactly as broken, and the helpers are exercised on planted gaps so a
+scan that matched nothing cannot pass. The `SESSION` filter chip was added to the trail's entity row for the same
+reason it needed a label: "who has been signing in?" is now a question the screen can answer.
+
+**Why the table is JSON rather than TypeScript.** The guard runs under the *server's* project, and importing the
+mobile `.ts` module pulled it into `server/tsconfig.json`, where `verbatimModuleSyntax` rejected it with four
+`TS1287`/`TS1295` errors — `npm run typecheck` went red for a presentation file. Data cannot collide with another
+project's module settings, and the app imports the same file, so there is still **exactly one table**. The label
+*lookups* (`actionLabel`/`entityLabel`, including the rule that an unknown value stays visible and a missing one is
+an em dash rather than the word "undefined") are covered by `mobile/__tests__/audit-labels.test.ts`.
+
+## F-63 — a denied screen still asked the server
+
+Writing the Audit screen's first render test exposed a third defect, in two screens: `audit.tsx` and
+`users/index.tsx` checked their permission **after** their hooks, so the denied path still mounted `usePagedList`
+(which loads on mount) and `useRefetchOnFocus` (which subscribes). A MANAGER or STAFF deep link therefore issued
+`GET /api/audit` or `GET /api/users` and was refused with **403** — no data leaked, but the client asked for
+something it knew it could not have, and the server logged an authorization refusal for a screen the person had
+already been told they could not open. MOD-07 fixed exactly this shape on four other screens (*"Hoisting the hooks
+instead of splitting would have satisfied the linter while quietly turning every denied visit into an API call"*) and
+these two were missed because neither violates Rules of Hooks — the return simply comes last.
+
+Both now use the same guard-parent/child split as the AI hub: the permission check and an `AccessDenied` with the
+unchanged message sit in the exported screen, and a child component owns every hook and mounts only when allowed.
+`screen-rbac-guard.test.tsx` grew the cases that would have caught it — MANAGER and STAFF for Users, STAFF for the
+trail — each asserting **the denied copy is rendered and the API was never called**, plus the allowed direction
+(OWNER for Users, ADMIN for the trail) so the guard cannot pass by refusing everyone. Reverting the Users guard to a
+no-op produced **2 failures**; the file was restored and the suite returned **13/13**.
+
+**The sweep then found the same shape on two detail screens**, so the class was fixed rather than the two instances:
+`users/[id].tsx` (a MANAGER or STAFF deep link loaded `GET /api/users/:id` before denying) and
+`purchase-orders/[id]/edit.tsx` (a STAFF deep link loaded the order for a form they may not use). Both took the same
+split, and the guard suite grew **4 more cases** — denied-renders-and-does-not-fetch plus an allowed direction for
+each (`userGet` for OWNER, `purchaseOrdersApi.get` for MANAGER) — bringing it to **17 cases**. Neutering both guards
+produced **2 failures**; restored byte-identically, back to 17/17. Reading every gated screen rather than only the
+reported ones is what made this a sweep: the check is now **before** the hooks on all of them.
+
+## Device verification (2026-10-17, after the fixes)
+
+Run on the OPPO CPH1969 over the USB tunnels (`adb reverse tcp:4000` / `tcp:8081`), development build, driven
+headlessly by the §9b recipe (deep-link navigation, `uiautomator dump`, text reads only — no screenshot judgement).
+The role fixture was re-seeded for it: `npm run seed:roles` removed **934** previous documents from tenant
+`6ad30fc8f1b55717c234abcd`, wrote **900** and read them back equal, and refreshed the four identities with
+`emailVerified: true`.
+
+**F-61.** Signed in as `role-staff@example.invalid` → the app landed on **Inventory** (STAFF has no Dashboard, as
+designed) and the header carried **Tools · Profile · Sign out**. Tapping **Profile** opened the account screen:
+*Role Test Staff · Staff · role-staff@example.invalid · Active · Edit name · Sign-in methods*. Before the fix there was
+no route to that screen at all for this role — the finding was made on this phone and is now closed on it.
+
+**F-62.** Signed in as `role-owner@example.invalid` → **Audit Log** listed *Signed in · Role Test Owner · Session*,
+*Signed out · Role Test Staff · Session* and *Signed in · Role Test Staff · Session*. The new **Sessions** chip
+filtered the list to exactly those rows, and **Products** answered *"No product activity yet."* — so the chip's
+filter reaches the server and changes what is drawn. Cross-checked in the database: the development database holds
+exactly `SESSION_CREATED ×2` and `SESSION_LOGGED_OUT ×1` for that tenant, which is both the three rows the screen drew
+and the raw values the old label table would have printed instead.
+
+**F-63.** As STAFF, deep links to `/users`, `/users/6ad30fcef1b55717c234abd1` and `/audit` each rendered the denied
+copy (*"Only the business owner and admins can manage users."* / *"…view the audit log."*), and the server log grew by
+**0 bytes** across all three — measured by comparing the log's byte offset before and after, so the claim is "no
+request was made", not "no error was seen". Before the fix each of those visits was a 403 the server logged.
+
+**One tooling correction, recorded because it produced a wrong reading first.** An ad-hoc mongoose script read
+`audit_logs` and reported **0 rows** for the fixture tenant while the phone was displaying three — the script had
+connected to the `test` database, because `MONGODB_DB_NAME` is applied by the server's own `resolveDatabaseName`
+and is not part of the URI. Connecting with `dbName: process.env.MONGODB_DB_NAME` returned the three rows. Nothing in
+the product was wrong; a diagnostic that does not load the database the way the server does will answer confidently
+and incorrectly.
+
+## Verification
+
+* mobile **70 suites / 900 tests**, `tsc` and `eslint` clean (from 69 / 892);
+* server **1 497 tests / 223 suites / 0 failures**, `tsc`, `eslint`, `check:extensions` and `check:specifiers` clean
+  (the known transient `[db] MongoDB connection lost` line appeared once and recovered, as in §27BC/§27BG);
+* the parity guard was **proved able to fail** on the real table: deleting `SESSION_CREATED` and de-humanising
+  `INVENTORY_ADJUSTED` produced **4 failures** (coverage, identical-label, the device-raw assertions and the
+  scan-floor test), and the file was restored to 31 actions / 9 entity types;
+* the reachability guard was **proved able to fail** by removing `<ProfileIcon />` from the Inventory header, after
+a first mutation attempt that silently did not apply (CRLF) and was therefore not evidence;
+* the audit screen's own render suite (`mobile/__tests__/audit-screen-labels.test.tsx`, 3 cases) mounts the real
+screen with a mocked API and asserts a session row reads **"Signed in · Session"** with no raw enum anywhere, that
+the **Sessions** chip asks for `entityType=SESSION`, and that STAFF gets the denied copy **without a request** —
+which is what found F-63.
+
+**Limits.** The device run above is **one build, one device and one tenant**, and three role/screen combinations
+were walked rather than the whole map: MANAGER was not re-walked for F-61 (its route to Profile is the Dashboard tile
+that already existed), and the Sessions chip is proved by *what the list contains* rather than by an inspectable
+query string, because `httpLogger` records the path without its query. The parity guard covers the **label** table;
+it cannot know that a new server action is worth showing at all, and "does it read well" remains a judgement for the
+owner's eye. The role fixture is **left in place** so these four logins stay usable (`npm run cleanup:roles` removes
+the tenant and keeps the Firebase identities), and its password now lives in `server/.env` (gitignored) as
+`ROLE_TEST_PASSWORD` — no credential is in any committed file.
+
+# 27CV. The MANAGER walk — the writes verified against the ledger, and two screens that agree (2026-10-17)
+
+§27CU left one role's phone pass outstanding, and it is the role whose daily job is the writing: MANAGER holds
+`dashboard.view`, `inventory.manage`, `products.manage`, `suppliers.manage`, `purchase_orders.manage` and `ai.use`,
+and is refused `users.manage`, `audit.view`, `categories.manage` and `locations.manage`. This is that walk, on the
+same device and build, with the fixture signed in as `role-manager@example.invalid`.
+
+## What was done, and what the database says
+
+**Stock In.** Product *Everyday Battery 10202*, location *Shop Front*, quantity **5**, reference
+`QA-MANAGER-WALK`. The app answered *"Done. Everyday Battery 10202 at Shop Front: 33 → 38"*; the database agrees —
+Shop Front **38**, Main Warehouse untouched at 32, `inventory_transactions` **366 → 367** with one `STOCK_IN` row of
+quantity 5 carrying that reference, and one `INVENTORY_STOCK_IN` / `INVENTORY_TRANSACTION` audit row whose metadata
+holds `previousQuantity: 33` and `newQuantity: 38`.
+
+**Transfer.** The same product, *Shop Front → Main Warehouse*, quantity **1**. The app answered *"…moved from Shop
+Front to Main Warehouse. Shop Front: 38 → 37, Main Warehouse: 32 → 33"*; the database holds the **two legs** — one
+`TRANSFER` row per location, each with its own `locationId` and its own `previous`/`new` pair, **one shared
+automatic reference** (`TRF-6ad32e089cc544d4e847d816`) — and one `INVENTORY_TRANSFERRED` audit row carrying both
+sides (`fromPreviousQuantity: 38`, `fromNewQuantity: 37`, `toPreviousQuantity: 32`, `toNewQuantity: 33`) and both
+transaction ids.
+
+**Same-location transfer.** Choosing the source as the destination leaves the button **disabled** and shows
+*"Choose two different locations — a transfer moves stock somewhere else."* — and the server refuses it independently
+(400 with a `toLocationId` problem, then `409 TRANSFER_SAME_LOCATION` in the service). The rule is enforced in three
+places, and the tap that looked like a dead button on the phone was the client-side one doing its job.
+
+## Two screens that agree, on data that moved under them
+
+The dashboard read **IN STOCK 168 / LOW STOCK 35 / OUT OF STOCK 11 / ACTIVE 203 / ON-HAND 46,607** after the writes,
+and the restock screen read **"35 products at or below minimum stock, most urgent first"**. Both were checked against
+an independent recomputation from the collections (§19: per product, summed available across locations, `<=`
+minimum), which returned **35 low / 11 out of 203**, and against the dashboard service called in-process
+(`lowStockProducts: 35, outOfStockProducts: 11, totalProducts: 203, totalInventoryQuantity: 46 607`).
+
+The interesting part is the **change**, because it looked like a discrepancy and was not: the dashboard read
+**36** when MANAGER signed in at 07:58 and **35** afterwards, and no screen was stale or wrong — the stock-in above
+lifted *Everyday Battery 10202* from **exactly** its minimum (summed available 65, `minimumStock` 65, so `65 <= 65`
+counted as low) to 70, so one product legitimately left the list. The ledger was the arbiter: exactly three
+transactions exist after 07:58, all of them the two above. The boundary rule is asserted in
+`SCALE-dashboard-counts.test.mjs` against a hand-built fixture; this is it happening on real data.
+
+## The permission mirror, seen rather than asserted
+
+MANAGER opened **Categories** and **Locations** and both rendered as **read-only** lists (Personal Care, Household,
+Snacks; Shop Front) with **no create or edit affordance** at all — the manage controls are behind `canManageFn`, and
+the reads are open to any authenticated member by design (`categories.routes.ts`/`locations.routes.ts` gate only their
+mutations). The Dashboard's workspace grid withholds Users and Audit log, and `/users`, `/users/:id` and `/audit`
+refuse this role with the denied copy and **no request** (§27CU's F-63, re-confirmed for a third role).
+
+## Limits, and one observation left as an observation
+
+No code changed in this pass, so no suite was re-run for it: the evidence is a device, a database and the ledger.
+One device, one build, one tenant, one role. **Not exercised:** purchase-order create/issue/receive, adjust stock,
+stock out, product create/edit and the AI assistant as MANAGER — the matrix in §27CT already refuses or admits those
+routes for this role, and what is unverified here is their *screens*, not their permissions. **One observation, not
+a defect:** the transfer form's destination picker still offers the source location, so the same-location case is a
+banner plus a disabled button rather than an impossible choice; the current behaviour is explained on screen and
+refused by the server, so changing it is cosmetic and is **recorded rather than implemented**. **Fixture state:** the
+QA writes above (one stock-in of 5 with reference `QA-MANAGER-WALK`, one transfer of 1) are left in the fixture
+tenant; `npm run seed:roles` resets it and `npm run cleanup:roles` removes it.
+
+# 27CW. The Stop, measured again — two stale claims corrected, and the stale server that answered instead (2026-10-17)
+
+**Documentation only — no production file, route, permission, schema, test, dependency or environment change.**
+This record is an **independent second observation** of AI-9's Stop against a held stub, and the durable part of it is
+**two claims it corrects**: the ISS-21 row and the AI-1 entry both still said the abandoned-turn cancellation was
+*"unmeasured on hardware"*, and §27CM had already measured it that morning. The measurement is not new; the
+correction is, and one half of it is stated below because it is the reason the correction was invisible.
+
+## The measurement, reproduced rather than discovered
+
+Signed in as `role-manager@example.invalid` on the role fixture (§27CT), the development client served by Metro over
+USB with both `adb reverse` tunnels, the AI hub opened by deep link (`inventoryai://ai/new` reaches a fresh chat with
+no dashboard tap). The gateway was pointed at a **local stub** answering after `slow:25000` ms via
+`OPENROUTER_BASE_URL` — §27CM's own technique — so the turn is long by construction and no provider quota is spent:
+
+| when (UTC) | what | evidence |
+| --- | --- | --- |
+| 17:27:57.191 | the turn's provider call reaches the stub (`asked="Which products are low on stock?"`) | stub log |
+| 17:28:02 | **Stop** pressed on the phone (the slot under the thinking row reads `Stop`) | screen |
+| 17:28:02 (≲1 s later) | the server ends the turn | `[ai] turn outcome=AI_ABANDONED total=6539ms providerMs=6539ms calls=1 toolMs=0ms toolRuns=0 tools=none empty=0 in=0 out=0 model=unknown iterations=1` |
+| 17:28:22.201 | the stub's held answer is ready and there is **no socket left to send it to** | stub: `caller had already gone away; nothing sent` |
+| after | AI-9's note verbatim, no error banner, Send restored | screen |
+| after | the hub lists **one** conversation — the earlier *successful* stub turn — and **none** for the stopped one | `1 conversation · newest first` |
+
+The last row is the only addition to §27CM's evidence, and it is small and specific: the stopped turn's promise was
+that a turn the model had **already finished** would be there when the chat is reopened, and that half is still
+unprovoked (the stop landed inside the in-flight call again). What is now observed rather than inferred is the
+**converse** — an aborted turn leaves no conversation and no orphan USER message in the member's own list, which is
+Phase 07E / M7 read from the interface rather than from the store.
+
+## The two claims this corrects
+
+The stale sentence is identical in both places: *"only AI-1's abandoned-turn cancellation remains unmeasured on
+hardware"* (the ISS table) and *"Still unverified on hardware: the Task 5 abandoned-turn cancellation"* (the AI-1
+entry). §27CM had already replaced both with a measurement, on a **fresh `development`-profile EAS build** earlier the
+same day, and neither was annotated afterwards — so the file that an agent reads first (this project's instruction
+file) sent readers to a gap that no longer existed, and it did so while an annotation two entries later recorded the
+measurement. Both are corrected where they stand, pointing at §27CM and this record, and the AI-1 and ISS-21 claims
+now read as **done**, with the one path that is genuinely still unprovoked named as such.
+
+## The trap: a stale server owned the port, and the new one said it was listening
+
+Four `node src/index.ts` processes were alive on this laptop — three from earlier sessions — and the one that owned
+`:4000` was **not** the one just started. Windows let the new bind succeed: it printed
+`[server] environment=development listening on http://localhost:4000` exactly as a healthy one does,
+`/api/health/ready` answered `{"status":"ready"}`, and every request was still served by the older process. The
+consequence is what makes it worth recording rather than a note about tidiness: **an environment override looks like
+it was ignored.** The same command with and without `OPENROUTER_BASE_URL` pointed at the stub are indistinguishable
+from the outside — the stub stays silent while the deployed gateway answers — and only the **owner PID on the port**
+tells the two apart:
+
+```bash
+netstat -ano | grep '0.0.0.0:4000'      # LISTENING  <pid>  <- must be YOUR process
+```
+
+Readiness, a startup banner and a bound port identify *a* server, never *which*. Cleanup was four servers and their
+npm wrappers killed, `:4000` confirmed free, one server started with **no** overrides, its PID matched against the
+port, and only then the device touched again. Both traps are now in the device guide's §9b, because both cost real
+time here and neither is about Inventory AI.
+
+## What the trap cost, reported rather than hidden
+
+The first probe reached the deployed free tier instead of the stub, so **two real turns were spent**:
+`outcome=AI_OUTPUT_LIMIT total=22068ms providerMs=21993ms calls=2 toolMs=74ms toolRuns=1 tools=getReorderNeededProducts
+in=5265 out=800` and `outcome=degraded total=41442ms providerMs=41364ms calls=2 toolRuns=1 in=5141 out=800`, both on
+`nvidia/nemotron-3-super-120b-a12b:free`. **Both arrived with nothing usable at the 800-token cap** — the AI-10 shape,
+and the phone rendered AI-10's copy rather than a canned sentence (*"The assistant ran out of room before it could
+answer. Please ask a shorter or more specific question."*). That is four provider requests and no answers, on an
+afternoon when §27CQ's six calls produced no failures; it is a reading on one afternoon and not a rate, it changes
+nothing about ISS-22, and it is exactly the kind of spend that the stub exists to avoid.
+
+## A third trap, smaller and older
+
+The Expo **dev-client's floating `Tools` overlay** sits over the app at `[915,852][993,930]` on this phone and is not
+the app's control — a tap on it opens the Expo dev menu, which then swallows the next tap too. And `adb shell input
+text` needs `%s` for spaces (re-measured: `low stock please` arrived as `low`), which is why a message can look
+truncated in a transcript rather than in the app.
+
+## Limits
+
+One device, one build, one tenant, one role; the stub proves the server aborts **its own** provider call, and what a
+real gateway does with a cancelled request (billing, its console's count) remains unmeasured. The stopped turn is
+reachable only through AI-9's Stop — navigating away from a chat deliberately does **not** abort a turn, so an answer
+in flight is not thrown away. **No suite was re-run for this record** (no code changed in it); the two accidental real
+turns leave the free tier's reliability where §27CP/§27CQ left it; and the fixture's QA writes from §27CV are still in
+the role tenant (`npm run cleanup:roles` removes it).
+
+# 27CX. The purchase-order write chain as MANAGER — create, issue, receive, and the ledger after each step (2026-10-18)
+
+**No code changed — a device, a database and the ledger, so no suite was re-run for it.** §27CV walked this role's
+screens and left a named list unexercised: *purchase-order create/issue/receive, adjust stock, stock out, product
+create/edit*. This pass closes all but the last, on the same fixture tenant (`ROLE TEST — role boundary fixture`) and
+the same OPPO CPH1969, with every step checked against the database rather than against the screen that reported it.
+
+## The chain, as the member walked it — and as the database recorded it
+
+Everything below is one product, *Everyday Battery 10202* (SKU `ROLESKU-202`), at *Shop Front*, on **PO-0002**
+(*Eco Industries 1001*, 3 ordered). The left column is what the app said; the right column is what the server stored.
+
+| step | the screen | the database |
+| --- | --- | --- |
+| create (draft) | *"Draft PO-0002 created — issue it when you're ready to receive."* | `PURCHASE_ORDER_CREATED`; list row `0 of 3 received, Draft` |
+| issue | *"PO-0002 is now open for receiving."* | status `OPEN`; `PURCHASE_ORDER_ISSUED` (metadata `status: OPEN`) |
+| receive 2 of 3 | receive form pre-filled `3`, helper *"Remaining on this line: 3. Set 0 to skip."*, button *"Receive 2 units"*; alert *"Received 2 unit(s) across 1 line."* — **no** "fully received" clause | item `2/3`, `committed 2`, **1 receipt** (`prev 37 → new 39`, its own transaction id), claims `0`; `STOCK_IN x2` with `reason 'PO receipt'`, `reference 'PO-0002'`; `INVENTORY_STOCK_IN`; `PURCHASE_ORDER_RECEIVED` (`status: OPEN`) |
+| receive 1 of 3 | button *"Receive 1 unit"*; alert *"Received 1 unit(s) across 1 line.\n\nThis order is now fully received."* | status `RECEIVED`, item `3/3`, **2 receipts**, claims `0`; `STOCK_IN x1`; `PURCHASE_ORDER_RECEIVED` (`status: RECEIVED`) |
+| stock out 1 | *"Done. Everyday Battery 10202 at Shop Front: 40 → 39"*; the form had read **AVAILABLE NOW 40** | `Shop Front 39`; `STOCK_OUT x1` (`prev 40 → new 39`); `INVENTORY_STOCK_OUT` |
+| adjust to 41 | *"Done. Everyday Battery 10202 at Shop Front: 39 → 41"*; the form had read **CURRENT ON HAND 39** | `Shop Front 41`; `ADJUSTMENT` (`prev 39 → new 41`); `INVENTORY_ADJUSTED` (`prev 39`, `next 41`) |
+
+**The ledger is continuous across all five movements** — 37 → 39 → 40 → 39 → 41 — and each row's `previousQuantity`
+is the row the step before it left behind, which is the property the whole section exists to check. The PO carries
+**two embedded receipts**, one per receive call, each holding the exact inventory transaction it caused, and **no
+leftover claims** (`pendingClaims` empty on a completed order). One detail worth keeping: both receives write the
+**same** audit action `PURCHASE_ORDER_RECEIVED` and are told apart by metadata (`status: OPEN` vs `RECEIVED`, and the
+line list), which is why the trail reads as a chain rather than as two identical rows.
+
+## The UI's terminal states, which only exist after a real completion
+
+The list row became **Received · 3 of 3 received · complete**; the detail showed the **RECEIVED** badge, *Ordered 3 ·
+Received 3 · Remaining 0*, a **Receiving history** with the two dated receipts (*Oct 18 · 01:50 · 2 unit(s) ·
+Everyday Battery 10202 +2* and *01:52 · 1 unit(s) · +1*), and the note *"This order is fully received."* where the
+Receive button had been — the button is replaced, not disabled. The receive route on that order answers *"This order is
+already fully received."* with **no form at all**. Returning from the receive form to the detail refetched on focus: the
+detail read *Remaining 1* a second after the partial receive without any manual refresh.
+
+## The dashboard, moved by exactly the net
+
+`46,611 → 46,614` (the three received units) `→ 46,613` (the stock out) `→ 46,615` (the adjustment's +2), with **in
+stock 168 / low 35 / out 10 / active 203 unchanged** throughout — the same arithmetic computed from the ledger by hand,
+which is the §19 boundary observed again after §27CV's own version of it.
+
+## One observation, recorded rather than implemented
+
+After *Create draft order* the success alert dismisses to the screen **underneath the form** (here, the AI hub), not to
+the new order's detail — so issuing what you just created is two taps away (list → order) rather than one. Nothing is
+lost and nothing is wrong; it is a navigation choice, and it is recorded rather than changed on a walkthrough.
+*(Fixed 2026-10-18 — §27CZ: creating now opens the draft itself.)*
+
+## Limits
+
+The whole pass ran through the dedicated headless recipe and the deep-link route navigation it documents
+(`inventoryai://purchase-orders/new`, `…/<id>/receive`, `inventoryai://stock-out`, `inventoryai://adjust`) — which is
+what made a five-step write chain practical without a single dashboard tap. **Product create/edit remains
+unexercised as MANAGER**, and it is the last item on §27CV's list; the assistant **was** exercised by this role today,
+but through the stub and the two real turns §27CW records rather than as a deliberate assistant pass. One device, one
+build, one tenant, one role, one product. The QA writes (PO-0002 and its five movements) are **left in the fixture**;
+`npm run seed:roles` resets it and `npm run cleanup:roles` removes it, and the role fixture's tenant is still the only
+one any of this touched.
+
+# 27CY. The port proves which process answered — the stale-server trap made impossible instead of documented (2026-10-18)
+
+**Server only — two new modules, one middleware line, one boot guard, one defence-in-depth error handler, one guard
+suite. No route, endpoint, permission, schema, session, dependency, environment value, mobile file or model change.**
+§27CW ended by documenting a trap instead of removing it: four `node src/index.ts` processes were alive on this laptop
+and the port's owner was not the newest one, so an `OPENROUTER_BASE_URL` override aimed at a local stub looked
+ignored and four provider requests were spent reaching the deployed free tier. The device guide now says *find the
+PID*, which is the right advice and the wrong kind of solution — it depends on remembering to look. This record makes
+the process prove it instead.
+
+## Why a readiness probe could never have caught it
+
+`/api/health/ready` answers `{"status":"ready"}` in both cases because the answer is written by the same process
+both times: the old server is healthy and says so. A startup banner is printed by the new process and proves only
+that *something* bound. Neither distinguishes *which* process a request will reach, and no amount of extra logging
+can, because the question is about identity, not state. So the identity had to be created:
+
+* `config/instanceIdentity.ts` — one `randomUUID()` per process, `INSTANCE_ID`, exposed as the `x-instance-id`
+  response header. It is **not a credential and nothing authorizes on it**: it is regenerated on every restart,
+  means nothing after the process exits, and says only *this boot of this server*. It is mounted in `app.ts` before
+  every route, so error and 404 responses carry it too.
+* `config/portGuard.ts` — the boot asks the port it just bound to name itself, against `/api/health/live` (the one
+  endpoint that never touches MongoDB, so the probe cannot be slow or fail because the database is down), with a
+  1.5 s budget. Three outcomes, deliberately distinct:
+
+| the port answers | meaning | what the boot does |
+| --- | --- | --- |
+| **this process's id** | this process is serving | nothing — silent |
+| **a different id** | another Inventory AI server owns the port | logs the foreign id and the `netstat`/`lsof` command, then **exits 1** |
+| unreachable, or no id at all | undecidable | logs that it could not confirm, and **continues** |
+
+The third row is the design decision worth stating: a loopback probe can fail for reasons that are not the trap (a
+slow host, an app built without the middleware, a test's bare Express instance), and a guard that refused to boot on
+every inconclusive probe would break real deployments to catch a hypothetical one. **Only the one unambiguous
+outcome is fatal**, because a process that is listening but not serving is worse than one that refused to start: it
+looks healthy and takes every request. The probe is fired **unawaited**, after the socket is listening, so a boot
+never waits on a loopback round trip, and the boot line now carries the same id (`… listening on
+http://localhost:4000 instance=8eee…`), so an operator can compare the line they just saw with the header a client
+is getting.
+
+A second, smaller guard went in beside it: a bind that genuinely fails emits `error` on the server, which without a
+handler is an unhandled event and a stack trace. It is now one line naming the port and the `netstat` command.
+**The rule that decides whether that line is fatal is described in the measurement section below, because the first
+draft of it was wrong** and only two real boots on this host showed it: `EADDRINUSE` is fatal whenever it arrives,
+while every *other* code is fatal only before the socket is listening — killing a genuinely serving process over a
+stray socket error would be its own defect.
+
+## Measured, on this machine — and a defect in this increment that only the second run could find
+
+### Run 1 — two `createApp()` instances through the real `startServer`, port 4599
+
+```text
+FIRST instance id answered by the port: 8eee71a8-98ff-46a0-8383-dad84225ddc4
+FIRST boot line: [server] environment=development listening on http://localhost:4599 instance=8eee71a8-…
+port still answered by: 8eee71a8-… (the FIRST process)
+SECOND exit codes: [ 1 ]
+SECOND errors: [ 'port 4599 is already in use — refusing to start. Find the owner with netstat -ano | findstr :4599 …' ]
+FIRST exit codes after second boot: []
+```
+
+The second boot exited 1 rather than sitting there looking healthy, and the first kept answering with **its own** id
+throughout — the header is a property of the process, not of the port.
+
+### Run 2 — two real `node src/index.ts` boots on the same port, and the bug in run 1's assumption
+
+Run 1's `EADDRINUSE` arrived **before** the listening callback. A real boot on this host does not behave that way,
+and the difference is the point of this subsection:
+
+```text
+[server] environment=development listening on http://localhost:4011 instance=521c9cd0-…   <- the SECOND process
+[server] the HTTP server reported an error after it was listening (EADDRINUSE).
+SECOND_EXIT=124 (still alive after 30 s)
+```
+
+The listening callback **really did fire**, so the first draft's rule — *an error after listening is logged, not
+fatal, because killing a serving process would be its own defect* — let a process with **no working listener** stay
+up for thirty seconds. That is the trap this record exists to close, wearing the guard's own exemption. The guard did
+not save it either, and the reason is worth keeping: after that error the socket is gone, so `address()` returns
+null, `verifyBoundPort` reports **skipped**, and the port was never asked. A boot that cannot report its address is
+exactly the boot that most needs the fatal path.
+
+Corrected: **`EADDRINUSE` is decisive on its own**, before or after the listening callback, because a port that
+cannot be taken is never a normal runtime event; every *other* code stays non-fatal once listening, so a genuinely
+serving process is still never killed over a stray socket error. Re-measured on the same port with the same
+two boots:
+
+```text
+[server] environment=development listening on http://localhost:4011 instance=c231f30a-…
+[server] port 4011 is already in use — refusing to start. Find the owner with netstat -ano | findstr :4011 …
+SECOND_EXIT=1
+```
+
+And a real single boot (real `.env`, port 4011) was also checked end to end: the guard stayed **silent**, and the
+header a client receives is the id the boot line printed —
+`x-instance-id: bfce8573-443f-4ddc-ab14-b3b3bd6afe53` against `… instance=bfce8573-443f-4ddc-ab14-b3b3bd6afe53`.
+That boot could not reach MongoDB (the known Atlas `ServerSelection` timeout), which is a useful accident: the
+guard ran and verified **while readiness was `not ready`**, which is what `/api/health/live` was chosen for.
+
+## Verification
+
+* **`server/test/port-ownership-guard.test.mjs` — 13 cases**, registered in `run-tests.mjs`'s `PURE_UNIT` list
+  (an unclassified file makes `npm test` exit 2). The probe is exercised against **real loopback HTTP servers** for
+  the three identity outcomes and the closed-port failure, so the fetch path, the header read and the refusal are
+  not mocked; `startServer` is exercised with a fake app to pin the wiring — that the guard probes the port the
+  server **actually bound** (an ephemeral `0` is read back as a real number), that it does not probe when the server
+  exposes no address, and that a foreign answer exits non-zero while the dev handles are still returned.
+* **Both error orderings are pinned**, because run 2 above proved the ordering is not stable on this platform:
+  ★ `EADDRINUSE` **after** the listening callback is fatal (the zombie case, which would have passed silently
+  without this case), and a non-`EADDRINUSE` error after listening is logged while the process keeps running. The
+  fakes had to be rebuilt on `EventEmitter` for these: a fake whose `on` is a no-op cannot emit, so it could never
+  exercise the handler it appears to cover.
+* **Proved able to fail.** With `exit?.(1)` removed from the foreign-id branch, the suite reports **2 failures** —
+  both ★ cases, one per layer — and the tree was restored **byte-identically** (`diff` against the saved copy,
+  and `grep` confirming the mutation text is gone). The zombie fix was not mutation-tested separately: it was
+  **measured** (the 30 s process above) before and after, which is stronger evidence for a timing bug than a
+  mutation would be.
+* **A defect in the test fixture, found by the fixture hanging.** The first run never finished: the fake server's
+  `close()` never called its callback, so the graceful-shutdown drain awaited a promise nothing would settle. Fixed
+  in the fixture — and the reason is recorded in the file, because a fake that silently swallows a callback turns
+  *"the suite is green"* into *"the suite never ran".*
+* `npm run test:unit` — **882 tests / 198 suites / 842 pass / 0 fail / 40 deliberately skipped**, exit 0 (up from
+  871 / 197); `npm run test:db` — **721 tests / 132 suites / 656 pass / 0 fail / 65 skipped** (unit suites inside
+  mixed files), exit 0. No mobile file changed and no mobile suite was re-run; its baseline this session is
+  **70 suites / 904 tests** green.
+* `npx tsc --noEmit` and `npx eslint` over the four touched files, both clean.
+
+## Limits, stated rather than glossed
+
+* **A probe on `127.0.0.1` sees whatever answers IPv4 loopback.** A stale process bound only to IPv6 would be
+  invisible to the guard while a client resolving `localhost` to `::1` first could still reach it. The probe is
+  deliberately loopback because it is a question about our own process, not about a deployment.
+* **It is a boot check, not a continuous one.** A server started later on the same port by some other means is not
+  detected; nothing polls.
+* **The header is not authentication.** Anything can send `x-instance-id`, and nothing anywhere trusts it for
+  authorization — the comparison is between one process's own id and what the port echoed back.
+* **One platform, and two different behaviours in one day.** This host both refused a second bind *before* the
+  listening callback (run 1) and accepted it and failed *afterwards* (run 2), on the same afternoon. That
+  instability is why the guard probes rather than branching on an error code, and why both orderings are pinned by
+  a test instead of one of them being assumed. Nothing outside this laptop was measured.
+* **A stale process already running is still stopped by hand.** The guard refuses to start a second one; it does not
+  evict the first. That remains the `netstat`/`lsof` command the boot prints.
+
+# 27CZ. Where a new draft lands — and the first test `PoForm` has ever had (2026-10-18)
+
+**Mobile only — one navigation branch in `PoForm.submit()` and one new suite. No server, route, permission, schema,
+session, dependency or environment change.** §27CX's device walkthrough created a draft through the deep link
+`inventoryai://purchase-orders/new` and watched the success alert dismiss to the **AI hub**, with the order it had just
+made nowhere on screen. The cause is one line that treats both halves of the form the same way: `submit()` ended with
+`router.back()` whichever verb ran.
+
+## Why `back()` is wrong for create and right for edit
+
+For **edit**, `back()` is exactly right: the member came from the detail screen and returns to it, which refetches on
+focus, so the change is visible without a manual refresh.
+
+For **create** the destination is whatever happens to be underneath. From the list that is the list — not wrong, but
+the draft is one more tap away and the alert's own advice (*"issue it when you're ready to receive"*) is two. From a
+deep link there is **no form history at all**, so "underneath" is whatever screen the link was opened over: the AI hub
+in the measured case. The write was correct every time; only the destination was arbitrary.
+
+Now a successful create **replaces** the form with `/purchase-orders/<id>` — the id the server already returns with its
+201 — and edit still pops. `replace` rather than `push` is deliberate: back from a new draft goes to the list, never
+to a second copy of the create form. A response with no id (nothing the server sends; the fallback exists so a shape
+change cannot strand the member on a stale form) pops as before — the old behaviour is the safe one.
+
+## The suite `PoForm` never had
+
+This is the write path for purchase orders, exercised by hand in §27CX and by nothing by machine. Six cases in
+`mobile/__tests__/po-form-create-navigation.test.tsx`:
+
+| case | what it pins |
+| --- | --- |
+| ★ create → detail | `replace('/purchase-orders/po-1')`, **no** `back`, and the exact payload POSTed (`supplierId`, `locationId`, one line, quantity) |
+| edit → back | `PATCH` on the **initial** id, `back`, **no** `replace`, no create |
+| create with no id | falls back to `back`, never to a route with `undefined` |
+| ★ empty form | the client mirror refuses before any request — ``Supplier is required.``, ``Location is required.``, ``Add at least one product line.`` — and the form is still usable afterwards |
+| server field error | a 400 field problem lands **on the field it names** (`items[0].quantityOrdered`) and nothing navigates |
+| server code error | `PO_NUMBER_CONFLICT` becomes its sentence, and the code itself is **absent from the screen** |
+
+**The suite's first draft tested nothing, and its symptom was a missing element.** Every press was written as
+`fireEvent.press(...)` without `await`; in RNTL 14 `fireEvent.press` **returns a promise that resolves after the
+handler's updates flush**, so each un-awaited press was still pending when the next line read the tree — the form was
+asked for a product line that the screen had not yet been told to add. It failed as *"Unable to find an element with
+text: Choose a product…"*, which reads like a missing control and is actually a race, and the same trap is what made
+five of six cases fail in a full run while each passed alone. Both are recorded here because the difference between
+*"the screen does not render it"* and *"the test has not waited for it"* costs real time to tell apart.
+
+## Verification
+
+* ★ **watched failing first**: with the create branch reverted to the single `router.back()`, **1 of 6** fails — the ★
+  create case, and only it — with the file then restored byte-identically (`diff`).
+* Mobile **71 suites / 910 tests / 0 failures** (from 70 / 904), `tsc --noEmit` and `eslint .` clean.
+* The server is untouched by this change; its baseline stands at unit **884 / 198 / 0** and db **721 / 132 / 0**.
+
+## Limits
+
+* **Not seen on the phone.** The navigation is pinned by mock; the destination screen renders in a device run that has
+  not happened since, so "does the draft look right when you arrive" is unmeasured here (§27CX measured that screen by
+  hand before this change).
+* One screen and one verb pair. The same `back()` shape exists on other create forms (movement, transfer, product) and
+  was **not** audited — several of those are meant to return to a list the member was looking at, and each would need
+  its own judgement rather than a blanket change.
+* The suite mocks the reference lists, so it says nothing about how the pickers behave with a 50 000-product
+  catalogue; that is the picker's own concern, not the form's.
+
+# 27DA. An escaped pipe made data, and a tilde removed — two parser defects found by probing (2026-10-18)
+
+**Mobile plus the extracted library (`assistant-markdown`, PR #2 there). No server, route, permission, schema,
+session, dependency or environment change, and no prompt change — the model's input is untouched.**
+
+Both defects came from **running the parser on realistic model output** rather than reading it: a short probe over
+eleven shapes a model writes (alignment rows, missing edge pipes, blockquotes, ordered lists, escaped pipes,
+strikethrough, code spans) is what found them. Reading the function had not, across three earlier increments that
+touched it.
+
+## 1. `\|` was a column boundary, so a table silently shifted
+
+`| A \| B | 3 |` is Markdown's escape for a pipe **inside** a cell. `splitCells` split on every `|`, producing three
+cells — `A`, `B`, `3` — and the row then had one more column than its header. Measured before the fix:
+`header ["Product","Qty"] rows 1 [["A","B","3"]]`.
+
+That is worse than untidy. A table is the one structure where a shifted value is *wrong* rather than ugly: the number
+the member reads under **Qty** is then part of a product name, and the row three lines down looks normal. The fixes
+are three lines: protect `\|` behind a sentinel while the row splits and restore it inside the cell, and stop
+dropping a trailing `|` when it is itself escaped (`| x \|` is one cell containing `x |`, not a row with a stray
+edge). Ordinary tables are untouched — pinned by a control case.
+
+## 2. `~~strikethrough~~` reached the screen as tildes
+
+The residual pass exists for exactly one reason: *a marker the renderer does not model cannot reach the screen*.
+`~~old~~ new` reached it with both pairs intact, because no rule had ever been written for it. It is now removed
+under the **same word boundary as every other marker**, so `a~~b~~c` — data — is left alone, exactly as `SKU_123_AB`
+is for underscores and `4*5*6` is for asterisks.
+
+## Verification
+
+* New suite `mobile/__tests__/assistant-parser-edges.test.ts` — **7 cases**: the ★ escaped-pipe alignment case, a
+trailing escaped pipe, an ordinary-table control, ★ paired tildes, tildes inside a word, a lone `~5 minutes`, and
+strikethrough inside a **cell** (where the two rules meet).
+* **Each fix was reverted separately and its own cases failed** — naive splitter: **2 of 7**; strikethrough rule
+  removed: **2 of 7** — with the file restored byte-identically after each (`diff`). The first attempt at the
+  strikethrough mutation silently did not apply and the suite passed, which is the reason both mutations assert they
+  landed before the run is trusted.
+* Mobile **72 suites / 917 tests / 0 failures** (from 71 / 910), `tsc --noEmit` and `eslint .` clean. The AI-2, AI-4
+  and invariant suites — which pin the no-marker property over generated inputs — all still pass unchanged.
+* The same fix is published in the extracted library (`assistant-markdown`), with two matching cases there: 13 pass,
+  typecheck clean, CI green on Node 22 and 24.
+
+## Limits, recorded rather than fixed
+
+* **Links and images still leak in the plain-text path.** `stripMarkdown('[Product A](https://…)')` returns it
+  unchanged, tildes fixed but brackets not. In the *rendered* path this is rarer (the answer is prose without URLs),
+  and a link rule needs its own judgement — what to do with the URL, whether to keep it — so it is named here rather
+  than half-done.
+* **`4**5**6` still becomes `4*5*6`**, the residual AI-4 recorded on purpose: operators survive, so the number is
+  not altered, and the rule that would change it trades a visible asterisk for a visible pair.
+* **Not re-seen on a device.** These are pure functions over strings, and the rendered result for the escaped-pipe
+  case is a cell containing a `|` — which AI-4's renderer draws as text. That is reasoned from the renderer, not
+  observed on the phone.
+* The app's module and the library's copy are **two files that must be kept in step by hand**; there is no guard
+  that they match, because the app deliberately does not depend on the published package.
+
+# 27DB. The whole stored corpus replayed — and the one leak it found (2026-10-18)
+
+**Mobile plus the extracted library (`assistant-markdown`, PR #3 there). No server, route, permission, schema,
+session, dependency or environment change, and no prompt change.**
+
+§27DA found two defects by *writing* realistic samples. This increment asked the opposite question — **what does the
+assistant actually write?** — and answered it by replaying **all 50 assistant answers stored in the database** through
+the renderer, flattening every block back to the text a member would read. The census is the evidence, and it is what
+decided what not to build as much as what to fix:
+
+| shape | answers of 50 | disposition |
+| --- | --- | --- |
+| tables (`\|`) | 13 | already rendered as cards (AI-4) |
+| bold `**` | 23 | rendered as bold |
+| bullet lists | 11 | rendered as lists |
+| numbered lists | 6 | rendered, numbers preserved |
+| a `#` heading | 1 | rendered as a heading |
+| `\( … \)` LaTeX | 1 | decoded to a readable percentage (ISS-26) |
+| **links / images** (`[`), blockquotes (`>`), HTML tags, fenced code, `---` rules, `$$`, checkboxes | **0 each** | **not built** — see below |
+| inline code | 1 | rendered |
+
+## 1. The link rule §27DA left open was not needed, and that is a measurement
+
+§27DA recorded `stripMarkdown('[Product A](https://…)')` as an open limit, because a link rule needs a judgement
+about the URL. The corpus settles it: **no stored answer contains a bracket at all**, let alone a link, in 50 turns.
+Adding a link rule would have been code for a shape the model does not produce, so none was written. If the model's
+behaviour changes, the fixture added below is where it will appear first.
+
+## 2. The one leak: a truncated answer's dangling opener
+
+Two of the fifty — **both turns that hit their output budget** — ended mid-marker, because the model was cut off
+while writing: `… (the system has **71,07` and a numbered `11. **2`. The last thing on the screen was a pair of
+asterisks. Measured before the fix: `parseInline('**2')` → `[{ text: '**2' }]`.
+
+`stripMarkdown` now drops a marker run that **opens and is never closed**, under three conditions that keep it away
+from data:
+
+* **a word boundary before it** — `4**5` between digits is untouched, the same rule every other marker obeys;
+* **a non-space after it** — `** a` is not half-cleaned, because an opener has content after it;
+* **no later run of the same marker** — which is what makes it safe: in well-formed markup every opener has a closer
+  later and a closer is preceded by a word character, so the only run it can match is a genuinely unpaired one.
+
+Only the run goes; the text after it stays, so the truncated answer still says `71,07`. The single `*` is
+deliberately **not** in the list, because `12 * 3 = 36` must keep its multiplication.
+
+## Verification
+
+* New suite `mobile/__tests__/assistant-real-answers.test.ts` — **6 cases** over a committed fixture of **8 verbatim
+  stored answers** (wide table, numbered list, truncated table answer, heading, LaTeX, bullets+bold, longest prose,
+  and a short non-English answer): the ★ **no-marker property over all eight at once**, a guard-on-the-guard that the
+  fixture still covers those eight reasons, table row/header width, the numbered list's own numbers, the truncated
+  answer ending at `71,07`, and LaTeX decoded. It is a **property, not a snapshot**, so a Markdown change that is an
+  improvement passes while a marker on the screen or a lost value fails.
+* `mobile/__tests__/assistant-parser-edges.test.ts` gained **6 cases** for the rule itself, including the two measured
+  strings, the arithmetic/identifier controls, and the `(?=\S)` case (`** a` is left alone).
+* **The fix was removed and watched failing twice** — the edges suite **4 of 6** new cases (the two ★ cases and the
+  two that pin covered shapes), the corpus suite **2 of 6** (the ★ property and the truncation case) — with the file
+  restored **byte-identically** (`cmp`) each time.
+* The replay that produced the census is **not committed as 50 blobs**: 8 answers are verbatim, the rest were
+  measured once. Mobile **73 suites / 929 tests / 0 failures** (from 72 / 917), `tsc --noEmit` and `eslint .` clean.
+* Same fix in the library: **PR #3** merged, `npm test` **15 pass**, typecheck clean, CI green on Node 22 and 24, and
+  the rule text verified identical in both files (`diff` of the declaration).
+
+## Limits, recorded rather than fixed
+
+* **A dangling unpaired single `*` still reaches the screen** in a truncated answer, because excluding it is what keeps
+  `12 * 3 = 36` correct; the ambiguity is resolved in favour of data, as AI-4 established.
+* **`** a **` with spaces inside is left as-is**, by the `(?=\S)` condition — an opener is only recognised where it
+  could open.
+* **Not re-seen on a device.** These are pure string functions; the two affected answers were read on the phone in
+  §27BE/§27BS era device runs, but the cleaned tails have not been looked at on hardware.
+* **The corpus is 50 answers from seeded demo tenants**, not a broad production sample; its value is that every one
+  is real model output, and its limitation is that 50 turns is a small and unusual population.
+* The app's module and the library's copy remain **two files kept in step by hand**, still with no cross-repo guard.
+
+# 27DC. The tool result the model reads, capped without breaking it (2026-10-18)
+
+**Server only — one new pure module, one line in `runAiChat`, one new suite; no route, permission, schema, session,
+index, dependency, mobile or environment change, and no model was called.**
+
+Found by probing rather than reading, like the two increments before it. The probe asked a question nothing had asked:
+**at each tool's own maximum legal `limit`, how big is the payload — and is it still JSON when the assistant's cap is
+applied to it?** The answers, on the 50 000-product perf tenant (`6acfc07c…`, 100 143 inventory rows), were:
+
+| tool | payload at its max limit | over the 12 000 cap by |
+| --- | --- | --- |
+| `getInventoryHistory` | 24 834 chars | 12 834 |
+| `getReorderNeededProducts` | 15 550 | 3 550 |
+| `getProductsByLocation` | 14 207 | 2 207 |
+| `getLowStockProducts` | 14 109 | 2 109 |
+| `getOutOfStockProducts` | 14 082 | 2 082 |
+| `getInventory` | 9 244 | — |
+| `searchProducts` | 6 532 | — |
+| `getInventorySummary` | 1 593 | — |
+| `getProduct` | 1 396 | — |
+
+## 1. Five of nine tools were handing the model invalid JSON
+
+`runAiChat` capped a tool result with `truncate(JSON.stringify(output), max)` — a slice of a JSON document plus an
+ellipsis. The probe ran the same slice the service ran and `JSON.parse` threw, on all five. Those arguments are the
+schema's own maxima, so "show me the last 50 movements" reached the defect with no misbehaviour anywhere on the
+model's side, and the model received a document that stops mid-string. **A model handed half a payload has to guess at
+the other half**, which is the worst possible input for an assistant whose one job is reporting exact numbers — and
+prompt rule 3 ("tool results are capped to a page") cannot help, because it describes a *complete* page that is short,
+not a *broken* document.
+
+## 2. The cap is now structural
+
+`server/src/services/ai/toolPayload.ts` serializes the result as-is when it fits (**byte-identical** to
+`JSON.stringify(output)`, asserted, because this must be invisible on an ordinary turn) and otherwise drops rows from
+the end of the longest array until the serialized result fits, adding `truncated: true` and a note naming how many of
+how many rows are included. Three properties are deliberate:
+
+* **A prefix, not a sample.** Every one of these tools is newest-first or worst-first, so the kept rows are the ones
+the question was about.
+* **The true total survives** — `total`, `page` and every other non-array field are untouched, so the model can still
+say "41 of 7 717".
+* **A result too wide to shorten row by row** (one enormous row, a bare array, a bare string) becomes a labelled
+`preview` envelope — a *string*, so the JSON stays valid. This path was itself buggy in the first draft: the preview is
+escaped JSON text, so `"` becomes `\"` and a budget computed by subtraction overflows; the suite's very first run
+caught it as `Unterminated string in JSON at position 12000`, and it is now an exact search on the slice length.
+
+**After the fix, the same probe on the same tenant:** all nine payloads are **valid JSON** at or below 12 000
+characters, the five oversized ones are marked `TRUNCATED` and kept **23–41 of 50 rows**, and the four that fit are
+passed through **byte-identically**.
+
+## Verification
+
+* New suite `server/test/AI13-tool-payload-cap.test.mjs` — **10 cases / 4 suites**, registered in `run-tests.mjs`'s
+  `PURE_UNIT` list: byte-identical passthrough and the inclusive boundary; ★ the measured 24 834-character history
+  payload becoming parseable **with the old cut asserted to fail** (so the reason for the module cannot stop being
+  true); the kept rows being a **prefix and whole**; `total`/`page` surviving; ★ the **largest** prefix being kept
+  (adding one more row would not fit — otherwise the search left data on the table); the longest array being the one
+  shortened; ★ one enormous row becoming a labelled preview; a bare array and a bare string; a cap smaller than the
+  envelope; and ★ the **source guard** proving `runAiChat` caps through this module, with a positive control that the
+same scan finds the old call when it is put back.
+* **Every measured size in the suite is a real size from the probe** (24 834-char payload, 50 rows), not an invented
+  one.
+* **Each half was proved able to fail.** Restoring the old call in `runAiChat` fails the ★ source guard (**1 of
+  10**); restoring the old cut inside `capToolResult` fails **8 of 10**, including every case that asserts
+  parseability — with the file restored **byte-identically** (`cmp`) both times.
+* `tsc --noEmit`, `eslint`, `check:extensions` (412 modules) and `check:specifiers` (1 974 relative specifiers, 0
+  stale) all clean; server **1520 tests / 228 suites / 0 failures**, exit 0 (from 1510 / 224).
+* **The documentation guards earned their keep during this increment, twice:** `phase-docs-section-integrity` failed
+  on the first run with `['server\\scripts\\run-tests.mjs: §27DC', 'server\\src\\services\\ai\\ai.service.ts: §27DC']`
+  — the code cited a record that did not exist yet — and then on `['27DC']` until the record was reachable from
+  CLAUDE.md. Both were fixed by writing the missing half, not by relaxing the check.
+
+## The second finding this probe produced — recorded as ISS-31, not fixed
+
+The same run measured `getInventory` at **25 346 ms**, and following that to its source showed why: `q` and `status`
+force `inventory.listRows` down its **filtered** path, which runs the product `$lookup` once per inventory row before
+the page window. Measured through the service the Inventory screen itself calls: **no filter 922 ms**, `q` "a"
+**25 234 ms**, `q` "pro" **19 088 ms**, `q` "Professional Towel" **14 812 ms** (499 rows), `status` ACTIVE
+**28 950 ms**. The 499-row case is the tell — the cost is the partition, not the result. That is a member-facing
+15–29 s search on the app's main catalogue screen, and it is the same defect class AI-3 fixed for the tools, left in
+this one place because the filter genuinely needs the joined product. **It needs its own increment** (resolve matching
+product ids first, page the inventory index, count separately, proved output-identical with `perf:golden`), because
+the ordering contract and the total must survive the rewrite. Nothing about it was changed here.
+
+## Limits, recorded rather than fixed
+
+* **The kept prefix is rows, not characters.** A page whose rows are individually huge keeps very few of them, and the
+  note says so rather than the envelope hiding it.
+* **The cap is still per tool result, not per turn** — six tool rounds may each carry 12 000 characters to the provider,
+  which is the existing token budget and was not re-measured here.
+* **No model was called**, so how a model reads the new `truncated` note is **unverified**: the note's wording is the
+  only part of this that a future device run can judge.
+* **ISS-31 is untouched** — the Inventory search is still 15–29 s at 50 000 products, and that is said plainly rather
+  than implied by a green suite.
+
+# 27DD. The filtered inventory page, resolved product-first — 15–29 s to 0.5–1.6 s (2026-10-18)
+
+**Server only — one branch of `inventory.listRows`, two new DB cases; no route, permission, schema, index,
+dependency, mobile or environment change, and no model was called.**
+
+ISS-31 was found in the previous increment by following a 25 s `getInventory` tool call to its source: `q` and `status`
+force `inventory.listRows` down its filtered path, which ran the product `$lookup` **once per inventory row** before the
+page window — the same defect class AI-3 fixed for the assistant's tools, left in this one place because the filter
+needs the joined product.
+
+## The measurement, before and after
+
+The service the Inventory screen itself calls, `skip: 0, limit: 25`, on the 50 000-product perf tenant (100 143
+inventory rows):
+
+| request | before | after | total (unchanged) |
+| --- | --- | --- | --- |
+| no filter | 922 ms | **693 ms** | 100 143 |
+| `q` "a" | 25 234 ms | **1 561 ms** | 71 964 |
+| `q` "pro" | 19 088 ms | **758 ms** | 16 607 |
+| `q` "Professional Towel" | 14 812 ms | **716 ms** | 499 |
+| `status` ACTIVE | 28 950 ms | **1 019 ms** | 100 143 |
+| `q` "pro" + ACTIVE | 17 516 ms | **760 ms** | 16 607 |
+| `status` ACTIVE, page 2 | 28 521 ms | **831 ms** | 100 143 |
+| `lowStock` (deliberately not on this path) | 19 247 ms | 19 247 ms | 25 419 |
+
+**Through the assistant's tool, which is the same code:** `getInventory {q:"a"}` **25 346 ms → 1 342 ms**,
+`{status:ACTIVE}` **→ 877 ms**, `{q:"pro"}` **→ 695 ms**, and the unfiltered page **183 ms**.
+
+## What changed
+
+When the filter is on the **product's own fields** (`q` against name/sku/barcode, `status` against status), the matching
+products are resolved in **one** query and the page is then an index read over `productId`, joined only for the rows
+actually returned — the shape AI-3 used, applied to the one path it left behind. The order is applied before
+`$skip`/`$limit` exactly as before, so a page boundary lands on the same row; the `$in` changes which rows *can* appear
+in it, not how they are ordered. The total is a `countDocuments` over the **same** scope, so it does not pay for the
+page's joins.
+
+**`lowStock`/`outOfStock` are deliberately NOT on this path** — they compare a row's availability with its product's
+`minimumStock`, a per-row joined value, so the join is inherent rather than a leftover. They keep the old shape and
+remain ~19 s at 50 000 products. That is stated in the code beside the branch, and the assistant's own low-stock
+questions use `getLowStockProducts`/`getReorderNeededProducts`, which AI-3 measured at 1.1–1.3 s at this size.
+
+## Verification
+
+* **`perf:golden` before/after: all 17 cases byte-for-byte identical** (payload hash + total), including the four
+  `getInventory` shapes this change moves and the `lowStock`/`outOfStock` shapes it does not.
+* **A prototype was compared against the old implementation before the service was edited** — same rows in the same
+  order, same totals, on six shapes including a page 2 — and only then was the branch written.
+* `phase20-pagination-order.test.mjs` gained **two cases**, both over the real route: the **three-step ordering and
+  paging contract** (distinct sort values, one shared sort value falling back to `_id`, paging at limit=1 and 2
+  reproducing the single-page order) now runs for `status=ACTIVE` **and** `q`, because the `_id` tiebreaker a transfer
+  relies on is exactly what a reordered pipeline could break; and a **selective search** returning exactly its own
+  rows, a total that agrees, and an empty + zero total for a term that matches nothing. **13 / 13 pass.**
+* **The guard was proved able to fail:** dropping the `$in` narrowing from the page scope fails the selective-search
+  case (**12 / 13**), with the file restored **byte-identically** (`cmp`). That is the failure a pre-resolved id set
+  built from the wrong scope would produce.
+* `tsc --noEmit` and `eslint` clean; server **1522 tests / 228 suites / 0 failures**, exit 0 (from 1520 / 228).
+
+## Limits, recorded rather than fixed
+
+* **`lowStock`/`outOfStock` on this path are still ~19 s at 50 000 products.** Fixing them needs the product's
+  minimum available per row before paging, which is a different query shape (and possibly a different data shape)
+  rather than a moved join.
+* **The product scan is now part of the latency**: 0.4–0.8 s of each filtered page is resolving the matching ids on a
+  50 000-product catalogue, because an unanchored case-insensitive `q` cannot use an index. It is one scan instead of
+  100 143 joined lookups, but it is not free, and it grows with the catalogue.
+* **The id list is bounded by BSON**: 50 000 ids is ~600 KB of query and every filtered page builds it. A catalogue an
+  order of magnitude larger would need a different transport for that set (or a stored `productIds` match), and that
+  has not been measured.
+* ~~**No device pass.**~~ **DEVICE-VERIFIED 2026-10-18**, on the OPPO CPH1969 over the USB tunnels (`adb reverse`
+  4000/8081, Metro-launched development build): the local backend restarted on this code, a throwaway MANAGER account
+  created in the perf tenant (removed afterwards, and its script deleted), and the Inventory screen's own search
+  driven by hand — typing `pro` produced `GET /api/inventory 200` in **996.7 ms** (the unfiltered load before it
+  was 267 ms), and the row rendered as *“Professional Kettle 50984, Shop Front, 176 available · 176 on hand”*. That
+  is the request that used to take ~19 s on this tenant. The debounce is confirmed in practice: the first request
+  arrived with the third character, not the first.
+
+# 27DE. The join itself was the cost — 9× from a `$lookup` shape (2026-10-18)
+
+**Server only — the two lookups in `inventory.listRows` and one isolation case; no route, permission, schema, index,
+dependency, mobile or environment change, and no model was called.**
+
+§27DD left one shape behind: `lowStock`/`outOfStock` compare a row's availability with its product's `minimumStock`, a
+per-row joined value, so the join is inherent — and it measured **~20 s** at 50 000 products, which is why that entry
+recorded it as a limit rather than fixing it. It was not inherent. **The lookup's FORM was the cost.**
+
+## The measurement
+
+A probe ran the same full-partition pipeline twice, changing only how the product is joined:
+
+| join | time on the 50 000-product partition |
+| --- | --- |
+| `$lookup` **pipeline** matched with `$expr` (what shipped) | **19 965 ms** |
+| `$lookup` **simple** `localField`/`foreignField` | **2 166 ms** |
+
+Same rows, same order. The `$expr` form gives the planner a nested-loop, one index lookup per row with no batching,
+and the cost is per row — so it multiplied exactly where the partition was large. The simple form is index-backed and
+batched. This is the same lesson as AI-3 in a different key: *the number of per-row operations is the cost*, and the
+two forms differ by almost an order of magnitude at that count.
+
+## What changed
+
+`productLookup` and `locationLookup` in `inventory.listRows` are now the simple form, in **all three** paths that use
+them. **Tenant isolation moved rather than weakened:** the simple form resolves a document by `_id` alone, so a row
+whose `productId` pointed at another business's product would resolve it. A `$filter` beside each lookup drops any
+joined document whose `businessId` is not this business, *before* the unwind and before any DTO is built — the same
+guarantee as the old `$expr` match, in a different place, and the case that would leak if it were dropped is now a
+test.
+
+## After
+
+| shape | before | after |
+| --- | --- | --- |
+| `lowStock` | 20 361 ms | **3 801 ms** |
+| `outOfStock` | (same path, not separately timed before) | **2 612 ms** |
+| `q` "pro" + `lowStock` | — | **2 554 ms** |
+| `q` "a" | 1 561 ms | 1 533 ms |
+| `status` ACTIVE | 1 019 ms | 906 ms |
+| no filter | 693 ms | 892 ms |
+
+The paged shapes are unchanged within noise — they were already paying for 25 rows. The full-partition shapes are
+**5–7× faster**, and the totals are identical (`lowStock` 25 419, `outOfStock` 6 396, `q`+`lowStock` 4 371).
+
+## Verification
+
+* **`perf:golden` is byte-for-byte identical again — 17/17**, including `getInventory {lowStock}` and
+  `{outOfStock}`, which are the two shapes this changes and the only two that run the join over a whole partition.
+* `phase20-pagination-order.test.mjs` **13/13** on the real route, re-run after the change: the ordering and paging
+  contract still holds for the unfiltered list, `status=ACTIVE` and `q`, including the `_id` tiebreaker.
+* `phase04-inventory.test.mjs` gained **one isolation case** (§27DE): a row written **directly** with the owner's
+  `businessId` and **another business's** `productId`/`locationId` (the application cannot create one) — asserted absent
+  from the listing, with the foreign product's name never appearing anywhere in the response. **19/19 pass.**
+* **The guard was proved able to fail:** replacing the `$filter` condition with `true` fails exactly that case
+  (**18/19**), with the file restored **byte-identically** (`cmp`).
+* `tsc --noEmit` and `eslint` clean; server **1523 tests / 228 suites / 0 failures** (from 1522 / 228).
+
+## Limits, recorded rather than fixed
+
+* **`lowStock` is still 3.8 s at 50 000 products**, because the predicate itself needs every row's availability and its
+  product's minimum — a full-partition pass, no longer a per-row fan-out. Below that, the assistant's dedicated
+  `getLowStockProducts`/`getReorderNeededProducts` remain 1.1–1.3 s and are the tools the prompt steers to.
+* **The same `$expr` lookup form exists outside this service** (the tool pipelines in `src/services/ai/`), and it was
+  **not** swept here. Those tools measure 0.1–1.3 s at this size, so the upside is small and the surface is wide; it is
+  named as the next place the same 9× might be available.
+* ~~**No device pass** — these remain service and tool measurements.~~ **The device pass happened on 2026-10-18**
+  (§27DD's limits record the setup): the same run that verified the search also produced a real assistant turn on the
+  phone — *“How much Professional Towel stock do we have, and where?”* — `[ai] turn outcome=ok total=12035ms
+  providerMs=11719ms calls=2 toolMs=316ms toolRuns=1 tools=searchProducts empty=0 iterations=2`, rendered as a
+  disambiguation question with the read-only tool chip, no marker on screen and no degraded mark. The `lowStock`
+  shape this entry changes was **not** driven from the phone: the model chose `searchProducts`, which is a different
+  path.
+
+# 27DF. Five tools broke at 131 000 products — the `$group` payload, not the row count (2026-10-18)
+
+**Server only — the availability merge in `product.service.ts`, two branches of `inventory.listRows`, one new guard
+suite, `run-tests.mjs`'s classification; no route, permission, schema, index, dependency, mobile or environment
+change, and no model was called.**
+
+The owner asked for the assistant to be exercised "under heavy workloads, including stress testing". It was, on a
+**131 000-product tenant (261 918 inventory rows)** — and the answer was that **five tools did not work at all**:
+
+| shape | at 131 000 products, before |
+| --- | --- |
+| `getLowStockProducts` | **TOOL_ERROR** |
+| `getOutOfStockProducts` | **TOOL_ERROR** |
+| `getReorderNeededProducts` | **TOOL_ERROR** |
+| `getProductsByLocation` | **TOOL_ERROR** |
+| `getInventory {lowStock}` | 11 286 ms |
+| `getInventory {outOfStock}` | 7 770 ms |
+
+`GET /api/products?lowStock=true` — the same service method, which the **Restock** screen and the Inventory
+low-stock filter call — answered 500 on the same tenant. The tool layer logged MongoDB's own sentence:
+
+```text
+PlanExecutor error during aggregation :: caused by :: Exceeded memory limit for $group,
+but didn't allow external sort. Pass allowDiskUse:true to opt in.
+```
+
+## The mechanism
+
+AI-3 replaced a per-product `$lookup` fan-out with **one `$group` over the union of the catalogue and its inventory
+rows**, and the group's key is the product — so there is one group entry per product, and **`$group` memory is
+memory PER GROUP**. The first version carried the product document itself through it
+(`$project: { __product: '$$ROOT' }` → `$max: '$__product'`): a few hundred bytes × 131 000 products crossed
+MongoDB's 100 MB in-memory limit. The cost was never the row count — it was the **payload per group**, so the
+failure appeared exactly where the catalogue was large and nowhere smaller.
+
+## What changed
+
+**The merge now publishes four scalars per product** — `__product` as a `{ $literal: true }` presence marker (it is
+what still drops the groups the catalogue `$match` excluded), `__minimumStock`, `__createdAt` and the two inventory
+sums — and the **page**, which is at most `limit` rows by construction, is hydrated afterwards by
+`hydrateStockPage`: one indexed `Product.find` for the page's ids, one `Category.find` for their distinct
+references, both tenant-guarded, with `available`/`hasRow` merged back and the same `category`/`categoryId`
+normalisation the removed `$lookup` performed. Both paged aggregates also pass `allowDiskUse: true`, as a
+**backstop rather than a mechanism**: an exact id-space group should never need to spill, and a tenant an order of
+magnitude beyond today's must degrade rather than fail.
+
+**Two row-local facts the same measurement produced.** `outOfStock` is `available <= 0`, computed from the row's own
+`quantity`/`reservedQuantity` — it had been routed through the per-row product join only because it sits beside
+`lowStock` in the same request, and that join is what a partition-sized scan pays for (**~55 µs per row**, measured):
+`getInventory {outOfStock}` was **5 364 ms for a 15-row page**. The same predicate with no join is **603 ms**. And
+`lowStock` — which genuinely needs each row's product's `minimumStock` — now **prefilters rows against the largest
+`minimumStock` in the business** before the join, which is exact rather than a heuristic (a row above the maximum
+threshold cannot satisfy `available <= minimumStock` for any product, and a product with no `minimumStock` never
+satisfies the comparison either way): it keeps **147 225 of 261 918 rows** out of the join.
+
+The location join in the filtered inventory path also moved **below the page window**, into the facet's data branch,
+where it cannot change the result set (it augments and `preserveNullAndEmptyArrays`-unwinds, so it neither filters a
+row nor moves it) and where it runs for at most `limit` rows instead of every row the low/out filter admitted.
+
+## After
+
+| shape | before | after |
+| --- | --- | --- |
+| `getLowStockProducts` | TOOL_ERROR | **2 119 ms** |
+| `getOutOfStockProducts` | TOOL_ERROR | **2 110 ms** |
+| `getReorderNeededProducts` | TOOL_ERROR | **2 247 ms** |
+| `getProductsByLocation` | TOOL_ERROR | **2 014 ms** |
+| `getInventory {lowStock}` | 11 286 ms | **4 843 ms** |
+| `getInventory {outOfStock}` | 7 770 ms | **603 ms** |
+| `getInventory {}` / `{q}` / `{locationId}` | 108 / 714 / 98 ms | 152 / 773 / 125 ms |
+| `getInventorySummary`, `searchProducts`, `getInventoryHistory` | 1 985 / 859 / 128 ms | 2 019 / 1 065 / 176 ms |
+
+The unchanged shapes are the control: they move within noise, and **every total and every payload is identical**.
+
+## At 523 918 inventory rows
+
+The tenant was then grown to **131 000 products × 6 locations = 523 918 inventory rows** and the whole tool set run
+again: **every tool answered, no errors anywhere** — the four former failures 2.9–3.3 s, `getInventory {lowStock}`
+**8 873 ms**, `{outOfStock}` **869 ms**, `{locationId}` **2 395 ms**, `getInventorySummary` **2 548 ms**,
+`getProductsByLocation` **2 340 ms**, `getInventoryHistory` **161 ms**. Two things were learned there rather than
+assumed: the row-local predicate is what keeps `outOfStock` flat (**869 ms at twice the rows**, where the join shape
+had been 5.4 s at half of them), and **`lowStock` grows with the partition** as designed — 4.8 s at 262 000 rows,
+8.9 s at 523 918 — because it must read every row's availability against its product's minimum, which is a limit
+stated rather than hidden.
+
+**A third finding, measured and NOT fixed:** the **location-filtered inventory page** took **2 395 ms** at that size.
+`explain` showed why it is not a query cost: `optimizationTimeMillis: 2052` with a `SORT` winning plan over
+131 000 rows — the planner weighing a blocking sort of the location's rows against the page-sort index, which cannot
+serve `locationId` + `updatedAt` together. The same query measured **98–125 ms** on the same tenant earlier the same
+day, so this is **plan-choice instability**, not a regression from this increment (`allowDiskUse` does not change
+plan selection, and the shape was measured with and without it: 2 030 / 2 091 ms). The named next step is a dedicated
+`{ businessId, locationId, updatedAt: -1, _id: -1 }` index; it was **not** added here, because the cluster is at its
+ceiling (below).
+
+## The cluster ceiling — a real finding, and the reason the test tenant is gone
+
+The growth that produced the 523 918-row measurement **filled the Atlas free tier**: the very next write was refused
+with `you are over your space quota, using 520 MB of 512 MB. Writes are blocked on your cluster.` The scratch
+tenant (`AI SCALE TEST — 80k seeded dataset`, **872 004 documents**) was removed the same hour — its 523 918 inventory
+rows, 216 106 transactions, 131 000 products, 800 purchase orders, its audit trail, conversations, sessions, users and
+business row — leaving **0 documents** and restoring writes (a probe insert then succeeded). Cluster usage after the
+removal: `storageSize` **74.8 MB**, `dataSize` **125.1 MB**, `indexSize` **328.0 MB**. **Testing at millions of
+inventory rows therefore needs a larger cluster or a separate test cluster — the 512 MB tier cannot hold it, and
+neither can it hold the data plus the indexes such a measurement would build.** This is recorded as a blocker for the
+owner rather than worked around: no production, acceptance or real tenant was touched at any point, and the only
+documents deleted were the scratch tenant's.
+
+## Verification
+
+* **`perf:golden` byte-for-byte identical — 17/17** across **three** captures: the state before the change, after the
+  catalog merge, and after the inventory change (payload hash + total), including the two `getInventory` shapes whose
+  branch changed and the four `getProducts*` shapes that used to fail.
+* `node --test` over `phase04-inventory.test.mjs` — which asserts **both** filter paths end to end (`lowStock` total 3
+  with its three product ids, `outOfStock` total 1 with `isOutOfStock`/`isLowStock` both true) — **passes**, as does
+  `phase20-pagination-order.test.mjs`'s ordering contract for the same routes, and the suite records
+  `inventory list flags low stock / out of stock per spec §19 ✔` on the new fast path.
+* `tsc --noEmit` and `eslint` clean; the full server suite is green (below).
+* New guard `server/test/scale-stock-query-shape.test.mjs` — **6 cases**, DB-free, registered in `run-tests.mjs`'s
+  `PURE_UNIT` list: the merge must carry the presence marker and no `$$ROOT`, must hydrate the page after the group,
+  both paged aggregates must opt into `allowDiskUse`, `outOfStock` must not appear in the join-routing expression,
+  and the `lowStock` prefilter and its threshold aggregate must both be present. **Each checker carries an in-memory
+  positive control** (the mutation applied to the source text, the checker watched reporting it), plus a control that
+  **each mutation actually applied** — a guard proved by a mutation that missed its target proves nothing (§27CZ's
+  lesson, written into the file).
+
+## Limits, recorded rather than fixed
+
+* **`lowStock` remains a full-partition pass** — 4.8 s at 262 000 rows and 8.9 s at 523 918 — because the predicate
+  compares each row with its own product's threshold. The assistant's product-level tools (`getLowStockProducts`,
+  2.1–3.3 s) are what the prompt steers to, and they do not grow with the row count in the same way.
+* **The location-filtered page's plan instability** (2.4 s observed once) is described above with its measurement and
+  its candidate index, and was left alone deliberately.
+* **The huge tenant no longer exists**; the numbers above were measured before it was removed to restore the
+  cluster's writes, and the growth script itself was scratch (deleted with the tenant).
+
+## Device verification (2026-10-18)
+
+**DEVICE-VERIFIED on the OPPO CPH1969** over the USB tunnels with a Metro-launched development build against a
+restarted local backend (its boot line's `instance=30530be2…` checked against the port's owner before anything was
+read). Signed in on the **50 000-product perf tenant** as a throwaway MANAGER
+(`device-lowstock-2026-10-18@example.invalid`, **removed afterwards** with its script, `adb reverse` cleared and both
+servers stopped). The three paths this increment touches, each on the screen:
+
+* **The Restock screen** — `GET /api/products/reorder` **200 in 1 173 ms**, rendering *"7,585 products at or below
+  minimum stock, most urgent first"* and rows like *Value Torch 50999 · SKU SEEDSKU-49999 · 0 available · minimum 88 ·
+  Out*: `listReorder`, i.e. the id-space merge plus the page hydration.
+* **The Inventory screen's Low stock filter** — `GET /api/inventory` **200 in 1 970 ms** after the chip was tapped,
+  against **385.7 ms** for the same screen's unfiltered load: the filtered path with the threshold prefilter.
+* **One real assistant turn**, from the hub's own suggested prompt *"Which products are low on stock?"* —
+  `POST /api/ai/chat` **201 in 23 849 ms** and `[ai] turn outcome=degraded total=23287ms providerMs=22320ms calls=2
+  toolMs=967ms toolRuns=1 tools=getLowStockProducts empty=0 in=5928 out=800 iterations=2`, with the read-only chip
+  **Read: getLowStockProducts** on screen — the tool that answered `TOOL_ERROR` at 131 000 products before this change
+  — and the answer rendered as product cards (*Compact Battery 50896 · SEEDSKU-49896 · Available 16 · Minimum Stock
+  67*). The `degraded=OUTPUT_LIMIT` mark is the free tier's 800-token cap on a long low-stock list — AI-8's shipped
+  copy (*"This answer hit the length limit, so it may be incomplete."*) above its **Open the full restock list**
+  action — and not a defect of this increment.
+
+The **131 000-product tenant could not be used on the device**: it had already been removed to restore the cluster's
+writes, and the 512 MB tier cannot hold it again. The device evidence is therefore the 50 000-product tenant, and the
+131 000 / 523 918-row evidence is service and tool measurement.
+
+# 27DG. The location page's plan made unambiguous — an index for a defect that cannot be re-measured (2026-10-18)
+
+**Server only — one declared index, one explicit index guard, plus the model comment; no route, permission, schema,
+dependency, mobile or environment change, and no model was called.**
+
+§27DF measured the location-filtered inventory page at **2 395 ms** on the 523 918-row tenant and named the next step
+without taking it: a dedicated `{ businessId, locationId, updatedAt: -1, _id: -1 }` index. This takes it. **The
+discipline matters more than the index:** the defect it answers **cannot be reproduced on the data that still
+exists**, so what is recorded below is a captured plan, a diagnosis, and a preventive fix that has been verified in
+every way available — not a before/after speedup.
+
+## What was actually observed
+
+* At 523 918 inventory rows (131 000 products × 6 locations, one location holding 131 000 of them) `getInventory
+  {locationId}` measured **2 395 ms**, after **98–125 ms** for the same query on the same tenant earlier that day —
+  the instability, not the latency, was the finding.
+* `explain` captured at that size: a **`SORT` winning plan** over the location's rows with **`optimizationTimeMillis:
+  2052`** — the planner weighing an index-ordered scan that filters on `locationId` against a blocking in-memory sort
+  of every row at that location.
+* No declared key could supply both halves of the request: `{ businessId, locationId }` carries no sort field and
+  `{ businessId, updatedAt: -1, _id: -1 }` carries no `locationId`.
+
+## What was changed
+
+`inventorySchema.index({ businessId: 1, locationId: 1, updatedAt: -1, _id: -1 })` — equality first, then the complete
+page order — so the wanted plan is index-provided **by construction** rather than chosen by cost estimates that flipped
+as the collection grew. `{ businessId, locationId }` is a **prefix** of the new key and is deliberately kept, the same
+choice this model already made when the page-sort index was added: no existing environment has an index dropped
+underneath it.
+
+## Verification, and what it can and cannot show
+
+* **The index is built and chosen.** After `Model.init()` (build **1 401 ms**, index size **296.3 → 298.4 MB**),
+  `explain` for the location page shows `LIMIT → FETCH → IXSCAN` on
+  `businessId_1_locationId_1_updatedAt_-1__id_-1`, **no `SORT` stage**, and **`optimizationTimeMillis: 0`**.
+* **Every answer is unchanged:** `perf:golden` **17/17 byte-for-byte identical** (payload hash + total), which is the
+  guard that an index can never be observed to have changed a result.
+* **No regression at the size that is measurable:** through the service the Inventory screen and the assistant's
+  `getInventory` tool call, the three locations of the 100 143-row perf tenant read in **123 / 173 / 237 ms before**
+  and **172 / 175 / 372 ms after** — noise on the same afternoon, and the honest reading is that **the shape was
+  already index-ordered at 100 000 rows**. The fix is therefore **prevention** at the size where the planner flipped,
+  not a measured improvement there.
+* **A guard that can fail:** `phase-index-integrity.test.mjs` gains a ★ case beside the AI-3 one — the key is asserted
+  **declared** and **present in the database**, both halves, because nothing in the tree named this key before and
+  deleting one line from the model would otherwise leave every suite green.
+* **DEVICE-VERIFIED 2026-10-18** (OPPO CPH1969, USB tunnels, Metro development build, local backend restarted — its
+  boot instance checked against the port's owner — signed in on the perf tenant as a throwaway MANAGER, **removed
+  afterwards** with its script, tunnels cleared and both servers stopped): the Inventory screen's **Location** sheet
+  was opened, **Main Warehouse** selected, and the filtered page answered `GET /api/inventory` **200 in 365.5 ms**, the
+  control reading **"Main Warehouse"** with the list filtered to that location.
+
+## Limits, recorded rather than glossed
+
+* **The slow plan was never reproduced.** The tenant that showed it was deleted to restore the cluster's writes (§27DF)
+  and the 512 MB tier cannot hold it again, so the evidence is one captured `explain` plus a service-level reading —
+  and the fix is argued from the key, not from a re-measured 2 395 ms.
+* **The planner is still the planner.** An index makes the desired plan dominant for this shape; it does not remove
+  plan choice, and no test here can fail if the estimates shift for a different shape.
+* **The cost is an index**: ~2 MB on the current data, built on the next boot by the same `autoIndex` path the
+  Phase 20G/20H and AI-3 indexes took, so every environment carries it from that boot onward.
+
+# 27DH. There was no backup — and the drill found the tier's ceiling (2026-10-18)
+
+**Server only — two new scripts, one shared safety/testability module, two `package.json` entries, nine test cases and
+the guide section that teaches them; no route, permission, schema, dependency, session, mobile or environment change,
+and no model was called.**
+
+§27DF ends by recording that the cluster was over its 512 MB quota and that the tenant which produced the 523 918-row
+measurements **had to be deleted to restore writes**. Reading that back with the Atlas documentation open gives the
+sentence this increment exists to answer:
+
+> *"Atlas backups are not available for Free clusters (formerly known as M0). You may use `mongodump` to back up your
+> Free cluster data."* — MongoDB Atlas, Back Up, Restore, and Archive Data
+
+So the production database had **no recoverable copy of any kind**. Not a stale one — none. Every increment since
+Phase 26A has been hardening an application whose data had no answer to "what if it is gone", and the free tier's own
+documented remedy (`mongodump`) was not reachable from this repository: it needs a MongoDB Database Tools install, and
+nothing here recorded that fact either.
+
+## What was built
+
+* **`npm run backup:db`** (`scripts/backup-db.mjs`) — **read-only**. One gzipped Extended-JSON file per collection
+  (`<collection>.jsonl.gz`, one document per line) plus `manifest.json` carrying each file's length, **uncompressed
+  size** and **SHA-256**. System collections are skipped; the manifest is written last, so its presence means every
+  file before it completed. It is allowed to point at production precisely because it cannot write there.
+* **`npm run restore:db`** (`scripts/restore-db.mjs`) — **destructive, and fail-closed**: it may only target
+  `inventoryai_test_db` or `inventoryai_dev_db` (the allowlist is **imported from `cleanup/lib.mjs`**, not re-typed,
+  so the two cannot drift), it verifies **every** file's hash **before it drops anything**, and it needs
+  `CONFIRM=restore-db`. `--dry-run` verifies and reports without writing.
+* **`scripts/backup/lib.mjs`** — the safety rules and the dump/restore primitives, taking an already-connected
+  database handle. That is what makes them testable without a CLI or a second cluster.
+
+## Verified
+
+* The suite is `server/test/OPS1-backup-restore.test.mjs` — **9 cases, 9 passing** — and it runs against its **own
+  scratch database** on the same connection, because the first version ran against `inventoryai_test_db` itself and the
+  listing assertion exposed the hazard: `node --test` runs files in parallel, so a suite that dumps and restores a
+  shared database drops collections other suites are using mid-run.
+* The round trip is exact, including the BSON types a plain JSON dump degrades: `ObjectId`, `Date`, `Decimal128`,
+  nested documents, `null`. Comparison is canonical-Extended-JSON string equality, **with a negative control on the
+  comparator itself** — an equality helper that always returned true would make every assertion in the file vacuous.
+* **A corrupted byte is refused before anything is dropped.** One byte inside the gzip stream is flipped, and the test
+  asserts both that the restore rejects with the manifest's recorded hash and that a row written just beforehand is
+  **still there** afterwards. The order in `restoreBackup` (verify all, then drop) is the property under test.
+* A manifest entry with no file, a manifest that lists no collections, and a backup of an empty database are each
+  refused; a dry run verifies and writes nothing; a dump directory inside the repository is refused by name.
+* **Both commands were then run for real**, which is where the interesting result came from.
+
+## The real drill (and what it found)
+
+Against the **development database — 15 collections, 525 750 documents, 111 923 products, 223 227 inventory rows**:
+
+* `backup:db` produced **11.0 MB on disk**, 2 484 docs/s over the wire, and the manifest recorded **240.5 MB to
+  restore**.
+* `restore:db --dry-run` into the test database **verified all 15 files against the manifest and wrote nothing**.
+* `restore:db` for real restored `ai_conversations` through `inventory` — **223 227 documents in 46 s** (the first
+  version of the restore inserted 500 documents per round trip, serially, and managed ~250 docs/s: a 560 s window ended
+  with `inventory` holding 140 000 of 223 227. Batching is now 2 000 with four in flight, **~19× faster**, and progress
+  is printed every 50 000 documents because a nine-minute silence is indistinguishable from a hang).
+* **Then Atlas stopped it:** *"you are over your space quota, using 520 MB of 512 MB. Writes are blocked on your
+  cluster."* The copy needs ~240 MB and the cluster had ~280 MB used, so a second copy of the development dataset does
+  not fit on this tier. The command reported the failure and **exited 1 without claiming success**.
+* **Nothing was lost.** The space was freed by dropping `inventoryai_test_db` (its documented, throwaway state), the
+  development database was never touched (`dataSize 125.1 MB`, all 15 collections intact), and a write probe confirmed
+  the cluster accepts writes again. The suite then re-ran green on the restored cluster.
+
+## The finding this increment produced, stated plainly
+
+**The backup works at production scale; the tier cannot hold the restore of it.** That is not a defect in these two
+commands and no code change fixes it — it is the measured argument for the cluster upgrade the readiness review has
+been carrying as an open item, now with numbers: a 525 750-document tenant needs **~240 MB** of room to restore, the
+free tier is **512 MB in total**, and the same tier has **no server-side backups at all**. The `size` line both CLIs
+now print exists because of this run — the gzipped copy was 11 MB and told an operator nothing about the fit.
+
+## Limits, stated rather than glossed
+
+* **A full restore was never observed end-to-end** on this tier, for the reason above. Every case the suite covers is
+  one database copy that fits; the 525 750-document restore is proven to the point the cluster refused it.
+* **The restore is single-database, not cluster-wide.** It cannot restore `admin`, a replica set's oplog, or anything
+  outside one database's collections, and it is not a substitute for a tier with continuous backups once real users
+  exist.
+* **The dump is not a point-in-time snapshot.** Reading collection by collection over several minutes means a write
+  during the dump can land in one file and not another; the manifest is internally consistent, the dataset is not
+  transactional.
+* **It is a manual command.** Nothing schedules it. A copy that depends on someone remembering is a copy that does not
+  exist, which is exactly the situation this increment found.
+
+# 27DI. The pulse an outside watcher can read (2026-10-18)
+
+**Server only — one new module, one middleware line in `app.ts`, one field on the existing legacy health payload,
+one MIXED suite and a guide section; no new route, no permission, no schema, no dependency, no environment value, no
+mobile change, and no model was called.**
+
+§27DF recorded the sentence that names this gap without filling it: the cluster was refusing writes and four assistant
+tools were answering `TOOL_ERROR` **while `/api/health/ready` reported `ready` throughout**. Readiness answers "is the
+process up and the database reachable"; nothing answered **"are requests succeeding"**. So the counter that did not
+exist is the one an outside watcher needs, and the reviews that found those defects were people opening a terminal.
+
+## What was built
+
+* **`src/config/operationalCounters.ts`** — responses counted by status class, 5xx counted separately with the time of
+the most recent one, bounded by construction (fixed keys, integers, ≤ 8 tracked statuses plus an aggregate bucket), and
+returned as a **copy** so a caller serializing it cannot reach into the process's state.
+* **One middleware line in `app.ts`** on `res.on('finish')`, registered **before the first route**, so the error
+  handler's and `notFound`'s responses are counted too and no route can be placed ahead of it.
+* **One field on the existing legacy `/api/health` payload.** No new route: the endpoint already publishes the commit
+  id, and this is the same exposure class for the same reason — it identifies behaviour, not people. `/live` and
+  `/ready` are **unchanged**, deliberately: one is a dependency-free probe, the other a gate.
+* **A guide section** (`docs/guides/6-scripts-and-commands.md`, Part 7) that turns the field into an actual alert: poll
+  `/api/health/ready`, alert on two consecutive non-200s, watch `counters.serverErrors` climbing, with UptimeRobot
+  named as the smallest service that does it (and a bare `curl` cron named as the no-account alternative).
+
+## Verified
+
+* `server/test/OPS2-operational-counters.test.mjs` — **11 cases, 11 passing**, registered MIXED.
+* Unit: the status classification **and its own negative control** (99, 600, 0, −1, 1.5, `NaN`, `undefined`, `null` and
+  the string `'200'` all answer `other` rather than being folded into a plausible class); counting a **read is not
+  traffic**; a 4xx is not a server error and does not move the error timestamp; the snapshot is a copy whose mutation
+  leaves the live counters untouched; the published surface is pinned by key list and every value is asserted to be a
+  number, one timestamp or `null` — **no path, id or message in it**; **100 distinct 5xx codes** collapse into 8
+  statuses plus `other` without losing a single count (100 in, 100 out); reset returns to boot state; and a source
+  guard that the counter is installed **before** the first route.
+* DB, over the real app: a finished request is counted; a **404** lands in 4xx and leaves the error count alone;
+  `/live` and `/ready` carry **no `counters` key at all** (their payload keys are asserted, so the surface cannot
+  widen by accident).
+* **The end-to-end case is the sequence that was invisible:** the database connection is dropped, `/api/health/ready`
+  answers its real **503**, and the next `/api/health` read reports `serverErrors ≥ 1` with a timestamp — a genuine
+  failure, counted, from the app the deployment runs, not a manufactured one.
+
+## Limits, stated rather than glossed
+
+* **The counters are process-local.** Four instances each report their own, so a watcher polling one sees a fraction
+  of the traffic; a shared counter needs a shared store and this project has none (the same reason B2 and E3 are
+  deferred, §29). For the single instance deployed today it is the whole picture.
+* **They reset on restart**, and there is no history: this is "is it failing now", not "did it fail at 02:00". Trend
+  and history are the log's job, which is why nothing here replaces the log line.
+* **Nothing was wired to the outside.** The service, the monitor and the alert recipient are the owner's to choose;
+  what ships here is the signal it polls and the recipe for it. Until a monitor exists, this increment makes an
+  outage **observable**, not **announced** — and that distinction is the whole remaining gap.
+* **`/api/health` is public**, as it already was. The disclosure is bounded on purpose (counts, no names), and it is
+  recorded here rather than left for someone to notice.
+
+# 27DJ. The reference data the assistant could not see — and the ids two tools required (2026-10-19)
+
+**Server only — two tools added to the existing table, two sentences in the system prompt, one MIXED suite, the two
+catalogue counts, and the documents that enumerate the tool set. No route, permission, schema, dependency, environment
+value or mobile change. Four real provider requests were spent on the measurement below, deliberately and only once.**
+
+The assistant could filter by location and category id, and could not obtain one. `getProductsByLocation` takes a
+`locationId`; `searchProducts` and `getReorderNeededProducts` accept a `categoryId`. Nothing in the table could turn
+*"the Main Warehouse"* or *"Beverages"* into either, so the specification's own example question — *"Show me inventory
+in the warehouse"* — was answerable only by luck, when an unrelated inventory row happened to carry the id, and
+*"which locations do I have?"* had no answer at all. This was not a missing feature so much as an addressable input
+with no way to address it.
+
+## What was built
+
+* **`listLocations`** and **`listCategories`** in `src/services/ai/tools.ts` — `{ q?, status?, limit? }`, returning
+  `{ count, status, items: [{ id, name, description, status }] }`.
+* **Archived is excluded by default** (`status = 'ACTIVE'`) and the response states which slice it answered with. A
+  model handed an archived location would confidently report stock "in" somewhere that can no longer receive any —
+  worse than not knowing it exists. `status: 'ARCHIVED'` serves the member who asks about a closed location, and
+  `q` searches within the chosen slice, so an archived name cannot surface by accident.
+* **`businessId` is deliberately not returned.** The tenant is already the session's; publishing it into a transcript
+  buys the model nothing and puts a tenant identifier in a prompt. `referenceItem` maps exactly four fields.
+* **The permission is the design question.** `GET /api/locations` and `GET /api/categories` require **authentication
+  only** — every member of a business may list them — so there is no reference-read permission to mirror and none was
+  invented. The tools are gated on `INVENTORY_VIEW` and `PRODUCTS_VIEW`, the capabilities they exist to *serve*; all
+  four roles hold both, so the gate is at least as strict as the route it mirrors and narrows nobody.
+* **Prompt rule 9** (~30 tokens): resolve a location or category name to its id with these tools before filtering by
+  id, and never guess one. Without it the tools would exist and go unused — and a guessed id is exactly the failure
+  that makes the member think their warehouse is empty.
+* **A second prompt sentence, forced by the measurement below** (rule 3, ~35 tokens): when a tool result reports that it
+  was truncated, summarise it and give its count instead of listing the rows. That sentence is not speculative — it
+  exists because the first real turn about a location holding 1 000 products answered by enumerating them and was cut
+  off at the output cap.
+* **Both tools are read-only** and stay inside the AI-2 allow-list: `locationService.list` and `categoryService.list`
+  are added to it by name, so the same scan still rejects `create`/`update`/`setStatus` on those services.
+
+## Verified
+
+* `server/test/AI14-reference-tools.test.mjs` — **13 cases (5 unit + 8 DB)**, registered MIXED.
+* Unit (no database): both tools are advertised to the model; every reference tool forbids unknown arguments, so
+  `businessId`/`$where`/`role` are refused; `status` is a closed set of `ACTIVE`/`ARCHIVED` and a rejected value never
+  survives as cleaned data; `limit` is bounded 1–50 by the schema and 50 is accepted; each is gated on a permission
+  **every one of the four roles holds**, asserted per role, because a gate stricter than the screen it feeds would be
+  a defect of its own.
+* DB, over the real app: ids, names and statuses come back with the exact key set (and no `businessId`); the archived
+  location is absent by default, absent from an unfiltered search, and reachable by name **only** when asked for; a
+  `limit: 2` page over three ACTIVE rows returns two with `count: 3`, so the model can say *"showing 2 of 3"*; a second
+  tenant with **identically named** records contributes none of them (asserted by **id**, because a name match would
+  have looked right); a `categoryId` from `listCategories` filters `searchProducts` to exactly the products in that
+  category; a `locationId` from `listLocations` is accepted by `getProductsByLocation` and reports the stock written
+  through the API the app uses; STAFF gets the same rows; and each tool's description states its ACTIVE default, since
+  behaviour that disagrees with the text the model reads is worse than a missing tool.
+* **Proved able to fail:** removing the `status ?? 'ACTIVE'` default failed **3** cases — exactly the default slice, the
+  archived-by-name slice, and the count/paging case — and the file was restored **byte-identically** (`md5sum` equal).
+
+## Measured on a real model, not only asserted (2026-10-19)
+
+Two turns were run against the deployed provider on the 80 000-product perf tenant, through `runAiChat` directly
+(no HTTP, no phone, four provider requests in total — the free tier is the scarce resource and this was spent
+deliberately). It is the first evidence that a model *chooses* the new tools.
+
+* **Turn 1 — "Which locations do I have?"** → `tools=listLocations` alone, **4 586 ms**, and the answer named **three
+  active locations** with their real ids. The ACTIVE default is what made that answer *three* rather than "here are
+  your locations, one of which is archived".
+* **Turn 2 — "Show me the products in Main Warehouse."** → `tools=listLocations,getProductsByLocation`, i.e. the model
+  **resolved the name into the id** and filtered with it. The join this increment exists for works end to end, with no
+  id anywhere in the member's sentence.
+
+**And the same run found a defect the suites could not.** That second turn took **29 210 ms** and came back
+`outcome=degraded reason=OUTPUT_LIMIT out=800`: asked about a location holding 1 000 products, the model began
+enumerating them and the 800-token cap cut the answer off mid-list. AI-13 had already put a `truncated` marker in the
+tool payload and AI-8 already marked the partial answer, so nothing was silently wrong — but a reasonable question
+produced half an answer for no reason. Prompt rule 3 now says what to do with a truncated result: summarise it and give
+its count instead of listing the rows, because an enumeration of a large catalogue is cut off mid-answer. **Re-measured
+on the same tenant with the same question: `outcome=ok`, `out=511`, 11 427 ms** — no truncated sentence, no partial
+answer, and **61 % faster**, because the tokens it stopped writing were never going to reach the screen. The sentence
+costs about 35 tokens per turn and bought back 689 output tokens and 17.8 s on the turn that motivated it.
+
+## Limits, stated rather than glossed
+
+* **No device run.** The model turns above prove the *server* path — prompt, tool choice, payload, answer — but the
+  screen has not shown a `listLocations` provenance chip, and "does it read well" is still hardware's judgement. The
+  next phone session should ask *"which locations do I have?"* and *"show me stock in the warehouse"*.
+* The **two prompt sentences cost ~65 tokens per turn** (~30 for the id rule, ~35 for the truncated-result rule), on
+  every turn including those that mention neither a location nor a truncated result. That is stated rather than hidden;
+  the second sentence was measured to save 689 output tokens and 17.8 s on the one turn that needed it.
+* The reference lists are **not paged beyond 50**, and a tenant with more than 50 locations or categories would need
+  the model to narrow with `q`; that is recorded rather than solved, and realistic tenants are far below it.
+* These tools make the assistant **more capable, not more authoritative**: they return what `GET /api/locations` and
+  `GET /api/categories` already return to any member, and the AI remains read-only.
+
+# 27DK. The instrument that measured the provider could crash, and the test threw away why (2026-10-19)
+
+**Server only — one script's connection handling, one test helper, one new guard case. No route, permission, schema,
+dependency, environment value, mobile or production-server change, and no model was called.**
+
+`npm run ai:usage` is the read-only report that ISS-22's provider decision rests on, and it was found failing inside a
+full-suite run with **no explanation at all**: the test parsed the child's stdout and reported
+`SyntaxError: Unexpected end of JSON input`. Two separate defects were behind that one message.
+
+## The crash — an unhandled `error` event
+
+The script connects to MongoDB itself and **attached no connection listener**. A mongoose `Connection` is an
+`EventEmitter`, so an `error` event with no listener is **thrown** — and the full-suite log, once the second fix made
+it name the cause, held the exact sentence: `MongoNetworkError: connect ETIMEDOUT 159.143.161.245:27017`, emitted on a
+teardown-time socket. The report is printed only after the read returns, so the consequence was the worst shape for an
+instrument: **empty stdout and a stack trace on stderr**, indistinguishable from "no turns" to anything that
+de-serialised the output.
+
+**The first fix was incomplete and the next run caught it.** Listeners were attached around the read and detached in
+`finally`, and the very next full run failed again with the same crash — because `mongoose.disconnect()` is where a
+pending socket's timeout surfaces, i.e. *after* the listeners had been removed. They are now attached **before
+`connect()`** and **never removed**: this is a one-shot report process with nothing to leak, and a listener that only
+covers part of the process's life covers the wrong part.
+
+## The message — a test that could not say why
+
+`cli()` returned the child's exit code and stderr, and every assertion then did `JSON.parse(res.stdout)` **without
+looking at either**. So a dead process and an empty database produced the same failure text. Now `json()` asserts the
+run first — killed, non-zero exit (with stderr's first line), or exit-0-but-empty — and only then parses, and
+`dbReport()` separately asserts `database.status === 'OK'` so a refused connection is reported as a refused connection
+rather than as a wrong `turns` count. The CLI is also bounded by a 120 s timeout that reports *"the CLI was killed after
+120000ms"* instead of hanging the suite (generous on purpose: a `--db` run opens its own Atlas connection and this host
+has been measured at ~16 s just to select a server).
+
+## Verified
+
+* The **behavioural** run: `scripts/ai-usage.mjs --log=… --db --no-provider --json` executed twice against the real
+  cluster, both answering `database.status: OK` as JSON.
+* One new case in `phase-ai-usage-report.test.mjs` (`★ a dropped connection is a row in the report, never an unhandled
+  error`) pins the wiring the crash depended on: an `error` listener exists, a `disconnected` listener exists, **no
+  `.off('error')`/`.removeListener('error')` appears anywhere**, and the listener is attached **before** the first
+  `connect()` — the ordering that a listener added afterwards could not satisfy.
+* **Proved able to fail:** re-adding `mongoose.connection.off('error', () => {})` to `finally` failed exactly that case
+  and only it, and the script was restored **byte-identically** (`md5sum` equal).
+* The **next** full-suite run is the real test of the crash fix, since the failure only appears when Atlas misbehaves.
+
+## Limits, stated rather than glossed
+
+* This makes the report **survive** a network fault, not retry it: a slow selection still produces
+  `database.status: UNREADABLE` with the fault named, which is the honest answer and the one the script always claimed
+  to give.
+* The 120 s bound is a hang-stopper, not a service level; on this host a `--db` run costs 15–20 s per invocation, so a
+  loaded machine can approach it.
+* The underlying `connect ETIMEDOUT` is **this host's network path to one Atlas node**, not a repository defect; the
+  server's own retry behaviour (5 s server selection, then a retry at boot) was left alone deliberately.
+
+# 27DL. The location a member named — one provider call instead of two (2026-10-19)
+
+**Server only — three tool schemas, one resolver, one optional filter on the reference list, one MIXED suite. No route,
+permission, schema change, dependency, environment value or mobile change. Two real provider requests were spent on the
+measurement.**
+
+AI-14 gave the assistant `listLocations`, and the measured turn then used it exactly as designed: *"Show me the products
+in Main Warehouse"* called `listLocations` → `getProductsByLocation` → answer, **3 provider calls, 11 427 ms**. The
+first of those calls existed only to translate a name into an id.
+
+## What changed
+
+* **`getInventory`, `getProductsByLocation` and `getInventoryHistory` accept `location`** — the exact name — alongside
+  `locationId`. All three took a location id, so leaving history out would have kept the lookup call for "what moved at
+  the warehouse?" — the same defect, one tool over.
+* **Only an exact name resolves.** `referenceService.list` gained an optional `exactName` filter (anchored, regex-escaped,
+  case-insensitive after trimming) rather than reusing `q`: `q` searches name *and description*, and truncating a loose
+  match to a page could push the exact record out of view entirely — a lookup that fails on a large tenant is worse than
+  no shortcut.
+* **Only ACTIVE locations**, only within the session's own business, and **a duplicated name returns both candidates**
+  rather than picking one. A name is a member's word, not a unique key: the model must be told when it is ambiguous
+  instead of being handed the wrong shelf.
+* **Both forms in one call is refused.** `getProductsByLocation` refuses **no** location (it is about one place by
+  definition) rather than quietly unfiltering, which would answer the whole catalogue while looking like a filtered
+  page. `getInventory` keeps **no location** as its documented default — all locations — because it is a general
+  inventory query; the first draft of this change refused that too, and the suite caught it before the increment
+  landed.
+* **Prompt rule 9 was amended** rather than left to contradict this: the model is told to pass the exact name to a tool
+  that accepts one, and to resolve an id only when it does not. Without that amendment the new parameter would exist and
+  the old instruction would forbid using it.
+
+## Verified
+
+* `server/test/AI15-location-name.test.mjs` — **15 cases (3 unit + 12 DB)**, registered MIXED.
+* Unit: all three tools advertise `location` (bounded at 100 chars) and **none still requires `locationId`**; a 101-char
+  name, an operator-shaped `location` object and a smuggled `businessId` are all refused; the descriptions say the name
+  must be exact, because a parameter the model is never told about will not be used.
+* DB: the name path returns **exactly the rows and count** the id path returns, with the resolved `locationId` reported
+  so the answer is checkable; case and surrounding whitespace are forgiven (`"  main WAREHOUSE  "`); `getInventory`
+  and `getInventoryHistory` narrow identically, and each keeps "all locations" as its default when no location is
+  given — with the unfiltered answer asserted **wider** than one location's, so that case cannot pass vacuously; a **prefix** does not resolve (`Main`, `Sh`, `Twin`); a name that appears only in another
+  location's **description** does not resolve; an unknown name is a soft result that names `listLocations`; an
+  **archived** location never resolves; a **duplicated** name returns both ids; another tenant's location never resolves
+  even with an identical name, while it still resolves for its own tenant; both forms at once is refused;
+  `getProductsByLocation` refuses a missing location while `getInventory` keeps "all locations" as its default, and the
+  unfiltered answer is asserted to be **wider** than one location's so that case cannot pass vacuously.
+* **A second suite's assertion moved rather than disappeared.** `phase06-ai-tools` used to prove that
+  `getProductsByLocation({})` was a `TOOL_INVALID_ARGUMENTS` schema refusal. With two ways to give a location, and this
+  validator's JSON-Schema subset having no `anyOf`, the schema cannot say "one of the two" — so the refusal is the
+  executor's, and that case now asserts the soft refusal **and that it carries no rows**, which is the property rather
+  than the layer it was checked at. The file still passes **18/18**.
+
+* **Proved able to fail, and the first attempt taught the difference:** removing the anchors failed **nothing**, because
+  the filter reads `name` only — so the suite gained the prefix case it was missing, and the same mutation then failed
+  exactly that case. The file was restored **byte-identically** (`md5sum` equal).
+* **Measured on the deployed model, same tenant, same question:** `tools=getProductsByLocation` alone, **10 013 ms,
+  2 provider calls** — against AI-14's `listLocations,getProductsByLocation`, 11 427 ms, 3 calls. The answer was
+  equivalent (1 000 products, truncated, no enumeration).
+
+## Limits, stated rather than glossed
+
+* **The call count is the structural result; the 1.4 s is not a speed claim.** One sample of a free-tier model whose
+  turns have ranged 4.6–29.2 s cannot separate a removed round-trip from provider noise — what is deterministic is that
+  the turn now spends one model round-trip on a location question instead of two, which also removes one chance to
+  receive an empty completion.
+* **The name must be exact.** "Warehouse" will not find "Main Warehouse"; the model is told to fall back to
+  `listLocations`, and the soft result says which way to go, but the member pays one more call in that case.
+* **A tenant with more than two identically-named ACTIVE locations** still gets an ambiguity result; the tool fetches
+  two and offers both, which is the honest answer, not a ranking.
+* **`searchProducts` and `getReorderNeededProducts` still take `categoryId` only** — the same shortcut for categories is
+  deliberately not in this increment, so the category path keeps its lookup call.
+
+# 27DM. The assistant on the owner's phone — six questions, five defects, one device run (2026-10-19)
+
+**Server + mobile — five increments (AI-16 … AI-20). No route, permission, schema, session, dependency
+or environment VALUE change, and no paid service: the run used the deployed free-tier model and a
+labelled, disposable fixture tenant.**
+
+This record exists because the owner asked for the app to be exercised on real hardware rather than
+inferred from suites, and the hardware disagreed with the suites five times. Every number below was
+read off the OPPO CPH1969 over the USB tunnels, and every figure the assistant printed was then
+checked against MongoDB directly.
+
+## The fixture, and why it is one
+
+The run needed a tenant with stock, movement history and categories. `npm run seed:roles` built it:
+**203 products, 302 inventory rows, 366 movements, 4 categories** and two locations — **Main
+Warehouse** and **Shop Front** — in a tenant literally named *“ROLE TEST — role boundary fixture (do
+not use)”*, identity **`6ad50c70443d8ed513af507f`**. `SEED_CONFIRM=seed-roles npm run seed:roles`
+re-runs it and `SEED_CONFIRM=seed-roles npm run cleanup:roles` removes it, so nothing here depends on
+the owner's own demo data. Ground truth for every assertion below was read from that business with a
+read-only script before the first question was asked.
+
+## AI-16 — the category a member named
+
+The same defect AI-15 fixed for locations, one tool over: `searchProducts` and
+`getReorderNeededProducts` filtered on `categoryId`, so *“how many Beverages products are low?”* paid
+a `listCategories` round-trip to translate a word. Both now accept an exact `category` name through
+the same anchored `exactName` filter, with the AI-15 semantics unchanged (ACTIVE only, own tenant
+only, duplicated name returns both candidates, both forms refused). **15 cases** in
+`server/test/AI16-category-name.test.mjs`; the anchors were **proved able to fail** — dropping them
+reddened exactly the new prefix case, restored byte-identically (`md5sum`).
+
+**The device then corrected the increment's own premise.** The first live turn still called
+`listCategories` first, then `getReorderNeededProducts` — **2 tool runs, 3 provider calls** — because
+prompt rule 9 said to resolve an id *“otherwise”*, which a model reads as *“confirm first”*. Rule 9
+now says **do not call `listLocations`/`listCategories` to confirm a name**: pass it, and the tool
+answers an unmatched name with the name it needs. The re-run: **1 tool run, 2 calls**, both answers
+correct (**10** low-or-out Beverages products = 3 out + 7 low, against a ground truth of 10 = 3 + 7).
+
+## AI-17 — the number in the corner
+
+The owner asked what the small grey number at the bottom-right of every reply meant, guessing it
+might be a response time. It was `formatTime(createdAt)` — the message's own clock time, printed as a
+bare **`02:33`**. It is now `formatClock12` (**`2:33 AM`**), which cannot be read as a duration.
+
+**The owner then corrected the fix itself**, after seeing it on the device: the first version wrote
+*“Answered 2:33 AM”* on the assistant's bubble and *“Sent 2:33 AM”* on the member's, and the owner
+asked for the bare time back — cleaner, and still unmistakably a time. The record keeps both steps
+because the second is a design decision, not a revert: `mobile/__tests__/ai17-message-time-label.test.tsx`
+pins the **bare 12-hour form**, asserts the words are absent, and fails if the 24-hour form returns.
+**Seen on the device**: `Answered 2:53 AM` (labelled version) and then `3:18 AM` (final form).
+
+## AI-18 — a page that says it is a page
+
+*“Show me the inventory in Main Warehouse”* — the specification's own example question — called
+`getInventory`, received **25 of 203** rows and rendered all 25 as a table. The turn came back
+**`degraded` at exactly `out=800`**, cut off mid-table at row 16, and the member read a truncation
+note. The model even wrote *“showing the first 25 of 203”*: it had `count` beside the array and still
+enumerated, because nothing said `items` was a **window**.
+
+Now every paged list returns `returned` and `hasMore` beside `count` (nine tools, one `page()`
+helper), the prompt states that `hasMore: true` means one page and bounds the answer at **five items
+— counting cards, list entries and table rows alike**, and `getInventory`/`getInventoryHistory` report
+the resolved `locationId` so an answer is checkable. A source guard fails if a tool returns a bare
+`{ count, items }` again. `server/test/AI18-paged-results.test.mjs`, **7 cases**. The same question
+afterwards: **`outcome=ok`, `out=355`**, *“The Main Warehouse currently has 203 products stocked”*,
+the five newest rows, and the app named as the place for the rest.
+
+## AI-19 — a history row is a movement, not a ledger record
+
+`getInventoryHistory` returned `transactionPublic` verbatim, so every history answer put
+**`businessId` and `userId`** into the prompt — the identifiers the reference rows deliberately omit —
+and spent output budget having the model retype fields nobody asked for. The row is now what an
+answer actually says: type, quantity, before, after, reason, reference, and the product and location
+**names** the `$lookup` already paid for. Same question, same model: **`in=8173` → `in=5503`**.
+`server/test/AI19-history-item-shape.test.mjs`, **3 cases**, asserting on the serialized payload
+because that string *is* the prompt.
+
+## AI-20 — the output budget a compliant answer needs, and a recorded decision reversed on purpose
+
+The cap (`AI_MAX_OUTPUT_TOKENS`, default 800) was doing its job — and **three device turns hit it
+exactly**, two of them while obeying AI-18's five-item rule. A five-row movement table plus one
+introductory sentence is **~900–1000 tokens in this model's own wording**, so the answer was cut off
+at row three of five while doing what it was told. The default is now **1200**: above the largest
+compliant answer measured, still bounded, with the AI-1 turn deadline unchanged. `.env.example`
+updated. The same history question afterwards: **`outcome=ok`, `out=1078`**, complete, with the
+remaining fifteen summarised rather than listed.
+
+**This reverses §27BY, and the reversal is deliberate rather than accidental.** That record decided to
+keep 800 — correctly, on its own evidence: the two turns that had ever filled the cap spent **48.6 s
+and 57.4 s of the 60 s deadline**, so raising it would have converted a *marked partial answer* into a
+`504 AI_TIMEOUT` with **no answer at all**. What changed is the measurement, not the reasoning: today
+the same deployed model answered a **1078-token** turn in **20.7 s** (≈52 tok/s) where 2026-10-15's
+recorded rate was **13.9–16.5 tok/s** on the cap-filling turns, and the 800-cap history turn today
+took **23.1 s** — nowhere near the deadline. The trade-off §27BY drew still exists on a slow day, and
+it is recorded here rather than hidden: at ~14 tok/s a 1200-token answer cannot finish inside the 60 s
+turn budget, and a turn that would have arrived *marked partial* at 800 will instead arrive as the
+AI-1 timeout sentence. The cap is set for the path the owner actually runs on, and the deadline still
+bounds the worst case.
+
+## Measured on the device
+
+| Question | Before | After |
+|---|---|---|
+| *Show me the inventory in Main Warehouse.* | `degraded`, `out=800`, 25-row table cut at row 16 | **`ok`, `out=355`**, 203 products stated, 5 rows, chip `Read: getProductsByLocation` |
+| *What moved recently in Main Warehouse?* | `degraded`, `out=800`, cut at row 3 of 5 (after AI-19: still 800) | **`ok`, `out=1078`**, 187 movements, 5 newest rows, rest summarised |
+| *How many Beverages products are low on stock?* | 3 calls / 2 tool runs (`listCategories` first) | **2 calls / 1 tool run**, answer 10 = 3 out + 7 low |
+
+**Accuracy was checked, not assumed.** Main Warehouse holds **203** inventory rows and the assistant
+said 203; the tenant's dashboard reads **203 active products / 46 602 total on-hand / 167 in stock /
+11 out / 36 low**, which is what the screen showed; the five rows printed for Main Warehouse
+(**32, 1, 0, 7, 609** available) and the five newest movements (**+22** Ultra Kettle 10137,
+**−40** Everyday Towel 10090, **+49** Pro Cable 10153, **−23** Deluxe Battery 10098, **−73** Deluxe
+Bottle 10094, with their before→after figures) each match the stored documents exactly; Beverages
+holds **51** ACTIVE products, **10** of them at or below minimum, **3** with nothing available — the
+counts and the 3/7 split the assistant gave.
+
+## Verified
+
+* Server **1605 tests / 242 suites / 0 failures** (`EXIT:0`) before the rule-9 rewording, re-run after
+  it; mobile **74 suites / 937 tests / 0 failures**; `tsc`/`eslint`/module-graph clean on both sides.
+* The AI-16 anchors and the AI-18 source guard were **each watched failing** and restored
+  byte-identically.
+* The five increments were re-measured **on the phone**, not in a script: server on `:4000`, Metro on
+  `:8081`, both tunnels up, the dev client reloaded by broadcast (`com.inventoryai.app.RELOAD_APP_ACTION`)
+  so the JS changes under test were the ones on disk.
+
+## Limits, stated rather than glossed
+
+* **Three questions, one model, one tenant.** Free-tier turns on this host have ranged **4.6–32.3 s**,
+  so no latency figure here is a claim; the numbers that matter are the call counts and the tokens.
+* **The cap raise has a cost direction, and one measured counter-example**: an answer that now fits
+  can also run longer, and the 60-second turn deadline is what bounds it. On the provider path this
+  host saw on 2026-10-15 (**13.9–16.5 tok/s** on cap-filling turns, §27BY) a 1200-token answer could
+  not finish and would become a `504 AI_TIMEOUT` instead of the marked partial answer 800 produced.
+  Today's path ran at ≈52 tok/s, which is what makes the raise a win here and not universally.
+* **The model still chooses its format.** AI-18's bound is followed most of the time, not always; with
+  the cap above the largest compliant answer, the failure mode is an over-long answer rather than a
+  truncated one.
+* **The chip names tools** (`Read: getProductsByLocation`) — internal identifiers shown to a member,
+  which is useful for traceability and arguably jargon. The owner's call; not changed here.
+  *(Annotated 2026-10-19: the owner made the call — implemented same day as **AI-21**, §27DN. The
+  chip now reads `Read: Low-stock products`, verified on the phone.)*
+* **`ISS-29` is updated, not closed by this record**: the answer truncated by the cap is marked and
+  the screen says so (observed twice today), and the cap now sits above the answer shapes the prompt
+  asks for.
+
+# 27DN. The chip a member can read — and the assistant at 50 000 products (2026-10-19)
+
+**Mobile (AI-21) plus a measurement pass. No server file, route, permission, schema, session,
+dependency or environment change; the measurement half ran against a labelled, disposable tenant
+on the deployed free-tier model.**
+
+## AI-21 — the internal name off the screen
+
+§27DM ended with a limit and an owner's question: *“The chip names tools (`Read:
+getProductsByLocation`) — internal identifiers shown to a member… The owner's call; not changed
+here.”* The owner asked for the labels, so the call is made.
+
+`mobile/lib/toolLabels.ts` maps each tool to what it **read** rather than which function read it —
+`getProductsByLocation` → *Products at a location*, `getInventoryHistory` → *Stock movements*,
+`getReorderNeededProducts` → *Restock list*, `getLowStockProducts` → *Low-stock products*, and the
+seven other names in the table (eleven in all). Two properties carry the increment:
+
+* **The fallback is the point.** A tool added on the server later must not render as an identifier
+  just because this table was not updated: anything unknown is humanised (`getWidgetStats` →
+  *Widget stats*), and a name that cannot be humanised still never reaches the screen raw.
+* **Nothing that depends on the real names changed.** The stored message keeps them,
+  `restockPathForTools` still keys off them, the server's turn line and the app's logs are
+  untouched — only the sentence drawn on the bubble is translated, and the suite pins both
+  directions at once (label on the chip, restock link still routing from the stored name).
+
+The suite (*8 cases*, `mobile/__tests__/ai21-tool-labels.test.tsx`) **caught a real gap in the first
+implementation**: a name with no letters to humanise (`123`) was returned unchanged, i.e. an
+identifier-shaped string on the chip. The fix is a total fallback (*Your data*), not a loosened
+assertion. Case 3 asserts the eleven labels are **pairwise distinct**, so no two tools can ever
+share an ambiguous chip.
+
+**Device evidence, read off the running app rather than inferred:** the answer on screen at
+2026‑10‑19 03:39 carried **`Read: Low-stock products`** where it previously carried
+`Read: getLowStockProducts`, with the restock screen pointer and message time beside it.
+
+## The list-length half, on the phone
+
+The same turn is the evidence for the list-length item: **five items**, then *“The full list
+continues beyond these five items (the current page shows 20 of 36). You can view the complete
+low-stock report on the matching screen in the app.”* — the AI-18 five-item bound held, the page
+marker the model had been guessing at before AI-18 is now present, and the answer points at the
+screen that holds the rest instead of trying to become it. One turn is one observation, not a
+rate; the format is still the model's choice.
+
+## 50 000 products — the measurement AI-3 left open
+
+AI-3 ended with *“NOT measured above 10 000 products — a ≥50 k measurement is the recorded next
+step.”* It has now been run: `npm run seed:perf` built **50 000 products / 100 143 inventory rows /
+100 096 transactions** in **112.8 s** (tenant `6ad520034260a28f16a8e116`, disposable;
+`npm run cleanup:perf` removes it).
+
+**Tools, zero model calls** (`npm run perf:measure`, 7 iterations each, median ms; the 10 k figure
+from AI-3 beside it):
+
+| tool | 10 k (AI-3) | 50 k | payload |
+| --- | --- | --- | --- |
+| `getInventory` | 75 | **102** | 5 537 |
+| `getInventoryHistory` | 68 | **107** | 5 162 |
+| `listLocations` / `listCategories` | — | **157 / 157** | 349 / 1 144 |
+| `searchProducts` / `getProduct` | 214 / 212 | **213 / 224** | 3 946 / 994 |
+| `getInventorySummary` | 413 | **723** | 1 593 |
+| `getOutOfStockProducts` | 259 | **946** | 5 690 |
+| `getReorderNeededProducts` | 268 | **962** | 6 270 |
+| `getLowStockProducts` | 265 | **1 015** | 5 682 |
+| `getProductsByLocation` | 258 | **1 041** | 5 761 |
+
+This is exactly the shape AI-3 predicted: the three index-backed tools stayed **flat** (102–224 ms
+at 5× the data), and the merged partition-scan family grew **3.6–4×** for 5× the rows — near-linear
+by construction, because those tools still scan the partition. At 50 k the worst tool is **1.2 s**,
+no payload exceeds the 12 000-character truncation, and the whole family is 2–6 % of a turn.
+
+**Real turns over HTTP** (`npm run perf:turns -- --business=… --only=1,5`) — the two exact-count
+questions, which are the accuracy test that matters at scale:
+
+* *“How is my inventory doing? Give me the headline numbers.”* — **201**, 10 351 ms, one tool run
+  (`getInventorySummary`), **every figure exact**: 50 000 products / **7 585** low / **3 079** out,
+  against ground truth read from MongoDB at run time; the answer's 42 415 in-stock is internally
+  consistent (50 000 − 7 585) and its on-hand total 12 425 872 matched by the next turn.
+* *“How many total units do we have?”* — **201**, 6 690 ms, all facts present, **12 425 872** exactly
+  the figure the dashboard shows.
+
+One observation is recorded rather than smoothed over: the first answer **stopped mid-sentence**
+(*“The most recent stock movements… include a ”*) with **no `degraded` marker** — because the
+provider reported a normal finish, not the output cap. The marker logic is behaving correctly (it
+marks the cap, not the model's own stopping); the incomplete sentence is a free-tier model artefact
+and is left in the record as one.
+
+## Limits
+
+* **The 50 k tenant is a synthetic one.** Its movements are generated, so the answers prove the
+  *counting and paging* path at scale, not the plausibility of a real ledger.
+* **Two turns, one model, one run.** 6.7 s and 10.4 s are two samples on a provider whose turns on
+  this host have ranged 4.6–32.3 s; the durable numbers are the tool timings and the exact counts.
+* **AI-21 is a client-side translation.** A server-side rename of a tool would silently fall back
+  to the humanised form — correct behaviour, but a stale label would not fail any test, by design.
+* **The seed's own write path was still running for part of the earlier device turn**, so the
+  toolMs figure from that turn (5.3 s) is inflated and is not quoted as a tool cost.
+
+# 27DO. One round-trip per set of lookups — the compare-two-locations turn (2026-10-19)
+
+**Server only (AI-22): the prompt, the Anthropic wire mapping, and a cross-provider guard. No
+route, permission, schema, session, dependency or environment-value change, and no mobile file.**
+
+## The measurement that produced the increment
+
+The owner asked the assistant, on his phone, *"Compare my two locations, how many products are in
+each?"*. The answer was **exactly right** — **203** in Main Warehouse and **99** in the second
+location, both checked against MongoDB — and the turn line read:
+
+```text
+[ai] turn outcome=ok total=51600ms providerMs=50879ms calls=5 toolRuns=4 tools=listLocations,getProductsByLocation ...
+```
+
+**Five provider calls and 51.6 s** for a question that needs three lookups. Every extra call is a
+full model round-trip — roughly ten seconds each on the free tier — so the answer was not the
+defect; the path to it was. The 60-second turn deadline was 8.4 s away.
+
+## Three legs, and why each one is a different fix
+
+1. **The prompt did not ask for batching.** Nothing in the instructions said a single response may
+   carry several tool calls, so the model spent one round-trip per lookup. Rules 10 and 11 now say
+   that independent lookups go out **together** and why (the member waits for every round-trip),
+   and that no tool, function or internal identifier may appear in member-facing prose — the chip
+   was already translated by AI-21 (§27DN); the sentence was not.
+2. **The loop was already capable** — `runAiChat` executes every call in one provider response — so
+   the capability existed and was simply never requested. That behaviour is re-pinned rather than
+   introduced, because a future refactor must not remove the thing the prompt now depends on.
+3. **The wire mapping relied on a gateway's goodwill.** The Anthropic mapping emitted one `user`
+   message per tool result and depended on consecutive user turns being merged upstream. Anthropic
+   documents that merge, but an Anthropic-*compatible* gateway is not obliged to perform it — and
+   until this turn no model had ever batched, so the dependency was never exercised. Adjacent tool
+   results now travel as **one** user message carrying N `tool_result` blocks, which is the
+   canonical shape. Gemini's mapping already merged adjacent turns, so the two wires disagreed;
+   the suite now asserts both produce one model turn plus one user turn for the same conversation,
+   which is the guard that would have caught the divergence had batching started earlier.
+
+A third prompt rule (12) came from the same answer: it appended an unrequested movements summary
+after the two counts. Output tokens are generation time on the member's clock, and the 50 000-product
+probe (§27DN) had a model stop mid-sentence inside an unrequested section. One volunteered fact is
+still allowed; a section is not.
+
+## Measured effect, same question, same tenant, same model
+
+| | before | after |
+| --- | --- | --- |
+| provider calls | **5** | **3** |
+| tool runs | 4 | 3 |
+| wall clock | **51.6 s** | **29.8 s** (−43 %) |
+| output tokens | 446 | **283** |
+| answer | 203 / 99, exact | 203 / 99, exact |
+
+The call count is the structural result — a batched turn cannot spend a round-trip per lookup. The
+43 % is one sample of a provider whose turns on this host range 4.6–32.3 s, so it is evidence, not
+a rate. What survives the sample is that two round-trips and 163 output tokens were spent on
+nothing the member asked for, and both are now gone.
+
+## Verification
+
+`server/test/AI22-batched-lookups.test.mjs` — **11 cases**, DB-free: the prompt's three new rules,
+the loop's multi-call path, the batched wire shape (one user message, N blocks, ids and contents
+paired), the untouched single-result shape, both providers agreeing on the batched conversation, and
+the boundary that a later user message is never merged into a result batch. Each leg was watched
+failing on a missing module or an absent rule before it passed.
+
+Server **1616 tests / 245 suites / 0 failures**, mobile **75 suites / 946 tests / 0 failures**,
+`tsc` and `eslint` clean.
+
+**A guard earned its keep during this increment, and the instance is recorded rather than tidied
+away.** A mutation experiment reverted `ai.service.ts` to HEAD to prove a test could fail; the
+revert also undid AI-13's payload cap, silently restoring the old
+`truncate(JSON.stringify(output), …)`. The **AI-13 source guard failed the suite** — it asserts the
+`capToolResult` call is present *and* that the old shape is absent, with a positive control — and the
+cap was restored. Without that assertion the regression would have shipped as a passing build: a tool
+result cut mid-JSON, which the model then reads as a broken document. It is the clearest evidence in
+the record that source-shape guards are not decoration.
+
+## Limits
+
+* **One turn, one tenant, one model.** Batching is a model **choice**: the prompt asks for it, and a
+  model that ignores the rule still gives a correct answer — just more slowly. Nothing enforces it.
+* **The wire merge is a robustness fix, not a measured win.** No gateway rejection was observed; the
+  change removes a dependency that only a batching model would have exposed.
+* **Rule 11 (no tool names in prose) cannot be proven from one answer.** The chip is translated by
+  AI-21 and the sentence is now instructed; the model may still slip, and no layer enforces it.
+* **Rule 12 bounds bloat, not helpfulness.** An unrequested single sentence is still permitted; only
+  appended sections are forbidden.
+
+# 27DP. The comparison a single lookup can answer (2026-10-19)
+
+**Server only (AI-23): one service read, one tool, one prompt rule, one harness question.
+No route, permission, schema, session, dependency or environment-value change, and no mobile file.**
+
+## The gap AI-22 could not close
+
+AI-22 (§27DO) cut the owner's own question — *"Compare my two locations, how many products are in
+each?"* — from 5 provider calls to 3, and the turn line still read
+`calls=3 toolRuns=3 tools=listLocations,getProductsByLocation`, **29.3 s**, `in=14037`. The reason is
+structural rather than a failure of batching: **the member never names the locations**, so the turn
+spends one call learning the names before any per-location question can be phrased. No instruction
+to batch can merge those two steps, because the second lookup does not exist until the first one
+answers. What was missing was a **capability**: one read that reports every location at once.
+
+## What was added
+
+* **`inventoryService.locationBreakdown(businessId)`** — one aggregate (two `$group` stages under a
+  `$facet`) over the tenant's inventory rows. `products` per location is the count of **distinct**
+  products with a row there; `units` is on-hand quantity; `totals.products` counts a product **once**
+  however many shelves hold it, computed from the same reduced rows so it cannot drift from the
+  per-location figures. Every location is returned — an empty one with `0 / 0`, an ARCHIVED one
+  marked and with its stock intact, and stock whose location document no longer exists summed into
+  an `Unassigned` entry rather than silently dropped. Ordered by stock on hand.
+* **`getLocationBreakdown`** — a read-only tool with **no parameters at all** (`additionalProperties:
+  false`, empty `properties`), gated on `DASHBOARD_VIEW`. The strictest schema in the table: there
+  is no field in which a `businessId` could arrive, and a model that tries one is refused like
+  anywhere else (asserted).
+* **Prompt rule 13**, and it is here because the first hypothesis was **wrong and measured to be
+  wrong**: with the tool in the table and a description that says it answers every location at once,
+  a live turn on a 1 000-product tenant still called `listLocations` first and then asked about one
+  location (`tools: listLocations, getProductsByLocation`, 33 643 ms). Naming the tool once, for the
+  question shape it exists for, is what changed the choice (~40 tokens per turn).
+* **A sixth question in `perf:turns`** so this cannot regress unnoticed, with its ground truth read
+  from `locationBreakdown` at run time — the same discipline the harness already applies to the
+  dashboard figures.
+
+## Measured
+
+| | before (AI-22 prompt, no tool) | after |
+| --- | --- | --- |
+| tools called | `listLocations, getProductsByLocation` | **`getLocationBreakdown`** |
+| provider calls | 3 | **2** |
+| wall clock | 33 643 ms | **8 983 ms** |
+| answer | correct, three locations | correct, three locations |
+| tool time | — | **114 ms** |
+
+Turn line for the measured run:
+`[ai] turn outcome=ok total=8483ms providerMs=8369ms calls=2 toolMs=114ms toolRuns=1 tools=getLocationBreakdown empty=0 in=4287 out=221`.
+The sixfold wall-clock difference is **not** a speed claim about the tool (114 ms); it is what two
+provider round-trips cost less than three on a provider whose turns range 4.6–33 s on this host.
+
+**At scale, zero model calls** (`npm run perf:measure -- --label=10k`, 10 000 products / 20 105
+inventory rows): `getLocationBreakdown` median **242 ms** (p95 312, payload **378** chars) against
+`getInventorySummary` 212 ms / 1 582 chars and `getProductsByLocation` 363 ms / 5 706 chars — i.e.
+the same class as the summary it complements, for a payload the model can read whole.
+
+## Correctness checked against real data rather than fixtures alone
+
+On the dev database the service reports **Main Warehouse: 203 products / 35 520 units** and
+**Shop Front: 99 / 11 082** for the role-boundary fixture — the same **203 / 99** the assistant
+answered on the owner's phone on 2026-10-19 and that was checked against MongoDB at the time. The
+new read therefore reproduces a device-verified answer independently.
+
+## Verification
+
+`server/test/AI23-location-breakdown.test.mjs` — **10 cases**, written first and all watched failing
+(`the tool is missing from the table`): the schema takes no arguments and refuses a smuggled
+`businessId`, the permission is a read capability, the description names the question, the prompt
+points at the tool, and against real MongoDB — exact per-location counts, a product at two locations
+counted once in the total but once on each shelf, an empty location present with zeros, an archived
+location still carrying its stock, another tenant absent, ordering by stock, a brand-new tenant, and
+the role gate.
+
+Three mutations, each restored from a checksummed copy (**no `git checkout`**), all failing the case
+they should:
+
+| mutation | failed |
+| --- | --- |
+| totals summed from per-location counts (double counting) | *the business total counts a product once* |
+| empty locations filtered out | *reports every location…* and *a business with no stock yet…* |
+| tenant `$match` removed | *another tenant never appears*, the total, and the new-tenant case |
+
+The file was restored **byte-identically** (`sha256 bebe7dc0…`), checked after every run. The AI-2
+read-only invariant suite needed `inventoryService.locationBreakdown` added to its allow-list — which
+is the guard working as designed: a new read on the table is a deliberate act, not an omission.
+
+## Verified at 60 000 products, on the owner's instruction
+
+The owner asked that the assistant be exercised against **large** datasets rather than small
+fixtures, so a **60 000-product** tenant was seeded (`SEED_CONFIRM=seed-perf-ai npm run
+seed:perf -- --size=60000`, business `6ad5b6b4dc9074c2cdab4e8d`): **60 000 products, 120 131
+inventory rows, 120 164 movements**, seeded in **125 s**.
+
+**Tools, zero model calls** (`perf:measure`, 7 iterations each, median ms):
+
+| tool | 10 k (§27DN) | **60 k** | payload |
+| --- | --- | --- | --- |
+| `getLocationBreakdown` (new) | 242 (at 10 k) | **848** | 383 |
+| `searchProducts` / `getProduct` | 214 / 212 | **221 / 213** | 3 933 / 1 347 |
+| `listLocations` | — | **142** | 349 |
+| `getInventorySummary` | 413 | **914** | 1 606 |
+| `getProductsByLocation` | 258 | **1 064** | 5 748 |
+| `getOutOfStockProducts` | 259 | **1 081** | 5 685 |
+| `getReorderNeededProducts` | 268 | **1 105** | 6 265 |
+| `getLowStockProducts` | 265 | **1 193** | 5 673 |
+
+Every tool is **≤ 1.2 s** at 60 k, and the new read sits at the same cost as the summary it
+complements — 848 ms — while returning a **383-character** payload, the smallest of the list tools.
+
+**Six real turns over HTTP**, all on the deployed free-tier model, all **6/6 grounded and 6/6
+numerically exact** against ground truth read at run time: 60 000 products / 8 976 low / 3 654 out /
+**14 928 688 units**, the last figure matching the dashboard.
+
+| q | tools | calls | wall clock | tool time |
+| --- | --- | --- | --- | --- |
+| inventory health | `getInventorySummary` | 2 | 13.0 s | 851 ms |
+| restock | `getReorderNeededProducts` | 2 | **24.6 s** (slowest) | 1 143 ms |
+| one SKU | `getProduct` | 2 | 10.9 s | 188 ms |
+| out-of-stock share | `getInventorySummary` | 2 | 10.9 s | 816 ms |
+| total units | `getInventorySummary` | 2 | **3.8 s** (fastest) | 833 ms |
+| **per-location comparison** | **`getLocationBreakdown`** | **2** | **6.2 s** | **787 ms** |
+
+The comparison turn is the one this increment exists for: **one tool, two calls, `in=448`,
+`out=237`** — against `listLocations` + one lookup per shelf before it. No turn was degraded and
+none timed out.
+
+## Limits
+
+* **The ambiguity result is kept, not hidden.** The first live attempt used the owner's wording
+  (*"my two locations"*) on a tenant with **three** locations, and the model **correctly** asked
+  which two instead of guessing (`tools: listLocations` only). The harness question was reworded to
+  remove the ambiguity; the tool did not remove the need to clarify, and should not.
+* **One question, one model, one tenant per measurement.** The call count is structural; the wall
+  clock is not. Three provider calls at this host's range could have produced 9 s or 40 s.
+* **The prompt now names one tool.** Rule 11 forbids tool names in the *answer*; this is an
+  instruction, and it costs ~40 tokens per turn. It is recorded as a trade, not a free win.
+* **50 000 products was not re-measured for this tool** — it is the same partition-scan class as
+  `getInventorySummary` (723 ms at 50 k, §27DN), and the 10 k figure above is the measurement that
+  was taken.
+
+# 27DQ. The question's own clock — and the four copies a blip exposed (2026-10-19)
+
+**Mobile (AI-24) plus a one-line server change in the chat controller. No route, permission,
+schema, session, dependency or environment-value change.**
+
+## What was actually missing
+
+The owner asked for a timestamp on **each of their own messages**, like the one the answer already
+carries, so the interval between question and answer can be read off the screen.
+
+`MessageBubble` had supported it all along — `styles.timeUser`, `testID="chat-time-user"`, the same
+`formatClock12` mapping — but **nothing ever supplied the value**: the optimistic row the screen
+appends while a turn is in flight was built by hand as `{ key, role, content }` with no
+`createdAt`. The component was not the defect; the screen was.
+
+## The timestamp that had to be chosen, not copied
+
+The obvious move — show `userMessage.createdAt` from the response — is wrong, and the reason is a
+rule this project deliberately adopted: **a turn persists nothing until the provider succeeds**
+(Phase 07E / M7). The USER row is therefore written *after* the model answers, so its stored time is
+the moment the turn **completed**. Two such timestamps are a second apart however long the member
+waited — the interval the feature exists for would have been invisible, and a reloaded thread would
+report a zero-second response time.
+
+So the time is taken where it is true:
+
+* **On the device**, at the instant Send is pressed, for the bubble drawn while the turn runs.
+* **On the server**, at the top of the controller — `askedAt`, recorded *before* `runAiChat` — and
+  written as the USER message's explicit `createdAt`. Mongoose honours a supplied `createdAt`
+  (measured against the live schema before the change: a value 45 s in the past stored unchanged),
+  so the stored question carries its own send time on **the same clock as its answer**. The
+  interval is now readable on screen, in a reloaded thread, and straight out of the database.
+
+The two paths agree because the reply carries `userMessage`, and the client merges that stored copy
+in place of the optimistic bubble — the same single-mapping rule AI-8 applied to the answer.
+
+## Two defects the device found in this increment
+
+Both were seen on the phone during a real **MongoDB Atlas blip** (two 503s from the development
+database), and neither was visible in any test until they were reproduced:
+
+1. **A failed send left its bubble behind.** M7 guarantees nothing was stored, yet the member's
+   message stayed on screen as if delivered — and every retry stacked another copy. The screen
+   showed the same question **four times**. Fixed: on a failed (not stopped) send the bubble is
+   removed and the text is returned to the composer, so a retry needs no retyping.
+2. **The merge replaced every id-less row.** The first fix matched "a user row with no server id",
+   which was *every* leftover bubble from those failures; the next success replaced all of them with
+   the same stored message — four identical rows and React's *"Encountered two children with the
+   same key"*. Fixed: the pending row's key is held in a local and is the only row this turn may
+   replace or remove, and the merged list is deduped by server id so the first-turn reload race
+   (the conversation is created, which triggers a thread load) cannot produce a duplicate either.
+
+The second defect was *caused by the first fix*, which is why the four stages are recorded rather
+than only the end state.
+
+## Verification
+
+`mobile/__tests__/ai24-user-message-time.test.tsx` — **8 cases**: both bubbles render in the same
+12-hour form and can be compared; a bubble with no time renders no footer; the send path stamps the
+bubble it creates; the stored copy replaces it (exactly one question bubble, server times shown); a
+failed send removes the bubble **and** restores the draft; three failures leave **zero** bubbles; and
+`toRow` carries a stored user message's time.
+
+`server/test/AI24-message-times.test.mjs` — **3 DB cases** driving the real route with a
+**deliberately slow (350 ms) fake provider**, because with a fast one a persist-time stamp and a
+send-time stamp land in the same millisecond and the test would pass whatever the code did: the gap
+between the two stored rows is at least the provider's delay, the row is read back **from MongoDB**,
+a question is never ordered after its answer, and a failed turn still writes nothing.
+
+Each half was **proven able to fail by mutation, then restored byte-identically** (checked by
+sha256): removing `createdAt: askedAt` failed the server interval case; removing the failed-send
+cleanup failed the mobile case; removing the optimistic `createdAt` failed the send case.
+
+**On the device (2026-10-19, OPPO CPH1969 over `adb reverse`, Metro development build):** a
+reloaded conversation shows the question at **3:01 PM** and the answer at **3:02 PM** — one bubble
+each, both times drawn in the member's own 12-hour form, with the provenance chip below.
+
+## Limits
+
+* **The footer is minute-resolution.** `formatClock12` is the format AI-17 chose on this device, so
+  a 20-second turn reads 3:01 → 3:02. The interval is visible; the seconds are not. A duration
+  label ("took 12 s") would make it exact and is a separate design decision.
+* **The in-flight time is the device clock**, the stored one is the server clock. A device whose
+  clock is badly wrong will show a shifted send time until the reply arrives, at which point the
+  stored value takes over.
+* **A STOPPED turn keeps its bubble.** The server may have completed and stored it, so removing it
+  would be a claim this screen cannot make; a stopped turn that stored nothing therefore leaves a
+  bubble that disappears on reload.
+* **The Atlas blip is recorded as an observation, not a fix.** The long-running server kept
+  answering 503 to `/api/ai/chat` after the database was reachable again and needed a restart; the
+  fail-fast `1500 ms` buffering timeout is deliberate, and this run does not change it.
+
+# 27DR. One provider, on purpose — the direct Claude and Gemini implementations removed (2026-10-19)
+
+**Server only (AI-25): provider registry, configuration, `.env.example`, the production-config
+message, and the suites that named the removed providers. No route, permission, schema, session or
+dependency change, and no mobile file.**
+
+## The decision, and who made it
+
+The owner asked whether the extra providers were still worth their configuration, with the goal of
+keeping the system *"as simple, reliable, and maintainable as possible"*. The answer is **yes, remove
+them**, and this record is the reasoning rather than a preference:
+
+* **They bought no capability.** Both Claude and Gemini were already reachable **through OpenRouter as
+  model choices** — `AI_MODEL_OPENROUTER=anthropic/claude-…` is the whole change. Two direct
+  implementations therefore added a second way to do the same thing.
+* **The "fallback" was theoretical.** A second provider is only a fallback if it has its own account,
+  key and billing and is exercised. None of that was true: the deployed path is OpenRouter, so the
+  direct paths were production code nothing could reach.
+* **They were real maintenance.** Gemini carried its own wire mapping and response parser
+  (`generateContent`, `functionDeclarations`, `functionResponse`, `MAX_TOKENS`), a second way for tool
+  results to be shaped, and two more environment variables in every operator's `.env`. An unexercised
+  second protocol is not free; it is a surface that rots silently.
+
+## What was removed, and what was deliberately kept
+
+| Removed | Kept, and why |
+| --- | --- |
+| `claudeProvider.ts`, `geminiProvider.ts` | **`AIProvider` interface + registry** — OpenRouter is one entry; the `fake` provider the suites register is the other, and that seam is how the whole loop is tested without a key |
+| The `claude` / `gemini` registry entries | **`anthropicWire.ts`** — OpenRouter *is* an Anthropic-compatible gateway, so this shared mapping is the deployed path, not legacy |
+| `aiConfig().claudeModel` / `.geminiModel` | `AI_MODEL_OPENROUTER`, which is now the single place a model is chosen |
+| `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `AI_MODEL_CLAUDE`, `AI_MODEL_GEMINI` from `.env.example` | The production config check, which now requires exactly OpenRouter's three settings |
+
+Restoring a direct provider later is therefore **one small factory plus one registry entry**, and git
+keeps the Gemini mapping if it is ever wanted. That is the point of keeping the abstraction while
+removing the implementations.
+
+## What an existing deployment sees
+
+Nothing, if it already runs OpenRouter. If a deployment's `.env` still names a removed provider, the
+chat route answers **503 `AI_NOT_CONFIGURED`** — the same clean refusal every unconfigured state
+produces — and the production-config check names `AI_PROVIDER` as wrong, telling the operator to set
+`openrouter`. The selection message no longer offers the removed names as alternatives; it says
+*'Set AI_PROVIDER to "openrouter", or leave it empty to disable the AI assistant.'*
+
+## Verification
+
+`server/test/AI25-single-provider.test.mjs` — **4 cases**, DB-free and **written first, watched
+failing** on the unmodified tree (`providerRequiredEnv('claude')` returned `['ANTHROPIC_API_KEY']`
+where `null` was expected, and `selectProvider()` answered with the old missing-key sentence rather
+than the unsupported-provider one): the registry knows openrouter and nothing else; `claude` and
+`gemini` are refused as **unknown**, with a message naming openrouter and not listing them; the config
+carries no per-provider models; and `.env.example` no longer documents their keys — because a
+documented variable is a requirement to whoever sets up a server, whether or not anything reads it.
+
+Updated alongside it, rather than deleted: the provider-selection cases in `phase06-ai-provider`
+(now covering the removed names **and** the upgrade path — a stale name gets `503 AI_NOT_CONFIGURED`
+through the real route), the production-config key test in `phase07d-production-config` (now
+openrouter's settings are required and the removed keys are planted as unused secrets that must not
+leak), and AI-22's cross-wire parity case, which becomes an assertion on the **one** remaining wire
+with the reason recorded in place (see its comment) — the property it existed for is the batched
+shape, and that is unchanged.
+
+## Limits
+
+* **There is no code-level provider fallback any more.** If OpenRouter itself is unusable, the assistant
+  is unavailable until OpenRouter recovers or a provider is restored. That is a deliberate trade: the
+  previous "fallback" had never been exercised, so it was a promise the repository could not keep.
+* **The model is now an OpenRouter concern.** A model that cannot call tools still cannot answer
+  inventory questions; that risk is unchanged and is the reason `AI_MODEL_OPENROUTER` has no default.
+* **Gemini's mapping exists only in git history.** Restoring it is a revert, not a switch.
+* **Nothing was verified on a device for this increment** and nothing needed to be: it changes no
+  request, response or screen. The route-level upgrade case is covered against the real server.
+
+# 27DS. The answer a member can finish reading (2026-10-19)
+
+**Server + mobile (AI-26). No route, permission, schema, session, dependency or environment-value
+change; no extra provider call.**
+
+## The defect, read out of the database and off the phone
+
+Two complaints from the owner, and one of them had a measured shape. *"Fix incomplete AI responses"* —
+the development database held **4 `OUTPUT_LIMIT` answers out of 34**, and **every one ended inside a
+Markdown table cell**:
+
+```text
+… | Professional Battery 10051 |
+… | 2026-10-18 01:48:51 | Professional Towel 1
+… | Pro Cable 19871 |
+… | 6ad49
+```
+
+AI-8 was right to keep a truncated answer and right to mark it. The note, however, explains the cut;
+it does not make a half-row readable — a member reading *"Professional Towel 1"* cannot tell whether
+that is the product's name or where it was chopped.
+
+## What was added
+
+* **`trimIncompleteAnswer`** (`server/src/services/ai/answerCompletion.ts`) — a pure function that drops
+the **one** incomplete unit at the end: a trailing table row that is cut mid-cell, missing a cell or
+lacking its closing pipe; a paragraph cut back to its last finished sentence; closing markdown kept
+(`app.)*` stays whole). A **complete** row or sentence is never touched; a cut **list item** is left
+alone, because a whole item and a cut one look identical at the end of a string and deleting a correct
+row to rescue a cut one would be the worse failure; and with no identifiable whole unit the text is
+returned **unchanged** — a visibly cut answer with the note is more honest than a guess.
+* **`humaniseStatusConstants`** — the same file, applied to **every** answer before the trim, so the
+store, the screen and the trim all see the same words. It rewrites `OUT_OF_STOCK` → **Out of stock**,
+`LOW_STOCK` → **Low stock**, `IN_STOCK` → **In stock**, word-bounded so `LOW_STOCK_PRODUCTS` is left
+alone. This exists because a **complete** device answer printed the enum in a Status column: the
+prompt now forbids it, but a prompt is a request.
+* **The degraded line says what it removed** — `trimmed=<chars>` beside `reason=OUTPUT_LIMIT`, so a
+silent edit to a stored answer is countable.
+* **Prompt rules, each traceable to a stored or on-screen sentence:** rule 3 now **names the screens**
+with their real titles and rules out the invented one (“There is no *Reorder needed* screen — the
+restock list is the *Restock* screen”); rule 4 asks for the **thousands separator** the app uses
+(`8,976`, not `8976`) except inside names/SKUs/dates; rule 14 forbids stored status constants and
+field names in parentheses (`Product (name)`); rule 15 requires the **first sentence to state both
+numbers** (*"47 products need restocking; the 5 most urgent are below."*) and keeps AI-2's ban on
+*"subsequent pages"* and on asking how many rows to show.
+* **Mobile: the restock link is an affordance, not a consolation prize.** It used to exist only in the
+`OUTPUT_LIMIT` branch, so the answer that most needs it — a **complete** answer showing five of 8,976 —
+offered no way there. It is now drawn whenever the answer came from a stock-list tool
+(`getReorderNeededProducts`, `getLowStockProducts`, `getOutOfStockProducts`), which the stored message
+already carries for the provenance chip: **no new field, no request, no server change**.
+* **Mobile: a three-column table is a card, not a grid.** AI-4 chose `TABLE_GRID_MAX_COLUMNS = 3`
+without ever seeing a three-column grid on hardware. The first one did: `| Product | Available QTY |
+Stock status |` in a ~400 px bubble drew its header **mid-word** — `Availabl / e QTY` — because the
+2:1:1 split leaves the narrow columns under 80 px. The constant is now **2**, and the same table reads
+as three whole lines per card.
+* **Mobile: the restock screen states how much of itself is on screen** — `Showing 20 of 8,976 — scroll
+for more`, then `All 8,976 products shown`. The list pages silently, so without this a member at the
+bottom of page 1 had no way to know thousands more existed.
+
+## Measured on the phone (OPPO CPH1969, development build over Metro + `adb reverse`)
+
+**The 203-product role fixture:** the answer read *"36 products need restocking; the 5 most urgent are
+below."* — the total, in the required shape, with **card rows** and **Open the full restock list** on a
+**complete** answer (no truncation note); tapping the link opened the **Restock** screen, whose own
+header read **36 products at or below minimum stock** and whose first rows were the five the answer
+named. The screen is titled **Restock**, so the prompt's vocabulary matches the title the member sees.
+
+**The 60 000-product perf tenant** (a temporary OWNER account on the disposable seed tenant, removed
+after the run):
+
+| question | total | provider | tools | grounded | count |
+|---|---:|---:|---:|---|---|
+| Which products are low on stock? | 43.0 s | 41.8 s | 1.16 s | yes | 8,976 (shown `8976`) |
+| Is anything out of stock? | 17.1 s | 15.9 s | 1.23 s | yes | 3,654 |
+| How much stock do we hold? | 10.3 s | 9.3 s | 0.97 s | yes | 14,928,688 |
+| Which products are low on stock? (repeat) | 22.0 s | 20.8 s | 1.20 s | yes | 8,976 (shown `8976`) |
+
+Every count equals the dashboard's own figure on the same screen, and every stock row lists the same
+five products as the top of the Restock list. **4/4 grounded and numerically exact.** The tools are
+**0.97–1.23 s** — 2.7 % to 10.4 % of the turn — so the free-tier model, not the database, bounds the
+answer; the same question took **43.0 s** and **22.0 s** on consecutive runs, which is provider
+variance and not a regression. The Restock screen itself opened **8,976** rows at this scale, scrolled
+into further pages without a stall, and its search still reaches the endpoint (verified previously and
+unchanged).
+
+## Verification
+
+* `server/test/AI26-answer-completion.test.mjs` — **22 cases**: the four real stored tails (cut
+  mid-cell, cut name, cut id, one cell under a four-column header), the complete-table and
+  complete-sentence negatives, paragraph fallback, closing markdown, the list-item **non**-deletion,
+  the header-only and empty-input totality; through the **real loop** the marked turn still returns
+  `OUTPUT_LIMIT` with no half row and logs `trimmed=`, a complete answer is untouched, and the status
+  constant reaches the caller already humanised; the prompt cases pin rules 3, 4, 14 and 15 (including
+  the invented screen and the separator).
+* `mobile/__tests__/ai26-restock-link.test.tsx` — **6 cases**: the link on a **complete** stock-list
+  answer, on all three stock-list tools, absent for a non-stock answer, absent on the member's own
+  message, and the truncation note still shown without a link when the answer was prose.
+* `mobile/__tests__/restock-screen.test.tsx` — **2 new cases** for `Showing 2 of 36 — scroll for more`
+  and `All 2 products shown`, and the zero case asserts **no** footer.
+* `mobile/__tests__/ai4-assistant-answer-render.test.tsx` — **1 new case**: a three-column table is a
+  card and its header no longer wraps mid-word.
+* Full suites after every edit: mobile **77 suites / 963 tests / 0 failures**; server **1654 tests /
+  253 suites / 0 failures**, `tsc` and `eslint` clean on both sides.
+* **The quota sentence, rewritten the same day because the allowance was measured spent.** The
+  provider's own counter read **50 of 50 free requests used, 0 remaining**, and a real turn through
+  the route answered **`429 AI_QUOTA_EXCEEDED`** (`[ai] turn outcome=AI_QUOTA_EXCEEDED total=660ms
+  calls=1`) — so the client's *"reached its usage limit for now. Please try again later"* was advice
+  with no actionable content: the next usable moment is the **daily reset**, not an unspecified later.
+  The sentence now reads *"The assistant has used today's request allowance. It resets at midnight UTC
+  (8AM in Manila) — the rest of the app works as usual."*, with the server's own message left generic
+  on purpose (it cannot know the provider's day boundary). `ai6-assistant-quota-copy` and
+  `ai10-output-limit-copy` were updated to pin the new sentence **and** assert that it names the
+  reset; both suites pass.
+
+## Limits
+
+* **The reset time in the quota sentence is the provider's clock, not a promise about the app.**
+  OpenRouter's free tier is a per-day counter whose day boundary is UTC; the sentence names that and
+  the owner's local equivalent, and it was written when the allowance was measured at zero — a turn
+  after the reset has not been observed.
+* **The trim is verified by test, not by a device run.** Provoking `OUTPUT_LIMIT` on demand needs
+  either the cap lowered or a question that spends it; the cap is 1 200 and the measured answers use
+  483–774 tokens, so nothing on the phone reached it. The four real tails are the fixtures, which is
+  the next best evidence, but a device answer drawn after a trim has not been seen.
+* **The thousands-separator rule was added after the four measured turns.** Two of three low-stock
+  answers said `8976`; the prompt now asks for `8,976`, and **no turn has yet confirmed the model
+  obeys it** — it is a request, not a guarantee, and a deterministic separator pass was **rejected**
+  because it would rewrite the five-digit code inside every product name (`Deluxe Kettle 60980`).
+* **The restock footer is not device-verified.** It was written after the 36-item phone pass, and at
+  8,976 rows the next page loads before the footer is on screen for long; it is asserted by test only.
+* **The trim can only remove one unit.** A model that ends inside the *middle* of a table (a cut row
+  followed by more rows) is not repaired — the cut is not at the end, and repairing it would mean
+  inventing the missing cells.
+* **The role fixture's password was rotated** through the documented `npm run seed:roles` path so the
+  phone could sign in (the committed scripts never print it); the temporary 60 000-product account was
+  deleted after the run, and the perf tenant was otherwise untouched.
 
 # 28. Phase Gate System
 

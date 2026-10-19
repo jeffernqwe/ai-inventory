@@ -24,7 +24,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 
 import { aiConfig } from '../src/services/ai/aiConfig.ts';
-import { AiNotConfigured, AiProviderError, AiQuotaExceeded } from '../src/services/ai/aiErrors.ts';
+import { AI_OUTPUT_LIMIT, AiNotConfigured, AiProviderError, AiOutputLimit, AiQuotaExceeded } from '../src/services/ai/aiErrors.ts';
 import { createOpenrouterProvider } from '../src/services/ai/providers/openrouterProvider.ts';
 import { providerRequiredEnv, selectProvider } from '../src/services/ai/providers/index.ts';
 import { validateProductionConfig } from '../src/config/validateConfig.ts';
@@ -55,6 +55,12 @@ const EXPECTED_TOOLS = [
   'getInventoryHistory',
   'getProductsByLocation',
   'getReorderNeededProducts',
+  // AI-14: the two reference lists the id-taking tools needed to be usable.
+  'listLocations',
+  'listCategories',
+  // AI-23: the per-location breakdown, so a comparison is one lookup rather than one per
+  // shelf. Listed here because this array is the wire-level statement of what ships.
+  'getLocationBreakdown',
 ];
 
 const { dbOk, baseUrl, server: appServer } = await startServer();
@@ -118,10 +124,12 @@ function lastRequest() {
 /**
  * Every tool_result block the loop sent back, in order.
  *
- * The orchestration loop pushes ONE neutral message per tool call, and the
- * Anthropic mapping turns each of them into its own `user` message — so a turn
- * with parallel calls arrives as several consecutive user messages, not as one
- * batched message.
+ * The orchestration loop pushes ONE neutral message per tool call; the Anthropic
+ * mapping batches ADJACENT results into a single `user` message (AI-22), so a turn
+ * with parallel calls arrives as one message carrying N blocks. This helper scans
+ * every message rather than the last one on purpose: it must keep seeing every
+ * result whichever shape the mapping produces, which is what makes it usable as the
+ * assertion for both.
  */
 function toolResultBlocks(body) {
   const out = [];
@@ -230,16 +238,22 @@ function restoreAll(restores) {
 }
 
 /**
- * Run a call with console.error silenced. The failure paths under test log
- * upstream diagnostics (by design, for operators); those lines are noise here.
+ * Run a call with console.error AND console.warn silenced. The failure paths
+ * under test log upstream diagnostics (by design, for operators); those lines are
+ * noise here. `warn` joined in AI-10, which logs the output limit at the provider
+ * layer rather than at the HTTP layer — that line is asserted where it belongs
+ * (`AI10-output-limit-not-an-outage.test.mjs`) and suppressed here.
  */
 async function quiet(fn) {
   const original = console.error;
+  const originalWarn = console.warn;
   console.error = () => {};
+  console.warn = () => {};
   try {
     return await fn();
   } finally {
     console.error = original;
+    console.warn = originalWarn;
   }
 }
 
@@ -425,9 +439,9 @@ unitSuite('OpenRouter provider — Anthropic /v1/messages wire mapping', () => {
     assert.equal(body.max_tokens, cfg.maxOutputTokens);
     assert.equal(body.system, 'You are the read-only inventory assistant.');
 
-    // All nine shipped tools travel with the JSON Schema under input_schema.
+    // Every shipped tool travels with the JSON Schema under input_schema.
     // (Compared as a set: the catalogue's own order is tools.ts's to define.)
-    assert.equal(body.tools.length, 9);
+    assert.equal(body.tools.length, EXPECTED_TOOLS.length);
     assert.deepEqual([...body.tools.map((t) => t.name)].sort(), [...EXPECTED_TOOLS].sort());
     for (const tool of body.tools) {
       assert.equal(tool.parameters, undefined, 'Anthropic tools use input_schema, not parameters');
@@ -468,7 +482,7 @@ unitSuite('OpenRouter provider — Anthropic /v1/messages wire mapping', () => {
     assert.deepEqual(out.usage, { inputTokens: 100, outputTokens: 20 });
   });
 
-  it('parses parallel tool calls in order and falls back to the provider name for the model', async () => {
+  it('parses parallel tool calls in order and names the model the REQUEST asked for when the body omits one (AI-12)', async () => {
     const provider = providerFor(`http://127.0.0.1:${port}/api`);
     responder = () => ({
       status: 200,
@@ -483,7 +497,10 @@ unitSuite('OpenRouter provider — Anthropic /v1/messages wire mapping', () => {
     });
     const out = await provider.complete({ system: 's', messages: [{ role: 'user', content: 'hi' }], tools: AI_TOOL_DEFS });
     assert.deepEqual(out.toolCalls.map((c) => c.id), ['a', 'b']);
-    assert.equal(out.model, 'openrouter');
+    // AI-12 changed this from the provider label `'openrouter'` to the model the request
+    // named. The label was not a model, and because an empty completion is exactly a body
+    // that omits `model`, it hid the model on every failing turn in the stored record.
+    assert.equal(out.model, MODEL);
     assert.equal(out.usage, null);
   });
 
@@ -505,7 +522,12 @@ unitSuite('OpenRouter provider — Anthropic /v1/messages wire mapping', () => {
     assert.deepEqual(out2.toolCalls, [{ id: 'x', name: 'getProduct', input: {} }]);
   });
 
-  it('maps a max_tokens stop with no content to a truncation error', async () => {
+  it('maps a max_tokens stop with no content to the OUTPUT LIMIT, not to a provider error (AI-10)', async () => {
+    // AI-10 changed this classification, and the change IS the fix: this used to be an
+    // `AiProviderError`, which the controller maps to 502 AI_UNAVAILABLE — "temporarily
+    // unavailable, please try again in a moment" for a 2xx that answered fine, with the
+    // model having spent its budget. Asserted in both directions, because "not a provider
+    // error" is the whole content of the change.
     const provider = providerFor(`http://127.0.0.1:${port}/api`);
     responder = () => ({
       status: 200,
@@ -515,8 +537,11 @@ unitSuite('OpenRouter provider — Anthropic /v1/messages wire mapping', () => {
       assert.rejects(
         provider.complete({ system: 's', messages: [{ role: 'user', content: 'hi' }], tools: [] }),
         (err) => {
-          assert.ok(err instanceof AiProviderError);
-          assert.match(err.message, /cut off/);
+          assert.ok(err instanceof AiOutputLimit);
+          assert.equal(err.code, AI_OUTPUT_LIMIT);
+          assert.equal(err instanceof AiProviderError, false, 'nothing upstream failed: the gateway answered 2xx');
+          assert.match(err.message, /out of room|length limit/i);
+          assert.doesNotMatch(err.message, /unavailable|in a moment/i);
           return true;
         }
       )
@@ -683,6 +708,12 @@ unitSuite('OpenRouter provider — AI loop compatibility (DB-free)', () => {
       assert.deepEqual(assistantToolUseBlocks(second).map((b) => b.id), ['p1', 'p2']);
       const blocks = toolResultBlocks(second);
       assert.deepEqual(blocks.map((b) => b.tool_use_id), ['p1', 'p2']);
+      // AI-22 — and they arrive BATCHED: one user message carrying both results, which is
+      // the canonical shape rather than two consecutive user turns the gateway has to
+      // merge. Asserted here, at the HTTP level, as well as in the wire suite.
+      const batch = second.messages.filter((m) => Array.isArray(m.content) && m.content.some((b) => b?.type === 'tool_result'));
+      assert.equal(batch.length, 1, 'parallel results travel as ONE tool_result message');
+      assert.equal(batch[0].content.filter((b) => b?.type === 'tool_result').length, 2);
       const results = parsedToolResults(second);
       // A smuggled businessId is an unknown argument; a write-shaped tool does not exist.
       assert.equal(results[0].code, 'TOOL_INVALID_ARGUMENTS');
@@ -719,7 +750,7 @@ unitSuite('OpenRouter provider — AI loop compatibility (DB-free)', () => {
     }
   });
 
-  it('surfaces a truncated (max_tokens) reply as a provider error, not as empty text', async () => {
+  it('surfaces a truncated (max_tokens) reply as the output limit, not as empty text and not as an outage (AI-10)', async () => {
     const restores = useOpenrouter();
     try {
       responder = () => ({
@@ -728,8 +759,8 @@ unitSuite('OpenRouter provider — AI loop compatibility (DB-free)', () => {
       });
       await quiet(() =>
         assert.rejects(runAiChat({ ...ctx, message: 'a very long question' }), (err) => {
-          assert.ok(err instanceof AiProviderError);
-          assert.match(err.message, /cut off/);
+          assert.equal(err.code, AI_OUTPUT_LIMIT);
+          assert.equal(err instanceof AiProviderError, false, 'a limit is not an outage');
           assert.ok(!err.message.includes(TEST_KEY));
           return true;
         })
@@ -801,9 +832,9 @@ unitSuite('OpenRouter provider — AI loop compatibility (DB-free)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// The real read-only workload: all nine tools executed over MongoDB.
+// The real read-only workload: every tool in the catalogue executed over MongoDB.
 // ---------------------------------------------------------------------------
-dbSuite('OpenRouter provider — real 9-tool workload', dbOk, () => {
+dbSuite('OpenRouter provider — real full-catalogue workload', dbOk, () => {
   let owner;
   let productId;
   let locationId;
@@ -829,7 +860,7 @@ dbSuite('OpenRouter provider — real 9-tool workload', dbOk, () => {
   });
 
   /** One valid call per shipped tool, so every executor answers ok:true. */
-  function allNineCalls() {
+  function allToolCalls() {
     return [
       { id: 't1', name: 'searchProducts', input: { q: 'OpenRouter' } },
       { id: 't2', name: 'getProduct', input: { id: productId } },
@@ -840,13 +871,22 @@ dbSuite('OpenRouter provider — real 9-tool workload', dbOk, () => {
       { id: 't7', name: 'getInventoryHistory', input: { productId, limit: 5 } },
       { id: 't8', name: 'getProductsByLocation', input: { locationId, limit: 5 } },
       { id: 't9', name: 'getReorderNeededProducts', input: { limit: 5 } },
+      // AI-14: the reference lookups travel and execute like every other tool — this
+      // case is the only place the whole catalogue is run in one turn, so a tool that
+      // was advertised but could not execute would be caught here and nowhere else.
+      { id: 't10', name: 'listLocations', input: { limit: 5 } },
+      { id: 't11', name: 'listCategories', input: { limit: 5 } },
+      // AI-23: takes no arguments by design, which is also why it is the safest entry in
+      // this all-tools case — there is nothing for a model to get wrong.
+      { id: 't12', name: 'getLocationBreakdown', input: {} },
     ];
   }
 
-  it('executes all nine read-only tools in one turn and feeds every result back', async () => {
+  it('executes every read-only tool in one turn and feeds every result back', async () => {
     const restores = useOpenrouter();
     try {
-      responder = (_body, turn) => (turn === 1 ? okTools(allNineCalls()) : okText('Nine tools answered.'));
+      responder = (_body, turn) =>
+        turn === 1 ? okTools(allToolCalls()) : okText('Every tool answered.');
       const ctx = { businessId: owner.businessId, userId: owner.userId, role: ROLES.OWNER };
       const out = await runAiChat({ ...ctx, message: 'Give me a full picture of my inventory' });
 
@@ -854,9 +894,9 @@ dbSuite('OpenRouter provider — real 9-tool workload', dbOk, () => {
       assert.deepEqual([...out.toolsUsed].sort(), [...EXPECTED_TOOLS].sort());
 
       const results = parsedToolResults(requests[1].body);
-      assert.equal(results.length, 9);
+      assert.equal(results.length, EXPECTED_TOOLS.length);
       for (const [i, result] of results.entries()) {
-        assert.equal(result.ok, true, `tool ${allNineCalls()[i].name} failed: ${JSON.stringify(result)}`);
+        assert.equal(result.ok, true, `tool ${allToolCalls()[i].name} failed: ${JSON.stringify(result)}`);
       }
 
       // The wire carried every tool schema in the same request.

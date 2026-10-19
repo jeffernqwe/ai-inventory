@@ -19,11 +19,19 @@ import { useTheme } from '../lib/theme-context';
  * WHY A WIDE TABLE BECOMES CARDS, NOT A GRID. This is a phone. The observed
  * answers have five and seven columns, and in a ~400 px bubble a seven-column
  * grid leaves each column under 60 px, which is what makes the screenshot
- * unreadable: every cell wraps to one or two characters. Below the threshold a
- * grid is genuinely better (aligned numbers are easy to compare); at or above it,
- * one card per row — the row's own name as its title, its remaining columns as
- * label/value lines — keeps every value legible at the cost of height. The
- * threshold is a single named constant so the call is visible and reversible.
+ * unreadable: every cell wraps to one or two characters. At TWO columns a grid
+ * is genuinely better (aligned numbers are easy to compare); ABOVE it, one card
+ * per row — the row's own name as its title, its remaining columns as
+ * label/value lines — keeps every value legible at the cost of height.
+ *
+ * WHY THE THRESHOLD MOVED FROM 3 TO 2 (2026-10-19, on the phone). AI-4 chose 3
+ * without ever seeing a three-column grid on hardware; the first one did: a
+ * complete restock answer drew `| Product | Available QTY | Stock status |` in a
+ * ~400 px bubble and the header row wrapped MID-WORD ("Availabl / e QTY"), because
+ * the 2:1:1 column split leaves each narrow column under 80 px. The values were
+ * readable but the labels were not, and the card layout shows those same three
+ * fields as three whole lines. The threshold is a single named constant so the
+ * call stays visible and reversible.
  *
  * COST. Nothing here touches the network, the prompt or the model: it is pure
  * string work over an answer already in memory, memoised per answer string, so
@@ -33,7 +41,7 @@ import { useTheme } from '../lib/theme-context';
  */
 
 /** At or below this many columns a table is rendered as an aligned grid. */
-export const TABLE_GRID_MAX_COLUMNS = 3;
+export const TABLE_GRID_MAX_COLUMNS = 2;
 
 /** The whole answer must have at least two columns to be worth a grid. */
 function isGrid(headers: number): boolean {

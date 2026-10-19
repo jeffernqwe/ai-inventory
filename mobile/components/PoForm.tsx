@@ -283,7 +283,16 @@ export default function PoForm({ initial }: PoFormProps) {
           ? `${res?.number ?? 'Order'} was updated.`
           : `Draft ${res?.number ?? 'order'} created — issue it when you're ready to receive.`
       );
-      router.back();
+      // Creating now lands on the draft itself (§27CZ). `router.back()` used to dismiss the form to whatever
+      // was underneath it — on the list that is the list, but on a deep link there is no draft anywhere on
+      // the screen, and even from the list the order you just made is one more tap away. Landing on it puts
+      // the alert's own advice ("issue it when you're ready") one tap from the member, and `replace` keeps the
+      // back stack honest: back goes to the list, never to a second copy of the create form.
+      if (!isEdit && res?.id) {
+        router.replace(`/purchase-orders/${res.id}`);
+      } else {
+        router.back();
+      }
     } catch (err) {
       const fields = fieldMap(err);
       if (Object.keys(fields).length) setFieldErrors(fields);

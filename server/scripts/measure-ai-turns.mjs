@@ -61,6 +61,7 @@ import env from '../src/config/env.ts';
 import { Business, Inventory, Product, User } from '../src/models/index.ts';
 import { signAccessToken } from '../src/config/jwt.ts';
 import dashboardService from '../src/services/dashboard.service.ts';
+import inventoryService from '../src/services/inventory.service.ts';
 import productService from '../src/services/product.service.ts';
 import { createSessionForToken, newSessionId } from '../src/services/session.service.ts';
 
@@ -102,6 +103,12 @@ async function main() {
   // database than the answer it is checked against.
   const summary = await dashboardService.summary(businessId);
   const restock = await productService.listReorder(businessId, { skip: 0, limit: 1 });
+  // AI-23 — the per-location figures this probe now asks about, read through the same
+  // service the new tool calls, so the expectation describes this database rather than a
+  // remembered one. The two biggest shelves are used: a comparison of two locations is
+  // what the device question asked, and picking them by stock avoids relying on names.
+  const breakdown = await inventoryService.locationBreakdown(businessId);
+  const topShelves = breakdown.locations.slice(0, 2);
 
   const questions = [
     {
@@ -141,6 +148,24 @@ async function main() {
       message: 'How many total units do we have?',
       expects: [summary.totalInventoryQuantity],
       why: `total on-hand units across the tenant (${summary.totalInventoryQuantity}, read now — the figure the dashboard shows)`,
+    },
+    {
+      // AI-23, from the owner's own phone question on 2026-10-19: it cost 3 provider calls
+      // and 29.3 s because the member never names the locations, so a call went on learning
+      // them before any per-location question could be phrased. `getLocationBreakdown`
+      // exists to answer it in one lookup, and only a REAL turn on the deployed model can
+      // show whether the model reaches for it. Two counts are required, so an answer that
+      // describes only one location fails.
+      // The wording matters, and the first run proved it: *"Compare my two locations"* on a tenant
+      // with THREE locations is genuinely ambiguous, and the model correctly asked which two
+      // (calling only `listLocations`). This wording removes the ambiguity while still asking
+      // the comparison the tool exists to answer, so a per-location lookup per shelf remains
+      // the alternative the tool has to beat.
+      message: 'How many products does each of my locations hold, and which holds the most?',
+      expects: topShelves.map((row) => row.products).slice(0, 2),
+      why: `the two biggest locations' product counts (${topShelves
+        .map((row) => `${row.name ?? 'unnamed'}: ${row.products}`)
+        .join(', ')}, read now — one lookup should answer this)`,
     },
   ];
 

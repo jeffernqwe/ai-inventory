@@ -2,6 +2,7 @@ import { Router } from 'express';
 
 import { buildInfo } from '../config/deploymentReadiness.ts';
 import { getDatabaseState, isDatabaseReady } from '../config/db.ts';
+import { operationalCounters } from '../config/operationalCounters.ts';
 
 /**
  * Health endpoints (Phase 07D / M1). Three complementary signals:
@@ -20,6 +21,18 @@ import { getDatabaseState, isDatabaseReady } from '../config/db.ts';
  * None of these expose the MongoDB URI, credentials, driver internals, or stack
  * traces; /ready is a cheap local check of the driver's connection state (no
  * round-trip, no extra connections, no polling).
+ *
+ * OPS-2 — WHY `/api/health` ALSO CARRIES COUNTERS, AND WHY THE OTHER TWO DO NOT.
+ *
+ * Liveness and readiness answer a question about the process and the database; neither can say
+ * whether requests are **succeeding**. Nothing outside the hosting dashboard could, which left
+ * "is it failing right now?" answerable only by reading logs a person had to go and read. The
+ * legacy endpoint publishes the counts since boot — total responses, by status class, and the 5xx
+ * count with the time of the most recent one — so an uptime watcher can alert on the second
+ * consecutive 5xx rather than on the process merely being up. It is the same endpoint and the same
+ * exposure class as the commit id already published there, for the same reason: it identifies
+ * behaviour, not people. No path, no identifier, no duration and no message is published, and
+ * `/live` and `/ready` stay exactly what they were — a dependency-free probe and a gate.
  *
  * WHY THE LEGACY ENDPOINT CARRIES A COMMIT ID, AND WHY NOTHING ELSE DOES.
  *
@@ -54,11 +67,16 @@ function timestamp() {
  *        Which build is answering (commit + process uptime). Injectable for
  *        the same reason the database state is: a suite pins both halves
  *        without depending on the environment it runs in.
+ * @param {() => object} [options.counters]
+ *        The OPS-2 response counters. Injectable so a suite can pin the payload
+ *        shape without manufacturing traffic, and so the number it asserts on is
+ *        the number the route published rather than one it counted itself.
  */
 export function createHealthRouter({
   getState = getDatabaseState,
   isReady = isDatabaseReady,
   build = buildInfo,
+  counters = operationalCounters,
 } = {}) {
   const router = Router();
 
@@ -70,6 +88,7 @@ export function createHealthRouter({
       db: getState(),
       commit,
       uptimeSeconds,
+      counters: counters(),
       timestamp: timestamp(),
     });
   });

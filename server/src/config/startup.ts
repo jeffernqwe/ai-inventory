@@ -139,10 +139,15 @@ export async function startServer({
       exitFn(1);
       return null;
     }
+    // The message states what the connect actually did before giving up. In development
+    // `connectDatabase` has already retried (3 attempts, 30 s bound each) because this host
+    // measured 15.8 s to select; in test it made its single attempt. Either way, mongoose
+    // does not retry a REJECTED initial connect, so a restart really is the remedy — the
+    // sentence has to say so rather than pretend the process will recover on its own.
     logger.error(
-      '[db] could not connect to MongoDB at startup — the API stays up for diagnostics, ' +
-        'but readiness will report not ready and database requests will return 503. ' +
-        'Restart once MongoDB is reachable.'
+      '[db] could not connect to MongoDB at startup, after every boot attempt — the API stays ' +
+        'up for diagnostics, but readiness will report not ready and database requests will ' +
+        'return 503. Restart once MongoDB is reachable.'
     );
   }
 

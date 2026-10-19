@@ -142,14 +142,91 @@ export function getDatabaseName(): string {
 }
 
 /**
+ * The boot connect budget, and why it differs by environment.
+ *
+ * PRODUCTION IS FAIL-FAST BY CONTRACT: one attempt, a 5 s bound, then the caller exits and
+ * Render restarts the service. A longer wait would only delay that restart.
+ *
+ * DEVELOPMENT IS NOT, and 5 s turned out to be a bound this host genuinely exceeds. Measured
+ * on 2026-10-19: the same cluster took 15.8 s to select (the figure `scripts/ai-usage.mjs`
+ * already relies on), and **three separate `npm start` runs** died on the 5 s bound while a
+ * raw connect seconds earlier had succeeded. Mongoose does not retry a REJECTED initial
+ * connect, so the result was an API that stayed `not ready` — answering 503 to every
+ * database request — until somebody restarted it, which is the failure this budget removes.
+ * Three attempts with a 30 s selection bound covers the measured outage without turning a
+ * genuine misconfiguration into a 90 s hang: a wrong URI still fails on its first attempt.
+ *
+ * TEST IS DELIBERATELY UNCHANGED (one attempt, 5 s): the suites already own their retry loop
+ * (`TEST_DB_MAX_ATTEMPTS`), and a nested 3 × 30 s wait inside it would turn a transient blip
+ * into a very long green run.
+ */
+export const PRODUCTION_CONNECT_TIMEOUT_MS = 5000;
+export const DEVELOPMENT_CONNECT_TIMEOUT_MS = 30000;
+export const DEVELOPMENT_CONNECT_ATTEMPTS = 3;
+export const DEVELOPMENT_CONNECT_RETRY_MS = 3000;
+
+/**
+ * The boot budget for one environment, as data.
+ *
+ * Split out as a pure function so every environment string can be asserted (including
+ * `undefined`, mixed case and the test runner's own value) without mutating the loaded
+ * `env` object — the branch that keeps production fail-fast is exactly the branch a
+ * mutation-style test would be least able to prove.
+ *
+ * `testMode` is `process.env.TEST_MODE`, and it is NOT optional detail: the suite runner sets
+ * TEST_MODE and leaves NODE_ENV unset, so a test process reports `nodeEnv === 'development'`
+ * and would otherwise take the three-attempt development budget — inside the suites' own
+ * `TEST_DB_MAX_ATTEMPTS` loop, turning a transient blip into minutes of waiting. Reading it
+ * here is what makes "TEST IS DELIBERATELY UNCHANGED" true rather than aspirational.
+ */
+export function connectBudget({
+  nodeEnv,
+  testMode,
+}: {
+  nodeEnv?: string | undefined;
+  testMode?: string | undefined;
+} = {}): {
+  attempts: number;
+  selectionTimeoutMs: number;
+  retryDelayMs: number;
+} {
+  const environment = String(nodeEnv ?? '').trim().toLowerCase();
+  const isTest = environment === 'test' || Boolean(String(testMode ?? '').trim());
+  const isDevelopment = environment === 'development' && !isTest;
+  return {
+    attempts: isDevelopment ? DEVELOPMENT_CONNECT_ATTEMPTS : 1,
+    selectionTimeoutMs: isDevelopment ? DEVELOPMENT_CONNECT_TIMEOUT_MS : PRODUCTION_CONNECT_TIMEOUT_MS,
+    retryDelayMs: DEVELOPMENT_CONNECT_RETRY_MS,
+  };
+}
+
+export type ConnectDatabaseOptions = {
+  /** Overrides the environment's attempt budget (tests pass 1 or an explicit count). */
+  attempts?: number;
+  /** Overrides the driver's server-selection bound for each attempt. */
+  selectionTimeoutMs?: number;
+  /** Pause between attempts. */
+  retryDelayMs?: number;
+  /** The connect itself, injectable so the retry policy is testable without a database. */
+  connect?: (uri: string, options: MongooseConnectOptions) => Promise<unknown>;
+};
+
+/**
  * Connects to MongoDB using MONGODB_URI from the environment.
  *
  * - Returns `true` when connected.
  * - Returns `false` when no URI is configured (skips the connection, e.g. for tests).
- * - Rethrows connection errors (already logged in sanitized form) so the caller
- *   can decide how to handle a failed startup.
+ * - Rethrows the LAST connection error (each attempt logged in sanitized form) so the
+ *   caller can decide how to handle a failed startup.
+ *
+ * The attempt budget comes from the environment (see above) unless the caller states one.
  */
-export async function connectDatabase(): Promise<boolean> {
+export async function connectDatabase({
+  attempts,
+  selectionTimeoutMs,
+  retryDelayMs,
+  connect,
+}: ConnectDatabaseOptions = {}): Promise<boolean> {
   if (!env.mongodbUri) {
     console.warn(
       '[db] MONGODB_URI is not set — skipping database connection. ' +
@@ -158,29 +235,45 @@ export async function connectDatabase(): Promise<boolean> {
     return false;
   }
 
-  try {
-    // Cast rather than `satisfies`: `satisfies` leaves the expression's type as
-    // the object literal, which is then freshly excess-property-checked against
-    // `ConnectOptions` at the call and fails for the same missing key.
-    await mongoose.connect(env.mongodbUri, {
-      // Environment separation: the database is chosen by config/env.ts, never by
-      // the path segment of MONGODB_URI, so one cluster and one connection string
-      // serve development, test and production without any of them sharing data.
-      dbName: env.mongodbDbName,
-      serverSelectionTimeoutMS: 5000,
-      bufferTimeoutMS: 1500,
-    } as MongooseConnectOptions);
-    // The database name is one of three fixed, non-secret values — and it is the
-    // single most useful line an operator can see in a deploy log, since it is
-    // what proves which database this process actually reached.
-    console.log(`[db] connected to MongoDB (database: ${getDatabaseName()})`);
-    return true;
-  } catch (err) {
-    console.error(
-      `[db] connection failed (${errorName(err)}): ${safeErrorDetail(err)}`
-    );
-    throw err;
+  const defaults = connectBudget({ nodeEnv: env.nodeEnv, testMode: process.env.TEST_MODE });
+  const budget = Math.max(1, attempts ?? defaults.attempts);
+  const selection = selectionTimeoutMs ?? defaults.selectionTimeoutMs;
+  const pause = retryDelayMs ?? defaults.retryDelayMs;
+  const connectImpl = connect ?? ((uri, options) => mongoose.connect(uri, options));
+
+  for (let attempt = 1; attempt <= budget; attempt += 1) {
+    try {
+      // Cast rather than `satisfies`: `satisfies` leaves the expression's type as
+      // the object literal, which is then freshly excess-property-checked against
+      // `ConnectOptions` at the call and fails for the same missing key.
+      await connectImpl(env.mongodbUri, {
+        // Environment separation: the database is chosen by config/env.ts, never by
+        // the path segment of MONGODB_URI, so one cluster and one connection string
+        // serve development, test and production without any of them sharing data.
+        dbName: env.mongodbDbName,
+        serverSelectionTimeoutMS: selection,
+        bufferTimeoutMS: 1500,
+      } as MongooseConnectOptions);
+      // The database name is one of three fixed, non-secret values — and it is the
+      // single most useful line an operator can see in a deploy log, since it is
+      // what proves which database this process actually reached.
+      console.log(`[db] connected to MongoDB (database: ${getDatabaseName()})`);
+      return true;
+    } catch (err) {
+      // Every attempt is logged, with its number: an operator reading a boot log has to be
+      // able to tell "the cluster is down" from "one socket was slow" and see whether the
+      // process gave up or recovered.
+      console.error(
+        `[db] connection attempt ${attempt}/${budget} failed (${errorName(err)}): ${safeErrorDetail(err)}`
+      );
+      if (attempt === budget) throw err;
+      await new Promise((resolve) => setTimeout(resolve, pause));
+    }
   }
+
+  // Unreachable: the loop either returns or throws. Kept for totality so the return type
+  // cannot silently become `undefined` if the loop is ever restructured.
+  throw new Error('[db] connectDatabase exhausted its attempts without an outcome');
 }
 
 export async function disconnectDatabase(): Promise<void> {

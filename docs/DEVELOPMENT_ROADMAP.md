@@ -15960,6 +15960,9 @@ figure on the same screen. **Six provider requests of fifty were used** for all 
 confirmed (`used 6`). Two of §27DS's stated limits are therefore closed by observation rather than by
 argument: the **thousands separator** the prompt asks for is what the model actually writes (`8,976`,
 `14,928,688`), and rule 15's *total in the first sentence* is obeyed.
+A detail worth keeping for ISS-22: all four turns logged `outcome=ok`, `calls=2`, `empty=0` — no
+retry, no degraded mark and no empty completion on this model today, against the 3-in-5 defect rate
+the free tier showed on the previous one (2026-10-12).
 
 ## Limits
 

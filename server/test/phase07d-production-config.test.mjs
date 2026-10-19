@@ -29,6 +29,12 @@ const ENV_KEYS = [
   'MONGODB_URI',
   'JWT_SECRET',
   'AI_PROVIDER',
+  // The one built-in provider's settings (AI-25).
+  'OPENROUTER_API_KEY',
+  'OPENROUTER_BASE_URL',
+  'AI_MODEL_OPENROUTER',
+  // The removed direct providers are no longer read by anything, but a developer's local
+  // `.env` may still set them: they are saved and restored so no case can be influenced by one.
   'ANTHROPIC_API_KEY',
   'GEMINI_API_KEY',
 ];
@@ -113,21 +119,32 @@ describe('H7 production config validation (Phase 07D)', () => {
   });
 
   it('requires the configured AI provider key but never an unused provider key', async () => {
+    // AI-25 — OpenRouter is the only built-in provider now, so this keeps the property it was
+    // written for (the configured provider's settings are required, an unrelated key never is)
+    // against the one provider that remains, with the removed names planted as unused secrets.
     await withEnv(
       {
         MONGODB_URI: DUMMY_URI,
         JWT_SECRET: LONG_SECRET,
-        AI_PROVIDER: 'claude',
-        ANTHROPIC_API_KEY: '',
+        AI_PROVIDER: 'openrouter',
+        OPENROUTER_API_KEY: '',
+        OPENROUTER_BASE_URL: 'https://openrouter.example/api/v1',
+        AI_MODEL_OPENROUTER: 'vendor/model',
+        ANTHROPIC_API_KEY: 'sentinel-anthropic-key-not-required', // secret-guard:allow (deliberate fixture)
         GEMINI_API_KEY: 'sentinel-gemini-key-not-required',
       },
       () => {
         const problems = validateProductionConfig();
-        assert.ok(hasVariable(problems, 'ANTHROPIC_API_KEY'), 'claude key required when claude is configured');
-        assert.ok(!hasVariable(problems, 'GEMINI_API_KEY'), 'gemini key must NOT be required');
+        assert.ok(hasVariable(problems, 'OPENROUTER_API_KEY'), 'the configured provider key is required');
+        assert.ok(!hasVariable(problems, 'ANTHROPIC_API_KEY'), 'a removed provider key must NOT be required');
+        assert.ok(!hasVariable(problems, 'GEMINI_API_KEY'), 'a removed provider key must NOT be required');
         assert.ok(
-          messages(problems).every((m) => !m.includes('sentinel-gemini-key-not-required')),
-          'unused key value never leaks'
+          messages(problems).every(
+            (m) =>
+              !m.includes('sentinel-gemini-key-not-required') &&
+              !m.includes('sentinel-anthropic-key-not-required'),
+          ),
+          'unused key values never leak'
         );
       }
     );
@@ -162,7 +179,8 @@ describe('H7 production config validation (Phase 07D)', () => {
     const planted = {
       MONGODB_URI: undefined,
       JWT_SECRET: 'planted-very-secret-jwt-value-0123456789',
-      AI_PROVIDER: 'claude',
+      AI_PROVIDER: 'openrouter',
+      OPENROUTER_API_KEY: 'sk-planted-openrouter-secret', // secret-guard:allow (deliberate fixture)
       ANTHROPIC_API_KEY: 'sk-planted-anthropic-secret', // secret-guard:allow (deliberate fixture)
       GEMINI_API_KEY: 'planted-gemini-secret',
     };

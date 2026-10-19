@@ -262,6 +262,22 @@ describe('AI-4 — the renderer shows the answer, never its markup', () => {
     expect(view.queryByTestId('assistant-md-table-grid')).toBeTruthy();
   });
 
+  it('★ gives a THREE-column table cards, because its header wrapped mid-word on the phone', async () => {
+    // Observed 2026-10-19: "| Product | Available QTY | Stock status |" in a ~400 px
+    // bubble drew the header as "Availabl / e QTY" — the 2:1:1 grid split leaves the
+    // narrow columns under 80 px. The labels are the table's meaning, so the card layout
+    // (name as title, the other two fields as whole lines) is the readable form.
+    const view = (await withTheme(
+      <AssistantMarkdown content={'| Product | Available QTY | Stock status |\n|---|---|---|\n| Classic Mug | 0 | Out of stock |'} />,
+    )) as unknown as Rendered;
+    expect(view.queryByTestId('assistant-md-table-cards')).toBeTruthy();
+    expect(view.queryByTestId('assistant-md-table-grid')).toBeNull();
+    const text = screenText(view);
+    expect(text).toContain('Classic Mug');
+    expect(text).toContain('Available QTY');
+    expect(text).toContain('Out of stock');
+  });
+
   it('renders list items as rows with their markers', async () => {
     const view = (await withTheme(
       <AssistantMarkdown content={'- Deluxe Clips 10996\n- Everyday Battery 10981'} />,

@@ -439,7 +439,51 @@ involvement) is the tool that isolates it.
 
 ---
 
-## Part 8 — Words from this guide
+## Part 8 — One login per role, for checking what each role can do
+
+Parts 3 and 7 seed **data**: they attach a dataset to an account you already sign in with. This part is
+different — it creates **four working logins in one small tenant**, one per role, so you can sign in as each in
+turn and see exactly what that role reaches.
+
+```bash
+cd C:/Users/jeffe/inventory-ai/server
+ROLE_TEST_PASSWORD='choose-a-password' SEED_CONFIRM=seed-roles npm run seed:roles
+```
+
+| Role | Address | What it is for |
+|---|---|---|
+| OWNER | `role-owner@example.invalid` | everything, including Users and the audit trail |
+| ADMIN | `role-admin@example.invalid` | everything except creating another ADMIN or touching the OWNER |
+| MANAGER | `role-manager@example.invalid` | products, suppliers, purchase orders, stock, the assistant — **no** Users, **no** audit trail |
+| STAFF | `role-staff@example.invalid` | stock in/out, receiving, reads — **no** creating products, suppliers or orders |
+
+All four share the password in `ROLE_TEST_PASSWORD`. They sign in on the phone exactly like any other account.
+
+**The addresses can never receive mail** — `example.invalid` is reserved for exactly that — so no verification
+code is sent or needed. The logins are marked verified through Firebase's admin interface, which is the **same
+write the app performs after a real code is confirmed**. Nothing about the app's rules changes: an ordinary
+account still has to verify its email.
+
+**It cannot touch your own data.** The tenant is named `ROLE TEST — role boundary fixture (do not use)` and is
+found by that name **and** by its owner address; every write is filtered by that one business, and the command
+refuses to run unless the database is the development one. Your own account, its business and its 80,000
+documents are never in scope.
+
+**Prove the permissions rather than eyeballing them** (the backend must be running):
+
+```bash
+SEED_CONFIRM=seed-roles npm run verify:roles -- --business=<the id the seeder printed>
+```
+
+It prints one line per route with `allow`/`deny` for all four roles and exits **0** only when all **96 cells**
+match the app's own role table. The exact commands, the flags and the teardown are in
+[Guide 6, section F](6-scripts-and-commands.md).
+
+**Tear it down** with `SEED_CONFIRM=seed-roles npm run cleanup:roles`. It removes the tenant and re-queries to
+prove nothing is left; the four logins are kept unless you pass `--delete-firebase` (see
+[Part 4](#part-4--the-one-irreversible-mistake) for why that order matters).
+
+## Part 9 — Words from this guide
 
 - **Firebase** — the outside service that holds logins (email + password). Runs in the cloud.
 - **MongoDB / Atlas** — the database service that holds the business data. Also in the cloud.

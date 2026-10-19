@@ -344,9 +344,10 @@ Phase 16 — audit trail (read-only, `Authorization: Bearer <token>`, OWNER/ADMI
 | GET    | `/api/audit`    | Read-only governance trail — every recorded action, newest first. Filters: `action`, `entityType`, `userId`, `from`/`to`, `q`; paginated. Strict whitelisted DTO with actor name; system rows return `actor: null` |
 
 The V1 assistant is **read-only**: it answers questions about the caller's catalog and
-stock through 9 server-side, authorization-aware tools (`searchProducts`, `getProduct`,
+stock through 11 server-side, authorization-aware tools (`searchProducts`, `getProduct`,
 `getInventory`, `getLowStockProducts`, `getOutOfStockProducts`, `getInventorySummary`,
-`getInventoryHistory`, `getProductsByLocation`, `getReorderNeededProducts`). Tools always run inside the
+`getInventoryHistory`, `getProductsByLocation`, `getReorderNeededProducts`,
+`listLocations`, `listCategories`). Tools always run inside the
 authenticated user's role and `businessId` context — the AI never connects to MongoDB
 directly and can never change products, stock, transactions, users or roles. If no AI
 provider is configured, chat returns `503 AI_NOT_CONFIGURED`; the rest of the API keeps
@@ -438,12 +439,12 @@ committed.
 
 - Copy `server/.env.example` to `server/.env` for local development.
 - `.env` files are git-ignored; `.env.example` contains variable **names only**.
-- **AI provider (Phase 06):** set `AI_PROVIDER` to `claude`, `gemini`, or `openrouter`
-  (an Anthropic-compatible gateway in front of many models) in `server/.env`
-  and add the matching `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, or
-  `OPENROUTER_API_KEY` + `OPENROUTER_BASE_URL` + `AI_MODEL_OPENROUTER`
-  (the model is required — OpenRouter has no default). AI credentials stay
-  server-side — they are never sent to the mobile app.
+- **AI provider (Phase 06):** set `AI_PROVIDER=openrouter` (an Anthropic-compatible gateway in
+  front of many models) in `server/.env` and add `OPENROUTER_API_KEY` +
+  `OPENROUTER_BASE_URL` + `AI_MODEL_OPENROUTER` (the model is required — OpenRouter has no
+  default). It is the **only** shipped provider (AI-25): Claude and Gemini models are reached
+  through it by choosing a different `AI_MODEL_OPENROUTER`, so there is no second key to manage.
+  AI credentials stay server-side — they are never sent to the mobile app.
 - **Firebase Authentication (Phases 32B–32E):** the server verifies Firebase ID tokens and
   needs a service account, supplied either as `FIREBASE_PROJECT_ID`,
   `FIREBASE_CLIENT_EMAIL` and `FIREBASE_PRIVATE_KEY`, or — preferred, because it removes
@@ -483,8 +484,9 @@ committed.
   stock in/out, adjust (MANAGER+), history and profile screens; centralized API client with
   timeout/network handling; client RBAC gating mirrors the server; verified by `expo export`
   bundling for Android and iOS plus a secret scan
-- **Phase 06 — AI Assistant:** complete — provider abstraction (Claude, Gemini and OpenRouter over Node `fetch`,
-  no AI SDK dependency), an AI service that orchestrates tool calls with strict read-only,
+- **Phase 06 — AI Assistant:** complete — provider abstraction (one shipped provider, **OpenRouter**,
+  over Node `fetch` with no AI SDK dependency; Claude and Gemini models are reached through it by
+  choosing `AI_MODEL_OPENROUTER`, since AI-25 removed the direct implementations), an AI service that orchestrates tool calls with strict read-only,
   authorization-aware tools (9 inventory tools), conversation/message persistence, a rate-limited
   `/api/ai/chat` endpoint plus conversation listing/creation and message retrieval, and a mobile
   chat UI (hub, new chat, threads) with loading/error/empty states. Tool execution is bound to the

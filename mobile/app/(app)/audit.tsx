@@ -11,6 +11,7 @@ import ListRow from '../../components/ListRow';
 import ListScreen from '../../components/ListScreen';
 import SearchField from '../../components/SearchField';
 import { auditApi } from '../../lib/api';
+import { ENTITY_LABELS, actionLabel, entityLabel } from '../../lib/auditLabels';
 import type { ApiResponse } from '../../lib/api';
 import { useSession } from '../../lib/auth';
 import { canViewAudit } from '../../lib/permissions';
@@ -22,45 +23,6 @@ import useDebounced from '../../hooks/useDebounced';
 import usePagedList from '../../hooks/usePagedList';
 import useRefetchOnFocus from '../../hooks/useRefetchOnFocus';
 
-/** Human-readable labels for every AUDIT_ACTIONS value (server constants/audit.js). */
-const ACTION_LABELS: Record<string, string> = {
-  PRODUCT_CREATED: 'Product created',
-  PRODUCT_UPDATED: 'Product updated',
-  PRODUCT_ARCHIVED: 'Product archived',
-  CATEGORY_CREATED: 'Category created',
-  CATEGORY_UPDATED: 'Category updated',
-  CATEGORY_ARCHIVED: 'Category archived',
-  LOCATION_CREATED: 'Location created',
-  LOCATION_UPDATED: 'Location updated',
-  LOCATION_ARCHIVED: 'Location archived',
-  SUPPLIER_CREATED: 'Supplier created',
-  SUPPLIER_UPDATED: 'Supplier updated',
-  SUPPLIER_ARCHIVED: 'Supplier archived',
-  PURCHASE_ORDER_CREATED: 'PO created',
-  PURCHASE_ORDER_UPDATED: 'PO updated',
-  PURCHASE_ORDER_ISSUED: 'PO issued',
-  PURCHASE_ORDER_CANCELED: 'PO canceled',
-  PURCHASE_ORDER_RECEIVED: 'PO received',
-  INVENTORY_STOCK_IN: 'Stock in',
-  INVENTORY_STOCK_OUT: 'Stock out',
-  INVENTORY_ADJUSTED: 'Inventory adjusted',
-  INVENTORY_TRANSFERRED: 'Stock transferred',
-  USER_CREATED: 'User created',
-  USER_UPDATED: 'User updated',
-};
-
-/** Human-readable labels for every AUDIT_ENTITY_TYPES value. */
-const ENTITY_LABELS: Record<string, string> = {
-  PRODUCT: 'Product',
-  INVENTORY: 'Inventory',
-  INVENTORY_TRANSACTION: 'Transaction',
-  USER: 'User',
-  PURCHASE_ORDER: 'Purchase order',
-  SUPPLIER: 'Supplier',
-  CATEGORY: 'Category',
-  LOCATION: 'Location',
-};
-
 const ENTITY_FILTERS = [
   { label: 'All', value: '' },
   { label: 'Products', value: 'PRODUCT' },
@@ -70,22 +32,25 @@ const ENTITY_FILTERS = [
   { label: 'Suppliers', value: 'SUPPLIER' },
   { label: 'Categories', value: 'CATEGORY' },
   { label: 'Locations', value: 'LOCATION' },
+  // Session lifecycle (sign-ins, sign-outs, revoked sessions) is a real part of
+  // the trail and the one people ask about — "who has been signing in?".
+  { label: 'Sessions', value: 'SESSION' },
 ];
 
 function AuditRow({ item }: { item: ApiResponse }) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const actionLabel = ACTION_LABELS[item.action] ?? item.action;
-  const entityLabel = ENTITY_LABELS[item.entityType] ?? item.entityType;
+  const actionText = actionLabel(item.action);
+  const entityText = entityLabel(item.entityType);
   const actor = item.actor?.name ?? 'System';
   const metadata = item.metadata ? JSON.stringify(item.metadata) : null;
   return (
     <Card>
       <ListRow
         leading={<Icon name="document" color={colors.primary} size={22} />}
-        title={actionLabel}
+        title={actionText}
         subtitle={`${actor} · ${formatDateTime(item.createdAt)}`}
-        right={<Badge text={entityLabel} tone="neutral" />}
+        right={<Badge text={entityText} tone="neutral" />}
         footer={
           item.entityId || metadata ? (
             <View>
@@ -107,11 +72,35 @@ function AuditRow({ item }: { item: ApiResponse }) {
   );
 }
 
+/**
+ * Role guard (MOD-07, same shape as the AI hub). The permission check lives
+ * here and nowhere else, so the list below mounts only for a role that may read
+ * the trail. Declaring the hooks under this return instead would run them on a
+ * denied render — `usePagedList` loads on mount and `useRefetchOnFocus`
+ * subscribes — so a MANAGER or STAFF visit to a deep link would issue
+ * `GET /api/audit` and be refused by the server for no reason. The server
+ * remains the boundary either way; this stops the client asking at all.
+ */
 export default function AuditScreen() {
+  const { user } = useSession();
+  const view = canViewAudit(user);
+
+  if (!view) {
+    return (
+      <>
+        <Stack.Screen options={{ title: 'Audit Log' }} />
+        <AccessDenied message="Only the business owner and admins can view the audit log." />
+      </>
+    );
+  }
+
+  return <AuditList />;
+}
+
+function AuditList() {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const { user, token, signOut } = useSession();
-  const view = canViewAudit(user);
+  const { token, signOut } = useSession();
 
   const [q, setQ] = useState('');
   const debouncedQ = useDebounced(q, 300);
@@ -159,27 +148,23 @@ export default function AuditScreen() {
   return (
     <>
       <Stack.Screen options={{ title: 'Audit Log' }} />
-      {!view ? (
-        <AccessDenied message="Only the business owner and admins can view the audit log." />
-      ) : (
-        <ListScreen
-          items={list.items}
-          keyExtractor={(item) => item.id}
-          renderItem={({ item }) => <AuditRow item={item} />}
-          header={header}
-          loading={list.loading}
-          error={list.error}
-          onRetry={list.reload}
-          errorTitle="Couldn't load the audit log"
-          refreshing={list.refreshing}
-          onRefresh={list.refresh}
-          onEndReached={list.loadMore}
-          loadingMore={list.loadingMore}
-          loadingLabel="Loading audit log…"
-          emptyTitle="Nothing to show"
-          emptyMessage={emptyMessage()}
-        />
-      )}
+      <ListScreen
+        items={list.items}
+        keyExtractor={(item) => item.id}
+        renderItem={({ item }) => <AuditRow item={item} />}
+        header={header}
+        loading={list.loading}
+        error={list.error}
+        onRetry={list.reload}
+        errorTitle="Couldn't load the audit log"
+        refreshing={list.refreshing}
+        onRefresh={list.refresh}
+        onEndReached={list.loadMore}
+        loadingMore={list.loadingMore}
+        loadingLabel="Loading audit log…"
+        emptyTitle="Nothing to show"
+        emptyMessage={emptyMessage()}
+      />
     </>
   );
 }

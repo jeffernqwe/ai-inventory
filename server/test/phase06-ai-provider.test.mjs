@@ -108,33 +108,28 @@ unitSuite('Phase 06 — AI provider selection', () => {
     }
   });
 
-  it('claude without ANTHROPIC_API_KEY throws AiNotConfigured', () => {
-    const restoreKey = withEnv('ANTHROPIC_API_KEY', undefined);
-    const restoreProvider = withEnv('AI_PROVIDER', 'claude');
-    try {
-      assert.throws(() => selectProvider(), (err) => {
-        assert.ok(err instanceof AiNotConfigured);
-        assert.match(err.message, /ANTHROPIC_API_KEY/);
-        return true;
-      });
-    } finally {
-      restoreKey();
-      restoreProvider();
-    }
-  });
-
-  it('gemini without GEMINI_API_KEY throws AiNotConfigured', () => {
-    const restoreKey = withEnv('GEMINI_API_KEY', undefined);
-    const restoreProvider = withEnv('AI_PROVIDER', 'gemini');
-    try {
-      assert.throws(() => selectProvider(), (err) => {
-        assert.ok(err instanceof AiNotConfigured);
-        assert.match(err.message, /GEMINI_API_KEY/);
-        return true;
-      });
-    } finally {
-      restoreKey();
-      restoreProvider();
+  // AI-25 (2026-10-19, owner decision): the direct Claude and Gemini providers were removed.
+  // Both are still reachable THROUGH OpenRouter as model choices, so the names now resolve to
+  // "unsupported provider" — not to a missing key for an implementation that no longer exists.
+  // The full contract (including `.env.example`) is pinned in AI25-single-provider.test.mjs;
+  // this case keeps the selection error itself covered where the other unknown names are.
+  it('the removed direct providers are refused as unsupported, naming openrouter', () => {
+    for (const gone of ['claude', 'gemini']) {
+      const restoreProvider = withEnv('AI_PROVIDER', gone);
+      try {
+        assert.throws(
+          () => selectProvider(),
+          (err) => {
+            assert.ok(err instanceof AiNotConfigured);
+            assert.match(err.message, /not supported/);
+            assert.match(err.message, /openrouter/);
+            return true;
+          },
+          `${gone} must be refused as unsupported`,
+        );
+      } finally {
+        restoreProvider();
+      }
     }
   });
 });
@@ -333,15 +328,16 @@ dbSuite('Phase 06 — HTTP failure mapping', dbOk, () => {
     }
   });
 
-  it('claude configured without a key -> 503 AI_NOT_CONFIGURED', async () => {
-    const restoreKey = withEnv('ANTHROPIC_API_KEY', undefined);
+  it('a stale pre-AI-25 provider name -> 503 AI_NOT_CONFIGURED, not a crash', async () => {
+    // A deployment whose `.env` still says `claude` must fail cleanly with the same 503 every
+    // other unconfigured state produces. This is the upgrade path's whole risk: the removal is
+    // only safe if a leftover name is a refusal rather than an unhandled throw.
     const restoreProvider = withEnv('AI_PROVIDER', 'claude');
     try {
       const res = await chat(owner.token, { message: 'hello' });
       assert.equal(res.status, 503);
       assert.equal(res.json.code, 'AI_NOT_CONFIGURED');
     } finally {
-      restoreKey();
       restoreProvider();
     }
   });

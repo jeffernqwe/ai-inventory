@@ -82,7 +82,12 @@ export function createOpenrouterProvider(): AIProvider {
     messagesUrl: messagesUrlFromBase(baseUrl),
     modelKey: 'openrouterModel',
     defaultModel: model,
-    fallbackModel: 'openrouter',
+    // NO `fallbackModel` (AI-12). It used to be the provider's own name, so any response
+    // whose body omitted `model` was recorded as the model `openrouter` — and since an
+    // empty completion is exactly such a body, **every** failing turn in the record was
+    // labelled with the provider instead of a model. The factory now falls back to the
+    // model the request named, which is true by construction and answers "is it this
+    // model?", the question a provider-tier decision actually has to ask.
     // OpenRouter documents a bearer token and nothing else. No impersonation
     // headers, and no anthropic-version: the endpoint does not require one.
     authHeaders: (key) => ({ authorization: `Bearer ${key}` }),

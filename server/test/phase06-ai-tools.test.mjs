@@ -305,7 +305,6 @@ dbSuite('Phase 06 — AI tools', dbOk, () => {
       ['getInventory', { limit: 0 }, /at least 1/],
       ['getInventory', { q: 'a'.repeat(101) }, /too long/],
       ['getLowStockProducts', { limit: 500 }, /at most 50/],
-      ['getProductsByLocation', {}, /missing required argument/],
       ['getInventoryHistory', { type: 'ROBOT_ATTACK' }, /must be one of/],
       ['getInventoryHistory', { from: 'yesterday' }, /ISO date-time/],
       ['getInventorySummary', { businessId: 123 }, /businessId/],
@@ -317,6 +316,22 @@ dbSuite('Phase 06 — AI tools', dbOk, () => {
       assert.equal(res.code, 'TOOL_INVALID_ARGUMENTS');
       assert.match(res.error, re, `${tool} ${JSON.stringify(args)}`);
     }
+  });
+
+  it('★ a required location is refused by the executor, because the schema cannot say "one of two"', async () => {
+    // This case used to live in the malformed-arguments list above, asserting a `missing
+    // required argument` problem from the schema. AI-15 made the location expressible two
+    // ways (`locationId` or the exact `location` name), and this validator's JSON-Schema
+    // subset has no `anyOf`, so no single `required` key can state "one of these". The
+    // refusal moved to the executor — and the property that matters is unchanged and
+    // asserted here: an empty call must not return the catalogue. That is the failure mode
+    // the move risked: an `undefined` locationId reaching `productService.list` answers
+    // every product while looking exactly like a filtered page.
+    const res = await executeTool('getProductsByLocation', {}, ctxOf(A));
+    assert.equal(res.ok, true, 'a model-driven mistake is a soft result it can explain, not a crash');
+    assert.equal(res.result.found, false);
+    assert.match(res.result.error, /locationId or a location name/i);
+    assert.equal(res.result.items, undefined, 'the refusal must not carry a page of rows');
   });
 
   it('validateToolArgs returns only declared keys and reports unknown ones', () => {
@@ -337,17 +352,23 @@ dbSuite('Phase 06 — AI tools', dbOk, () => {
     assert.equal(res.code, 'TOOL_ERROR');
   });
 
-  it('the tool catalog is strictly read-only (9 tools, no write verbs)', async () => {
+  it('the tool catalog is strictly read-only (12 tools, no write verbs)', async () => {
     const names = AI_TOOL_DEFS.map((t) => t.name).sort();
     assert.deepEqual(names, [
       'getInventory',
       'getInventoryHistory',
       'getInventorySummary',
+      // AI-23: per-location counts and units, one read for a comparison question.
+      'getLocationBreakdown',
       'getLowStockProducts',
       'getOutOfStockProducts',
       'getProduct',
       'getProductsByLocation',
       'getReorderNeededProducts',
+      // AI-14: reference lookups — read-only, and the only way to turn a location or
+      // category NAME into the id the tools above filter by.
+      'listCategories',
+      'listLocations',
       'searchProducts',
     ]);
     for (const def of AI_TOOL_DEFS) {

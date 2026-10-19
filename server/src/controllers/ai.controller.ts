@@ -276,6 +276,22 @@ const aiController = {
     // to its deadline and pay for a model call nobody will ever read.
     if (res.destroyed) clientGone.abort();
 
+    // AI-24 — when the member ASKED, recorded before the model is called.
+    //
+    // The turn is persisted only after the provider succeeds (Phase 07E / M7), so the
+    // default `createdAt` Mongoose would stamp on the USER message is the moment the turn
+    // COMPLETED — the answer's clock on the question. Two timestamps made of that are
+    // seconds apart however long the member waited, which is exactly the interval the
+    // question/answer pair exists to show. Taking the time here makes the stored question
+    // carry its own send time, on the server's clock like the answer beside it, so the
+    // difference is the real turn duration anywhere it is read: on screen live, in a
+    // reloaded thread, and straight out of the database.
+    //
+    // A supplied `createdAt` is honoured by Mongoose (measured 2026-10-19 against the
+    // schema: a value 45 s in the past was stored unchanged), so no schema change is
+    // needed and none was made.
+    const askedAt = new Date();
+
     let result;
     try {
       result = await runAiChat({ businessId, userId, role, history, message, signal: clientGone.signal });
@@ -300,6 +316,8 @@ const aiController = {
       conversationId: conversation._id,
       role: 'USER',
       content: message,
+      // AI-24 — the member's clock time, not the persistence time.
+      createdAt: askedAt,
     });
     const assistantMessage = await AIMessage.create({
       conversationId: conversation._id,

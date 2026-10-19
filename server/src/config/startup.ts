@@ -28,6 +28,9 @@ import {
 import type { Logger, ShutdownHandler, ShutdownServer, SignalTarget } from './shutdown.ts';
 import { validateProductionConfig } from './validateConfig.ts';
 import type { ConfigProblem } from './validateConfig.ts';
+import { INSTANCE_ID } from './instanceIdentity.ts';
+import { boundPortOf, verifyBoundPort } from './portGuard.ts';
+import type { PortProbeResult } from './portGuard.ts';
 
 /**
  * Everything `startServer` reaches the outside world through, injectable so the
@@ -50,6 +53,7 @@ type StartServerOptions = {
   logger?: Logger;
   signalTarget?: SignalTarget;
   shutdownTimeoutMs?: number;
+  probe?: (port: number) => Promise<PortProbeResult>;
 };
 
 /**
@@ -82,6 +86,7 @@ export async function startServer({
   logger = console,
   signalTarget = process,
   shutdownTimeoutMs = env.shutdownTimeoutMs,
+  probe,
 }: StartServerOptions = {}): Promise<{
   server: ShutdownServer;
   shutdown: ShutdownHandler;
@@ -141,11 +146,74 @@ export async function startServer({
     );
   }
 
+  type BootServer = {
+    on?: (event: string, handler: (err: { code?: unknown; message?: unknown }) => void) => unknown;
+    listening?: boolean;
+    once?: (event: string, handler: () => void) => unknown;
+    address?: () => unknown;
+  };
+  // Declared before `listen` because the listening callback may run inside it (a test fake calls it synchronously),
+  // and filling in `server` afterwards is what lets that callback read the port actually bound.
+  const bootRef: { server?: BootServer; listening: boolean } = { listening: false };
+
   const server = appInstance.listen(port, () => {
+    // An ephemeral `0` becomes a real number here, and the boot line should name the port that was actually taken —
+    // `localhost:0` tells an operator nothing, and this line is what a stale server imitates.
+    const bound = boundPortOf(bootRef.server);
+    bootRef.listening = true;
     logger.log(
-      `[server] environment=${nodeEnv} listening on http://localhost:${port}` +
+      `[server] environment=${nodeEnv} listening on http://localhost:${bound ?? port} instance=${INSTANCE_ID}` +
         (connected ? '' : ' (MongoDB NOT connected — /api/health/ready reports not ready)')
     );
+  });
+  bootRef.server = server as unknown as BootServer;
+  const bootServer = bootRef.server;
+
+  // A port this process could not take at all is a boot failure, and it must read as one instead of as an
+  // unhandled 'error' event.
+  //
+  // EADDRINUSE IS ALWAYS FATAL, INCLUDING AFTER THE 'listening' CALLBACK — measured on this host on 2026-10-18, and
+  // the measurement is the whole reason that clause exists. The second boot printed `listening on
+  // http://localhost:4011 instance=521c…` (its listening callback really did fire), and the EADDRINUSE error
+  // arrived AFTERWARDS; treating "already listening" as proof of serving let that process stay up for 30 s as a
+  // zombie with no working listener — precisely the trap this guard exists to prevent, wearing the guard's own
+  // exemption. A port that cannot be taken is never a normal runtime event, so its code is decisive.
+  //
+  // Other codes remain non-fatal once the socket is listening: killing a server that is genuinely serving over a
+  // stray socket error would be its own defect, so they are logged and the process keeps running.
+  if (bootServer && typeof bootServer.on === 'function') {
+    bootServer.on('error', (err) => {
+      const code = err && typeof err.code === 'string' ? err.code : 'UNKNOWN';
+      if (code === 'EADDRINUSE') {
+        logger.error(
+          `[server] port ${port} is already in use — refusing to start. Find the owner with ` +
+            `netstat -ano | findstr :${port} (or lsof -nP -iTCP:${port} -sTCP:LISTEN) and stop it.`
+        );
+        exitFn(1);
+        return;
+      }
+      if (bootRef.listening) {
+        logger.error(`[server] the HTTP server reported an error after it was listening (${code}).`);
+        return;
+      }
+      logger.error(`[server] the HTTP server could not start (${code}) — refusing to start.`);
+      exitFn(1);
+    });
+  }
+
+  // The port-ownership guard (2026-10-18). Fired unawaited, after the socket is listening, because a boot must
+  // not wait on a loopback round trip; it exits the process only on the one unambiguous outcome (another
+  // instance answering), and is silent when this process is provably the owner.
+  void (async () => {
+    await waitForListening(bootRef.server ?? {});
+    await verifyBoundPort({
+      server: bootServer,
+      logger,
+      exit: exitFn,
+      ...(probe ? { probe } : {}),
+    });
+  })().catch(() => {
+    // A guard that cannot run must never be the reason a server is down.
   });
 
   // M2 — bounded, idempotent graceful shutdown.
@@ -159,6 +227,20 @@ export async function startServer({
   registerSignalHandlers(signalTarget, shutdown);
 
   return { server, shutdown, connected };
+}
+
+/**
+ * Resolve once the server is listening.
+ *
+ * The guard needs `address()`, which is null until the socket binds, and the boot must not block on the loopback
+ * probe, so this is awaited inside the unawaited guard rather than in the boot path. A server that already reports
+ * `listening` resolves immediately; one that never becomes listening (a fake) simply never probes, which is the
+ * same outcome as having no bound address.
+ */
+function waitForListening(server: { listening?: boolean; once?: (e: string, h: () => void) => unknown }) {
+  if (server.listening === true) return Promise.resolve();
+  if (typeof server.once !== 'function') return Promise.resolve();
+  return new Promise<void>((resolve) => server.once!('listening', resolve));
 }
 
 export default { startServer };

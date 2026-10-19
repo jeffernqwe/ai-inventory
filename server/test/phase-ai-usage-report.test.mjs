@@ -64,13 +64,72 @@ after(() => {
   if (dir) fs.rmSync(dir, { recursive: true, force: true });
 });
 
+/**
+ * How long one CLI invocation may take before it is killed AND SAID TO HAVE BEEN KILLED.
+ * Generous on purpose: a `--db` run opens its own Atlas connection, and this host has been
+ * measured at ~16s just to select a server — but unbounded is not the answer either, because
+ * a hung child would stall the whole suite with no explanation.
+ */
+const CLI_TIMEOUT_MS = 120_000;
+
 async function cli(args) {
   try {
-    const { stdout, stderr } = await run(process.execPath, [SCRIPT, ...args], { cwd: SERVER_ROOT });
-    return { code: 0, stdout, stderr };
+    const { stdout, stderr } = await run(process.execPath, [SCRIPT, ...args], {
+      cwd: SERVER_ROOT,
+      timeout: CLI_TIMEOUT_MS,
+      killSignal: 'SIGKILL',
+    });
+    return { code: 0, stdout, stderr, killed: false };
   } catch (err) {
-    return { code: err.code ?? 1, stdout: err.stdout ?? '', stderr: err.stderr ?? '' };
+    return {
+      code: err.code ?? 1,
+      stdout: err.stdout ?? '',
+      stderr: err.stderr ?? '',
+      killed: Boolean(err.killed),
+    };
   }
+}
+
+/**
+ * Parse the CLI's JSON — ASSERTING THE RUN FIRST.
+ *
+ * `JSON.parse(res.stdout)` on its own is how a real failure became a mystery on 2026-10-19: the
+ * child died mid-read (empty stdout, a stack trace on stderr), and the suite reported
+ * `Unexpected end of JSON input`, which names neither the exit code nor the cause. The cause
+ * was a mongoose connection `error` event with no listener in the script — fixed there — but
+ * this helper is what would have named it in one line instead of an hour. Every case reads its
+ * output through here, so a broken run is reported AS a broken run.
+ */
+function json(res, label = 'the report') {
+  if (res.killed) {
+    assert.fail(`${label}: the CLI was killed after ${CLI_TIMEOUT_MS}ms without finishing`);
+  }
+  assert.equal(
+    res.code,
+    0,
+    `${label}: exit code ${res.code}${res.stderr ? ` — ${String(res.stderr).trim()}` : ' — nothing on stderr'}`,
+  );
+  assert.notEqual(res.stdout.trim(), '', `${label}: exit 0 but nothing was printed`);
+  try {
+    return JSON.parse(res.stdout);
+  } catch (err) {
+    assert.fail(`${label}: exit 0 but stdout was not JSON (${err.message}): ${res.stdout.slice(0, 200)}`);
+  }
+}
+
+/**
+ * The database half, asserted to be a READING rather than a refusal. Without this a failed
+ * connect answers `database.status: 'UNREADABLE'` with no counts, and the case fails several
+ * assertions later on a value that was never computed — instead of on the connection.
+ */
+function dbReport(res, label) {
+  const report = json(res, label);
+  assert.equal(
+    report.database?.status,
+    'OK',
+    `${label}: the database half is ${report.database?.status} — ${report.database?.detail}`,
+  );
+  return report.database;
 }
 
 // ---------------------------------------------------------------------------
@@ -135,8 +194,7 @@ dbSuite('the usage report can read the turns the database already stores', dbOk,
       '--no-provider',
       '--json',
     ]);
-    assert.equal(res.code, 0, res.stderr);
-    const db = JSON.parse(res.stdout).database;
+    const db = dbReport(res, 'the database report');
 
     // The database name is asserted rather than assumed: a report that silently read the
     // wrong database would look perfectly plausible and be worthless.
@@ -169,15 +227,14 @@ dbSuite('the usage report can read the turns the database already stores', dbOk,
     });
 
     const narrow = await cli(['--db', `--business=${owner.businessId}`, '--days=7', '--no-provider', '--json']);
-    assert.equal(JSON.parse(narrow.stdout).database.turns, 0, 'outside the window');
+    assert.equal(dbReport(narrow, '--days=7').turns, 0, 'outside the window');
     const wide = await cli(['--db', `--business=${owner.businessId}`, '--days=60', '--no-provider', '--json']);
-    assert.equal(JSON.parse(wide.stdout).database.turns, 1, 'inside a wider one');
+    assert.equal(dbReport(wide, '--days=60').turns, 1, 'inside a wider one');
   });
 
   it('★ the database half is opt-in — no --db means no connection at all', async () => {
     const res = await cli([`--log=${logPath}`, '--no-provider', '--json']);
-    assert.equal(res.code, 0, res.stderr);
-    const report = JSON.parse(res.stdout);
+    const report = json(res);
     assert.equal('database' in report, false, 'the report must not touch the database unless asked');
     assert.equal(report.turns, 4, 'and the log half is unaffected');
   });
@@ -186,9 +243,7 @@ dbSuite('the usage report can read the turns the database already stores', dbOk,
 unitSuite('the AI usage report reads the log it is given, and nothing else', () => {
   it('★ counts turns, outcomes, requests and empty completions from the cost lines alone', async () => {
     const res = await cli([`--log=${logPath}`, '--no-provider', '--json']);
-    assert.equal(res.code, 0, res.stderr);
-
-    const report = JSON.parse(res.stdout);
+    const report = json(res);
     // The degraded warning and the access-log line are not turns. A count that included
     // either would overstate usage on exactly the turns that had trouble.
     assert.equal(report.turns, 4, 'only the four `[ai] turn` lines are turns');
@@ -206,7 +261,7 @@ unitSuite('the AI usage report reads the log it is given, and nothing else', () 
 
   it('★ divides the allowance by what a turn actually costs, measured rather than assumed', async () => {
     const res = await cli([`--log=${logPath}`, '--no-provider', '--json']);
-    const report = JSON.parse(res.stdout);
+    const report = json(res);
 
     // 7 requests across 4 turns. This ratio is the whole reason the tool exists: a
     // 50-request day is ~28 turns at the cheap end and ~11 at this end, and only the log
@@ -254,7 +309,7 @@ unitSuite('the AI usage report reads the log it is given, and nothing else', () 
       encoding: 'utf8',
     });
     assert.equal(res.status, 0, res.stderr);
-    assert.equal(JSON.parse(res.stdout).turns, 4);
+    assert.equal(json({ code: res.status, stdout: res.stdout, stderr: res.stderr, killed: false }).turns, 4);
   });
 
   it('★ its own controls pass, and a control that cannot fail is not a control', async () => {
@@ -262,6 +317,31 @@ unitSuite('the AI usage report reads the log it is given, and nothing else', () 
     assert.equal(res.code, 0, res.stderr);
     assert.match(res.stdout, /control\(s\) passed/i);
     assert.match(res.stdout, /must-fire/i, 'the controls are labelled by what they assert');
+  });
+
+  it('★ a dropped connection is a row in the report, never an unhandled error', async () => {
+    // MEASURED THE HARD WAY. A full-suite run on 2026-10-19 failed this file with an empty
+    // stdout and, once the helper above named the cause, an unhandled `MongoNetworkError:
+    // connect ETIMEDOUT`. Two separate mistakes: the script had no `error` listener at all
+    // (a mongoose `Connection` is an EventEmitter, so such an event is THROWN), and the first
+    // fix detached the listener in `finally` — which the very next run caught, because a
+    // pending socket times out DURING `disconnect()`. The report promises "an unreachable
+    // database is a row, not a crash"; this pins the wiring that makes it true, against a
+    // regression that is invisible to every other test in this file.
+    const source = fs.readFileSync(SCRIPT, 'utf8');
+    assert.match(source, /mongoose\.connection\.on\('error'/, 'the connection needs an error listener');
+    assert.match(source, /mongoose\.connection\.on\('disconnected'/, 'a drop is reported, not thrown');
+    assert.equal(
+      /\.(off|removeListener)\(\s*'(error|disconnected)'/.test(source),
+      false,
+      'detaching the listener lets a teardown-time error crash the process — the defect this pins',
+    );
+    // Order matters: a listener added after the first `connect()` cannot absorb a failure
+    // that happens during it.
+    assert.ok(
+      source.indexOf("connection.on('error'") < source.indexOf('await mongoose.connect('),
+      'the error listener must be attached BEFORE connecting',
+    );
   });
 
   it('★ the tool never writes anything, anywhere', async () => {

@@ -16,8 +16,28 @@ import { canManagePurchaseOrders } from '../../../../lib/permissions';
  * are editable — the backend rejects everything else (PO_NOT_DRAFT), and this
  * screen surfaces that instead of rendering an editable form.
  */
+/**
+ * Role guard (MOD-07, same shape as the receive screen below it). The check
+ * lives above the hooks so a STAFF deep link does not load an order for a form
+ * they may not use — the same defect F-63 fixed on the list screens.
+ */
 export default function EditPurchaseOrderScreen() {
-  const { user, token, signOut } = useSession();
+  const { user } = useSession();
+
+  if (!canManagePurchaseOrders(user)) {
+    return (
+      <>
+        <Stack.Screen options={{ title: 'Purchase Order' }} />
+        <AccessDenied message="Only managers and above can manage purchase orders." />
+      </>
+    );
+  }
+
+  return <EditPurchaseOrder />;
+}
+
+function EditPurchaseOrder() {
+  const { token, signOut } = useSession();
   const { id } = useLocalSearchParams<{ id: string }>();
   const [po, setPo] = useState<ApiResponse>(null);
   const [loading, setLoading] = useState(true);
@@ -50,9 +70,7 @@ export default function EditPurchaseOrderScreen() {
   return (
     <>
       <Stack.Screen options={{ title: po?.status === 'DRAFT' ? 'Edit Purchase Order' : 'Purchase Order' }} />
-      {!canManagePurchaseOrders(user) ? (
-        <AccessDenied message="Only managers and above can manage purchase orders." />
-      ) : loading && !po ? (
+      {loading && !po ? (
         <CenterLoader label="Loading order…" />
       ) : error && !po ? (
         <ErrorState title="Couldn't load this order" message={errorText(error)} onRetry={load} />

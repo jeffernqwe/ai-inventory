@@ -300,6 +300,69 @@ still unmeasured".
 > **Good to know:** an account that has **never been signed in to** will still have its data, because
 > the seeder attaches the dataset to the account behind the address. Sign in once to see it in the app.
 
+### F. One login per role — for checking permissions, with no verification code
+
+`seed:roles` creates a **single small tenant** that holds **one working account per role** — OWNER, ADMIN,
+MANAGER and STAFF — so each role can be signed into on the phone and compared against the others **on the same
+data**. Four separate tenants would make a missing button indistinguishable from an empty dataset.
+
+```bash
+cd C:/Users/jeffe/inventory-ai/server
+ROLE_TEST_PASSWORD='choose-a-password' SEED_CONFIRM=seed-roles npm run seed:roles -- --dry-run
+ROLE_TEST_PASSWORD='choose-a-password' SEED_CONFIRM=seed-roles npm run seed:roles
+```
+
+The four addresses are fixed, and are all in the reserved `example.invalid` domain, which **cannot receive
+mail**:
+
+| Role | Address |
+|---|---|
+| OWNER | `role-owner@example.invalid` |
+| ADMIN | `role-admin@example.invalid` |
+| MANAGER | `role-manager@example.invalid` |
+| STAFF | `role-staff@example.invalid` |
+
+All four share the password you put in `ROLE_TEST_PASSWORD`. Sign in on the phone with any of them, exactly as
+a normal user would.
+
+**No six-digit code is needed, and nothing is weakened to avoid it.** The login is marked verified through
+Firebase's admin interface — the *same* write the app performs after a real code is confirmed — and nothing
+about the app's verification rules changes: a normal account still has to verify its email, and these addresses
+could never receive a code anyway. The command refuses to run outside the development database, and it only
+ever touches those four addresses.
+
+**What it creates:** a tenant named `ROLE TEST — role boundary fixture (do not use)` with about **900
+documents** (roughly 200 products, 2 locations, suppliers, purchase orders and stock history), so every screen
+has something on it. The seeder **reads its own numbers back** and fails if the database disagrees.
+
+**Prove the permissions, not just the logins** (the backend must be running):
+
+```bash
+SEED_CONFIRM=seed-roles npm run verify:roles -- --business=<the id the seeder printed>
+```
+
+It signs all four in and checks **96 cells** — every route against every role, plus the user-management rules
+(can ADMIN create another ADMIN? can ADMIN change its own role?) — and prints one line per route with `allow`
+or `deny` for each role. It exits **0** only when every cell matches the app's own role table. Add `--signin`
+(with `FIREBASE_WEB_API_KEY` and `ROLE_TEST_PASSWORD` set) to prove the real **phone sign-in path** too,
+rather than a session minted on the server.
+
+**Remove it when you are done:**
+
+```bash
+SEED_CONFIRM=seed-roles npm run cleanup:roles
+```
+
+It removes that tenant and **proves nothing is left**; it re-queries rather than trusting its own report. The
+four Firebase logins are **kept** by default — that is the safe direction, because deleting a login whose
+database record still exists is the one irreversible mistake in this guide. `--delete-firebase` removes them
+too, but only after the database is gone and only after re-checking that nothing points at them.
+
+> **Note on ADMIN:** no screen or route is closed to ADMIN that is open to OWNER — the two capabilities ADMIN
+> lacks (business settings and role administration) have no screens yet. ADMIN's real restriction is visible in
+> **Users**: it cannot create another ADMIN, cannot change its own role, and cannot edit an ADMIN or the OWNER.
+> That is the difference to look for when comparing OWNER with ADMIN.
+
 ---
 
 ---
@@ -372,6 +435,37 @@ npm start | npm run ai:usage --silent --
 npm run ai:usage -- --db --days=30
 ```
 
+  **The log has to come from somewhere, because there is no durable copy of it.** A turn line and
+  the empty-completion line are written to the server's stdout and never stored, so the failures
+  that persist nothing — a timeout, an abandoned turn, a quota refusal — exist **only** there, and
+  the database half cannot show them (the report says so in place). `logs/` is already ignored by
+  git, so keeping one is a redirect and nothing else:
+
+```bash
+cd C:/Users/jeffe/inventory-ai/server
+
+# a fresh clone has no logs/ directory, and the redirect fails without one
+mkdir -p logs
+
+# start the server with its output going to a file you can read back later
+npm start > logs/server.log 2>&1
+
+# ...and then, whenever the question comes up: nothing is spent, nothing is written
+npm run ai:usage -- --log=logs/server.log
+
+# the turns that FAILED (a turn line is written on every exit, including the ones that throw)
+grep '\[ai\] turn outcome=' logs/server.log | grep -v outcome=ok
+
+# the 2xxs that carried nothing at all — one line per occurrence, with the body's SHAPE (AI-12)
+grep 'empty completion' logs/server.log
+```
+
+  The last grep is the one to run first when an answer arrives as *"I could not generate a response
+  right now."*: it names the model the request asked for, whether the body named a model and
+  reported usage, which block types it carried, and which top-level fields it had — enough to tell
+  "the model reasoned and produced nothing" from "the gateway answered with a body that is not a
+  message". It never prints the body itself, so it is safe to paste into a record.
+
 ---
 
 ## Part 5 — Maintenance and safety checks (from the project root)
@@ -427,6 +521,60 @@ between the last two is the point:
 The `2` is deliberate: a network hiccup must never be reported as *"your indexes are wrong"*, because
 the remedy for a real disagreement is a change to the database's index structure — and `2` is what
 stops a blip from pointing anyone at that. `verify:demo` uses the same code for the same reason.
+
+### `backup:db` — the recoverable copy, and `restore:db` — putting it back
+
+```bash
+cd C:/Users/jeffe/inventory-ai/server
+
+# 1. Take the copy. The folder MUST be outside the project — see below.
+BACKUP_DIR=C:/Users/jeffe/inventory-ai-backups CONFIRM=backup-db npm run backup:db
+
+# 2. Look before you leap: checks every file, writes nothing. Safe against ANY database.
+CONFIRM=restore-db npm run restore:db -- --from=<the folder it printed> --dry-run
+
+# 3. Put it back — DISPOSABLE DATABASES ONLY (the test or development one).
+CONFIRM=restore-db npm run restore:db -- --from=<a folder you have already dry-run>
+```
+
+The cluster this app runs on is Atlas's **free tier**, and MongoDB is blunt about it: free clusters
+have **no backups at all** — the paid tiers do, and the documented answer for the free tier is a
+`mongodump`. This pair is that dump, and it is the project's answer to *"what do we do if the data
+is gone?"*.
+
+**How it works, in one line each.** `backup:db` writes **one gzipped file per collection** plus a
+`manifest.json` recording every file's length and its **SHA-256 fingerprint**. `restore:db` reads
+that manifest, re-fingerprints every file, and only then drops and inserts — so a copy that was
+truncated by a dropped connection fails **before** it can replace good data with bad.
+
+| | `backup:db` | `restore:db` |
+|---|---|---|
+| Touches the database | **reads only** | **drops and rewrites** collections |
+| Which database | any, including production | `inventoryai_test_db` or `inventoryai_dev_db` **only** |
+| Folder | `BACKUP_DIR` (outside the project) | `--from=<folder>` |
+| Phrase | `CONFIRM=backup-db` | `CONFIRM=restore-db` |
+| `--dry-run` | — | verifies and reports, writes nothing |
+
+**Three things that look like obstacles and are not.**
+
+- **The folder must be outside the project.** A dump is a copy of real customer data; written inside
+the repository it is one `git add` away from being committed and pushed. The command refuses such a
+path rather than warning about it.
+- **`restore:db` refuses production, by name and by shape.** Restoring is the most destructive thing
+in this guide — it drops collections — so the target has to be one of the two throwaway databases,
+and a name containing `prod` or `live` is refused even if you edited the list (you did not).- **A long restore prints its progress every 50 000 documents.** If a collection seems to stall, look
+  for those lines before assuming it is stuck. On this project's throttled free-tier cluster the
+  223 227-document `inventory` collection took **46 s**.
+- **Watch the `size` line, because the disk copy tells you nothing about the fit.** The same drill
+  measured the ceiling too: restoring the whole 525 750-document development database needs about
+  **240 MB** of room, and this cluster is a 512 MB free tier, so the restore filled it and Atlas
+  answered *"you are over your space quota, using 520 MB of 512 MB. Writes are blocked"*. The command
+  reported that, exited `1`, and claimed nothing. **Nothing was lost** — the space was freed by
+  dropping the test database, and the development data was never touched — but this is why the size
+  is printed before the first write: an 11 MB copy can still be a 240 MB restore.
+
+**The one habit worth forming:** restore the copy into the *test* database and run `npm test` against
+it before you need it. That is the difference between a backup and a backup you have proved.
 
 ### Files that are not commands (you never type these)
 
@@ -519,6 +667,35 @@ a silenced test would be caught rather than admired. The commands that **do not*
 and should not, because they write or they need your own credentials — are the seeders, the cleanup
 commands, the performance probes and `audit-access.mjs`.
 
+### The gap that is not a command: nothing watches the running service
+
+CI checks the code. **Nothing checks the deployment.** On 2026-10-18 the database was refusing writes
+and five of the assistant's tools were answering errors while `/api/health/ready` reported `ready` the
+whole time — and nobody would have been told. The code half of that gap is closed (the counters below);
+the other half is one uptime check, and it takes about five minutes to set up:
+
+1. **Poll this URL every 5 minutes:** `https://<your-deployment>/api/health/ready`. It answers `200`
+only when the database is reachable **right now** and `503` when it is not, which is exactly the
+question worth waking someone for.
+2. **Alert when it is not `200` twice in a row** — once can be a deploy or a blip.
+3. **Optionally watch `https://<your-deployment>/api/health`** (always `200`) and alert if
+`counters.serverErrors` keeps climbing. That is the number that moves when requests are failing while
+the process is still up — the 2026-10-18 shape of failure, which readiness cannot see.
+
+The smallest service that does this is **[UptimeRobot](https://uptimerobot.com)** — a free tier, HTTP
+monitors, and an email when a check fails; create the monitor, paste the URL, choose your address as
+the alert contact, and nothing in this repository changes. (A cron job running `curl` on any machine
+you own works too, if you would rather not have an account anywhere. Anything that tells you is better
+than nothing, which is the current answer.)
+
+**Two things to know about the counters** so they are read correctly:
+
+- **They are per process and they reset when it restarts.** A deploy resets them to zero, so watch the
+  **climbing**, not the total.
+- **They are public, and deliberately contain no names** — a total, a by-class breakdown, a 5xx count,
+  a timestamp. No path, no user, no tenant, no error message. The detail stays in the logs behind
+  credentials; the healthy/unhealthy signal is the part an outside watcher needs.
+
 ---
 
 ## Part 8 — The whole list, in one table
@@ -537,8 +714,13 @@ commands, the performance probes and `audit-access.mjs`.
 | `npm run check:extensions` | half-finished file-rename check | ✅ |
 | `npm run check:specifiers` | broken-import check | ✅ |
 | `npm run audit:indexes` | are the declared database indexes really there? | ✅ reads only |
+| `npm run backup:db` | write a recoverable copy of a database (needs `BACKUP_DIR` outside the project) | ✅ **reads only** — safe against production |
+| `npm run restore:db -- --from=…` | put a copy back (needs `CONFIRM=restore-db`) | ⚠️⚠️ **destructive** — test/development databases only, `--dry-run` first |
 | `npm run seed:demo -- --email=…` | put sample data in **your** account | ⚠️ replaces that one business's data |
 | `npm run seed:accounts` | seed **several** accounts, each at its own size, with **no** SKUs/barcodes | ⚠️ replaces those accounts' data |
+| `npm run seed:roles` | one isolated tenant with **one login per role** (OWNER/ADMIN/MANAGER/STAFF) and ~900 documents | ⚠️ replaces that fixture tenant's data |
+| `npm run verify:roles -- --business=…` | sign all four roles in and check **96 permission cells** | ✅ reads almost nothing; removes its own sessions |
+| `npm run cleanup:roles` | remove the role fixture tenant (Firebase logins kept unless `--delete-firebase`) | ⚠️ scoped delete, verified afterwards |
 | `npm run verify:demo -- --email=…` | read the data back and check it | ✅ reads only |
 | `npm run seed:perf -- --size=N` | create the throwaway test tenant | ⚠️ writes that tenant only |
 | `npm run cleanup:perf` | remove the throwaway tenant | ⚠️ scoped delete |
@@ -547,6 +729,7 @@ commands, the performance probes and `audit-access.mjs`.
 | `npm run perf:turns -- --business=…` | real assistant turns | ⚠️ spends AI quota |
 | `npm run ai:usage -- --log=…` | turns, failures and the allowance left | ✅ reads only (offline with `--no-provider`) |
 | `npm run ai:usage -- --db --days=30` | what was **answered**, and its degraded rate | ✅ reads only |
+| `npm run restore:db -- --from=…` | put a `backup:db` copy back | ⚠️⚠️ **destructive** — refuses production; `--dry-run` first |
 | `npm run cleanup:test-mongodb` | wipe the test database | ⚠️ destructive, throwaway data |
 | `npm run cleanup:dev-mongodb` | wipe the development database | ⚠️⚠️ **your data** |
 | `npm run cleanup:test-firebase` | delete every development login | ⚠️⚠️ **irreversible** |
@@ -586,6 +769,9 @@ meet:
 | *`set CLEANUP_CONFIRM=…`* / *`NODE_ENV is not set`* | The cleanup guard would not delete without an explicit environment | Set the phrase; if the environment is missing, `server/.env` — which normally sets it — is the thing being talked about |
 | *`the resolved database is "…", not the development database`* | You are pointed at the wrong database — most likely the test one | Do not override the guard. Check `server/.env`; a seeder is deliberately only allowed near the development database |
 | *`NOT VERIFIED (exit 2)`* from `verify:demo` | The database could not be reached, or the account does not exist | This is **not** a data problem. Check the internet and re-run |
+| *`is inside the repository`* from `backup:db` | You pointed `BACKUP_DIR` at a folder inside the project | Pick a folder outside it. This one is deliberate: a dump is real data and must not be committable |
+| *`is not an approved restore target`* from `restore:db` | You aimed a restore at a database it will not drop and rewrite | Point it at the test or development database. **Do not** widen the list |
+| *`has SHA-256 … the manifest recorded …`* from `restore:db` | The copy on disk is **damaged** — and **nothing was restored** | This is the guard working. Take a fresh copy; do not hand-edit the manifest |
 
 ---
 
@@ -601,6 +787,11 @@ meet:
   slowly — which is why `audit:indexes` exists.
 - **Exit code** — the small number a finished command reports: `0` means success.
 - **CI** — the automated checks that run after a push to the code host.
+- **Backup** — a separate copy of the data, kept somewhere else, for the day the original is lost.
+- **Manifest** — the small file inside a backup that lists what was written and each file's fingerprint.
+- **SHA-256** — a numeric fingerprint of a file's exact bytes. Change one byte and it no longer
+  matches, which is how a damaged backup is caught before it is used.
+- **Dry run** — do all the checking and printing, but write nothing.
 - **Read-only** — looks at data but cannot change it.
 - **Destructive** — permanently removes data. Nothing here can be undeleted.
 - **Fixture** — a small, fixed set of data used by automated tests.

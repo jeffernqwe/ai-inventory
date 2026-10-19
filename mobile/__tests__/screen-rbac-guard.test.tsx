@@ -1,15 +1,19 @@
 import { render } from '@testing-library/react-native';
 import type { ReactNode } from 'react';
 
-import { aiApi, dashboardApi, purchaseOrdersApi } from '../lib/api';
+import { aiApi, auditApi, dashboardApi, purchaseOrdersApi, usersApi } from '../lib/api';
 import { useSession } from '../lib/auth';
 import { ROLES } from '../lib/permissions';
 import { ThemeProvider } from '../lib/theme-context';
 
 import AiHubScreen from '../app/(app)/ai/index';
+import AuditScreen from '../app/(app)/audit';
 import DashboardScreen from '../app/(app)/dashboard';
 import PurchaseOrdersScreen from '../app/(app)/purchase-orders/index';
 import ReceiveStockScreen from '../app/(app)/purchase-orders/[id]/receive';
+import EditPurchaseOrderScreen from '../app/(app)/purchase-orders/[id]/edit';
+import EditUserScreen from '../app/(app)/users/[id]';
+import UsersScreen from '../app/(app)/users/index';
 
 /**
  * MOD-07 — the Rules-of-Hooks restructure must not move the RBAC boundary.
@@ -40,6 +44,9 @@ jest.mock('expo-router', () => {
   const navigation = { addListener: () => () => {} };
   const params = { id: 'po-1' };
   return {
+    // The denied render still declares its header title, so `Stack.Screen`
+    // must exist in the mock.
+    Stack: { Screen: () => null },
     router: { push: jest.fn(), replace: jest.fn(), back: jest.fn() },
     useNavigation: () => navigation,
     useLocalSearchParams: () => params,
@@ -55,6 +62,11 @@ jest.mock('../lib/api', () => ({
     get: jest.fn(async () => ({ id: 'po-1', status: 'OPEN', items: [] })),
   },
   productsApi: { reorder: jest.fn(async () => ({ items: [] })) },
+  usersApi: {
+    list: jest.fn(async () => ({ items: [], total: 0 })),
+    get: jest.fn(async () => ({ id: 'po-1', name: 'Target User', role: 'STAFF', status: 'ACTIVE' })),
+  },
+  auditApi: { list: jest.fn(async () => ({ items: [], total: 0 })) },
 }));
 
 const mockedUseSession = useSession as jest.Mock;
@@ -62,6 +74,9 @@ const list = purchaseOrdersApi.list as jest.Mock;
 const get = purchaseOrdersApi.get as jest.Mock;
 const summary = dashboardApi.summary as jest.Mock;
 const conversations = aiApi.conversations as jest.Mock;
+const userList = usersApi.list as jest.Mock;
+const auditList = auditApi.list as jest.Mock;
+const userGet = usersApi.get as jest.Mock;
 
 const DENIED = 'Not allowed';
 
@@ -83,6 +98,9 @@ beforeEach(() => {
   get.mockResolvedValue({ id: 'po-1', status: 'OPEN', items: [] });
   summary.mockResolvedValue({});
   conversations.mockResolvedValue({ items: [], total: 0 });
+  userList.mockResolvedValue({ items: [], total: 0 });
+  auditList.mockResolvedValue({ items: [], total: 0 });
+  userGet.mockResolvedValue({ id: 'po-1', name: 'Target User', role: 'STAFF', status: 'ACTIVE' });
 });
 
 describe('dashboard (dashboard.view — STAFF is the only denied role)', () => {
@@ -136,6 +154,97 @@ describe('receive stock (purchase_orders.receive — denied only without a role)
   it('mounts the form and loads the order for STAFF', async () => {
     signInAs(ROLES.STAFF);
     const { queryByText } = await mount(<ReceiveStockScreen />);
+
+    expect(queryByText(DENIED)).toBeNull();
+    expect(get).toHaveBeenCalled();
+  });
+});
+
+/**
+ * The two screens MOD-07 did not reach. They checked permission AFTER their
+ * hooks, so a denied visit still mounted the list hook and issued `GET
+ * /api/audit` / `GET /api/users` — refused by the server, visible in its logs,
+ * and pointless. Found while walking the four roles on 2026-10-17; the fix is
+ * the same guard-parent/child split as the four screens above, and these cases
+ * are what would have caught it.
+ */
+describe('users list (users.manage — MANAGER and STAFF are denied)', () => {
+  it('renders the denied UI and fetches nothing for MANAGER', async () => {
+    signInAs(ROLES.MANAGER);
+    const { queryByText } = await mount(<UsersScreen />);
+
+    expect(queryByText(DENIED)).toBeTruthy();
+    expect(queryByText('Only the business owner and admins can manage users.')).toBeTruthy();
+    expect(userList).not.toHaveBeenCalled();
+  });
+
+  it('renders the denied UI and fetches nothing for STAFF', async () => {
+    signInAs(ROLES.STAFF);
+    const { queryByText } = await mount(<UsersScreen />);
+
+    expect(queryByText(DENIED)).toBeTruthy();
+    expect(userList).not.toHaveBeenCalled();
+  });
+
+  it('mounts the list and loads it for OWNER', async () => {
+    signInAs(ROLES.OWNER);
+    const { queryByText } = await mount(<UsersScreen />);
+
+    expect(queryByText(DENIED)).toBeNull();
+    expect(userList).toHaveBeenCalled();
+  });
+});
+
+describe('audit trail (audit.view — MANAGER and STAFF are denied)', () => {
+  it('renders the denied UI and fetches nothing for STAFF', async () => {
+    signInAs(ROLES.STAFF);
+    const { queryByText } = await mount(<AuditScreen />);
+
+    expect(queryByText(DENIED)).toBeTruthy();
+    expect(queryByText('Only the business owner and admins can view the audit log.')).toBeTruthy();
+    expect(auditList).not.toHaveBeenCalled();
+  });
+
+  it('mounts the trail and loads it for ADMIN', async () => {
+    signInAs(ROLES.ADMIN);
+    const { queryByText } = await mount(<AuditScreen />);
+
+    expect(queryByText(DENIED)).toBeNull();
+    expect(auditList).toHaveBeenCalled();
+  });
+});
+
+describe('edit user (users.manage — the detail screen, not just the list)', () => {
+  it('renders the denied UI and fetches nothing for STAFF', async () => {
+    signInAs(ROLES.STAFF);
+    const { queryByText } = await mount(<EditUserScreen />);
+
+    expect(queryByText(DENIED)).toBeTruthy();
+    expect(userGet).not.toHaveBeenCalled();
+  });
+
+  it('loads the target for OWNER', async () => {
+    signInAs(ROLES.OWNER);
+    const { queryByText } = await mount(<EditUserScreen />);
+
+    expect(queryByText(DENIED)).toBeNull();
+    expect(userGet).toHaveBeenCalled();
+  });
+});
+
+describe('edit purchase order (purchase_orders.manage)', () => {
+  it('renders the denied UI and fetches nothing for STAFF', async () => {
+    signInAs(ROLES.STAFF);
+    const { queryByText } = await mount(<EditPurchaseOrderScreen />);
+
+    expect(queryByText(DENIED)).toBeTruthy();
+    expect(queryByText('Only managers and above can manage purchase orders.')).toBeTruthy();
+    expect(get).not.toHaveBeenCalled();
+  });
+
+  it('loads the order for MANAGER', async () => {
+    signInAs(ROLES.MANAGER);
+    const { queryByText } = await mount(<EditPurchaseOrderScreen />);
 
     expect(queryByText(DENIED)).toBeNull();
     expect(get).toHaveBeenCalled();

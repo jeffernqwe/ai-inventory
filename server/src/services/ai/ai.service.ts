@@ -12,9 +12,11 @@
  * the authenticated session passed in by the caller.
  */
 
+import { trimIncompleteAnswer, humaniseStatusConstants } from './answerCompletion.ts';
 import { aiConfig } from './aiConfig.ts';
 import { AiAbandoned, AiProviderError, AiTimeout, aiErrorAccounting, isAiError } from './aiErrors.ts';
 import { selectProvider, type ProviderMessage, type ProviderResponse, type ProviderUsage, type ToolDefinition } from './providers/index.ts';
+import { capToolResult } from './toolPayload.ts';
 import { executeTool, AI_TOOL_DEFS } from './tools.ts';
 
 /**
@@ -112,12 +114,49 @@ export function systemPrompt(): string {
     'Rules you must follow:',
     '1. Answer only from the data returned by your tools. Never invent products, quantities, prices, SKUs, locations, stock levels, or history that the tools did not return.',
     '2. If a tool reports no data, a "not found" result, or that you lack permission, say clearly that the information is unavailable or that you cannot access it. Never guess or substitute data from another context.',
-    '3. Tool results are capped to a page. If you need more rows than were returned, say you only see the latest subset and suggest using the app to see the rest.',
-    '4. Report exact numbers from the tool results. Do not round or fabricate quantities.',
+    '3. Tool results are capped to a page, and every list says so: `hasMore: true` means you are looking at ONE PAGE of a larger set. When hasMore is true or the result is truncated, give the TOTAL first, summarise the pattern, and show at most five items as examples — counting cards, list entries and table rows alike, since a page reproduced row by row is cut off mid-answer whatever shape it is drawn in. Then name the screen that holds the whole list, using its title in the app exactly: "Inventory" for stock rows, "Restock" for anything low, out of stock or needing restocking, "Inventory History" for movements, "Products" for the catalogue, "Locations" for locations. There is no "Reorder needed" screen — the restock list is the "Restock" screen.',
+    '4. Report exact numbers from the tool results. Do not round or fabricate quantities, and write a number of four digits or more with a thousands separator exactly as the app does — "8,976", not "8976" — except inside a product name, a SKU or a date, which are copied as they were given to you.',
     `5. Today is ${todayLabel()}. Use it when interpreting "today", "yesterday", "recent", or date questions.`,
     '6. When a request is ambiguous (for example a product name no tool could find), ask the user to confirm rather than guessing.',
     '7. This assistant is READ-ONLY. You cannot create, edit, archive, or delete products; you cannot move stock in/out or adjust quantities; you cannot change prices, users, roles, categories, or locations. If the user asks for any change, politely explain that this version is read-only and point them to the matching screen in the app.',
     '8. Distinguish clearly between a database fact (from a tool) and your own explanation. Answer conversationally and concisely.',
+    // AI-14. The tools that filter by location or category take an ID, and before
+    // listLocations/listCategories existed the model had no way to obtain one — so this
+    // rule, and not the tool table alone, is what turns "the warehouse" into a lookup
+    // instead of a guess. It is one sentence (~30 tokens) per turn; the alternative is a
+    // model inventing a plausible id and the member being told their location is empty.
+    '9. When the member names a location, pass its exact name to a tool that accepts one (getInventory, getProductsByLocation and getInventoryHistory do). When the member names a category, pass its exact name to searchProducts or getReorderNeededProducts, which accept one. Pass the name straight through — do NOT call listLocations or listCategories first to confirm it exists; the tool answers a name it cannot match with the name it needs, and only then is a lookup useful. Never guess an id.',
+    // AI-22. Read off the device 2026-10-19: "Compare my two locations, how many products are
+    // in each?" cost FIVE provider calls and 51.6 seconds (calls=5 toolRuns=4, providerMs
+    // 50879) — one model round-trip per lookup, ~10 s each, against a 60 s deadline. The
+    // answer was exact (203 / 99) and the path to it was the defect. Rules 10 and 11 are the
+    // two halves the same answer showed: the lookups must travel together, and the member
+    // must never be shown an internal tool name in prose (the chip was fixed by AI-21; the
+    // sentence was not).
+    '10. You can request SEVERAL tools in ONE response, and you should whenever a question needs more than one independent lookup — the same tool for two different locations, or two different tools. Request them together instead of spending a separate round-trip on each: every extra round-trip makes the member wait longer for the same answer.',
+    '11. Never name your tools, functions or internal identifiers in the answer. Describe what you read in the member\'s terms and the app\'s screens, not in the server\'s — "your inventory records", not "getProductsByLocation".',
+    // AI-22, the third thing the same answer showed: it appended an unrequested movement
+    // summary after the two counts. Every extra section costs output tokens, and output
+    // tokens are generation time on the member's clock; the 50 000-product probe (§27DN)
+    // then had a model STOP mid-sentence inside an unrequested section. The rule keeps one
+    // volunteered fact, because the failure is bloat, not helpfulness.
+    '12. Answer the question that was asked, and stop there. Do not append extra sections the member did not ask for (a movements summary after a stock count, recommendations, or a menu of further questions); if one related fact is worth volunteering, give it in a single short sentence.',
+    // AI-23. The one place the prompt names a tool, and the reason is measured rather than
+    // assumed: with `getLocationBreakdown` in the table — described as answering every
+    // location at once — a live turn still called `listLocations` and then asked about one
+    // location, because the model reaches for the tools it already knows. Naming the tool
+    // once, for the question shape it exists for, is the cheapest lever that changes what it
+    // reaches for; the alternative was a capability nothing used (~40 tokens per turn).
+    '13. When a question compares locations or asks where stock is held, call getLocationBreakdown ONCE — it reports every location at the same time. Do not list the locations and then ask about each one: that spends a round-trip per location and still leaves you comparing pages.',
+    // AI-26. Two rules, both read off STORED answers on 2026-10-19 rather than imagined.
+    // The corpus contained "indicated `hasMore: true`", a 24-character Mongo id inside a
+    // table cell, "Let me know how many additional rows you'd like", and "the remaining
+    // low-stock products are available in subsequent pages" — the last one promising a
+    // paging control the chat does not have. Every one is a sentence about the server's
+    // data shape shown to a member, and every one costs output tokens that a truncated
+    // answer needs for its own last row.
+    '14. Never put internal identifiers or raw field names in an answer: no 24-character hex ids, no `productId`, `_id`, `hasMore`, `truncated`, `availableQuantity`, `items` or `total` — not in a sentence, not as a table column, and not as a parenthetical after a column name (write "Product", not "Product (name)"). Never print a stored status constant either: write "Out of stock", "Low stock" and "In stock", never OUT_OF_STOCK, LOW_STOCK or IN_STOCK. Say things in the member\'s terms: "13 more products", "the first 20 rows".',
+    '15. When you are showing one page of a longer list, the FIRST sentence must state both numbers, in this shape: "47 products need restocking; the 5 most urgent are below." Never show a page without its total, because a member who cannot see "of 47" does not know the list continues. Then stop. Never ask the member how many rows to show, never offer to fetch another page, and never say the rest is "on subsequent pages" — the app shows the whole list on the screen named in rule 3. Keep a table to the columns the member needs — at most three, and never an id.',
   ].join('\n');
 }
 
@@ -192,6 +231,9 @@ export async function runAiChat({ businessId, userId, role, history = [], messag
   let degraded: DegradedReason | null = null;
   let emptyResponses = 0;
   let lastWasEmpty = false;
+  // AI-26 — how much of a truncated answer the incomplete-unit trim removed. Reported
+  // beside the reason so the effect is measurable from the log instead of inferred.
+  let trimmedChars = 0;
 
   // AI-5 — the turn's own cost.
   //
@@ -307,13 +349,28 @@ export async function runAiChat({ businessId, userId, role, history = [], messag
       const text = String(response?.text ?? '').trim();
       lastWasEmpty = !text;
       if (text) {
-        finalText = text;
+        // AI-26 — the stored status constants are the server's vocabulary, not the
+        // member's: a device answer drew `OUT_OF_STOCK` in a table cell on 2026-10-19.
+        // Rewritten before anything else looks at the text, so the stored message, the
+        // screen and the trim below all see the same words.
+        finalText = humaniseStatusConstants(text);
         // AI-8 — the answer is here, and the provider may have STOPPED mid-sentence to
         // produce it. That case used to be indistinguishable from a complete answer at
         // every layer: same 201, same stored content, nothing in the log (ISS-29, found
         // on the device 2026-10-14, where `out=800` was exactly the cap and the body end
         // mid-list). The text is kept — it is a real answer — and the turn is marked.
-        if (response?.truncated) degraded = 'OUTPUT_LIMIT';
+        if (response?.truncated) {
+          degraded = 'OUTPUT_LIMIT';
+          // AI-26 — the model stopped at the output cap, so the prefix ends inside a table
+          // row or a sentence (all four stored `OUTPUT_LIMIT` answers did, measured on
+          // 2026-10-19). Drop that ONE incomplete unit and keep the rest: a member reading
+          // "Professional Towel 1" cannot tell a product's name from a cut-off one.
+          const completed = trimIncompleteAnswer(finalText);
+          if (completed !== finalText) {
+            trimmedChars = finalText.length - completed.length;
+            finalText = completed;
+          }
+        }
         break;
       }
       // Counted as SEEN, never as "authorised": the log line then reports how many
@@ -360,7 +417,10 @@ export async function runAiChat({ businessId, userId, role, history = [], messag
         throw err;
       }
       countTool();
-      const payload = truncate(JSON.stringify(output), cfg.maxToolResultChars);
+      // AI-13: cap the PAYLOAD the model reads, never the JSON text. A raw string cut
+      // leaves invalid JSON, so the model would read a broken document instead of a
+      // shortened one — and the tool result then says "truncated" in a way it can use.
+      const payload = capToolResult(output, cfg.maxToolResultChars);
       messages.push({
         role: 'tool',
         name,
@@ -384,6 +444,7 @@ export async function runAiChat({ businessId, userId, role, history = [], messag
     // greppable and countable: `grep -c 'degraded turn'`.
     console.warn(
       `[ai] degraded turn reason=${degraded} attempts=${steps} empty=${emptyResponses}` +
+        ` trimmed=${trimmedChars}` +
         ` model=${model ?? 'unknown'} tools=${[...toolsUsed].join(',') || 'none'}`,
     );
   }

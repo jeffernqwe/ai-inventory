@@ -394,7 +394,10 @@ function DashboardView() {
                 title="Needs attention"
                 subtitle={restock.length ? 'At or below minimum stock' : 'Nothing below minimum stock right now'}
                 style={styles.section}
-                action={<HeaderLink label="View inventory" onPress={() => router.push('/inventory')} />}
+                /* §27CR — this used to read "View inventory" and open `/inventory`
+                   unfiltered, so the five rows above were the whole list anyone could
+                   reach. The products themselves have their own screen now. */
+                action={<HeaderLink label="View all" onPress={() => router.push('/restock')} />}
               />
               {restock.length ? (
                 <View style={styles.rowList}>

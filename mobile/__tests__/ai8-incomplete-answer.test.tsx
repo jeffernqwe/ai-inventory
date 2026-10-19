@@ -1,9 +1,14 @@
-import { render } from '@testing-library/react-native';
+import { fireEvent, render } from '@testing-library/react-native';
+import { router } from 'expo-router';
 import type { ReactNode } from 'react';
 
-import { MessageBubble, toRow } from '../components/AiChat';
+import { MessageBubble, restockPathForTools, toRow } from '../components/AiChat';
 import type { ChatRow } from '../components/AiChat';
 import { ThemeProvider } from '../lib/theme-context';
+
+jest.mock('expo-router', () => ({
+  router: { push: jest.fn(), replace: jest.fn(), back: jest.fn() },
+}));
 
 /**
  * AI-8 — a truncated answer is labelled, not silently passed off as complete.
@@ -90,6 +95,51 @@ describe('AI-8 an incomplete answer is labelled', () => {
       />,
     );
     expect(steps.queryByTestId('chat-incomplete-note')).toBeNull();
+  });
+});
+
+describe('AI-8 the note leads somewhere a long list can be read (§27CR)', () => {
+  it('offers the restock list when the truncated answer came from a restock tool', async () => {
+    const { getByTestId } = await withTheme(
+      <MessageBubble item={row({ degraded: 'OUTPUT_LIMIT', toolsUsed: ['getReorderNeededProducts'] })} />,
+    );
+
+    const link = getByTestId('chat-restock-link');
+    fireEvent.press(link);
+
+    expect(router.push).toHaveBeenCalledWith('/restock');
+  });
+
+  it('offers nothing when the truncation was not a stock list', async () => {
+    // The sentence stays; only a link that would genuinely show the rest is added, so a
+    // truncated prose answer is never pointed at an unrelated screen.
+    const { getByTestId, getByText, queryByTestId } = await withTheme(
+      <MessageBubble item={row({ degraded: 'OUTPUT_LIMIT', toolsUsed: ['getInventorySummary'] })} />,
+    );
+
+    expect(getByTestId('chat-incomplete-note')).toBeTruthy();
+    expect(queryByTestId('chat-restock-link')).toBeNull();
+    // With nowhere to send them, the advice to narrow the question is the only remedy
+    // there is — and it must still be there.
+    expect(getByText(/ask a narrower question/i)).toBeTruthy();
+  });
+
+  it('stops telling a member to narrow the question when the full list is one tap away', async () => {
+    const { getByTestId, queryByText } = await withTheme(
+      <MessageBubble item={row({ degraded: 'OUTPUT_LIMIT', toolsUsed: ['getLowStockProducts'] })} />,
+    );
+
+    expect(getByTestId('chat-restock-link')).toBeTruthy();
+    expect(queryByText(/ask a narrower question/i)).toBeNull();
+  });
+
+  it('maps only the three stock-list tools, and needs no tool list to answer', () => {
+    expect(restockPathForTools(['getLowStockProducts'])).toBe('/restock');
+    expect(restockPathForTools(['getOutOfStockProducts'])).toBe('/restock');
+    expect(restockPathForTools(['searchProducts', 'getReorderNeededProducts'])).toBe('/restock');
+    expect(restockPathForTools(['getInventoryHistory'])).toBeNull();
+    expect(restockPathForTools(undefined)).toBeNull();
+    expect(restockPathForTools([])).toBeNull();
   });
 });
 

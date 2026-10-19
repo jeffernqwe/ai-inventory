@@ -140,11 +140,26 @@ doors. These are the ones this project uses:
 
 | Port | Used by | If something is already using it |
 |---|---|---|
-| **4000** | the backend | `npm start` fails with `EADDRINUSE` |
+| **4000** | the backend | The new server stops and prints the command that finds the owner |
 | **8081** | Metro (the app's code server) | Expo offers to use another port — accept |
 
 `EADDRINUSE` means "this port is occupied". It usually means **you already have a backend running in
 another window** — which is often exactly what you want. Check for it before starting a second one.
+
+The backend now refuses to start quietly in that situation: it prints one line naming port 4000 and the
+`netstat` (or `lsof`) command that finds the other process, then exits, instead of looking healthy while
+the old server answers everything.
+
+**"Is the server answering the one I just started?"** Every response carries an `x-instance-id` header,
+and the startup line prints the same id. Compare them:
+
+```bash
+curl -s -D - -o NUL http://localhost:4000/api/health/live | grep -i x-instance-id
+```
+
+If the id in the response is not the id on the `[server] … instance=…` line you just saw, an older
+server owns port 4000 and the thing you changed (an environment value, a code edit that needed a
+restart) is not what is running.
 
 ---
 
@@ -152,7 +167,8 @@ another window** — which is often exactly what you want. Check for it before s
 
 | What you see | What it means | What to do |
 |---|---|---|
-| `EADDRINUSE` on port 4000 | A backend is already running | Reuse it, or stop the other window with `Ctrl+C` |
+| `EADDRINUSE` on port 4000, with a `netstat` hint | A backend is already running | Reuse it, or stop the other window with `Ctrl+C` |
+| The startup line's `instance=` differs from `x-instance-id` | You are talking to an older server | Stop it (the `netstat`/`lsof` command the boot printed) and start again |
 | `Ready` never appears; `ready` returns 503 | Backend is up, database unreachable | Check the internet; it may be a temporary cloud blip. Re-run `ready` in a minute |
 | `MONGODB_URI is not set` | `server/.env` is missing or incomplete | Copy the names from `.env.example` and fill in real values |
 | `node: bad option` or a syntax error at startup | Node is older than 24 | Check `node -v`, install Node 24 |

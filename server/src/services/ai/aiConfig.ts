@@ -19,8 +19,11 @@ export function aiConfig() {
   return {
     // Provider + keys (keys are read here but never returned/logged).
     provider: (process.env.AI_PROVIDER || '').trim().toLowerCase(),
-    claudeModel: (process.env.AI_MODEL_CLAUDE || 'claude-sonnet-5').trim(),
-    geminiModel: (process.env.AI_MODEL_GEMINI || 'gemini-2.5-flash').trim(),
+    // AI-25 — the direct Claude and Gemini models were removed with their providers. A model
+    // is still a choice here, and a wide one: OpenRouter reaches both families (and many
+    // others) through `AI_MODEL_OPENROUTER`, so flexibility lives in one variable rather than
+    // in two code paths and two more keys.
+    //
     // OpenRouter is an Anthropic-compatible gateway (see openrouterProvider.ts).
     // No default model on purpose: OpenRouter fronts hundreds of models with very
     // different tool-calling ability, so the model is REQUIRED — the provider
@@ -30,7 +33,18 @@ export function aiConfig() {
 
     // Cost / rate protection (V1). See SYSTEM_SPECIFICATION.md §25.
     maxMessageChars: positiveInt(process.env.AI_MAX_MESSAGE_CHARS, 4000),
-    maxOutputTokens: positiveInt(process.env.AI_MAX_OUTPUT_TOKENS, 800),
+    // AI-20 — raised from 800 to 1200 on 2026-10-19, on device evidence rather than taste.
+    //
+    // The cap exists so a runaway answer cannot spend the turn's whole budget (AI-8), and it
+    // worked — but three device turns on the deployed free-tier model hit 800 EXACTLY, and two
+    // of them were already obeying AI-18's "at most five items": a five-row movement table with
+    // its intro is ~900–1000 tokens in this model's own wording, so the answer was cut off at
+    // row three of five while doing what it was told. The cap is not what makes an answer short
+    // — the prompt is — so it is set above the largest compliant answer observed instead of
+    // inside it. Output tokens are not what the free tier meters (requests are), but they do
+    // cost generation time, which is why this is 1200 and not unlimited: the AI-1 turn deadline
+    // still bounds the turn, and a longer answer now has further to run before it is saved.
+    maxOutputTokens: positiveInt(process.env.AI_MAX_OUTPUT_TOKENS, 1200),
     maxToolIterations: positiveInt(process.env.AI_MAX_TOOL_ITERATIONS, 6),
     // AI-2 — how many times a turn retries a provider response that carries NO
     // usable content (neither text nor a tool call). The deployed free-tier gateway

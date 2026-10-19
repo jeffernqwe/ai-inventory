@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { router } from 'expo-router';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import AssistantMarkdown from './AssistantMarkdown';
@@ -9,7 +10,8 @@ import { aiApi } from '../lib/api';
 import type { ApiResponse } from '../lib/api';
 import { isSessionError, useSession } from '../lib/auth';
 import { REQUEST_CANCELLED } from '../lib/client';
-import { formatTime } from '../lib/format';
+import { formatClock12 } from '../lib/format';
+import { toolTrace } from '../lib/toolLabels';
 import { radius, spacing, type } from '../lib/theme';
 import type { Palette } from '../lib/theme';
 import { useTheme } from '../lib/theme-context';
@@ -82,8 +84,15 @@ export function sendErrorMessage(err: unknown): string {
   }
   // AI-6 — a spent allowance, not a fault and not something a moment's wait
   // fixes. Reported before the network check like every other code.
+  // The screen said "try again later" until 2026-10-19, when the provider's own counter was
+  // read at its ceiling (50 of 50 free requests used, nothing in reserve) and a real turn was
+  // refused: the next usable moment is the daily reset, not an unspecified "later". Naming
+  // the reset is the difference between advice a member can act on and advice that sounds
+  // like the assistant is broken. The server's own sentence deliberately stays generic —
+  // it cannot know the provider's day boundary — so the specifics belong here, where the
+  // client already owns a code-mapped sentence for every other failure.
   if (e.code === 'AI_QUOTA_EXCEEDED') {
-    return 'The assistant has reached its usage limit for now. Please try again later.';
+    return "The assistant has used today's request allowance. It resets at midnight UTC (8AM in Manila) — the rest of the app works as usual.";
   }
   // AI-10 — the model spent its whole output budget before it could answer. Like the
   // quota above, this is checked before the network test and it OWNS its sentence
@@ -132,6 +141,15 @@ export interface ChatRow {
   role: 'user' | 'assistant';
   content: string;
   createdAt?: string;
+  /**
+   * AI-24 — the server id of the message this row came from, when it came from the server.
+   *
+   * Present only so the turn's stored USER message can be merged in place of the optimistic
+   * bubble that was shown while it was in flight: the reply carries `userMessage`, which is
+   * the copy the reloaded thread reads, so merging it means a reopened conversation shows
+   * exactly what the live one showed. The optimistic row has no id and is replaced by key.
+   */
+  messageId?: string;
   toolsUsed?: string[];
   /**
    * AI-8 — the server's mark on a turn that did not finish cleanly. Only
@@ -158,6 +176,7 @@ export function toRow(m: ApiResponse): ChatRow {
     role: m.role === 'USER' ? 'user' : 'assistant',
     content: m.content,
     createdAt: m.createdAt,
+    messageId: m.id,
     toolsUsed: m.toolsUsed,
     degraded: m.degraded,
   };
@@ -191,11 +210,30 @@ export function isTableAnswer(content: string): boolean {
   return content.includes('|');
 }
 
+/**
+ * The tools whose answers are a STOCK LIST, and therefore have a screen that can show
+ * the whole thing (§27CR).
+ *
+ * The answer cap is a property of the model's reply, not of the request: a truncated
+ * *list* answer has a real destination in the app, while a truncated piece of prose
+ * does not — pointing one at `/restock` would be a fabricated connection between two
+ * unrelated things. These three names are the server's own tool ids, which the message
+ * already carries for the provenance line ("Read: …"), so this adds no field and no
+ * request.
+ */
+const RESTOCK_TOOLS = new Set(['getReorderNeededProducts', 'getLowStockProducts', 'getOutOfStockProducts']);
+
+/** Where a truncated stock-list answer can be read in full, or null if nowhere. */
+export function restockPathForTools(toolsUsed?: string[]): string | null {
+  return toolsUsed?.some((tool) => RESTOCK_TOOLS.has(tool)) ? '/restock' : null;
+}
+
 export function MessageBubble({ item }: { item: ChatRow }) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const user = item.role === 'user';
   const wide = !user && isTableAnswer(item.content);
+  const restockPath = user ? null : restockPathForTools(item.toolsUsed);
   return (
     <View style={[styles.bubbleRow, user ? styles.rowUser : styles.rowAssistant]}>
       <View
@@ -217,16 +255,57 @@ export function MessageBubble({ item }: { item: ChatRow }) {
             reasons put their copy in the content itself, so they are deliberately not
             repeated here. */}
         {!user && item.degraded === 'OUTPUT_LIMIT' ? (
-          <Text testID="chat-incomplete-note" style={styles.incomplete}>
-            This answer hit the length limit, so it may be incomplete — ask a narrower question to see the rest.
+          <View>
+            {/* §27CR — when the truncation was a stock list, "ask a narrower question"
+                was advice with nowhere to go, and telling a member to narrow a question
+                while offering them the full list is the wrong instruction. The sentence
+                keeps that clause only when there is nowhere else to send them. */}
+            <Text testID="chat-incomplete-note" style={styles.incomplete}>
+              {restockPath
+                ? 'This answer hit the length limit, so it may be incomplete.'
+                : 'This answer hit the length limit, so it may be incomplete — ask a narrower question to see the rest.'}
+            </Text>
+          </View>
+        ) : null}
+        {/* AI-26 — the restock link is drawn on EVERY stock-list answer, not only a
+            truncated one. Rule 3 tells the model to send the member to "the matching
+            screen in the app" for the full list, and a paginated 36-product answer is
+            just as unreachable as a truncated one: before this, a complete answer that
+            showed five of 8,976 ended with that sentence and no way to act on it — the
+            link existed only when the model happened to run out of output tokens. The
+            destination is the same screen for all three stock tools (the reorder
+            endpoint is the list they all describe), so the link says the same thing. */}
+        {restockPath ? (
+          <Pressable
+            testID="chat-restock-link"
+            accessibilityRole="button"
+            onPress={() => router.push(restockPath)}
+          >
+            <Text style={styles.incompleteLink}>Open the full restock list</Text>
+          </Pressable>
+        ) : null}
+        {/* AI-21 — the chip names what was READ, not which function read it: the owner's
+            judgement was that `Read: getProductsByLocation` is jargon. The stored message
+            and `restockPathForTools` above keep the real names, so the trace and the
+            routing are unchanged. */}
+        {!user && toolTrace(item.toolsUsed) ? (
+          <Text style={styles.tools} numberOfLines={2} testID="chat-tools">
+            Read: {toolTrace(item.toolsUsed)}
           </Text>
         ) : null}
-        {!user && item.toolsUsed?.length ? (
-          <Text style={styles.tools} numberOfLines={2}>
-            Read: {item.toolsUsed.join(' · ')}
+        {/* AI-17 — the footer used to be a bare `14:05`, which the owner read as a
+            response time and asked about. It is the message's own clock time: 12-hour with
+            a suffix, so it reads as a time on sight. The owner chose the bare time over a
+            "Sent"/"Answered" prefix — the words were tried on the device and cluttered the
+            bubble, while "2:58 AM" needs no label to be understood. */}
+        {item.createdAt ? (
+          <Text
+            testID={user ? 'chat-time-user' : 'chat-time-assistant'}
+            style={[styles.time, user && styles.timeUser]}
+          >
+            {formatClock12(item.createdAt)}
           </Text>
         ) : null}
-        {item.createdAt ? <Text style={[styles.time, user && styles.timeUser]}>{formatTime(item.createdAt)}</Text> : null}
       </View>
     </View>
   );
@@ -403,7 +482,22 @@ export default function AiChat({ conversationId = null }: AiChatProps) {
     setInput('');
     setSendError(null);
     setStopped(false);
-    setRows((prev) => [...prev, { key: `pending-${Date.now()}`, role: 'user', content: message }]);
+    // AI-24 — the member's own message gets a time, so the question and the answer can be
+    // read as two clock times a member can subtract by eye.
+    //
+    // It is taken HERE, at the instant the request leaves, and not from `userMessage.createdAt`
+    // on the reply. The server persists the USER message only after the model has answered
+    // (Phase 07E / M7: nothing is written until a provider succeeds), so its stored time is
+    // when the turn COMPLETED — labelling the question with the answer's clock would hide the
+    // very interval this is for. The send time is the one honest timestamp for this event.
+    const sentAt = new Date().toISOString();
+    // ONE key, held in a local: the bubble that is about to be drawn is the ONLY row this
+    // turn may replace or remove. Matching on "a user row with no server id" instead was a
+    // real bug on the device (2026-10-19): three failed sends had each left their bubble
+    // behind, and the next success replaced all three with the same stored message — four
+    // identical rows, and React warned "Encountered two children with the same key".
+    const pendingKey = `pending-${Date.now()}`;
+    setRows((prev) => [...prev, { key: pendingKey, role: 'user', content: message, createdAt: sentAt }]);
     // AI-9 — one controller per turn, registered BEFORE the request so the Stop
     // button has something to pull from the first render the member can see.
     const controller = new AbortController();
@@ -421,7 +515,30 @@ export default function AiChat({ conversationId = null }: AiChatProps) {
       // AI-8 — mapped through `toRow`, the same function a reloaded thread uses, so the
       // live reply cannot carry a field the stored one does not (or the reverse). The
       // mark on a truncated answer arrives on this response and would be lost here.
-      setRows((prev) => [...prev, toRow(reply)]);
+      //
+      // AI-24 — the turn's stored USER message is merged in the same step, replacing the
+      // optimistic bubble that was appended when Send was pressed. The screen needs no
+      // timestamp of its own for a reload: the optimistic time covers the live turn, and this
+      // is the copy a reopened thread reads, so both paths now show the same row.
+      setRows((prev) => {
+        const storedUser = res?.userMessage;
+        // Replace exactly THIS turn's bubble with the stored copy, so the row the live screen
+        // holds is the row a reload would build.
+        const replaced = storedUser
+          ? prev.map((row) => (row.key === pendingKey ? toRow(storedUser) : row))
+          : prev;
+        const merged = [...replaced, toRow(reply)];
+        // The FIRST turn creates the conversation, which starts a reload of the thread, so the
+        // same stored messages can arrive on both paths. Keyed dedupe makes a duplicate row
+        // structurally impossible rather than a race that is usually won.
+        const seen = new Set<string>();
+        return merged.filter((row) => {
+          if (!row.messageId) return true;
+          if (seen.has(row.messageId)) return false;
+          seen.add(row.messageId);
+          return true;
+        });
+      });
     } catch (err) {
       // Checked FIRST: a stop is the member's own act, and `isSessionError` must never
       // get the chance to end their session over it (it cannot today — a cancelled
@@ -435,6 +552,13 @@ export default function AiChat({ conversationId = null }: AiChatProps) {
         await signOut();
         return;
       }
+      // M7 guarantees a failed turn persists NOTHING, so the bubble must not stay on screen
+      // claiming otherwise: it is removed, and the text returns to the composer so a retry
+      // does not have to be retyped. Before this, every failed send left its bubble behind
+      // and a retry stacked another — seen on the device as four identical questions after a
+      // run of database 503s (2026-10-19).
+      setRows((prev) => prev.filter((row) => row.key !== pendingKey));
+      setInput(message);
       setSendError(sendErrorMessage(err));
     } finally {
       stopRef.current = null;
@@ -548,6 +672,7 @@ const createStyles = (colors: Palette) =>
     // AI-8 — a caveat inside the assistant bubble, in the warning colour so it reads as
     // one. `marginTop` keeps it clear of the answer's last line, which it qualifies.
     incomplete: { ...type.caption, color: colors.warning, marginTop: spacing.sm },
+    incompleteLink: { ...type.caption, color: colors.primary, fontWeight: '700', marginTop: spacing.xs },
 
     time: { ...type.caption, color: colors.textMuted, marginTop: 4, textAlign: 'right' },
     // On the primary-filled user bubble: readable in both themes without a

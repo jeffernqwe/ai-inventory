@@ -189,7 +189,8 @@ function reorderItemPublic(doc: ReorderItemSource) {
  */
 /**
  * Per-product availability, computed by MERGING two streams instead of one join per
- * product.
+ * product — and in ID SPACE, because the first version of this merge could not survive
+ * a large tenant.
  *
  * WHAT THIS REPLACES. The previous shape ran a `$lookup` into `inventory` once per
  * product of the tenant. Measured 2026-10-13 on a synthetic 10 000-product tenant
@@ -207,22 +208,42 @@ function reorderItemPublic(doc: ReorderItemSource) {
  * about matching semantics moves into application code, which is what makes this
  * output-identical rather than merely similar.
  *
- * Published per surviving product: the product document ITSELF (the root of the old
- * shape, byte for byte, so every DTO below needs no change) plus two fields:
+ * WHY IT CARRIES SO LITTLE (§27DF). The merge is one `$group` whose memory holds one
+ * entry PER GROUP, so a first version that carried the product document itself
+ * (`$project: { __product: '$$ROOT' }` → `$max: '$__product'`) held the whole
+ * catalog in RAM. On a **131 000-product** tenant (261 918 inventory rows) that
+ * `$group` crossed MongoDB's 100 MB in-memory limit and **failed the query**:
+ * `Exceeded memory limit for $group … Pass allowDiskUse:true to opt in`, surfaced as
+ * `TOOL_ERROR` from four assistant tools (`getLowStockProducts`,
+ * `getOutOfStockProducts`, `getReorderNeededProducts`, `getProductsByLocation`) and
+ * as a 500 from `GET /api/products?lowStock=true` on the Inventory/Restock screens.
+ * The cost was never the row count — it was the PAYLOAD PER GROUP.
  *
- *   available — quantity - reservedQuantity, summed across the product's rows, and
- *               0 when it has no inventory at all. §19: a missing row is zero
- *               stock, not missing stock. Identical arithmetic to the `$ifNull`
- *               pair this replaces.
- *   hasRow    — whether ANY inventory row contributed. This is what a
- *               location-scoped request needs to mean "only products actually
- *               stocked at that location"; the old shape tested `$size(inv) > 0`
- *               on the lookup result array.
+ * So the merge now publishes the four scalars the page needs to SELECT a row, and the
+ * page is hydrated afterwards for at most one page of products:
+ *
+ *   available    — quantity - reservedQuantity, summed across the product's rows, and
+ *                  0 when it has no inventory at all. §19: a missing row is zero
+ *                  stock, not missing stock. Identical arithmetic to the `$ifNull`
+ *                  pair this replaces.
+ *   hasRow       — whether ANY inventory row contributed. This is what a
+ *                  location-scoped request needs to mean "only products actually
+ *                  stocked at that location"; the old shape tested `$size(inv) > 0`
+ *                  on the lookup result array.
+ *   minimumStock — the product's own threshold, carried because `lowStock` compares
+ *                  it with `available` ABOVE the facet, where a join cannot help.
+ *   createdAt    — the catalog's page order, so the sort stays index-free but exact.
  *
  * `$max` is the merge operator on purpose: it IGNORES missing values, so each
- * accumulator simply takes the side of the union that carries it.
+ * accumulator simply takes the side of the union that carries it. `__product` is a
+ * literal `true` rather than the document, and it is what still drops the groups whose
+ * rows the catalog `$match` excluded (an ARCHIVED product, another filter).
+ *
+ * The hydration in {@link hydrateStockPage} puts the product document back byte for
+ * byte — same fields, same `category`/`categoryId` normalisation — so every DTO below
+ * is unchanged, which is why `perf:golden` stays identical.
  */
-function availabilityStages(
+function availabilityIdStages(
   bizOid: mongoose.Types.ObjectId,
   locationId?: string
 ): PipelineStage[] {
@@ -232,8 +253,17 @@ function availabilityStages(
   if (locationId) invMatch.locationId = new ObjectId(locationId);
 
   return [
-    // Carry the product document through the merge untouched.
-    { $project: { __product: '$$ROOT' } },
+    // Carry the product's IDENTITY and the three scalars the page needs — never the
+    // document. `__product` is a presence marker: `$max` ignores missing values, so it
+    // is `true` on every group that owns a catalog document and absent on the groups
+    // that hold inventory for a product this filter excluded.
+    {
+      $project: {
+        __product: { $literal: true },
+        __minimumStock: '$minimumStock',
+        __createdAt: '$createdAt',
+      },
+    },
     {
       $unionWith: {
         coll: 'inventory',
@@ -255,56 +285,83 @@ function availabilityStages(
       $group: {
         _id: '$_id',
         __product: { $max: '$__product' },
+        __minimumStock: { $max: '$__minimumStock' },
+        __createdAt: { $max: '$__createdAt' },
         __quantity: { $max: '$__quantity' },
         __reserved: { $max: '$__reserved' },
         __hasRow: { $max: '$__hasRow' },
       },
     },
-    // A group with no product document holds inventory rows for a product the
+    // A group with no catalog document holds inventory rows for a product the
     // catalogue filter excluded (an ARCHIVED product, another filter below). Those are
     // dropped here, exactly as the products-side `$match` dropped them before.
-    { $match: { __product: { $ne: null } } },
+    { $match: { __product: true } },
     {
-      $replaceRoot: {
-        newRoot: {
-          $mergeObjects: [
-            '$__product',
-            {
-              available: {
-                $subtract: [{ $ifNull: ['$__quantity', 0] }, { $ifNull: ['$__reserved', 0] }],
-              },
-              hasRow: { $eq: ['$__hasRow', true] },
-            },
-          ],
+      $project: {
+        minimumStock: '$__minimumStock',
+        createdAt: '$__createdAt',
+        available: {
+          $subtract: [{ $ifNull: ['$__quantity', 0] }, { $ifNull: ['$__reserved', 0] }],
         },
+        hasRow: { $eq: ['$__hasRow', true] },
       },
     },
   ];
 }
 
 /**
- * The category document a catalogue row carries, joined for the PAGE only.
+ * The product documents behind one page of {@link availabilityIdStages} ids.
  *
- * Both callers apply this after `$skip`/`$limit`, so the join runs for at most one
- * page of rows. It does not filter anything (the old shape joined every matching row
- * before the facet, but a row whose category is missing still surfaced — as a null
- * `categoryId`, which is what the normalisation below the pipeline reads), so moving
- * it below the page window cannot change which rows come back or how many.
+ * The merge above deliberately stops at four scalars per product, so the page — at most
+ * `limit` rows by construction — is hydrated here in two indexed reads instead of being
+ * carried through the `$group`. Output is what the old single-aggregation shape
+ * produced: the stored document, `available` and `hasRow` merged onto it, and the same
+ * `category`/`categoryId` normalisation the previous `$lookup` performed (the category
+ * document when it exists and belongs to this business, `null` when the reference is
+ * missing). The `page` array's order is preserved exactly, so every sort the pipeline
+ * applied still decides the order.
  */
-function categoryStages(bizOid: mongoose.Types.ObjectId): PipelineStage.FacetPipelineStage[] {
-  return [
-    {
-      $lookup: {
-        from: 'categories',
-        let: { cat: '$categoryId' },
-        pipeline: [
-          { $match: { $expr: { $and: [{ $eq: ['$businessId', bizOid] }, { $eq: ['$_id', '$$cat'] }] } } },
-        ],
-        as: 'category',
-      },
-    },
-    { $addFields: { category: { $arrayElemAt: ['$category', 0] } } },
+async function hydrateStockPage(
+  bizOid: mongoose.Types.ObjectId,
+  page: Array<{ _id: mongoose.Types.ObjectId; available?: number; hasRow?: boolean }>
+): Promise<Record<string, unknown>[]> {
+  if (page.length === 0) return [];
+
+  const ids = page.map((row) => row._id);
+  const docs = await Product.find({ _id: { $in: ids }, businessId: bizOid }).lean();
+  const byId = new Map(docs.map((doc) => [String(doc._id), doc as Record<string, unknown>]));
+
+  // One category read for the page's distinct references, still tenant-guarded. A
+  // category that does not resolve (or belongs to another business) is `null`, which is
+  // what the old join's `$arrayElemAt` produced for an empty match, and what the
+  // normalisation below the pipeline consumes.
+  const categoryIds = [
+    ...new Set(
+      docs
+        .map((doc) => (doc as { categoryId?: unknown }).categoryId)
+        .filter((id): id is mongoose.Types.ObjectId => Boolean(id))
+        .map((id) => String(id))
+    ),
   ];
+  const categories = categoryIds.length
+    ? await Category.find({ _id: { $in: categoryIds }, businessId: bizOid }).lean()
+    : [];
+  const categoryById = new Map(categories.map((cat) => [String(cat._id), cat as Record<string, unknown>]));
+
+  const items: Record<string, unknown>[] = [];
+  for (const row of page) {
+    const doc = byId.get(String(row._id));
+    // Cannot happen while the page ids and the catalog agree, and kept as read-path
+    // hygiene rather than a possibility: a product is never hard-deleted (§4).
+    if (!doc) continue;
+    const category = doc.categoryId ? categoryById.get(String(doc.categoryId)) ?? null : null;
+    doc.available = row.available ?? 0;
+    doc.hasRow = row.hasRow ?? false;
+    doc.category = category;
+    doc.categoryId = category;
+    items.push(doc);
+  }
+  return items;
 }
 
 /**
@@ -628,7 +685,7 @@ export const productService = {
       // `$match + $sort` together and walk the Phase 20G index
       // `{ businessId: 1, createdAt: -1, _id: -1 }`. That advice was right for the
       // shape it was written against, and this method is no longer that shape: the
-      // availability merge in `availabilityStages` has to read the whole inventory
+      // availability merge in `availabilityIdStages` has to read the whole inventory
       // partition to answer a STOCK-FILTERED question at all, so no index can supply
       // the page order while a stock predicate is applied above it — the rows that
       // survive the predicate are not a contiguous run of any index. What matters is
@@ -639,7 +696,7 @@ export const productService = {
       // ties in the same direction, so a page boundary inside a tie is stable.
       // (Unfiltered catalogue reads never reach this method: `list()` sends them to
       // `listSimple`, whose order is still index-provided.)
-      ...availabilityStages(bizOid, locationId),
+      ...availabilityIdStages(bizOid, locationId),
     ];
 
     // Only products actually stocked at the chosen location — the merge reports
@@ -664,21 +721,19 @@ export const productService = {
           { $sort: { createdAt: -1, _id: -1 } },
           { $skip: skip },
           { $limit: limit },
-          ...categoryStages(bizOid),
         ],
       },
     });
 
-    const [result] = await Product.aggregate(pipeline);
-    const items = result?.data ?? [];
+    // `allowDiskUse` is the BACKSTOP, not the mechanism: the merge's group now carries
+    // four scalars per product rather than the document (`availabilityIdStages`), so
+    // spilling should never be needed. It is set anyway so that a tenant an order of
+    // magnitude beyond today's degrades slowly instead of failing on MongoDB's 100 MB
+    // in-memory `$group` limit — the failure §27DF measured, which surfaced as a 500
+    // and as four assistant `TOOL_ERROR`s rather than as a slow answer.
+    const [result] = await Product.aggregate(pipeline, { allowDiskUse: true });
+    const items = await hydrateStockPage(bizOid, result?.data ?? []);
     const total = result?.metadata?.[0]?.total ?? 0;
-
-    // Normalise into the populated shape the DTO expects: categoryId becomes
-    // the category document when found, null when the reference is missing.
-    for (const doc of items) {
-      if (doc.category && doc.category._id) doc.categoryId = doc.category;
-      else doc.categoryId = null;
-    }
     return { items, total };
   },
 
@@ -705,7 +760,7 @@ export const productService = {
 
     const pipeline: PipelineStage[] = [
       { $match: match },
-      ...availabilityStages(bizOid),
+      ...availabilityIdStages(bizOid),
       { $match: { $expr: { $lte: ['$available', '$minimumStock'] } } },
       {
         $facet: {
@@ -714,25 +769,22 @@ export const productService = {
           // tie on both leading keys still pages deterministically. The sort sits in
           // this branch rather than above the facet because the count does not depend
           // on order — the same reason this branch held the sort before the
-          // availability merge (see `availabilityStages`). The category join follows
-          // the page window, so it runs for at most one page of rows.
+          // availability merge (see `availabilityIdStages`). `available` and `createdAt`
+          // are two of the four scalars that merge publishes, so the branch sorts the
+          // page order without needing the product document at all.
           data: [
             { $sort: { available: 1, createdAt: -1, _id: -1 } },
             { $skip: skip },
             { $limit: limit },
-            ...categoryStages(bizOid),
           ],
         },
       },
     ];
 
-    const [result] = await Product.aggregate(pipeline);
-    const items = result?.data ?? [];
+    // Same backstop, same reason, as `listWithStock`.
+    const [result] = await Product.aggregate(pipeline, { allowDiskUse: true });
+    const items = await hydrateStockPage(bizOid, result?.data ?? []);
     const total = result?.metadata?.[0]?.total ?? 0;
-    for (const doc of items) {
-      if (doc.category && doc.category._id) doc.categoryId = doc.category;
-      else doc.categoryId = null;
-    }
     return { items, total };
   },
 

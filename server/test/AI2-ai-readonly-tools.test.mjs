@@ -58,8 +58,17 @@ const READ_ONLY_SERVICE_CALLS = new Set([
   'productService.toProductDTO',
   'productService.reorderItemPublic',
   'inventoryService.listRows',
+  // AI-23: the per-location breakdown is one aggregate read over inventory rows — the same
+  // class as the dashboard summary above, and named here explicitly so adding it was a
+  // deliberate act rather than a hole in the scan.
+  'inventoryService.locationBreakdown',
   'dashboardService.summary',
   'transactionsService.list',
+  // AI-14: reference lists. `list()` is the only read the factory pair exposes here —
+  // `create`/`update`/`setStatus` on the same services are writes and stay OFF this list,
+  // which is what keeps the allow-list meaningful: it names methods, not services.
+  'locationService.list',
+  'categoryService.list',
 ]);
 
 /** Every service call in `source` that is NOT on the read-only allow-list. */

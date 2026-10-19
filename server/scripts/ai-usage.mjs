@@ -594,13 +594,39 @@ async function main() {
 
   let database = { status: 'SKIPPED', detail: 'not requested (no --db)' };
   if (wantDb) {
+    // A DROPPED CONNECTION IS A ROW, NOT A CRASH — pinned here because it was not, and it
+    // cost an investigation. `config/db.ts` attaches these handlers for the server; this
+    // script deliberately does not import it (it must work with no app booted), so until
+    // 2026-10-19 it connected with NO `error` listener at all. A mongoose `Connection` is an
+    // EventEmitter: an `error` event with no listener is THROWN, so a transient drop in the
+    // middle of a read killed the process with a stack trace and — this is the damaging
+    // part — EMPTY stdout, because the report is printed only after the read returns. A
+    // full-suite run then reported `Unexpected end of JSON input` and the real cause (an
+    // Atlas blip) had been thrown away. The status line above promises "an unreachable
+    // database is a row in the report, not a crash"; these two listeners are what makes
+    // that promise true for a failure that arrives asynchronously.
+    // THE LISTENERS ARE NEVER REMOVED, and that is the correction the first version of this
+    // fix needed: it detached them in `finally`, and the very next full-suite run failed
+    // again with `connect ETIMEDOUT …:27017` arriving DURING `disconnect()` — a pending
+    // socket's timeout surfaces after the read is over, when no `catch` can see it and no
+    // listener was left to absorb it. A one-shot report process has nothing to leak, so they
+    // stay attached for the life of the process.
+    const connectionFaults = [];
+    mongoose.connection.on('error', (err) => connectionFaults.push(err?.name ?? 'Error'));
+    mongoose.connection.on('disconnected', () => connectionFaults.push('disconnected'));
     try {
+      // No `serverSelectionTimeoutMS` override: the default 30s is what this host needs
+      // (measured 2026-10-19 — the same cluster took 15.8s to select and a 5s bound failed
+      // outright), and a wrong bound here would turn a slow network into a false UNREADABLE.
       await mongoose.connect(env.mongodbUri, { dbName: env.mongodbDbName });
       database = await readDatabaseUsage({ businessId, days });
     } catch (err) {
       // Read-only and best-effort: an unreachable database is a row in the report, not a
       // crash — but if it was the ONLY source asked for, the whole run measured nothing.
-      database = { status: 'UNREADABLE', detail: `the database could not be read (${err?.name ?? 'error'})` };
+      database = {
+        status: 'UNREADABLE',
+        detail: `the database could not be read (${err?.name ?? connectionFaults.at(-1) ?? 'error'})`,
+      };
     } finally {
       await mongoose.disconnect().catch(() => {});
     }

@@ -32,7 +32,11 @@ import { join } from 'node:path';
 
 import { sendErrorMessage } from '../components/AiChat';
 
-const QUOTA = 'The assistant has reached its usage limit for now. Please try again later.';
+// Changed 2026-10-19: the sentence names WHEN, because the provider's own counter was read at
+// its ceiling (50 of 50 free requests) and a real turn was refused — "try again later" gives a
+// member nothing to act on, while the allowance resets at a known moment.
+const QUOTA =
+  "The assistant has used today's request allowance. It resets at midnight UTC (8AM in Manila) — the rest of the app works as usual.";
 const UNREACHABLE = 'Cannot reach the server. Check your connection and try again.';
 const TOO_LONG = 'The assistant took too long to answer. Please try again.';
 
@@ -52,8 +56,12 @@ function serverQuotaCode(): string {
 }
 
 describe('AI-6 — a reached limit is reported as a limit', () => {
-  it('names the usage limit and asks for a wait that could help', () => {
+  it('names the usage limit and says WHEN the allowance returns', () => {
     expect(sendErrorMessage({ code: 'AI_QUOTA_EXCEEDED' })).toBe(QUOTA);
+    // The named reset is the point: an unspecified "later" was the defect.
+    expect(QUOTA).toMatch(/midnight UTC/);
+    // It must not read as an outage, and it must not tell the member the app is unusable.
+    expect(QUOTA).toMatch(/rest of the app works as usual/);
   });
 
   it('never reports it as a provider outage — the defect this fixes', () => {

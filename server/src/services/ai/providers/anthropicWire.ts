@@ -4,7 +4,7 @@
  * Both the Claude provider and the OpenRouter gateway provider speak this exact
  * protocol over HTTPS. OpenRouter is an Anthropic-compatible gateway (it exposes
  * /v1/messages and routes the request to the model it is asked for), so the
- * neutral provider contract — see the contract note in claudeProvider.js — maps
+ * neutral provider contract (see the provider interfaces in index.ts) maps
  * to/from the Anthropic shape in exactly one place. A future Anthropic-compatible
  * gateway is then a short factory call, not another ~100 lines of mapping.
  *
@@ -57,10 +57,23 @@ export function toAnthropicMessages(messages: ProviderMessage[]) {
       }
       out.push({ role: 'assistant', content });
     } else if (m.role === 'tool') {
-      out.push({
-        role: 'user',
-        content: [{ type: 'tool_result', tool_use_id: String(m.toolCallId), content: m.content }],
-      });
+      // AI-22 — the results of ONE assistant turn travel as ONE user message.
+      //
+      // The loop pushes a neutral message per tool call, and this mapping used to emit a
+      // `user` message per result, relying on the gateway to merge consecutive user turns
+      // (which the Anthropic Messages API documents). That reliance was invisible while the
+      // deployed model never asked for two tools at once — and it stopped being invisible on
+      // 2026-10-19, when a two-location question cost 5 round-trips and the prompt began
+      // asking for the lookups together. N `tool_result` blocks in one user message is the
+      // canonical shape and depends on no merging behaviour, so parallel results are batched
+      // here. The single-result case is byte-identical to what this function produced before.
+      const block = { type: 'tool_result', tool_use_id: String(m.toolCallId), content: m.content };
+      const previous = out[out.length - 1];
+      if (previous && previous.role === 'user' && Array.isArray(previous.content)) {
+        previous.content.push(block);
+      } else {
+        out.push({ role: 'user', content: [block] });
+      }
     }
   }
   // Anthropic forbids a bare assistant message right before a user message that
@@ -86,7 +99,69 @@ interface AnthropicResponse extends UpstreamJsonBody {
   model?: unknown;
 }
 
-export function parseAnthropicResponse(data: AnthropicResponse, fallbackModel = 'anthropic'): ProviderResponse {
+/**
+ * How many top-level field names the empty-completion line prints. A body can carry any
+ * number; the point is to identify the SHAPE, and twelve names is more than any Messages
+ * response has. Past it the line says so rather than growing unbounded.
+ */
+const SHAPE_KEYS_MAX = 12;
+
+/**
+ * AI-12 — a bounded, content-free description of a response body that carried no answer.
+ *
+ * WHY IT EXISTS. This shape left NO trace at all. A 2xx carrying nothing usable is not a
+ * non-2xx (the http layer logs those), not an unparseable body (that branch logs
+ * diagnostics), not a timeout and not a quota refusal (both throw). So the one thing an
+ * operator needs in order to identify it — what the body actually was — was never written
+ * down, and the 2026-10-17 investigation of the stored degraded turns could report only
+ * that it happened eleven times, never what arrived.
+ *
+ * ONLY SCHEMA LABELS ARE RETURNED: top-level FIELD NAMES, content block TYPES and counts.
+ * No value, no prompt, no model output. That rule is what makes the `thinking` case safe
+ * to report at all — its body DOES contain text (the model's reasoning, and the stored
+ * usage says such a turn spent tokens on it), and that text must not be copied into a log.
+ *
+ * `out` is the provider's own count and `null` when it reported none, because "the model
+ * spent its budget reasoning" and "the gateway sent nothing at all" are the two candidate
+ * explanations this line exists to tell apart — and a zero would collapse them.
+ */
+function emptyResponseShape(data: AnthropicResponse) {
+  const content = Array.isArray(data.content) ? (data.content as UpstreamJsonBody[]) : null;
+  const blocks = (content ?? [])
+    .map((block) => (block && typeof block === 'object' && typeof block.type === 'string' ? block.type : '?'))
+    .join(',');
+  const usage = data.usage && typeof data.usage === 'object' ? data.usage : null;
+  const outputTokens = usage && typeof usage.output_tokens === 'number' ? usage.output_tokens : null;
+  const names = Object.keys(data);
+  const keys = names.slice(0, SHAPE_KEYS_MAX).join(',');
+  return [
+    `stop=${typeof data.stop_reason === 'string' ? data.stop_reason : 'none'}`,
+    `blocks=${blocks || 'none'}`,
+    `contentBlocks=${content ? content.length : 'none'}`,
+    `hasModel=${typeof data.model === 'string' && data.model !== ''}`,
+    `hasUsage=${usage !== null}`,
+    `out=${outputTokens ?? 'none'}`,
+    `bodyBytes=${JSON.stringify(data).length}`,
+    `keys=${keys || 'none'}${names.length > SHAPE_KEYS_MAX ? ',…' : ''}`,
+  ].join(', ');
+}
+
+/**
+ * @param data            the untrusted response body
+ * @param requestedModel  the model the REQUEST named, used only when the body omits one.
+ *
+ * AI-12 — why the fallback is the requested model and not a provider label. It used to be
+ * the provider's name (`'openrouter'`, `'claude'`), and the effect was that a response
+ * omitting `model` was recorded as if the provider were a model: **12 of 44 stored turns in
+ * the development database carried `openrouter` in their model column, including every
+ * empty completion**, so the one question a provider-tier decision has to answer — *is this
+ * model the unreliable one?* — could not be answered from the record at all. The model the
+ * request named is true by construction of the request and answers that question; a
+ * provider name wearing a model's field answers a different one. The default keeps the
+ * function's standalone behaviour for callers that have no model to offer (tests, a future
+ * provider without a model env var).
+ */
+export function parseAnthropicResponse(data: AnthropicResponse, requestedModel = 'anthropic'): ProviderResponse {
   const content: unknown[] = Array.isArray(data.content) ? data.content : [];
   let text = '';
   const toolCalls: ToolCall[] = [];
@@ -113,23 +188,36 @@ export function parseAnthropicResponse(data: AnthropicResponse, fallbackModel = 
     // (measured on the device 2026-10-17). A caller who reads only the message sees
     // exactly the sentence it saw before.
     throw new AiOutputLimit(undefined, {
-      model: (typeof data.model === 'string' && data.model) || fallbackModel,
+      model: (typeof data.model === 'string' && data.model) || requestedModel,
       usage,
     });
   }
   // AI-8 — the stop reason is REPORTED, not merely tested. The throw above covers the
   // case where the cap left nothing usable; this covers every other one, where the cap
   // left a partial answer that used to arrive looking complete.
-  // `?? fallbackModel` is the only guard on `model`, exactly as before; the
+  // `?? requestedModel` is the only guard on `model`, exactly as before; the
   // assertion is what says the neutral contract reports it as a string.
   return {
-    model: data.model as string ?? fallbackModel,
+    model: data.model as string ?? requestedModel,
     text,
     toolCalls,
     usage,
     truncated: data.stop_reason === 'max_tokens',
   };
 }
+
+/**
+ * The aiConfig() keys whose value is a STRING — the only ones that can hold a model name.
+ *
+ * AI-12 — found by `tsc`, not by a test. With `modelKey: keyof ReturnType<typeof aiConfig>`,
+ * `cfg[modelKey]` has the union of every config value's type, so a model reached its call
+ * sites as `string | number` and compiled only because the one consumer took a loose shape.
+ * Narrowing the KEY fixes it at the source: a numeric knob can no longer be named as a
+ * model, and the compiler enforces that here instead of at each call site.
+ */
+type StringConfigKey = {
+  [K in keyof ReturnType<typeof aiConfig>]: ReturnType<typeof aiConfig>[K] extends string ? K : never;
+}[keyof ReturnType<typeof aiConfig>];
 
 /**
  * What a factory built on this wire layer must be told. `modelKey` names the
@@ -145,12 +233,10 @@ export interface AnthropicCompatibleOptions {
   apiKeyMissingMessage?: string;
   /** full /v1/messages URL to POST to */
   messagesUrl: string;
-  /** aiConfig() key holding the model name */
-  modelKey: keyof ReturnType<typeof aiConfig>;
+  /** aiConfig() key holding the model name — a string-valued key, never a numeric knob */
+  modelKey: StringConfigKey;
   /** fallback when the model env var is empty */
   defaultModel: string;
-  /** label used when the response omits a model */
-  fallbackModel?: string;
   /** header map for the key */
   authHeaders?: (apiKey: string) => Record<string, string>;
   /** static headers merged over authHeaders (e.g. a gateway-mandated User-Agent / beta header) */
@@ -167,7 +253,6 @@ export interface AnthropicCompatibleOptions {
  * @param {string} opts.messagesUrl     full /v1/messages URL to POST to
  * @param {string} opts.modelKey        aiConfig() key holding the model name
  * @param {string} opts.defaultModel    fallback when the model env var is empty
- * @param {string} [opts.fallbackModel] label used when the response omits a model
  * @param {(apiKey:string) => object} opts.authHeaders  header map for the key
  * @param {object} [opts.extraHeaders] static headers merged over authHeaders
  *   (e.g. a gateway-mandated User-Agent / beta header)
@@ -180,7 +265,6 @@ export function createAnthropicCompatibleProvider(opts: AnthropicCompatibleOptio
     messagesUrl,
     modelKey,
     defaultModel,
-    fallbackModel = name,
     authHeaders,
     extraHeaders = {},
   } = opts;
@@ -220,7 +304,26 @@ export function createAnthropicCompatibleProvider(opts: AnthropicCompatibleOptio
       // an operator acts on: a model that consistently spends `maxTokens` without
       // answering is a cap that is too small (or a question that needs narrowing).
       try {
-        return parseAnthropicResponse(data as AnthropicResponse, fallbackModel);
+        // AI-12 — the model the request names is the fallback for a body that omits one
+        // (see `parseAnthropicResponse`): a provider label in a model column answers the
+        // wrong question, and it hid the model on every failing turn in the record.
+        const parsed = parseAnthropicResponse(data as AnthropicResponse, model);
+        // AI-12 — and an empty completion is named ONCE PER OCCURRENCE, before it is
+        // returned, because the AI-2 retry means the turn-level warning appears only when
+        // a turn GIVES UP: an empty response the retry rescues used to be invisible, and
+        // the failure rate could not be counted, let alone explained. The shape is printed
+        // and never the body, for the reason `emptyResponseShape` gives.
+        if (!parsed.text && parsed.toolCalls.length === 0) {
+          console.warn(
+            // "the provider", not "the gateway": this factory is shared with a
+            // first-party Anthropic deployment, and naming the wrong component is the
+            // defect class AI-10 exists to avoid.
+            `[ai:${name}] empty completion (model=${model}, ${emptyResponseShape(
+              data as AnthropicResponse
+            )}) — the provider answered 2xx with neither text nor a tool call; the turn retries once, then degrades (AI-2)`
+          );
+        }
+        return parsed;
       } catch (err) {
         if (err instanceof AiOutputLimit) {
           console.warn(

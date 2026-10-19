@@ -11,11 +11,29 @@ import { isSessionError, useSession } from '../../../lib/auth';
 import { canManageUsers } from '../../../lib/permissions';
 
 /**
- * Edit a business user's role/status. Fetches the target fresh (deep-link
- * safe), then hands the public user DTO to the shared UserForm in edit mode.
+ * Role guard (MOD-07, same shape as the Users list). The permission check lives
+ * here so the loader below mounts only for a role that may manage users; with
+ * the check under the hooks instead, a MANAGER or STAFF deep link issued
+ * `GET /api/users/:id` and was answered 403 — the same defect F-63 fixed on the
+ * list screen, still present on this one.
  */
 export default function EditUserScreen() {
-  const { user, token, signOut } = useSession();
+  const { user } = useSession();
+
+  if (!canManageUsers(user)) {
+    return (
+      <>
+        <Stack.Screen options={{ title: 'Edit User' }} />
+        <AccessDenied message="Only the business owner and admins can manage users." />
+      </>
+    );
+  }
+
+  return <EditUser />;
+}
+
+function EditUser() {
+  const { token, signOut } = useSession();
   const { id } = useLocalSearchParams<{ id: string }>();
   const [target, setTarget] = useState<ApiResponse>(null);
   const [loading, setLoading] = useState(true);
@@ -49,9 +67,7 @@ export default function EditUserScreen() {
   return (
     <>
       <Stack.Screen options={{ title: 'Edit User' }} />
-      {!canManageUsers(user) ? (
-        <AccessDenied message="Only the business owner and admins can manage users." />
-      ) : loading && !target ? (
+      {loading && !target ? (
         <Screen>
           <CenterLoader label="Loading user…" />
         </Screen>

@@ -82,6 +82,10 @@ function argsFor(toolName, ctx) {
       return {};
     case 'getInventorySummary':
       return {};
+    // AI-23: no arguments at all, which is the whole point of the tool — so the measurement
+    // is of the aggregate itself, not of a filter it was handed.
+    case 'getLocationBreakdown':
+      return {};
     case 'getInventoryHistory':
       return {};
     case 'getProductsByLocation':

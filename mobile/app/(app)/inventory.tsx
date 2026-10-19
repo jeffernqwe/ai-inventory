@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { ListRenderItem } from 'react-native';
 
 import Badge from '../../components/Badge';
@@ -90,6 +90,13 @@ export default function InventoryScreen() {
         <Chip label="Out of stock" tone="danger" selected={out} onPress={() => setOut((v) => !v)} />
       </View>
       <SelectField label="Location" placeholder="Filter by location…" options={locOptions} value={locationId} onChange={setLocationId} />
+      {/* §27CR — this screen lists stock ROWS (per location); the restock list is the
+          product-level one, and STAFF land here after sign-in with no dashboard to
+          reach it from. Without this line the newest screen had no route in for the
+          role that does the restocking. */}
+      <Pressable onPress={() => router.push('/restock')} accessibilityRole="button" style={styles.restockRow}>
+        <Text style={styles.restockLink}>Restock list →</Text>
+      </Pressable>
     </View>
   );
 
@@ -154,5 +161,7 @@ const createStyles = (colors: Palette) =>
     search: { marginBottom: spacing.lg },
     chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.lg },
     quantity: { ...type.body, color: colors.textSecondary, fontVariant: ['tabular-nums'] },
+    restockRow: { alignSelf: 'flex-start', marginBottom: spacing.lg },
+    restockLink: { ...type.body, color: colors.primary, fontWeight: '700' },
     badges: { alignItems: 'flex-end', gap: spacing.xs },
   });

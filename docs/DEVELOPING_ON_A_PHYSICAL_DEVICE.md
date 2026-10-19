@@ -689,6 +689,95 @@ phone on the same Wi-Fi; the tunnel route needs no Wi-Fi at all and is the defau
 
 ---
 
+## 9b. Driving the app without touching the screen *(the headless recipe)*
+
+When you are testing from here and would rather not use the mirror, a whole session can be driven and read over
+`adb`. The coordinates below are **this** phone's (1080×2340) — take them from the dump each time, never from memory.
+
+**Navigate by deep link instead of hunting for a tab.** The app registers the `inventoryai` scheme, so a route opens
+directly:
+
+```bash
+adb shell am start -a android.intent.action.VIEW -d "inventoryai://ai"
+# "Activity not started, intent has been delivered to currently running top-most instance."
+# is the SUCCESS message: the running app navigated. It is not an error.
+```
+
+**Read the screen as text.** The UI hierarchy is the screen's own account of itself, and it is readable where a
+screenshot is not:
+
+```bash
+MSYS_NO_PATHCONV=1 adb shell uiautomator dump /sdcard/ui.xml      # write it on the phone
+MSYS_NO_PATHCONV=1 adb shell cat /sdcard/ui.xml | tr '>' '\n' \
+  | grep -oE 'text="[^"]+"' | sed 's/text="//;s/"$//'             # read just the visible text
+```
+
+`MSYS_NO_PATHCONV=1` is **not optional under Git Bash**: without it the *laptop* rewrites `/sdcard/ui.xml` into
+`C:/Program Files/Git/sdcard/ui.xml`, and both the dump and the read fail in a way that looks like the phone's fault.
+
+**Take the coordinates from the dump — and re-read them after anything opens.** A node's
+`bounds="[48,2040][756,2172]"` means tap its centre: `adb shell input tap 402 2106`. The trap that wastes real time:
+**opening the keyboard lifts the input row**, so the Send button sat at y≈2103 with the keyboard closed and y≈1338
+with it open. A tap at the old coordinates lands on the keyboard and **the message silently never sends** — the text
+stays in the field, which looks exactly like the app ignoring you.
+
+Type with `%s` for spaces and keep punctuation out of it:
+
+```bash
+adb shell input tap 402 2106                                   # focus the message field
+adb shell input text "How%smuch%sstock%sdo%swe%shold"            # %s is a space
+```
+
+**Check that the field you meant to type into is the one that has focus.** `input text` goes to the focused view, and
+a tap does not always move focus the way it looks like it did — signing in once, the password landed in the **email**
+field and the login failed for a reason nothing on screen explained. Take a dump after the tap and confirm
+`focused="true"` on the node you are about to fill; the same dump tells you the field's **current** bounds, which is
+what the next tap needs.
+
+**A tap that opens the Expo dev menu is the dev-client's overlay, not your app.** In a development build a floating
+**`Tools`** control sits over the UI (on this phone at `[915,852][993,930]`). It is not part of Inventory AI; tapping it
+opens the dev menu, and the next tap is swallowed by it as well. Press `BACK` to dismiss the menu and read the dump to
+find the app's own control instead of trusting a remembered coordinate.
+
+**Make sure the server you started is the server that answers.** This is the trap that cost the most time on
+2026-10-17, and it is silent on Windows: **a second `npm start` can bind `:4000` successfully while a stale process
+keeps serving every request** — the new one still prints `[server] environment=development listening on …`, and
+`/api/health/ready` still answers `{"status":"ready"}` from the old one. Anything you changed in the environment
+(a provider override, a feature flag) then looks like it was ignored, because the process reading it is not the one
+handling your request.
+
+```bash
+netstat -ano | grep '0.0.0.0:4000'     # LISTENING  <pid>  <- compare with the PID you started
+tasklist //FI "IMAGENAME eq node.exe"   # and look for more than one 'node src/index.ts'
+```
+
+The proof is always **the thing you pointed the config at** — a stub that logs its own requests, a feature flag's own
+log line. Readiness, a startup banner and a bound port all identify *a* server, never *which*.
+
+**This is now checked by the server itself (2026-10-18).** Every response carries an `x-instance-id` header, the
+startup line prints the same id, and a boot asks the port it just bound to name itself — a different id there is
+fatal (`port 4000 … is answered by a DIFFERENT server instance … NOT serving`), so the silent case is no longer
+silent. Compare them by hand when you want certainty:
+
+```bash
+curl.exe -s -D - -o NUL http://localhost:4000/api/health/live | grep -i x-instance-id
+```
+
+A header id that does not match the `instance=` on the line you just watched means you are reading an older
+server's logs and every request is going to it — the guard on the next boot will refuse to start rather than let
+that happen again, but an already-running stale process still has to be stopped by hand (the commands above).
+
+**Verify a turn from the server log, not by watching the screen.** Screen polling is slow and racy, and the backend
+already records both halves of what you want to know:
+
+```bash
+grep -c '"path":"/api/ai/chat"' server/logs/server.log    # the turn count
+grep '\[ai\] turn' server/logs/server.log | tail -1       # provider ms, tool ms, tokens, model, outcome
+grep 'empty completion' server/logs/server.log            # the shape line, when one fires
+```
+
+---
+
 ## 10. Optional: go wireless *(documented, not verified on this machine)*
 
 ```powershell

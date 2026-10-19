@@ -72,6 +72,32 @@ inventorySchema.index({ businessId: 1, locationId: 1 });
 // Every index above is kept unchanged.
 inventorySchema.index({ businessId: 1, updatedAt: -1, _id: -1 });
 
+// The SAME page order, for a request that names ONE location (§27DG).
+//
+// The index above supplies `{ updatedAt: -1, _id: -1 }` for the tenant-wide list, but a
+// request with `locationId` has to combine an equality on `locationId` with that sort,
+// and no declared key could supply both: `{ businessId, locationId }` carries no sort
+// key, and `{ businessId, updatedAt, _id }` carries no `locationId`. The planner was
+// therefore choosing between an index-ordered scan that filters on `locationId` and a
+// blocking in-memory sort of every row at that location — and at 523 918 inventory rows
+// (131 000 products × 6 locations, one location holding 131 000 of them) it chose the
+// sort: the location-filtered page measured **2 395 ms**, `explain` captured a `SORT`
+// winning plan over the location's rows with `optimizationTimeMillis: 2052`, and the same
+// query on the same tenant had measured 98–125 ms earlier that day. That is plan-choice
+// instability, not a fixed cost — which is why the remedy is an index that makes the
+// wanted plan the only sensible one, rather than a pipeline rewrite.
+//
+// Declaring the equality key first and the complete page order after it is what makes
+// the order index-provided: Mongo reads the location's rows in `updatedAt`/`_id` order
+// and can stop after `$limit` of them. Kept alongside `{ businessId, locationId }`, which
+// is a prefix of this key — the same deliberate choice as the page-sort index above, so
+// no existing environment has an index dropped underneath it.
+//
+// Measured after the build on the 100 143-row perf tenant: every location reads in
+// 100–226 ms through the service the Inventory screen and the assistant's `getInventory`
+// tool call, and `explain` now names this index with no `SORT` stage.
+inventorySchema.index({ businessId: 1, locationId: 1, updatedAt: -1, _id: -1 });
+
 const Inventory = mongoose.model('Inventory', inventorySchema);
 
 export default Inventory;

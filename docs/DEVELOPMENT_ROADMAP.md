@@ -15956,10 +15956,11 @@ stock."* (`getInventorySummary`, 10.4 s), *"Main Warehouse: 60,000 products / Sh
 Store: 20,149"* (`getLocationBreakdown`, 17.6 s), and *"**8,976 products need restocking**; the 5 most urgent
 are below."* (`getReorderNeededProducts`, 23.9 s) — and on the phone, in the fixture tenant, the simplest
 question answered *"You have **46,602** units in stock across all locations."*, equal to the dashboard
-figure on the same screen. **Six provider requests of fifty were used** for all of it, which the counter
-confirmed (`used 6`). Two of §27DS's stated limits are therefore closed by observation rather than by
-argument: the **thousands separator** the prompt asks for is what the model actually writes (`8,976`,
-`14,928,688`), and rule 15's *total in the first sentence* is obeyed.
+figure on the same screen. **Eight provider requests of fifty were used** for all of it — four turns
+at two requests each, which is the 1–3-per-turn cost AI-5 recorded — and the counter confirmed it
+(`used 8`, read after the last turn). Two of §27DS's stated limits are therefore closed by
+observation rather than by argument: the **thousands separator** the prompt asks for is what the
+model actually writes (`8,976`, `14,928,688`), and rule 15's *total in the first sentence* is obeyed.
 A detail worth keeping for ISS-22: all four turns logged `outcome=ok`, `calls=2`, `empty=0` — no
 retry, no degraded mark and no empty completion on this model today, against the 3-in-5 defect rate
 the free tier showed on the previous one (2026-10-12).

@@ -175,25 +175,42 @@ describe('H7 production config validation (Phase 07D)', () => {
     );
   });
 
-  it('error messages name variables but never planted secret values', async () => {
+  it('error messages name variables but never planted secret values', () => {
+    // An EXPLICIT values bag, for the same reason as the "complete production config"
+    // case above: the validator's own contract is what is under test, so the
+    // developer's server/.env must not be able to change the answer. It previously
+    // could, and that is exactly how this case broke — a machine with
+    // OPENROUTER_BASE_URL and AI_MODEL_OPENROUTER set reported only the two planted
+    // keys, while CI (which has neither) also reported those two variables with the
+    // text "required by the configured AI provider \"openrouter\"", and the secret
+    // scan below then failed on the provider NAME. A test that passes locally and
+    // fails in CI is reporting the environment, not the code.
     const planted = {
       MONGODB_URI: undefined,
       JWT_SECRET: 'planted-very-secret-jwt-value-0123456789',
       AI_PROVIDER: 'openrouter',
       OPENROUTER_API_KEY: 'sk-planted-openrouter-secret', // secret-guard:allow (deliberate fixture)
+      OPENROUTER_BASE_URL: 'https://openrouter.example/api/v1',
+      AI_MODEL_OPENROUTER: 'vendor/model',
       ANTHROPIC_API_KEY: 'sk-planted-anthropic-secret', // secret-guard:allow (deliberate fixture)
       GEMINI_API_KEY: 'planted-gemini-secret',
     };
-    await withEnv(planted, () => {
-      const problems = validateProductionConfig();
-      assert.ok(problems.length > 0);
-      const text = messages(problems).join('\n');
-      for (const secret of Object.values(planted)) {
-        if (secret) assert.ok(!text.includes(secret), `message must never contain secret ${secret.slice(0, 12)}...`);
-      }
-      // Every problem names the variable that is wrong.
-      for (const p of problems) assert.ok(p.message.includes(p.variable));
-    });
+    const problems = validateProductionConfig(planted);
+    assert.ok(problems.length > 0);
+    // The secrets that must never be echoed. AI_PROVIDER is deliberately NOT in this
+    // list: it is a provider name the messages legitimately quote, not a credential.
+    const secrets = [
+      planted.JWT_SECRET,
+      planted.OPENROUTER_API_KEY,
+      planted.ANTHROPIC_API_KEY,
+      planted.GEMINI_API_KEY,
+    ];
+    const text = messages(problems).join('\n');
+    for (const secret of secrets) {
+      assert.ok(!text.includes(secret), `message must never contain secret ${secret.slice(0, 12)}...`);
+    }
+    // Every problem names the variable that is wrong.
+    for (const p of problems) assert.ok(p.message.includes(p.variable));
   });
 
   it('flags a malformed JWT_EXPIRES_IN so it fails at boot, never on the first login', async () => {

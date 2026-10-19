@@ -177,6 +177,7 @@ They are read-only against the database.
 |---|---|---|
 | `npm run cleanup:test-mongodb` | Everything in `inventoryai_test_db` — the automated tests' scratch database | ✅ Low. It is throwaway |
 | `npm run cleanup:perf` | The disposable performance tenant (and nothing else) | ✅ Low |
+| `npm run cleanup:demo-tenant` | The demo tenant created by `seed:demo-tenant` (its rows, users and business — nothing else) | ✅ Low. The Firebase identity is left in place on purpose |
 | `npm run cleanup:dev-mongodb` | **Everything, in every business, in `inventoryai_dev_db`** — your account's data included | ⚠️ **High.** Your login survives (Firebase is untouched, so you can still sign in), but everything in the app is gone |
 | `npm run cleanup:test-firebase` | **Every login** in the development Firebase project | ⚠️⚠️ **Read the next section first** |
 | `npm run cleanup:prod-mongodb`, `npm run cleanup:all-mongodb` | Real data | ⚠️⚠️ Requires a second, deliberately loud phrase: `CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA` |
@@ -194,6 +195,52 @@ commands also require the environment to be **explicitly** `development`. An uns
 is refused on purpose — *"I could not tell where this would delete"* is treated as *"refuse"*, not
 as *"probably fine"*. On this machine `server/.env` already sets it, so nothing extra is normally
 needed; if you are told the environment is not set, that is the setting being talked about.
+
+### F. A small demo tenant, for testing the preview build
+
+This is the tenant to use when you want to compare what the app SHOWS with a number you already
+know. Unlike the seeded datasets above, every figure here is fixed and printed by the command that
+creates it, so a screen that reads `112` can be checked against `112` rather than against a feeling.
+
+```bash
+# create (or reset) the demo tenant — the database must be NAMED and must be the resolved one
+DEMO_ACCOUNT_PASSWORD='<a password you choose>' SEED_CONFIRM=seed-demo-tenant \r
+  npm run seed:demo-tenant -- --database=inventoryai_dev_db
+
+# remove it
+CLEANUP_CONFIRM=cleanup:demo-tenant npm run cleanup:demo-tenant -- --database=inventoryai_dev_db
+```
+
+Sign in as **`demo-preview@example.invalid`** (the owner is `Demo Tester`). The tenant is a separate
+business, so its data never mixes with a real one; the email is on the reserved `.invalid` domain and
+can never receive mail.
+
+What it contains — and therefore what the app and the assistant must answer:
+
+| | |
+|---|---|
+| Products | **6** active, 5 with stock (the Desk Lamp deliberately has **no** inventory row) |
+| On hand | **112 units** |
+| Locations | **Demo Warehouse 75** (4 products) · **Demo Shop 30** (2) · **Demo Van 7** (1) |
+| Health | 3 healthy · 3 at or below minimum · **1 out of stock** |
+| Restock list | **Demo Desk Lamp** (out, 0 vs min 3) · **Demo Coffee Beans 1kg** (low, 4 vs 10) · **Demo Paper Cups 100pk** (low, 15 vs 20) |
+| Ledger | 9 movements, each ending exactly at the stock figure above |
+
+**Two safety differences from every other seeder, both deliberate.** It is allowed to run against
+**production**, because the preview build can only reach production — so the database must be named
+on the command line (`--database=…`) and must equal the one the process resolved; the test database
+is always refused. And the teardown removes MongoDB rows **only**: the Firebase identity is left in
+place, because deleting an identity whose MongoDB record survives is the lockout described in Part 4.
+Re-seeding simply reuses it.
+
+To target production, state the environment and the environment's database explicitly — the config
+refuses a production database from a development process:
+
+```bash
+NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \r
+  DEMO_ACCOUNT_PASSWORD='<password>' SEED_CONFIRM=seed-demo-tenant \r
+  npm run seed:demo-tenant -- --database=inventoryai_prod_db
+```
 
 ---
 

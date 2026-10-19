@@ -15979,6 +15979,70 @@ the free tier showed on the previous one (2026-10-12).
 * **Nothing here makes the assistant cheaper.** It converts a discovered-after-the-fact refusal into a
   refusal before the fact, for the operator only; the member-facing path is unchanged.
 
+# 27DU. A boot that survives a slow cluster (2026-10-20)
+
+**Server only (`src/config/db.ts` + one message in `src/config/startup.ts`). No route, permission,
+schema, dependency, session or environment-value change, and no mobile change.**
+
+## The defect, observed three times in one afternoon
+
+`connectDatabase` made **one** attempt with a 5 s `serverSelectionTimeoutMS` bound, and mongoose does
+not retry a **rejected** initial connect. On 2026-10-19 the same Atlas cluster took **15.8 s** to select
+— a figure this repository already had, because `scripts/ai-usage.mjs` stopped overriding the bound
+*"measured 2026-10-19 — the same cluster took 15.8s to select and a 5s bound failed outright"* — and
+**three separate `npm start` runs** died on it while a raw connect seconds earlier had succeeded. The
+result was an API that stayed `not ready` and answered **503 to every database request** until a person
+restarted it. The log said *"Restart once MongoDB is reachable"*, which is an instruction to the
+operator rather than behaviour of the process.
+
+## What changed
+
+* **A budget per environment, as data.** `connectBudget({ nodeEnv, testMode })` — development gets
+  **3 attempts** with a **30 s** selection bound and a 3 s pause; production, test and an unset
+  `NODE_ENV` keep **one attempt and 5 s**. `connectDatabase` takes its defaults from it and accepts
+  explicit overrides, plus an injectable `connect`, so the policy is testable without a socket.
+* **Why 30 s rather than a longer default everywhere:** production is **fail-fast by contract** — one
+  attempt, exit non-zero, Render restarts — and a longer wait would only delay that restart, so the
+  bound is raised only where the failure mode is a *dead development API* rather than a restart.
+* **`TEST_MODE` is part of the decision, and that is not a detail.** The suite runner sets `TEST_MODE`
+  and leaves `NODE_ENV` unset, so a test process reports `nodeEnv === 'development'`; without this the
+  three-attempt budget would have applied inside the suites' own `TEST_DB_MAX_ATTEMPTS` loop and turned
+  a transient blip into minutes of waiting. The first version of this increment had exactly that bug,
+  caught by a case that asserts a test process is *not* development.
+* **Every attempt says which one it was** (`connection attempt 2/3 failed (…)`), so a boot log
+  distinguishes a slow socket from a dead cluster, and the failure message now says the attempts were
+  exhausted before advising a restart.
+* Nothing else moved: the URI, the resolved `dbName` (environment separation), `bufferTimeoutMS: 1500`
+  and the existing reconnect monitoring are untouched.
+
+## Verification
+
+* `server/test/DB1-boot-retry.test.mjs` — **7 cases**, unit only, against an injected connect: the
+  budget for every environment string (`production`, `test`, `''`, `undefined`, `staging`, `prod`, and
+  `development` in three casings), **a test process is never development**, the shipped constants
+  (3 / 30 000 / 5 000), recovery on the second attempt, the numbered log lines with no connection
+  string in any of them, the **last** error being what the caller receives, a real pause between
+  attempts (25 ms asserted on a 40 ms setting), the resolved `dbName` and `bufferTimeoutMS` reaching the
+  driver, and — only in a genuine test process — that the default budget is still **one** attempt.
+* **The guard was watched failing:** the development/test exclusion was removed *and* the non-development
+  budget set to 3 in one mutation, and the budget case failed; the file was then restored
+  **byte-identical** (`cmp`) and re-ran **7/7**.
+* **A real boot, with the database unreachable** (`MONGODB_URI` pointed at a closed port, `PORT=4001`):
+  `connection attempt 1/3/2/3/3/3 failed (MongooseServerSelectionError)`, three seconds apart, then the
+  new message — and the process still listened for diagnostics, exactly as designed.
+* Server **1673 tests / 255 suites / 0 failures**, `tsc` and `eslint` clean.
+
+## Limits
+
+* **This does not make the process self-healing.** After the three attempts it still stays up and not
+  ready until restarted; mongoose will not retry a rejected initial connect, and a background reconnect
+  loop was **not** added (it would be a second, divergent connection lifecycle next to the driver's own
+  monitoring, for a development-only failure).
+* **15.8 s is one measurement.** 30 s covers it with room; a cluster that is unreachable for longer still
+  needs the restart the message names — the difference is that a *slow* cluster no longer does.
+* **The three attempts are visible as three `MongoDB connection lost` lines**, because the driver's own
+  events fire per failed attempt. Noise, not behaviour; left alone rather than silenced.
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

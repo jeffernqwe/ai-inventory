@@ -15873,6 +15873,79 @@ unchanged).
   phone could sign in (the committed scripts never print it); the temporary 60 000-product account was
   deleted after the run, and the perf tenant was otherwise untouched.
 
+# 27DT. The allowance is read before it is spent (2026-10-19)
+
+**Server tooling only (`perf:turns` + `ai:usage`). No route, permission, schema, session, dependency,
+application behaviour or environment-value change; no model call and no quota spent by the change.**
+
+## The defect, paid for twice in one afternoon
+
+`perf:turns` is the only instrument that measures a **real** assistant turn, and the provider behind it
+meters those turns against a hard daily cap. On 2026-10-19 the cap was reached in the middle of a
+device session. Two `perf:turns` questions were then sent anyway and both came back
+`429 AI_QUOTA_EXCEEDED` (`[ai] turn outcome=AI_QUOTA_EXCEEDED total=764ms providerMs=764ms calls=1`,
+then `116ms`): **the run spent requests to learn that there were none left**, and its only finding was
+the spentness itself. The provider reports the counter for free (`GET /v1/key` →
+`free_model_daily_requests`), and this repository already read it — in `npm run ai:usage` — but nowhere
+in the measurement path, and **`ai:usage` could not be asked that question alone**: it needs a log file
+(or `--db`), so the cheapest question in the toolset was the one that demanded the most.
+
+## What was added
+
+* **`shortfall(usage, needed)` in `scripts/ai-usage.mjs`** — the judgement, in one place: a run is short
+  only when the provider **said** a number and that number is below the questions selected. Everything
+  else — `NOT_CONFIGURED`, `UNREADABLE`, `SKIPPED`, a paid key that reports no free counter, a counter
+  with `remaining: null` — returns `null` and blocks nothing. **Exactly enough is not a shortfall**
+  (`<`, not `<=`), pinned as a case.
+* **`readProviderUsage` is bounded.** It had no timeout at all, so an unanswered socket held the report
+  (and now the preflight) open indefinitely. It now aborts at 15 s and reports
+  `no answer within 15000 ms` — the same contract every other failure here follows: a reading that
+  failed is a row, never a hang and never a pass.
+* **`perf:turns` reads the allowance before the first turn** and refuses with **exit 2** when the
+  shortfall is known, naming the remaining count, the limit and the window (`00:00 UTC`). The refusal
+  happens **before a session is minted**, so a refused run leaves no row behind, and it is appended to
+  the same run's output as `[turns] allowance: 0 of 50 … ; 2 question(s) selected`. `--force` overrides.
+  The `--only=` filter is now computed first, because the refusal is a function of how many questions
+  were actually selected.
+* **`npm run ai:usage -- --provider-only`** — the allowance and nothing else: no log, no database, no
+  model, no quota. The provider contract (`DEFAULT_BASE_URL`) is now exported from `ai-usage.mjs` rather
+  than copied, so the probe and the report cannot ask two different hosts about the same account.
+
+## Verification
+
+* `server/test/AI27-allowance-preflight.test.mjs` — **11 cases**, unit only: the spent day, one request
+  short of three questions, **exactly enough is allowed** and one fewer is not, three failed-reading
+  statuses that must not refuse, a paid key with no counter, a counter with `remaining: null`, zero
+  questions, the real `/v1/key` body mapping to `{used, limit, remaining}` with the masked `label` never
+  becoming a value, an **abort-aware hanging fetch** that must settle at its bound (it is the shape of
+  a hang — a stub that rejects only when aborted), and the probe's own source: it imports **this**
+  reader, reads the allowance **before** `createSessionForToken`, exits `2`, says nothing was sent, and
+  names the reset. Last, `ai-usage.mjs --provider-only --json` runs as a **child process** with an
+  empty key: exit 0, `source=not requested (--provider-only)`, `provider.status=NOT_CONFIGURED` —
+  proving the flag exists and no longer needs a log.
+* **The guard was watched failing, twice.** `remaining >= needed` mutated to `>` broke the boundary
+  case; `process.exit(2)` mutated to `process.exit(0)` broke the wiring case — **2 failures, exactly
+  those two**, and both files were then restored **byte-identical** (`cmp`) and re-ran green.
+* **Live, against the real provider and the real probe:** `npm run ai:usage -- --provider-only` printed
+  `free-model requests : 50 used of 50 · 0 remaining today (UTC day; resets 00:00 UTC)`, and
+  `npm run perf:turns -- --business=<60k tenant> --only=1,2` refused with **exit 2** and the sentence
+  above — no request reached the provider and no session row was created.
+* `server` `tsc` and `eslint` clean; full suite **1665 tests / 254 suites / 0 failures** (1654 + 11).
+
+## Limits
+
+* **The check is a floor, not a budget.** A turn with tool rounds costs **1–3** provider requests
+  (AI-5 measured 3 requests for 1 tool run), so `remaining >= questions` means the run *can* fit, not
+  that it *will*: a run can still meet a `429` mid-way and the probe still reports it per question. The
+  conservative alternative — assuming 2–3 requests per question — was rejected because it would refuse
+  runs that would have succeeded, which is a worse failure for an instrument.
+* **The reading is the account's, not the model's.** A model-specific outage or a per-minute limit is
+  invisible here; the preflight can only see the daily free-model counter.
+* **A stale counter is trusted.** If the provider's own figure lags, the probe refuses a run that would
+  have worked; `--force` is the recorded escape.
+* **Nothing here makes the assistant cheaper.** It converts a discovered-after-the-fact refusal into a
+  refusal before the fact, for the operator only; the member-facing path is unchanged.
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

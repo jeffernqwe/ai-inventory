@@ -296,6 +296,16 @@ describe('the code field', () => {
     expect(view.getByDisplayValue('123456')).toBeTruthy();
   });
 
+  it('★ declares what the field holds, so the platform can offer the emailed code', async () => {
+    const view = await mount();
+    const field = view.getByPlaceholderText('123456');
+
+    // A six-digit code cannot be recalled from memory; this declaration is what makes Android
+    // offer an autofill chip and iOS show the code from Mail above the keyboard.
+    expect(field.props.autoComplete).toBe('one-time-code');
+    expect(field.props.textContentType).toBe('oneTimeCode');
+  });
+
   it('disables Verify until a code is entered, then enables it', async () => {
     const view = await mount();
 

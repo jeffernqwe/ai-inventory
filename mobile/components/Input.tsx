@@ -71,6 +71,21 @@ export interface InputProps {
   onSubmitEditing?: TextInputProps['onSubmitEditing'];
   onBlur?: () => void;
   autoFocus?: boolean;
+  /**
+   * What this field HOLDS, so the platform's own autofill can fill it.
+   *
+   * Passed straight through rather than re-declared as a project enum: the values are React
+   * Native's (`current-password`, `new-password`, `one-time-code`, `sms-otp`, `email`, …) and a
+   * copy of the union here would be a second list to keep in step.
+   *
+   * WHY IT MATTERS FOR THE AUTH SCREENS. A six-digit code is the one field a person cannot type
+   * from memory: Android offers it as an autofill chip when the field declares `one-time-code`, and
+   * iOS shows the code from Mail above the keyboard only when `textContentType` is `oneTimeCode`.
+   * Without the declaration both platforms offer nothing, and the email has to be re-opened.
+   */
+  autoComplete?: TextInputProps['autoComplete'];
+  /** The iOS half of the same declaration — see `autoComplete` above. */
+  textContentType?: TextInputProps['textContentType'];
 }
 
 /**
@@ -99,6 +114,8 @@ export default function Input({
   onSubmitEditing,
   onBlur,
   autoFocus,
+  autoComplete,
+  textContentType,
 }: InputProps) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -165,6 +182,8 @@ export default function Input({
       maxLength={maxLength}
       returnKeyType={returnKeyType}
       onSubmitEditing={onSubmitEditing}
+      autoComplete={autoComplete}
+      textContentType={textContentType}
       onFocus={() => {
         setFocused(true);
         reportFocusToScrollView?.(inputRef.current);

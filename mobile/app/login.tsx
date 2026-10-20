@@ -286,6 +286,11 @@ export default function LoginScreen() {
         placeholder="you@company.com"
         error={fieldErrors.email}
         required
+        // What the field HOLDS, so the platform's own autofill can fill it: Android offers the
+        // saved credential, and iOS shows the password-manager suggestion above the keyboard.
+        // Without the declaration both fall back to guessing from the field's shape.
+        autoComplete="email"
+        textContentType="emailAddress"
         returnKeyType="next"
       />
       <Input
@@ -297,6 +302,11 @@ export default function LoginScreen() {
         placeholder="••••••••"
         error={fieldErrors.password}
         required
+        // `current-password` rather than `new-password`: this is the sign-in field, and the
+        // distinction is what tells a password manager to offer a saved credential instead of
+        // proposing to generate one.
+        autoComplete="current-password"
+        textContentType="password"
         returnKeyType="go"
         onSubmitEditing={submit}
       />

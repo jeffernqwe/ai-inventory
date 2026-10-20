@@ -16569,16 +16569,43 @@ password* (code, new password, confirm, the 10-minute sentence) and the server l
 **202 in 440.3 ms**. So the client, the route, the challenge write and the detached send are now measured
 through the phone, against a listener carrying the current code.
 
-**What is still owed is the inbox, and only that.** A 202 is a claim about a dispatched send, not a
-delivery, so the remaining measurement is the owner's: the six digits typed on the phone, the new
-password accepted, the old one refused, and another device's session ended. None of that is asserted
-here by inference.
+**The inbox half is now measured, by the owner, 2026-10-21.** The six-digit code arrived in the
+mailbox, the owner set the new password on the phone, and the new password then signed in without
+an error. That is the delivery half this section could not infer from a 202: **Brevo delivered a
+reset code, and the credential it authorized is the one the account now has.** The one step not
+re-run by the owner is the *old* password's refusal, which the server suite pins (`a successful reset
+leaves no usable session`, the Admin write's effect) rather than the mailbox.
+
+## The follow-up pass this exposed (2026-10-21)
+
+Two things were worth fixing once the journey worked end to end, and neither changes a server
+surface:
+
+* **The screen did not drop this device's session on success.** `reset-password.tsx` has cleared it
+  since the link flow shipped — its own comment says why: without it, *Go to sign in* reaches
+  `/login`, `/login` sees `status === 'signedIn'` and redirects into `(app)` on a session the reset
+  has already ended. The code screen made the same promise in its copy ("every device signed in to
+  this account is signed out") and its own suite's header claimed the same, but the call was missing.
+  It now clears through `clearSession` (not `signOut`, which would fire a logout with a dead token),
+  and two cases pin both halves: cleared on success, untouched when the code is refused.
+* **The six-digit field declared nothing to the platform.** Neither code screen set `autoComplete` /
+  `textContentType`, so Android offered no autofill chip and iOS showed no QuickType suggestion — the
+  one field nobody can type from memory had to be fetched by leaving the app. `Input` now passes both
+  props through, and `verify-email.tsx` and `reset-password-code.tsx` declare `one-time-code` /
+  `oneTimeCode`. The same pass gives **Login** its declarations (`email` / `emailAddress`, and
+  `current-password` / `password` — deliberately *not* `new-password`, which would ask a password
+  manager to generate a credential for an account that already exists).
+
+Mobile **80 suites / 983 tests / 0 failures** (up from 79 / 977: three new cases in the reset suite,
+one in the verify screen's, and a new `auth-field-autofill.test.tsx`), `tsc` and `eslint` clean. No
+server file was touched by the pass.
 
 ## Limits
 
-* **Not device-verified end to end.** The request half is now measured on the phone (above), and the
-  routes are deployed and probed, but nobody has typed a received code on the OPPO yet, and no real
-  Brevo message has been confirmed in an inbox through this flow.
+* **Device-verified for the request and the reset, one claim short of complete.** The request half was
+  measured on the OPPO over `adb reverse`; the delivery half is the owner's report above. What nobody
+  re-typed is the **old** password after the change, and no second device's live session was observed
+  ending — the revocation itself is pinned by the server suite, not by an observer.
 * **L-17 stays OPEN**, and now gates only the AUTH-05 hosted-link path. This flow does not need the
   console setting — which is the point — but it also does not repair it: a person holding an older
   Firebase link may still land on Firebase's hosted page, and that reset still revokes nothing.

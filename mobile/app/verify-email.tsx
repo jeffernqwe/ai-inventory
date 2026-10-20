@@ -338,6 +338,12 @@ export default function VerifyEmailScreen() {
         placeholder="123456"
         error={fieldErrors.code}
         required
+        // The same declaration the reset-code screen makes, and for the same reason: six digits
+        // read out of an email are exactly what the platform's autofill can offer — Android as an
+        // autofill chip (`one-time-code`), iOS from Mail in the QuickType bar (`oneTimeCode`) —
+        // where an undeclared field gets no suggestion at all.
+        autoComplete="one-time-code"
+        textContentType="oneTimeCode"
         returnKeyType="go"
         onSubmitEditing={submit}
       />

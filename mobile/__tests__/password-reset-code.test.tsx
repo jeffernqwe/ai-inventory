@@ -38,6 +38,7 @@ import type { ReactNode } from 'react';
 
 import ResetPasswordCodeScreen from '../app/reset-password-code';
 import { confirmPasswordResetCode, requestPasswordResetCode } from '../lib/api';
+import { useSession } from '../lib/auth';
 import { ApiError } from '../lib/client';
 import { ThemeProvider } from '../lib/theme-context';
 
@@ -59,6 +60,13 @@ jest.mock('../lib/api', () => ({
   requestPasswordResetCode: jest.fn(),
   confirmPasswordResetCode: jest.fn(),
 }));
+
+// The screen drops this device's session on success — see the `clearSession` cases below. Only
+// the hook is mocked; the rest of the auth module is unreachable from this screen.
+jest.mock('../lib/auth', () => ({ useSession: jest.fn() }));
+
+const mockedUseSession = useSession as jest.Mock;
+const mockClearSession = jest.fn(async () => {});
 
 const mockedRequestCode = requestPasswordResetCode as jest.Mock;
 const mockedConfirmCode = confirmPasswordResetCode as jest.Mock;
@@ -101,6 +109,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   for (const key of Object.keys(mockParams)) delete mockParams[key];
   mockParams.email = EMAIL;
+  mockedUseSession.mockReturnValue({ clearSession: mockClearSession });
   mockedRequestCode.mockResolvedValue({});
   mockedConfirmCode.mockResolvedValue({});
 });
@@ -197,6 +206,39 @@ describe('AUTH-06 — a correct code sets the password inside the app', () => {
     // proof that the new password works.
     await fireEvent.press(view.getByRole('button', { name: 'Go to sign in' }));
     expect(mockReplace).toHaveBeenCalledWith('/login');
+  });
+
+  it('★ drops THIS device’s session, so the login screen cannot bounce into the app', async () => {
+    // The server revoked every session, including one this phone may have held. If the client kept
+    // its stored token, *Go to sign in* would reach `/login`, which sees `signedIn` and redirects
+    // back into `(app)` on a session the reset has already ended. `reset-password.tsx` clears for
+    // the same reason; this pins that the code screen does too.
+    const view = await mount();
+    await fillAndSubmit(view);
+
+    await waitFor(() => expect(view.getByText(RESET_COMPLETED)).toBeTruthy());
+    expect(mockClearSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the session when the code is refused — a failed reset changes nothing', async () => {
+    mockedConfirmCode.mockRejectedValue(new ApiError(400, 'INVALID_PASSWORD_RESET_CODE', 'No.'));
+
+    const view = await mount();
+    await fillAndSubmit(view);
+
+    await waitFor(() => expect(mockedConfirmCode).toHaveBeenCalledTimes(1));
+    expect(mockClearSession).not.toHaveBeenCalled();
+  });
+
+  it('★ tells the platform what the code field holds, so autofill can offer the code', async () => {
+    // A six-digit code cannot be typed from memory. The declaration is the whole reason Android
+    // shows an autofill chip and iOS shows the code from Mail above the keyboard — without it,
+    // both platforms offer nothing and the person has to leave the app and copy by hand.
+    const view = await mount();
+    const field = view.getByPlaceholderText(CODE_FIELD);
+
+    expect(field.props.autoComplete).toBe('one-time-code');
+    expect(field.props.textContentType).toBe('oneTimeCode');
   });
 
   it('★ never renders the code back, so it cannot be read off the screen or a log', async () => {

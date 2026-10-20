@@ -7,6 +7,7 @@ import Banner from '../components/Banner';
 import Button from '../components/Button';
 import Input from '../components/Input';
 import { confirmPasswordResetCode, requestPasswordResetCode } from '../lib/api';
+import { useSession } from '../lib/auth';
 import { ApiError } from '../lib/client';
 import { spacing, type } from '../lib/theme';
 import type { Palette } from '../lib/theme';
@@ -98,6 +99,22 @@ export default function ResetPasswordCodeScreen() {
 
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  /**
+   * THE LOCAL SESSION IS CLEARED ON SUCCESS, and this is the same decision `reset-password.tsx`
+   * records at its own success path rather than a parallel one.
+   *
+   * The confirm revoked every session server-side, including any this device held. Leaving the
+   * client's stored token in place would make the next screen bounce: *Go to sign in* reaches
+   * `/login`, `/login` sees `status === 'signedIn'` and redirects into `(app)`, and the person is
+   * dropped into the app on a session the server has already ended — until the first request fails
+   * and signs them out. So the claim this screen makes ("every device signed in … is signed out")
+   * is made true locally too, before the person is sent anywhere.
+   *
+   * `clearSession` rather than `signOut`: `signOut` would fire `POST /api/auth/logout` with a token
+   * the reset has just killed, which can only fail — and `clearSession` is the half that actually
+   * drops what this device holds.
+   */
+  const { clearSession } = useSession();
 
   const [code, setCode] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -203,6 +220,8 @@ export default function ResetPasswordCodeScreen() {
     setFieldErrors({});
     try {
       await confirmPasswordResetCode({ email, code, newPassword, confirmPassword });
+      // Every session this device held is already dead server-side — see the note above.
+      await clearSession();
       setDone(true);
     } catch (err) {
       const fields = fieldMap(err);
@@ -246,6 +265,12 @@ export default function ResetPasswordCodeScreen() {
         placeholder="123456"
         error={fieldErrors.code}
         required
+        // THE ONE FIELD NOBODY TYPES FROM MEMORY. Declaring what it holds is what lets the
+        // platform offer the code from the notification or the mail app — `one-time-code` for
+        // Android's autofill, `oneTimeCode` for the iOS QuickType bar — instead of making the
+        // person leave the app and copy six digits by hand.
+        autoComplete="one-time-code"
+        textContentType="oneTimeCode"
       />
       <Input
         name="newPassword"

@@ -403,44 +403,19 @@ export async function nativeCurrentIdToken(): Promise<string | null> {
 // property the reset screen leans on when it keeps the code in route params for as
 // long as the screen is mounted and nowhere else.
 //
-// THE DEEP LINK IS DECLARED RATHER THAN DERIVED, because nothing in JavaScript can
-// read it at runtime: it is three build-level facts that live in `app.json`
-// (`expo.scheme`, `android.package`, `ios.bundleIdentifier`). The N-3 suite pins the
-// constants below against that file, so a scheme or package change fails a test
-// instead of silently producing a reset link the app cannot receive.
-
-/** `expo.scheme` plus the reset route. Pinned against `app.json` by the N-3 suite. */
-const PASSWORD_RESET_DEEP_LINK = 'inventoryai://reset-password';
-
-/** `android.package` / `ios.bundleIdentifier`. Pinned against `app.json` too. */
-const APP_ANDROID_PACKAGE = 'com.inventoryai.app';
-const APP_IOS_BUNDLE_ID = 'com.inventoryai.app';
-
-/**
- * Sends Firebase's own password-reset email for this address.
- *
- * WHAT THE SETTINGS ASK FIREBASE TO DO, AND WHAT IS STILL NOT KNOWN ABOUT IT. They are
- * the design authority's prescription (design §14C.4): the emailed link should return
- * control to the app carrying the one-time code rather than landing on Firebase's
- * hosted page. Whether Firebase's hosted action handler honours that for a PASSWORD
- * RESET is the open gate L-17/B-2, and nothing here may be read as having settled it.
- * If it does not, the link opens the hosted page in a browser and the code never
- * reaches this app — a question about Firebase's behaviour, not a fault in this
- * function.
- *
- * It answers `void` and throws whatever the SDK threw, exactly like the Phase B
- * operations: the classification layer above decides what a code means, and a second
- * opinion here would split that decision in two.
- */
-export async function nativeSendPasswordResetEmail(email: string): Promise<void> {
-  const { auth, instance } = requireNativeFirebase();
-  await auth.sendPasswordResetEmail(instance, email, {
-    url: PASSWORD_RESET_DEEP_LINK,
-    handleCodeInApp: true,
-    android: { packageName: APP_ANDROID_PACKAGE, installApp: true },
-    iOS: { bundleId: APP_IOS_BUNDLE_ID },
-  });
-}
+// `sendPasswordResetEmail` IS NO LONGER PART OF THIS BOUNDARY (AUTH-06, 2026-10-20).
+//
+// N-3 asked Firebase to send the reset email, first with a custom-scheme
+// `ActionCodeSettings` (refused with `auth/unauthorized-domain`) and then with no settings at
+// all, which left the link's destination to the project's email template. That template can no
+// longer be written: the console answers `EMAIL_TEMPLATE_UPDATE_NOT_ALLOWED` for every change,
+// including a Subject edit and a default authorized domain. So a reset email whose destination we
+// choose is unconfigurable, and Firebase's own destination is a browser form.
+//
+// The request is now made to this project's server, which mints a six-digit code and mails it
+// itself (AUTH-06). `sendPasswordResetEmail` is therefore REMOVED rather than left unused: a
+// permitted verb with no caller is a capability nobody reviews, and the Phase 1 guard's job is to
+// keep the set of Firebase capabilities this app can reach small enough to read.
 
 /**
  * Checks a password-reset code and resolves with the ACCOUNT'S EMAIL (N-4).

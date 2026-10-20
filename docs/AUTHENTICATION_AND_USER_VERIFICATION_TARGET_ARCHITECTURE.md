@@ -191,8 +191,8 @@ The existing MongoDB email verification field is considered migration-era duplic
 ---
 
 > **Updated 2026-10-02 (AUTH-04); provider wording updated 2026-10-04 (AUTH-04-H).** Email verification is
-a **custom 6-digit Inventory AI code delivered through the provider-agnostic mail boundary** (Brevo is a
-supported provider and was used for the live acceptance; Resend remains supported), **not** a Firebase
+a **custom 6-digit Inventory AI code delivered through the provider-agnostic mail boundary** (Brevo is the
+provider in development and production, and the one used for the live acceptance), **not** a Firebase
 verification link. Firebase remains the identity provider and
 the **authority of record** for the final `email_verified` state, which Inventory AI sets through the
 Firebase Admin SDK (`updateUser(uid, { emailVerified: true })`) **after** it has verified its own code.
@@ -208,7 +208,7 @@ The initial Owner registration flow is:
 
 1. User enters email and password.
 2. Firebase creates the authentication identity.
-3. Inventory AI sends a **6-digit verification code** to the address through the provider-agnostic mail boundary (Brevo / Resend).
+3. Inventory AI sends a **6-digit verification code** to the address through the provider-agnostic mail boundary (Brevo).
 4. User enters the code; Inventory AI verifies it and then sets Firebase's email-verification state through the Admin SDK.
 5. Mobile reloads/refreshes the Firebase user state.
 6. Backend verifies the Firebase identity and verified-email state.
@@ -539,6 +539,34 @@ Forgot Password
 Any local reset marker/bridge used during migration is an optimization only.
 
 The marker must never be the sole security mechanism.
+
+## 21.1 How the emailed link returns to the app (implemented 2026-10-20, AUTH-05)
+
+Firebase will not mail a link that opens a custom URL scheme: `ActionCodeSettings.url` must be on a domain
+listed in **Authorized domains**, and a scheme is not a domain. Asking for one is refused before any mail
+exists (`auth/unauthorized-domain`, measured on this project).
+
+So the return leg is a page on this server, and the emailed link's destination is **project
+configuration**, not something the client requests:
+
+```text
+Firebase reset email
+  → GET https://<api-host>/auth/reset?mode=resetPassword&oobCode=…&apiKey=…&lang=en
+  → inventoryai://reset-password?oobCode=…        (the app redeems it with confirmPasswordReset)
+  → the same code on Firebase's hosted page        (fallback: no app installed, or a desktop browser)
+```
+
+**Two settings make that work, and both live in the Firebase console, not in this repository:**
+
+1. **Authentication → Templates → Password reset → Customize action URL** =
+   `https://<api-host>/auth/reset`. Production's host is `ai-inventory-l1mi.onrender.com`;
+   a local development run uses the same path on `http://localhost:4000`.
+2. **Authentication → Settings → Authorized domains**: the same host must be listed.
+
+With those unset, Firebase sends its own hosted-page link and the flow still completes in a browser — the
+previous behaviour, and not a regression. The page itself (`server/src/pages/resetPasswordLink.ts`) holds
+no authority: it validates the one-time code against an allow-list, forwards it, logs neither the code nor
+the query string, and offers no destination beyond the app and the project's own hosted page.
 
 Correctness must remain dependent on Firebase credential validity/revocation and the short-lived Inventory JWT.
 
@@ -1044,8 +1072,8 @@ Implementation should proceed approximately in this dependency order. These impl
 ### AUTH-04 — Registration & Email Verification
 
 > **Updated 2026-10-02; AUTH-04-H close-out 2026-10-04.** The verification mechanism is a **custom
-> 6-digit Inventory AI code delivered through the provider-agnostic mail boundary** (Brevo is the
-> provider used for the live acceptance; Resend remains a supported provider); the Firebase
+> 6-digit Inventory AI code delivered through the provider-agnostic mail boundary** (Brevo, the
+> provider used in development and production and for the live acceptance); the Firebase
 > verification-link/email/resend flow is **superseded**. Firebase remains the authority of record for
 > the final `email_verified` state, set via the Admin SDK. See design authority **§14C.10**.
 
@@ -1053,7 +1081,7 @@ Implementation should proceed approximately in this dependency order. These impl
 * verification gate
 * server-side provisioning
 * duplicate/concurrency safety
-* **custom 6-digit verification code (CSPRNG) delivered through the provider-agnostic mail boundary (Brevo / Resend)**
+* **custom 6-digit verification code (CSPRNG) delivered through the provider-agnostic mail boundary (Brevo)**
 * **Firebase Admin `updateUser(uid, { emailVerified: true })` as the final verification state**
 * **UID-bound, HMAC-protected challenge with unique `{uid}` + TTL `{expiresAt}` indexes**
 * **pre-session Firebase-authenticated endpoints `POST /api/auth/email-verification/request` and `.../confirm`**

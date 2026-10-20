@@ -99,7 +99,21 @@ export default function RegisterScreen() {
     setFieldErrors({});
     try {
       // Register issues no token — signUp logs the new owner in afterwards.
-      await signUp({ businessName, name, email, password });
+      //
+      // THE ADDRESS IS TRIMMED ON THE WAY OUT, exactly as `login.tsx` already trims it.
+      // A trailing space is invisible on a phone keyboard, and in a Firebase-configured
+      // build it reached `createUserWithEmailAndPassword` verbatim — either creating an
+      // identity under a padded address or coming back as `auth/invalid-email` for an
+      // address the person can see is correct. The two name fields are trimmed for the
+      // same reason (`Business name is required` above already judged the trimmed value,
+      // so sending the raw one made the validation and the request disagree). The
+      // password is deliberately NOT trimmed: spaces are legitimate password characters.
+      await signUp({
+        businessName: businessName.trim(),
+        name: name.trim(),
+        email: email.trim(),
+        password,
+      });
     } catch (err) {
       const fields = fieldMap(err);
       if (Object.keys(fields).length) setFieldErrors(fields);

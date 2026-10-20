@@ -251,6 +251,71 @@ export function validateResetPassword(body: Body) {
 }
 
 // ---------------------------------------------------------------------------
+// Password reset by emailed code (AUTH-06)
+// ---------------------------------------------------------------------------
+
+/**
+ * The request payload: one address, read through the existing email rules.
+ *
+ * A separate validator from `validateForgotPassword` even though it does the same thing today,
+ * because the two routes are different contracts: if the legacy flow's shape ever changes, the
+ * new flow must not change with it by accident. Every other body key is INERT — the returned
+ * object holds only `email`, so a `userId`, `businessId` or `role` in the body has no variable to
+ * travel through.
+ */
+export function validatePasswordResetCodeRequest(body: Body) {
+  const problems = [];
+  const email = normalizeEmail(body?.email);
+  problems.push(...emailProblems(email));
+  return { problems, email };
+}
+
+/**
+ * The confirmation payload.
+ *
+ * `confirmPassword` is an HTTP-LAYER field and is handled here on purpose: checking it before the
+ * service is called is what guarantees a mistyped confirmation cannot spend one of the challenge's
+ * five attempts. It is deliberately ABSENT from the returned object, so no caller has a variable
+ * to forward or persist.
+ *
+ * THE CODE IS SHAPE-CHECKED HERE, which is a deliberate divergence from
+ * `validateEmailVerificationConfirm` (where a present but wrong code is never shape-checked). The
+ * reasoning that makes it right here: an attempt on this endpoint is a guess at a credential that
+ * can take over an account, and the client's field already strips non-digits and caps at six, so a
+ * shorter value is an UNFINISHED ENTRY rather than a guess. Refusing it as a field problem costs
+ * nothing secret — it says nothing about whether the address exists — while charging it an attempt
+ * would make a typo indistinguishable from a wrong code.
+ *
+ * `newPassword` is returned UNTRIMMED: trimming would silently change the credential the person
+ * typed. Its problems are re-labelled `newPassword`, exactly as validateChangePassword does.
+ */
+export function validatePasswordResetCodeConfirm(body: Body) {
+  const problems = [];
+  const email = normalizeEmail(body?.email);
+  problems.push(...emailProblems(email));
+
+  const rawCode = typeof body?.code === 'string' ? body.code.trim() : '';
+  if (!rawCode) {
+    problems.push({ field: 'code', message: 'code is required' });
+  } else if (!/^\d{6}$/.test(rawCode)) {
+    problems.push({ field: 'code', message: 'code must be the 6-digit code from your email' });
+  }
+
+  problems.push(
+    ...passwordProblems(body?.newPassword).map((p) => ({ ...p, field: 'newPassword' }))
+  );
+
+  const confirm = body?.confirmPassword;
+  if (typeof confirm !== 'string' || confirm.length === 0) {
+    problems.push({ field: 'confirmPassword', message: 'confirmPassword is required' });
+  } else if (confirm !== body?.newPassword) {
+    problems.push({ field: 'confirmPassword', message: 'confirmPassword must match newPassword' });
+  }
+
+  return { problems, email, code: rawCode, newPassword: body?.newPassword };
+}
+
+// ---------------------------------------------------------------------------
 // Firebase authentication (Phase 32C)
 // ---------------------------------------------------------------------------
 
@@ -1230,6 +1295,8 @@ export default {
   validateLogout,
   validateForgotPassword,
   validateResetPassword,
+  validatePasswordResetCodeRequest,
+  validatePasswordResetCodeConfirm,
   validateUserCreate,
   validateUserUpdate,
   USER_STATUSES,

@@ -101,6 +101,10 @@ function verifyingSession(overrides: Record<string, unknown> = {}): Record<strin
     cancelFirebaseOnboarding,
     verificationEntryError: null,
     clearVerificationEntryError,
+    // Explicit, so a test that forgets it exercises the ordinary journey rather than
+    // relying on `undefined` being falsy.
+    firebaseRegistrationRequired: false,
+    verificationCodeIssuedAt: null,
     ...overrides,
   };
 }
@@ -178,6 +182,19 @@ describe('the verify screen', () => {
 
     expect(mockRedirect).toHaveBeenCalledWith('/login');
     expect(confirmVerificationCode).not.toHaveBeenCalled();
+  });
+
+  it('★ hands a verified identity with no tenant to the registration screen', async () => {
+    // FOUND ON A DEVICE. Confirmation succeeds after a cold start (the registration
+    // details are in-memory), the exchange refuses with REGISTRATION_REQUIRED, the
+    // registration route is armed — and this screen used to keep rendering its own form
+    // with the refusal's sentence and no control that goes anywhere, so retrying Verify
+    // only repeated the exchange. The armed route is now followed, as Login already does.
+    mockedUseSession.mockReturnValue(verifyingSession({ firebaseRegistrationRequired: true }));
+
+    await mount();
+
+    expect(mockRedirect).toHaveBeenCalledWith('/register-firebase');
   });
 });
 
@@ -339,7 +356,7 @@ describe('verify', () => {
       ])
     );
     const view = await mount();
-    await fireEvent.changeText(view.getByPlaceholderText('123456'), '12345');
+    await fireEvent.changeText(view.getByPlaceholderText('123456'), '123456');
 
     await fireEvent.press(view.getByRole('button', { name: VERIFY }));
 

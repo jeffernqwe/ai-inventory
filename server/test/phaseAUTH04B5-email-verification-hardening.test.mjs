@@ -25,7 +25,7 @@
 //
 // COMMENTS ARE STRIPPED BEFORE ANY ASSERTION. These modules document the
 // forbidden thing they must not do — `confirm.ts` explains why it never compares
-// `emailHmac`, `resendProvider.ts` calls out the `console.error` it will not make
+// `emailHmac`, the mail transport calls out the `console.error` it will not make
 // — so a guard searching the raw text would fail on its own documentation. Every
 // check below therefore runs against comment-stripped CODE, and the two checks
 // that could be satisfied by a string literal strip literals as well.
@@ -81,7 +81,7 @@ const MAIL_SURFACE = [
   'services/mail/mailConfig.ts',
   'services/mail/mailErrors.ts',
   'services/mail/providers/index.ts',
-  'services/mail/providers/resendProvider.ts',
+  'services/mail/providers/brevoProvider.ts',
 ];
 
 /** The Firebase boundary modules AUTH-04 relies on for the email-verified write. */

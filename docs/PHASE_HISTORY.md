@@ -323,13 +323,16 @@ the application reaches through three functions — `isMailConfigured()`, `mailP
 imports. `mailConfig.ts` reads `MAIL_PROVIDER`, `MAIL_FROM`, `PASSWORD_RESET_URL`, `MAIL_APP_NAME` and
 `MAIL_REQUEST_TIMEOUT_MS` lazily at call time, so tests can switch providers between files and a
 misconfiguration can never stop the server booting — password recovery simply answers a clean 503
-until an operator fixes it. The Resend API key is deliberately **not** a field of that object:
-`mailConfig()` is the value most likely to be spread into a log line, so `resendProvider.ts` reads the
-key itself. `providers/index.ts` holds the registry (`resend` is the only builtin, requiring
-`RESEND_API_KEY` + `MAIL_FROM`) and `selectProvider()` throws `MailNotConfigured` for an empty,
-unknown or under-configured provider. Provider failures become `MailDeliveryError` carrying safe facts
-only — an HTTP status and, when the provider names one, an error name matching `^[a-z0-9_]{1,64}$` —
-and Resend's free-text `message` is read and **discarded** rather than relayed: it can echo submitted
+until an operator fixes it. The provider API key is deliberately **not** a field of that object:
+`mailConfig()` is the value most likely to be spread into a log line, so the transport module reads the
+key itself. `providers/index.ts` holds the registry (`resend` was the only builtin at the time, requiring
+`RESEND_API_KEY` + `MAIL_FROM`; a `brevo` builtin was added afterwards, and **the Resend transport was
+removed on 2026-10-20, leaving Brevo as the only built-in and the transport used in development and
+production today**) and `selectProvider()` throws `MailNotConfigured` for
+an empty, unknown or under-configured provider. Provider failures become `MailDeliveryError` carrying
+safe facts only — an HTTP status and, when the provider names one, an error name matching
+`^[a-z0-9_]{1,64}$` — and the provider's free-text `message` is read and **discarded** rather than
+relayed: it can echo submitted
 field values, and one of those fields is the reset URL, which is a live credential. `MAIL_NOT_CONFIGURED`
 and `MAIL_UNAVAILABLE` are the only two codes, so a delivery failure can never be mistaken for an
 authentication one, and the layer logs nothing at all. The template is a pure function with no

@@ -106,7 +106,7 @@ const RATE_CODE = 'PASSWORD_RESET_RATE_LIMITED';
 
 const MAIL_ENV_KEYS = [
   'MAIL_PROVIDER',
-  'RESEND_API_KEY',
+  'BREVO_API_KEY',
   'MAIL_FROM',
   'MAIL_APP_NAME',
   'MAIL_REQUEST_TIMEOUT_MS',
@@ -1097,7 +1097,7 @@ dbSuite('Phase 26B-3 — password recovery over HTTP and a real database', dbOk,
       // No provider at all.
       { PASSWORD_RESET_URL: RESET_BASE },
       // A built-in provider missing its own required configuration.
-      { MAIL_PROVIDER: 'resend', MAIL_FROM: 'Inventory AI <no-reply@inventory-ai.test>', PASSWORD_RESET_URL: RESET_BASE },
+      { MAIL_PROVIDER: 'brevo', MAIL_FROM: 'Inventory AI <no-reply@inventory-ai.test>', PASSWORD_RESET_URL: RESET_BASE },
       // A provider configured, but nowhere to send the user.
       { MAIL_PROVIDER: FAKE_MAIL_PROVIDER, MAIL_FROM: 'x@y.test' },
       // A provider nobody supports.
@@ -1117,10 +1117,10 @@ dbSuite('Phase 26B-3 — password recovery over HTTP and a real database', dbOk,
         const serialized = JSON.stringify(res.json);
         for (const leak of [
           'MAIL_PROVIDER',
+          'BREVO_API_KEY',
           'MAIL_FROM',
-          'RESEND_API_KEY',
           'PASSWORD_RESET_URL',
-          'resend',
+          'brevo',
           'postmark',
           'missing required configuration',
           'is not supported',

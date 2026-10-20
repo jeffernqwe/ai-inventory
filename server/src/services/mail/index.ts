@@ -4,8 +4,9 @@
  * This is the only mail module the rest of the application imports. Callers —
  * today nothing, later services/passwordReset.service.js — depend on this
  * interface and on the error classes re-exported here, and on nothing else. They
- * never learn which provider is configured, and only resendProvider.js knows that
- * Resend exists.
+ * never learn which provider is configured: each transport module is the only
+ * place that knows the upstream it talks to. Brevo is the transport configured in
+ * development and production.
  *
  * The four exported functions are deliberately small:
  *
@@ -40,6 +41,7 @@ import { mailConfig } from './mailConfig.ts';
 import { selectProvider } from './providers/index.ts';
 import { passwordResetEmail } from './templates/passwordReset.ts';
 import { emailVerificationEmail } from './templates/emailVerification.ts';
+import { passwordResetCodeEmail } from './templates/passwordResetCode.ts';
 import { MailNotConfigured, MailDeliveryError, isMailError } from './mailErrors.ts';
 
 export { MailNotConfigured, MailDeliveryError, isMailError };
@@ -136,9 +138,54 @@ export async function sendEmailVerificationEmail({
   return { id: result?.id ?? null, provider: provider.name };
 }
 
+/**
+ * Everything `sendPasswordResetCodeEmail` needs. `to` and `code` are required: the caller has
+ * already resolved the recipient and minted the code, so neither has a sensible default.
+ * `expiresInMinutes` is optional because the lifetime is AUTH-06 flow policy and the template
+ * already defaults to it.
+ */
+interface PasswordResetCodeEmailRequest {
+  to: string;
+  code: string;
+  expiresInMinutes?: number;
+}
+
+/**
+ * Renders the AUTH-06 password-reset code email and sends it through the configured provider.
+ *
+ * AWAITED BY ITS CALLER? No — the opposite of `sendEmailVerificationEmail` and the same as Phase
+ * 28 B1's reset link: this function returns a promise, but the reset request path deliberately
+ * does NOT await it, because a delivery failure must not become an observable difference between
+ * a known and an unknown address. The caller attaches its rejection handler in the same
+ * synchronous turn.
+ *
+ * CONFIGURATION FAILURE (D-B2, reused). A missing or unusable mail configuration throws
+ * `MailNotConfigured` from `selectProvider()` before any template is rendered. This layer emits
+ * no `PASSWORD_RESET_CODE_*` code: the HTTP surface maps the condition to its own fixed copy, so
+ * no environment-variable name, provider name or transport detail reaches an unauthenticated
+ * caller.
+ *
+ * Nothing here logs: a code is a live credential, and a log aggregator is not a place it may ever
+ * appear.
+ */
+export async function sendPasswordResetCodeEmail({
+  to,
+  code,
+  expiresInMinutes,
+}: PasswordResetCodeEmailRequest) {
+  const provider = selectProvider();
+  const { appName } = mailConfig();
+  const { subject, text, html } = passwordResetCodeEmail({ code, expiresInMinutes, appName });
+
+  const result = await provider.send({ to, subject, text, html });
+
+  return { id: result?.id ?? null, provider: provider.name };
+}
+
 export default {
   isMailConfigured,
   mailProviderName,
   sendPasswordResetEmail,
   sendEmailVerificationEmail,
+  sendPasswordResetCodeEmail,
 };

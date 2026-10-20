@@ -5,6 +5,9 @@ An AI-powered inventory management system for Android and iOS.
 - **Mobile:** React Native + Expo + Expo Router (TypeScript)
 - **Backend:** Node.js + Express (TypeScript, ES Modules)
 - **Database (Phase 02+):** MongoDB Atlas + Mongoose
+- **Email (Phase 26B / AUTH-04):** transactional mail through a provider-agnostic server boundary —
+  **Brevo** in development and production — for password-reset links and the custom 6-digit
+  email-verification codes
 - **AI (Phase 06):** read-only assistant via a provider abstraction
 
 > **Phase discipline:** This project is built in strict phases (see
@@ -191,7 +194,7 @@ default and needs no dashboard entry. Verify the current values in the Render da
 | `OPENROUTER_API_KEY`, `OPENROUTER_BASE_URL`, `AI_MODEL_OPENROUTER` | **required when `AI_PROVIDER=openrouter`** | the model has no default |
 | `FIREBASE_SERVICE_ACCOUNT_JSON` — or the three-variable form | **all-or-nothing** | a partially supplied service account fails fast; none at all = Firebase disabled |
 | `TRUST_PROXY` | **effectively required behind Render** | set to `1`; see below |
-| `MAIL_PROVIDER`, `MAIL_FROM`, `RESEND_API_KEY`, `BREVO_API_KEY`, `PASSWORD_RESET_URL` | optional | `MAIL_PROVIDER` selects the transport (`resend` or `brevo`, each with its own key). Missing configuration **disables password recovery only** (`forgot-password` answers 503) — the server still starts and serves every other feature. The mail layer is provider-agnostic and both Brevo and Resend are supported (Brevo was used for the AUTH-04-G live acceptance); no Firebase reset flow is implemented |
+| `MAIL_PROVIDER`, `MAIL_FROM`, `BREVO_API_KEY`, `PASSWORD_RESET_URL` | optional | **Brevo** is the mail provider in development and production and the **only built-in transport** (`MAIL_PROVIDER=brevo`). Missing configuration **disables password recovery only** (`forgot-password` answers 503) — the server still starts and serves every other feature. The mail layer keeps a provider-agnostic boundary, but no second transport ships; no Firebase reset flow is implemented |
 | `AUTH_*_RATE_LIMIT_*` — **twenty-two** variables (eleven window/limit pairs) | optional | the documented defaults are the production values; the count is taken from code, not estimated. AUTH-03 added the per-IP session-renewal pair (`AUTH_SESSION_RENEW_RATE_LIMIT_WINDOW_MS` / `AUTH_SESSION_RENEW_RATE_LIMIT_MAX`, default 15 min / 120) and AUTH-04 the two per-IP email-verification pairs (`AUTH_EMAIL_VERIFICATION_REQUEST_*` / `AUTH_EMAIL_VERIFICATION_CONFIRM_*`, both 15 min / 30). `TRUST_PROXY` and `JWT_SECRET` / `JWT_EXPIRES_IN` / `JWT_ISSUER` / `JWT_AUDIENCE` are listed separately above and are **not** `AUTH_*` variables |
 | `CORS_ORIGINS`, `JSON_BODY_LIMIT`, `SHUTDOWN_TIMEOUT_MS`, `LOG_REQUESTS` | optional | the documented defaults are the production values |
 
@@ -747,7 +750,7 @@ Phase 07 (testing + production hardening) and Phase 08 (owner-directed hardening
 - **Phase 26B — Password Recovery (Email Reset):** implemented, verified, and committed (`5a46781`
   for the mail service; `9900e9a` for the token store, recovery service and HTTP surface; documentation
   close-out `e95c785`) — the first way back into an account without an operator. A provider-agnostic
-  mail layer with a Resend transport (`server/src/services/mail/`) sits behind three functions, and
+  mail layer (`server/src/services/mail/`, Brevo being the transport used in every environment) sits behind three functions, and
   `POST /api/auth/forgot-password` and `POST /api/auth/reset-password` were added as two **public**,
   rate-limited routes. Reset tokens are single-use and stored only as a SHA-256 digest — the raw
   32-byte value is emailed and never persisted — expire after 30 minutes, are claimed by one conditional
@@ -1196,7 +1199,7 @@ live test) then verified the Android app/OS half and found the `token`-vs-`oobCo
 `?token=` while a Firebase link carries `?oobCode=`, so a native link currently dead-ends on
 *"Link incomplete"*; the **Firebase email side remains UNVERIFIED** (no inbox or Console access), so the
 gate stays open and **iOS is entirely unverified**. **Nothing
-  was removed:** the 26B/27 endpoints, the reset-token model and the Resend mail layer all remain — the
+  was removed:** the 26B/27 endpoints, the reset-token model and the mail layer all remain — the
   record documents a later retirement, it does not perform one. Full record:
   `docs/superpowers/specs/2026-09-18-firebase-auth-design.md` **§14C**; security record
   `docs/AUTH_SECURITY_MASTER_CHECKLIST.md` **§39**; phase record `docs/DEVELOPMENT_ROADMAP.md` **§27U**.
@@ -1213,7 +1216,7 @@ gate stays open and **iOS is entirely unverified**. **Nothing
   flow** (`auth/user-not-found` and `auth/user-disabled` answer *sent*, because with Firebase's
   enumeration protection off those codes identify an address), and **a failed redemption can never fall
   back** to the server endpoint, because an action code is a Firebase credential. The 26B/27 routes,
-  controller, service, reset-token model, Resend mail layer and their suites are **untouched** — removing
+  controller, service, reset-token model, mail layer and their suites are **untouched** — removing
   them is N-7. **No server, permission, schema, dependency, environment, EAS or Firebase Console change.**
   Verified by **2 new mobile suites / 36 cases** (mobile **36 suites / 509 tests**, `tsc` and `eslint`
   clean). **★ An on-device run against the live Firebase project was then performed** (the F2.9
@@ -1231,8 +1234,8 @@ gate stays open and **iOS is entirely unverified**. **Nothing
 
 > **AUTH-04 supersession (2026-10-02; status updated 2026-10-04).** The entry below chose a **Firebase
 > verification link + native resend** mechanism. That mechanism is **superseded**: email verification is a
-> **custom 6-digit Inventory AI code delivered through the provider-agnostic mail boundary** (Brevo is a
-> supported provider and was used for the live acceptance; Resend remains supported), and Firebase's
+> **custom 6-digit Inventory AI code delivered through the provider-agnostic mail boundary** (Brevo, the
+> provider used in development and production and for the live acceptance), and Firebase's
 > `email_verified` state is set through the Admin SDK after a successful confirmation. The registration
 > ordering gate, the Firebase-UID-only join, MongoDB authority and the unmodified `requireAuth` are
 > preserved, and the server-side `EMAIL_NOT_VERIFIED` enforcement remains. This entry is preserved as the

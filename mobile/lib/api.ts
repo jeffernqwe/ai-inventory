@@ -165,6 +165,67 @@ export function resetPassword({ token, newPassword, confirmPassword }: ResetPass
 }
 
 // ---------------------------------------------------------------------------
+// Password reset by emailed code (AUTH-06)
+// ---------------------------------------------------------------------------
+// BOTH WRAPPERS ARE SESSIONLESS BY DESIGN, like the two above: the person resetting a
+// password has no usable one, which is why neither route requires auth and why neither
+// wrapper passes a token.
+//
+// THE REQUEST WRAPPER'S OUTCOME IS NOT READ BY THE SCREEN. The server answers one 202 and
+// one sentence whether or not the address exists, so rendering the body would be the one
+// place the client could undo that guarantee — the screens use their own constant.
+//
+// The code and the new password travel in the BODY, never in a URL, so neither can reach
+// an access log or a `Referer` header.
+
+/**
+ * POST /api/auth/password-reset/code -> { message } (202). PUBLIC.
+ *
+ * 503 `PASSWORD_RESET_CODE_NOT_CONFIGURED` when the deployment cannot run the flow (no
+ * code pepper, or no mail transport).
+ *
+ * A RESEND INSIDE THE COOLDOWN IS ANOTHER 202, AND IT SENDS NOTHING — it is not a 429. A
+ * 429 issued only when a challenge row exists would answer "this address has an account", so
+ * the wait is silent by design (design §6.1). The 429 this call can still raise comes from the
+ * route limiter (`PASSWORD_RESET_RATE_LIMITED`), which is the same for every address and does
+ * carry `Retry-After`; the screen honours whichever number arrives.
+ */
+export function requestPasswordResetCode(email: string): Promise<ApiResponse> {
+  return apiFetch('/api/auth/password-reset/code', { method: 'POST', body: { email } });
+}
+
+export interface PasswordResetCodePayload {
+  email: string;
+  code: string;
+  newPassword: string;
+  confirmPassword: string;
+}
+
+/**
+ * POST /api/auth/password-reset/confirm -> { message } (200). PUBLIC.
+ *
+ * `confirmPassword` is checked server-side BEFORE the code is spent, so the field name must
+ * match the server's exactly or a mistyped confirmation could cost the person the code.
+ * 400 `INVALID_PASSWORD_RESET_CODE` for a wrong, expired, used or exhausted code — one code
+ * for all four, deliberately; 400 `VALIDATION_ERROR` with `fields` when the password breaks
+ * the policy or the code is not six digits.
+ *
+ * A SUCCESSFUL RESET ISSUES NO SESSION. The server ends every existing one and the person
+ * signs in with the password they just chose.
+ */
+export function confirmPasswordResetCode({
+  email,
+  code,
+  newPassword,
+  confirmPassword,
+}: PasswordResetCodePayload): Promise<ApiResponse> {
+  return apiFetch('/api/auth/password-reset/confirm', {
+    method: 'POST',
+    body: { email, code, newPassword, confirmPassword },
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Firebase authentication (Phase 32C backend / 32E mobile)
 // ---------------------------------------------------------------------------
 // BOTH WRAPPERS ARE TOKENLESS, and that is structural rather than incidental.

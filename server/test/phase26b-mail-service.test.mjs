@@ -1,8 +1,11 @@
 // Phase 26B-1 — the mail service abstraction.
 //
-// This suite pins the layer that password recovery will be built on, before any
-// password-recovery code exists: the provider registry, the Resend transport, the
-// template and the error contract.
+// This suite pins the layer that password recovery was built on: the provider
+// registry, the built-in transport selection, the template and the error contract.
+// The BUILT-IN transport it exercises is **Brevo, the provider in use**; the wire
+// format itself is pinned in phase-brevo-provider.test.mjs, so this file keeps to
+// the parts that are provider-agnostic plus the one thing that must never come back:
+// `resend` is no longer a built-in (see "provider registry" below).
 //
 // Two properties are worth more than the rest of the file, and both are asserted
 // against a deliberately hostile upstream:
@@ -10,11 +13,11 @@
 //   * Nothing that could be replayed may leave the layer. The request body carries
 //     the password-reset URL, which carries the raw single-use token. A provider
 //     error, an exception or a log line is therefore treated as an exfiltration
-//     surface: the tests make Resend answer with a body that echoes the API key,
-//     the reset URL and the token, and require all three to be absent from the
+//     surface: the tests make the upstream answer with a body that echoes the API
+//     key, the reset URL and the token, and require all three to be absent from the
 //     thrown error, from every own property of it and from anything written to the
 //     console.
-//   * The transport is exercised without a network. The wire-format cases stub
+//   * The transport is exercised without a network. The provider cases stub
 //     globalThis.fetch, because testing the real endpoint would mean sending real
 //     mail — and because the endpoint is a module constant, not configuration.
 //     Provider selection is exercised through the registry seam with a fake.
@@ -45,7 +48,6 @@ import {
   mailProviderRequiredEnv,
   selectProvider,
 } from '../src/services/mail/providers/index.ts';
-import { createResendProvider } from '../src/services/mail/providers/resendProvider.ts';
 import { passwordResetEmail } from '../src/services/mail/templates/passwordReset.ts';
 import {
   FAKE_MAIL_PROVIDER,
@@ -60,21 +62,20 @@ import {
 
 const RESET_TOKEN = 'Kq7Qw3vT9xR2mB6nP1sL4dH8jF5gZ0cY';
 const RESET_URL = `https://app.inventory-ai.test/reset-password?token=${RESET_TOKEN}`;
-const API_KEY = 're_phase26b_test_key_000111222333'; // secret-guard:allow (deliberate fixture)
+const API_KEY = 'xkeysib-phase26b-test-key-000111222333'; // secret-guard:allow (deliberate fixture)
 const MAIL_FROM = 'Inventory AI <no-reply@inventory-ai.test>';
 const RECIPIENT = 'owner@inventory-ai.test';
-const RESEND_ENDPOINT = 'https://api.resend.com/emails';
 
 const MAIL_ENV_KEYS = [
   'MAIL_PROVIDER',
-  'RESEND_API_KEY',
+  'BREVO_API_KEY',
   'MAIL_FROM',
   'MAIL_APP_NAME',
   'MAIL_REQUEST_TIMEOUT_MS',
   'PASSWORD_RESET_URL',
 ];
 
-const RESEND_CONFIGURED = { MAIL_PROVIDER: 'resend', RESEND_API_KEY: API_KEY, MAIL_FROM };
+const BREVO_CONFIGURED = { MAIL_PROVIDER: 'brevo', BREVO_API_KEY: API_KEY, MAIL_FROM };
 
 /**
  * Runs `fn` with exactly the named mail env vars set — every other mail var is
@@ -113,20 +114,6 @@ function jsonResponse(status, body) {
   return { ok: status >= 200 && status < 300, status, json: async () => body };
 }
 
-function nonJsonResponse(status) {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    json: async () => {
-      throw new SyntaxError('Unexpected token < in JSON at position 0');
-    },
-  };
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 async function captureError(fn) {
   try {
     await fn();
@@ -144,11 +131,6 @@ function captureErrorSync(fn) {
     return err;
   }
   return assert.fail('expected the call to throw, but it returned');
-}
-
-/** The whole error surface a caller or a crash reporter could reach. */
-function serialiseError(err) {
-  return [err.message, err.stack, JSON.stringify(err, Object.getOwnPropertyNames(err))].join('\n');
 }
 
 function safeStringify(value) {
@@ -186,14 +168,30 @@ function sendReset(overrides = {}) {
   });
 }
 
-unitSuite('Phase 26B-1 — mail service (registry, Resend transport, template)', () => {
+unitSuite('Phase 26B-1 — mail service (registry, built-in transport, template)', () => {
   // ---------------------------------------------------------------------------
   // Provider registry
   // ---------------------------------------------------------------------------
   describe('provider registry', () => {
-    it('declares resend as a built-in with exactly the two required variables', () => {
-      assert.deepEqual(mailProviderRequiredEnv('resend'), ['RESEND_API_KEY', 'MAIL_FROM']);
-      assert.deepEqual(mailProviderRequiredEnv('  ReSend  '), ['RESEND_API_KEY', 'MAIL_FROM']);
+    it('declares brevo as a built-in with exactly the two required variables', () => {
+      assert.deepEqual(mailProviderRequiredEnv('brevo'), ['BREVO_API_KEY', 'MAIL_FROM']);
+      assert.deepEqual(mailProviderRequiredEnv('  BreVo  '), ['BREVO_API_KEY', 'MAIL_FROM']);
+    });
+
+    it('★ no longer declares resend as a built-in', async () => {
+      // THE REMOVAL GUARD. The Resend transport was deleted along with its key, its
+      // registry entry and its documentation; this fails if any of it comes back,
+      // because a re-added built-in would need a credential nobody configures and would
+      // present an operator with a provider the project does not use.
+      assert.equal(mailProviderRequiredEnv('resend'), null);
+      assert.equal(mailProviderRequiredEnv('  ReSend  '), null);
+
+      await withMailEnv({ MAIL_PROVIDER: 'resend', MAIL_FROM }, () => {
+        const err = captureErrorSync(() => selectProvider());
+        assert.ok(err instanceof MailNotConfigured);
+        assert.match(err.message, /not supported/i);
+        assert.match(err.message, /brevo/, 'the refusal must name the provider that IS supported');
+      });
     });
 
     it('reports no requirements for an unknown provider name', () => {
@@ -214,12 +212,12 @@ unitSuite('Phase 26B-1 — mail service (registry, Resend transport, template)',
       }
     });
 
-    it('refuses to select resend while any required variable is missing or blank', async () => {
+    it('refuses to select brevo while any required variable is missing or blank', async () => {
       const incomplete = [
-        { MAIL_PROVIDER: 'resend' },
-        { MAIL_PROVIDER: 'resend', RESEND_API_KEY: API_KEY },
-        { MAIL_PROVIDER: 'resend', MAIL_FROM },
-        { MAIL_PROVIDER: 'resend', RESEND_API_KEY: '   ', MAIL_FROM },
+        { MAIL_PROVIDER: 'brevo' },
+        { MAIL_PROVIDER: 'brevo', BREVO_API_KEY: API_KEY },
+        { MAIL_PROVIDER: 'brevo', MAIL_FROM },
+        { MAIL_PROVIDER: 'brevo', BREVO_API_KEY: '   ', MAIL_FROM },
       ];
       for (const vars of incomplete) {
         await withMailEnv(vars, () => {
@@ -229,34 +227,34 @@ unitSuite('Phase 26B-1 — mail service (registry, Resend transport, template)',
 
       // The message names the missing variable so an operator can act on it, and
       // names no value.
-      await withMailEnv({ MAIL_PROVIDER: 'resend', RESEND_API_KEY: API_KEY }, () => {
+      await withMailEnv({ MAIL_PROVIDER: 'brevo', BREVO_API_KEY: API_KEY }, () => {
         assert.throws(() => selectProvider(), /MAIL_FROM/);
       });
-      await withMailEnv({ MAIL_PROVIDER: 'resend', MAIL_FROM }, () => {
-        assert.throws(() => selectProvider(), /RESEND_API_KEY/);
+      await withMailEnv({ MAIL_PROVIDER: 'brevo', MAIL_FROM }, () => {
+        assert.throws(() => selectProvider(), /BREVO_API_KEY/);
       });
     });
 
     it('refuses an unsupported provider name instead of silently doing nothing', async () => {
-      await withMailEnv({ ...RESEND_CONFIGURED, MAIL_PROVIDER: 'sendgrid' }, () => {
+      await withMailEnv({ ...BREVO_CONFIGURED, MAIL_PROVIDER: 'sendgrid' }, () => {
         assert.throws(() => selectProvider(), /sendgrid/);
       });
     });
 
-    it('selects resend once every required variable is present', async () => {
-      await withMailEnv(RESEND_CONFIGURED, () => {
+    it('selects brevo once every required variable is present', async () => {
+      await withMailEnv(BREVO_CONFIGURED, () => {
         const provider = selectProvider();
-        assert.equal(provider.name, 'resend');
+        assert.equal(provider.name, 'brevo');
         assert.equal(typeof provider.send, 'function');
       });
     });
 
     it('reads the environment lazily, so a change is observed without reloading', async () => {
-      await withMailEnv({ ...RESEND_CONFIGURED, MAIL_APP_NAME: 'First', PASSWORD_RESET_URL: 'https://one.test/reset' }, () => {
-        assert.equal(mailConfig().provider, 'resend');
+      await withMailEnv({ ...BREVO_CONFIGURED, MAIL_APP_NAME: 'First', PASSWORD_RESET_URL: 'https://one.test/reset' }, () => {
+        assert.equal(mailConfig().provider, 'brevo');
         assert.equal(mailConfig().appName, 'First');
         assert.equal(mailConfig().resetUrl, 'https://one.test/reset');
-        assert.equal(mailProviderName(), 'resend');
+        assert.equal(mailProviderName(), 'brevo');
         assert.equal(isMailConfigured(), true);
 
         process.env.MAIL_PROVIDER = 'something-else';
@@ -288,7 +286,7 @@ unitSuite('Phase 26B-1 — mail service (registry, Resend transport, template)',
     });
 
     it('keeps the API key out of the shared configuration object', async () => {
-      await withMailEnv(RESEND_CONFIGURED, () => {
+      await withMailEnv(BREVO_CONFIGURED, () => {
         const config = mailConfig();
         assert.equal(Object.values(config).includes(API_KEY), false);
         assert.ok(!JSON.stringify(config).includes(API_KEY), 'the shared config must not carry the key');
@@ -321,276 +319,17 @@ unitSuite('Phase 26B-1 — mail service (registry, Resend transport, template)',
 
       resetMailProviders();
       assert.deepEqual(registeredProviders(), []);
-      assert.deepEqual(mailProviderRequiredEnv('resend'), ['RESEND_API_KEY', 'MAIL_FROM']);
+      assert.deepEqual(mailProviderRequiredEnv('brevo'), ['BREVO_API_KEY', 'MAIL_FROM']);
 
       await withMailEnv({ MAIL_PROVIDER: FAKE_MAIL_PROVIDER }, () => {
         assert.throws(() => selectProvider(), MailNotConfigured);
       });
-      await withMailEnv(RESEND_CONFIGURED, () => {
-        assert.equal(selectProvider().name, 'resend');
+      await withMailEnv(BREVO_CONFIGURED, () => {
+        assert.equal(selectProvider().name, 'brevo');
       });
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // Resend transport
-  // ---------------------------------------------------------------------------
-  describe('resend transport', () => {
-    it('posts the documented wire format to the Resend endpoint and returns the message id', async () => {
-      const calls = [];
-      let result;
-      await withFetchStub(
-        async (url, options) => {
-          calls.push({ url, options });
-          return jsonResponse(200, { id: 'msg_2f9c1a' });
-        },
-        async () => {
-          await withMailEnv(RESEND_CONFIGURED, async () => {
-            result = await sendReset({ expiresInMinutes: 30 });
-          });
-        },
-      );
-
-      assert.equal(calls.length, 1, 'exactly one HTTP request may be made');
-      const { url, options } = calls[0];
-      assert.equal(url, RESEND_ENDPOINT);
-      assert.equal(options.method, 'POST');
-      assert.deepEqual(Object.keys(options.headers).sort(), ['accept', 'authorization', 'content-type']);
-      assert.equal(options.headers.authorization, `Bearer ${API_KEY}`);
-      assert.equal(options.headers['content-type'], 'application/json');
-      assert.ok(options.signal, 'the request must carry an AbortSignal');
-
-      const body = JSON.parse(options.body);
-      assert.deepEqual(Object.keys(body).sort(), ['from', 'html', 'subject', 'text', 'to']);
-      assert.equal(body.from, MAIL_FROM);
-      assert.deepEqual(body.to, [RECIPIENT]);
-      assert.equal(body.subject, 'Reset your Inventory AI password');
-      assert.ok(body.text.includes(RESET_URL), 'the reset link must reach the transport');
-      assert.ok(body.html.includes(RESET_URL), 'the reset link must reach the transport');
-
-      assert.deepEqual(result, { id: 'msg_2f9c1a', provider: 'resend' });
-    });
-
-    it('renders the subject with the configured app name', async () => {
-      let options = null;
-      await withFetchStub(
-        async (_url, opts) => {
-          options = opts;
-          return jsonResponse(200, { id: 'msg_app' });
-        },
-        async () => {
-          await withMailEnv(
-            { ...RESEND_CONFIGURED, MAIL_APP_NAME: 'Cebu Traders', MAIL_REQUEST_TIMEOUT_MS: '4000' },
-            async () => {
-              await sendReset();
-            },
-          );
-        },
-      );
-      assert.equal(JSON.parse(options.body).subject, 'Reset your Cebu Traders password');
-    });
-
-    it('turns a non-2xx response into a MailDeliveryError that leaks nothing', async () => {
-      const hostile = {
-        statusCode: 422,
-        name: 'validation_error',
-        // A real upstream is free to echo what we sent. Nothing from this body may
-        // survive into the error, so the test makes it echo every secret at once.
-        message: `rejected request for ${RECIPIENT} with key ${API_KEY} and link ${RESET_URL} (token ${RESET_TOKEN})`,
-      };
-
-      let err;
-      await withFetchStub(
-        async () => jsonResponse(422, hostile),
-        async () => {
-          await withMailEnv(RESEND_CONFIGURED, async () => {
-            err = await captureError(() => sendReset());
-          });
-        },
-      );
-
-      assert.ok(err instanceof MailDeliveryError);
-      assert.equal(err.name, 'MailDeliveryError');
-      assert.equal(err.code, MAIL_UNAVAILABLE);
-      assert.ok(isMailError(err));
-      assert.match(err.message, /422/);
-      assert.match(err.message, /validation_error/);
-
-      const surface = serialiseError(err);
-      for (const secret of [API_KEY, RESET_URL, RESET_TOKEN, RECIPIENT, 'rejected request for']) {
-        assert.ok(!surface.includes(secret), `a thrown error must never carry ${secret}`);
-      }
-
-      const own = Object.getOwnPropertyNames(err).filter(
-        (key) => !['stack', 'message', 'name', 'code'].includes(key),
-      );
-      assert.deepEqual(own, [], 'no payload, upstream body or transport error may be attached');
-      assert.equal(err.cause, undefined);
-    });
-
-    it('accepts a non-2xx error body that is not JSON, without relaying it', async () => {
-      let err;
-      await withFetchStub(
-        async () => nonJsonResponse(502),
-        async () => {
-          await withMailEnv(RESEND_CONFIGURED, async () => {
-            err = await captureError(() => sendReset());
-          });
-        },
-      );
-      assert.ok(err instanceof MailDeliveryError);
-      assert.match(err.message, /502/);
-      assert.ok(!serialiseError(err).includes('Unexpected token'));
-    });
-
-    it('ignores an upstream error name that is not a safe identifier', async () => {
-      let err;
-      await withFetchStub(
-        async () => jsonResponse(500, { name: `bad name ${RESET_TOKEN}` }),
-        async () => {
-          await withMailEnv(RESEND_CONFIGURED, async () => {
-            err = await captureError(() => sendReset());
-          });
-        },
-      );
-      assert.ok(err instanceof MailDeliveryError);
-      assert.equal(err.message, 'The email service rejected the message (HTTP 500).');
-      assert.ok(!serialiseError(err).includes(RESET_TOKEN));
-    });
-
-    it('treats a 2xx that carries no usable message id as a delivery error', async () => {
-      for (const response of [
-        jsonResponse(200, {}),
-        jsonResponse(200, { id: 123 }),
-        jsonResponse(200, { id: '   ' }),
-        jsonResponse(200, null),
-        nonJsonResponse(200),
-      ]) {
-        let err;
-        await withFetchStub(
-          async () => response,
-          async () => {
-            await withMailEnv(RESEND_CONFIGURED, async () => {
-              err = await captureError(() => sendReset());
-            });
-          },
-        );
-        assert.ok(err instanceof MailDeliveryError);
-        assert.match(err.message, /unexpected response/);
-      }
-    });
-
-    it('turns a network failure into a MailDeliveryError', async () => {
-      let err;
-      await withFetchStub(
-        async () => {
-          throw new TypeError('fetch failed');
-        },
-        async () => {
-          await withMailEnv(RESEND_CONFIGURED, async () => {
-            err = await captureError(() => sendReset());
-          });
-        },
-      );
-      assert.ok(err instanceof MailDeliveryError);
-      assert.equal(err.code, MAIL_UNAVAILABLE);
-      assert.match(err.message, /could not be reached/);
-      assert.equal(err.cause, undefined);
-      assert.ok(!serialiseError(err).includes('fetch failed'), 'the transport error is not relayed');
-    });
-
-    it(
-      'aborts a request that exceeds MAIL_REQUEST_TIMEOUT_MS and reports a delivery error',
-      { timeout: 5000 },
-      async () => {
-        let aborted = false;
-        let err;
-        await withFetchStub(
-          (_url, options) =>
-            new Promise((_resolve, reject) => {
-              options.signal.addEventListener('abort', () => {
-                aborted = true;
-                const abort = new Error('The operation was aborted.');
-                abort.name = 'AbortError';
-                reject(abort);
-              });
-            }),
-          async () => {
-            await withMailEnv({ ...RESEND_CONFIGURED, MAIL_REQUEST_TIMEOUT_MS: '20' }, async () => {
-              err = await captureError(() => sendReset());
-            });
-          },
-        );
-        assert.equal(aborted, true, 'the in-flight request must be aborted when the timeout elapses');
-        assert.ok(err instanceof MailDeliveryError);
-        assert.match(err.message, /too long/i);
-      },
-    );
-
-    it('clears the request timeout once a successful send settles', async () => {
-      let signal = null;
-      await withFetchStub(
-        async (_url, options) => {
-          signal = options.signal;
-          return jsonResponse(200, { id: 'msg_fast' });
-        },
-        async () => {
-          await withMailEnv({ ...RESEND_CONFIGURED, MAIL_REQUEST_TIMEOUT_MS: '20' }, async () => {
-            const result = await sendReset();
-            assert.equal(result.id, 'msg_fast');
-          });
-        },
-      );
-
-      assert.ok(signal, 'the provider must hand an AbortSignal to fetch');
-      assert.equal(signal.aborted, false);
-      await sleep(60);
-      assert.equal(signal.aborted, false, 'the timeout timer must be cleared when the request settles');
-    });
-
-    it('clears the request timeout on the failure path too', async () => {
-      let signal = null;
-      await withFetchStub(
-        async (_url, options) => {
-          signal = options.signal;
-          throw new TypeError('fetch failed');
-        },
-        async () => {
-          await withMailEnv({ ...RESEND_CONFIGURED, MAIL_REQUEST_TIMEOUT_MS: '20' }, async () => {
-            const err = await captureError(() => sendReset());
-            assert.ok(err instanceof MailDeliveryError);
-          });
-        },
-      );
-
-      await sleep(60);
-      assert.equal(signal.aborted, false, 'the timeout timer must be cleared when the request fails');
-    });
-
-    it('refuses to send when its own configuration disappears, without touching the network', async () => {
-      const provider = createResendProvider();
-      const payload = { to: RECIPIENT, subject: 's', text: 't', html: 'h' };
-
-      await withFetchStub(
-        async () => {
-          throw new Error('the network must not be reached');
-        },
-        async () => {
-          await withMailEnv({ RESEND_API_KEY: API_KEY }, async () => {
-            const err = await captureError(() => provider.send(payload));
-            assert.ok(err instanceof MailNotConfigured);
-            assert.match(err.message, /MAIL_FROM/);
-            assert.ok(!err.message.includes(API_KEY));
-          });
-          await withMailEnv({ MAIL_FROM }, async () => {
-            const err = await captureError(() => provider.send(payload));
-            assert.ok(err instanceof MailNotConfigured);
-            assert.match(err.message, /RESEND_API_KEY/);
-          });
-        },
-      );
-    });
-  });
 
   // ---------------------------------------------------------------------------
   // Template
@@ -683,15 +422,15 @@ unitSuite('Phase 26B-1 — mail service (registry, Resend transport, template)',
   describe('service boundary', () => {
     it('answers isMailConfigured() false when disabled, false when incomplete, true when complete', async () => {
       await withMailEnv({}, () => assert.equal(isMailConfigured(), false));
-      await withMailEnv({ MAIL_PROVIDER: 'resend' }, () => assert.equal(isMailConfigured(), false));
-      await withMailEnv({ MAIL_PROVIDER: 'resend', RESEND_API_KEY: API_KEY }, () =>
+      await withMailEnv({ MAIL_PROVIDER: 'brevo' }, () => assert.equal(isMailConfigured(), false));
+      await withMailEnv({ MAIL_PROVIDER: 'brevo', BREVO_API_KEY: API_KEY }, () =>
         assert.equal(isMailConfigured(), false),
       );
-      await withMailEnv({ MAIL_PROVIDER: 'resend', MAIL_FROM }, () => assert.equal(isMailConfigured(), false));
-      await withMailEnv({ MAIL_PROVIDER: 'nope', RESEND_API_KEY: API_KEY, MAIL_FROM }, () =>
+      await withMailEnv({ MAIL_PROVIDER: 'brevo', MAIL_FROM }, () => assert.equal(isMailConfigured(), false));
+      await withMailEnv({ MAIL_PROVIDER: 'nope', BREVO_API_KEY: API_KEY, MAIL_FROM }, () =>
         assert.equal(isMailConfigured(), false),
       );
-      await withMailEnv(RESEND_CONFIGURED, () => assert.equal(isMailConfigured(), true));
+      await withMailEnv(BREVO_CONFIGURED, () => assert.equal(isMailConfigured(), true));
     });
 
     it('reports a sending attempt while mail is disabled as MailNotConfigured, never a delivery error', async () => {
@@ -774,18 +513,21 @@ unitSuite('Phase 26B-1 — mail service (registry, Resend transport, template)',
     it('writes nothing to the console on success or on any failure path', async () => {
       const logged = await captureConsole(async () => {
         await withFetchStub(
-          async () => jsonResponse(200, { id: 'msg_quiet' }),
+          // Brevo's success shape: a `messageId`, not Resend's `id`.
+          async () => jsonResponse(201, { messageId: 'msg_quiet' }),
           async () => {
-            await withMailEnv(RESEND_CONFIGURED, async () => {
+            await withMailEnv(BREVO_CONFIGURED, async () => {
               await sendReset();
             });
           },
         );
 
+        // A hostile upstream: the body names itself safely AND echoes the key and the
+        // reset URL in its free-text `message`, which must never be relayed.
         await withFetchStub(
-          async () => jsonResponse(500, { name: 'application_error', message: `key ${API_KEY} link ${RESET_URL}` }),
+          async () => jsonResponse(400, { code: 'invalid_parameter', message: `key ${API_KEY} link ${RESET_URL}` }),
           async () => {
-            await withMailEnv(RESEND_CONFIGURED, async () => {
+            await withMailEnv(BREVO_CONFIGURED, async () => {
               await captureError(() => sendReset());
             });
           },
@@ -796,7 +538,7 @@ unitSuite('Phase 26B-1 — mail service (registry, Resend transport, template)',
             throw new TypeError('fetch failed');
           },
           async () => {
-            await withMailEnv(RESEND_CONFIGURED, async () => {
+            await withMailEnv(BREVO_CONFIGURED, async () => {
               await captureError(() => sendReset());
             });
           },

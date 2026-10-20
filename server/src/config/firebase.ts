@@ -139,7 +139,7 @@ function decodeServiceAccountJson(raw: unknown): Record<string, unknown> | null 
  * Messages name the VARIABLE only. No value, and no part of a value, is ever
  * included — including on a JSON parse failure, where a parser's own message can
  * quote the input it rejected (the same reasoning as the mail layer discarding
- * Resend's free-text error).
+ * a mail provider's free-text error).
  */
 export function serviceAccountProblems(
   values: Record<string, string | undefined> = process.env

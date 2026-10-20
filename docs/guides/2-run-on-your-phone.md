@@ -138,7 +138,7 @@ account exists. That server says so the moment it starts:
 ```text
 [config] integrations mail=off firebase=on emailVerification=off ai=on(openrouter)
 [config] warning: email verification is ENABLED but mail is not configured: … Set MAIL_PROVIDER,
-MAIL_FROM and the selected provider key (RESEND_API_KEY or BREVO_API_KEY) on this host.
+MAIL_FROM and BREVO_API_KEY on this host.
 ```
 
 One line tells you what is switched on; the warning under it tells you what that costs and which

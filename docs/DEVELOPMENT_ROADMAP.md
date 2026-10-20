@@ -2524,8 +2524,11 @@ authenticated API consumer that does not already hold the reset token.
 `server/src/services/mail/` is a provider-agnostic boundary that the rest of the application reaches
 through exactly three functions — `isMailConfigured()`, `mailProviderName()` and
 `sendPasswordResetEmail({ to, resetUrl, expiresInMinutes })` — and it is the only mail module anything
-imports. Callers never learn which provider is configured; only `resendProvider.js` knows that Resend
-exists.
+imports. Callers never learn which provider is configured; each transport module is the only place that
+knows its upstream — at 26B there was one (`resendProvider.js`), and **a `brevo` transport was added
+later; the Resend transport was then removed on 2026-10-20, leaving Brevo as the only built-in and the
+provider used in development and production** (see the dated *Mail provider consolidation* record that
+follows the AUTH-04 section below).
 
 - **Configuration** (`mailConfig.js`) reads `MAIL_PROVIDER`, `MAIL_FROM`, `PASSWORD_RESET_URL`,
   `MAIL_APP_NAME` and `MAIL_REQUEST_TIMEOUT_MS` **lazily at call time**, the same pattern as
@@ -5265,15 +5268,15 @@ configured in the Firebase console. **No secret value is recorded anywhere in th
 ## The one genuinely open item — and what is deliberately NOT decided
 
 Password recovery is **disabled in production** because the Render service carries none of
-`MAIL_PROVIDER`, `MAIL_FROM`, `RESEND_API_KEY` or `PASSWORD_RESET_URL`. That is the designed
+`MAIL_PROVIDER`, `MAIL_FROM`, `BREVO_API_KEY` or `PASSWORD_RESET_URL`. That is the designed
 "not configured" state rather than a defect: `POST /api/auth/forgot-password` correctly answers a fixed
 503 `MAIL_NOT_CONFIGURED`, and **the server still boots and serves every other feature** — mail missing
-disables recovery only. Two things must **not** be read into this: **Resend is still the implemented,
-supported transport and was not removed**, and **Firebase-based password recovery has not been
-implemented.**
+disables recovery only. Two things must **not** be read into this: **the provider-agnostic mail layer is
+still implemented, with Brevo as the transport in every environment, and was not removed**, and
+**Firebase-based password recovery has not been implemented.**
 
 **The production reset architecture is undecided, and this record deliberately does not decide it.**
-Choosing between the shipped Resend flow and a Firebase-based reset requires a separate **read-only
+Choosing between the shipped Inventory AI reset flow and a Firebase-based reset requires a separate **read-only
 audit** first, so **no `PASSWORD_RESET_URL` value is proposed or pre-decided here.** Phase 27's
 `inventoryai://reset-password` mobile custom scheme exists and works, but whether a future decision
 reuses it is part of that audit. **Nothing was configured, enabled or changed.**
@@ -5351,8 +5354,8 @@ carry the rule: **`.easignore` replaces rather than extends `.gitignore`**.
 - `docs/DEVELOPMENT_ROADMAP.md` §27T, `docs/AUTH_SECURITY_MASTER_CHECKLIST.md` §38 and `README.md` —
   **second pass, after `a95a461`**: the two ignore-boundary decisions advanced from open to
   **DONE / VERIFIED**, the stale "no ignore file was changed" statement corrected, the `AUTH_*` count
-  corrected to **sixteen** (code-verified), and the password-recovery wording corrected so that Resend
-  is not implied to be removed, Firebase reset is not implied to be implemented, and no
+  corrected to **sixteen** (code-verified), and the password-recovery wording corrected so that the mail
+  layer is not implied to be removed, Firebase reset is not implied to be implemented, and no
   `PASSWORD_RESET_URL` value is pre-decided. Original audit wording is preserved and marked superseded.
 - No historical record, snapshot or test-count figure was rewritten, and no file was deleted. In
   particular §27J's Phase 32G text still says the `production` profile holds the placeholder: that is a
@@ -5393,7 +5396,7 @@ main app, and Google users are verified **according to Firebase's signed `email_
 rather than because the provider is Google (**L-6, L-7**); the **Inventory AI JWT + server session
 remain**, and Firebase does not replace backend authorization (**L-8**); **MongoDB remains
 authoritative** for `businessId`, `role`, `status`, permissions, business lifecycle and tenant isolation
-(**L-9**); legacy bcrypt login/register (**L-10**), the custom reset tokens + endpoints + **Resend**
+(**L-9**); legacy bcrypt login/register (**L-10**), the custom reset tokens + endpoints + mail
 infrastructure (**L-11**), admin-created password accounts (**L-12**) and the Inventory-specific
 link/unlink lifecycle (**L-13**) are to be retired or re-scoped; a **credential-change revocation
 bridge** is required before native recovery or change-password ships (**L-14/L-15/L-16**); the
@@ -5533,7 +5536,7 @@ already records.
 
 **Mobile only. No server file, no route, no permission, no schema, no dependency, no environment
 variable, no EAS configuration and no Firebase Console setting was changed.** The existing custom
-recovery stack — both routes, the controller, the service, the reset-token model, the Resend mail layer
+recovery stack — both routes, the controller, the service, the reset-token model, the mail layer
 and their suites — is **untouched and still works**; N-3 adds the Firebase path beside it, and N-7 is the
 phase that removes the other one.
 
@@ -5633,8 +5636,8 @@ dumps were removed.
 **N-1** this decision record → **N-2** the action-link live test (first, because it can invalidate the
 mobile half of the plan) → **N-3** mobile Firebase-native recovery, additive → **N-4** the revocation
 bridge → **N-5** native change-password + email verification → **N-6** retire the legacy password path
-→ **N-7** retire the custom recovery stack + the **entire mail layer** (Resend's only production
-consumer is password recovery) → **N-8** re-scope the identity lifecycle → **N-9** invitation-based
+→ **N-7** retire the custom recovery stack + the **entire mail layer** (password recovery is its only
+production consumer) → **N-8** re-scope the identity lifecycle → **N-9** invitation-based
 onboarding → **N-10** final verification. **Add before remove**, so no capability is briefly absent.
 
 **★ Two sequencing constraints that break real users if ignored.**
@@ -5715,7 +5718,7 @@ changed** — and no test count is claimed or advanced by this phase.
   direction recorded.
 - `README.md` — the phase list gains this entry.
 - **No historical record, snapshot, test-count figure or phase section was rewritten**, and **no file was
-  deleted**. The §14.1 guard, the 26B/27 endpoints, the reset-token model and the Resend mail layer all
+  deleted**. The §14.1 guard, the 26B/27 endpoints, the reset-token model and the mail layer all
   remain exactly as they shipped; the design documents a later retirement, it does not perform one.
 
 ---
@@ -6020,7 +6023,7 @@ record, and no secret value is recorded. It supersedes the Firebase verification
 ## What changed
 
 Email verification moves from **Firebase's own verification email/link plus native resend** to a
-**custom 6-digit Inventory AI verification code delivered through the provider-agnostic mail boundary (Brevo / Resend)**, with Firebase Admin
+**custom 6-digit Inventory AI verification code delivered through the provider-agnostic mail boundary (Brevo)**, with Firebase Admin
 `updateUser(uid, { emailVerified: true })` setting the final Firebase verification state. Firebase
 remains the identity provider; MongoDB remains the application authority; `requireAuth` is unchanged;
 the Inventory JWT/session is unchanged; Firebase UID remains the only join key and email is never a
@@ -6050,9 +6053,9 @@ no client-controlled uid/email/userId/businessId/role. Error codes are recorded 
 gate on 2026-10-04 (Brevo)**; **AUTH-04-H** is this documentation close-out. The custom 6-digit flow is
 the shipped mechanism and the Firebase verification-link flow is no longer the current path.
 
-**Brevo / Resend.** The AUTH-04 delivery path runs through the provider-agnostic mail boundary. **Brevo
-is a supported provider and was the provider used for the AUTH-04-G live acceptance; Resend remains a
-supported provider.** `MAIL_PROVIDER` selects between them; `server/.env.example` documents both.
+**Brevo.** The AUTH-04 delivery path runs through the provider-agnostic mail boundary, and **Brevo is
+the provider used in development and production and the one used for the AUTH-04-G live acceptance**.
+`MAIL_PROVIDER` names it and `server/.env.example` documents `BREVO_API_KEY` as the credential.
 
 **AUTH-04-G live acceptance (2026-10-04, Brevo).** Safe, non-secret evidence: request **HTTP 200** with
 the exact success envelope; Brevo **`sent`** → **`delivered`**; confirmation **HTTP 200** with
@@ -6074,6 +6077,95 @@ automatic sign-in, exchange or session restoration**.
 `docs/AUTHENTICATION_AND_USER_VERIFICATION_TARGET_ARCHITECTURE.md` (§6, §7, §44),
 `server/.env.example` (`EMAIL_VERIFICATION_CODE_PEPPER` name added). **Also reconciled by AUTH-04-H (2026-10-04):**
 `CLAUDE.md`, `README.md`.
+
+---
+
+## Password recovery — the blocked reset link, and the hosted fallback (2026-10-20)
+
+**The defect, measured on a real account.** A fresh registration and its six-digit verification code succeeded
+end to end; the first real **Forgot password** attempt then failed with *"Unable to send the reset link.
+Please try again."* The dev-only diagnostic the screen already renders named the cause exactly:
+
+```
+Diagnostic (dev only) — firebase: auth/unauthorized-domain
+```
+
+**Root cause.** `nativeSendPasswordResetEmail` passed `ActionCodeSettings.url =
+inventoryai://reset-password` with `handleCodeInApp: true`. Firebase Authentication validates that URL's
+**domain** against the project's Authorized domains, and **a custom scheme is not a domain** — it cannot be
+added to that list. The SDK therefore refuses the request *before generating any mail*: no reset link was
+created, nothing reached Brevo or Firebase's mailer, and the mailbox was correctly empty. The failure was
+classified as unknown, so it fell through to the generic "try again" sentence — advice that can never work,
+because the identical request is refused identically. Registration and verification were unaffected because
+they do not use `ActionCodeSettings`; the Brevo path was never involved.
+
+**The fix (mobile only, two modules).** The request now **asks for Firebase's own hosted link** when — and only
+when — the first shape is refused for a reason that proves nothing was sent. `nativeSendPasswordResetEmail`
+gained `{ deepLink: false }`, which calls the SDK with **no `ActionCodeSettings` at all**, so the emailed link
+is the project's ordinary hosted action page on an authorized domain. `sendFirebasePasswordResetEmail`
+retries once for the blocked-link family (`authorized-domain`, `continue-uri`, `invalid-domain`) and never for
+any other failure — a network fault or quota error may already have reached Firebase, and a blind retry there
+could deliver two reset emails for one request. If both shapes are refused the person is told the truth
+(*"Password reset is not available right now. Contact your administrator."*) instead of being sent round a
+retry loop. The user-visible success state is **byte-identical**: one uniform sentence, no detail about which
+link was mailed, and no account-existence signal — the retry is about the URL, never the address.
+
+**Device-verified 2026-10-20.** With the same throwaway address that previously produced the error, the screen
+now reaches *Check your email*; the first (deep-link) attempt is refused as before and the hosted retry is
+accepted by the live project. **The delivery half is the owner's live test** — a real Gmail reset is the next
+step, and the email link will open Firebase's hosted page, not the app.
+
+**Recorded consequence, not glossed.** Because the emailed link lands on the hosted page, the app's own
+`?oobCode=` reset screen (and the N-4 recovery marker it writes) is **not** reached by this flow, so a reset
+performed there does not call the credential-change bridge and other sessions are not revoked by it — the
+gap already recorded as **D2/OD-9**, now relevant because the hosted page is what runs. Making the in-app
+flow work requires an **https continue URL on an authorized domain** plus app-link handling, which is a
+configuration-and-build task, not a client edit; the deep-link shape is retained for exactly that day.
+
+**Verification.** Mobile **78 suites / 980 tests / 0 failures** (one new case for each blocked-link code,
+both-forms-refused, no-fallback-on-ambiguous-failure, and no-fallback-on-success), `tsc` and `eslint` clean;
+the frozen-module hash for `lib/firebase-auth.ts` re-frozen with the change written next to it. No server
+file, route, permission, schema, dependency, environment variable or EAS setting changed.
+
+---
+
+## Mail provider consolidation (2026-10-20) — the Resend transport removed
+
+**Server and documentation only. No route, permission, role grant, session, schema, index, environment
+name that is still in use, dependency, EAS configuration or mobile file changed**, and no mail capability
+was added or removed.
+
+**What changed.** `server/src/services/mail/providers/resendProvider.ts` was **deleted** — 149 lines whose
+only consumers were its own registry entry and its own tests. The registry's `BUILTINS` table now holds
+**`brevo` alone**; `mailProviderRequiredEnv('resend')` answers `null` and `MAIL_PROVIDER=resend` is refused
+as an unsupported provider (the refusal names Brevo, so the message is actionable). `RESEND_API_KEY` left
+`server/.env.example`, `mobile/scripts/check-build-env.mjs`'s server-owned-name guard, the deployment
+warning text and every test's environment scrub list. **Brevo is the transport in use and was never
+touched** — its provider module, key variable, sender parsing and suite are unchanged, and the one
+behavioural edit is that `deploymentNotes()` now tells an operator to set `MAIL_PROVIDER=brevo`,
+`MAIL_FROM` and `BREVO_API_KEY` instead of offering a choice.
+
+**Why this is safe rather than cosmetic.** The transport was reachable only by setting a variable no
+environment sets, so nothing in development or production could be sending through it. Removing it
+eliminates a second wire format, a second error shape and a second credential name that no test run and
+no deployment exercised — the class of path that rots silently and is then trusted during an incident.
+
+**Coverage moved, not lost.** The ten transport tests that pinned Resend's wire format went with the
+module; everything provider-agnostic in `phase26b-mail-service.test.mjs` (registry, selection, template,
+error contract, console silence, fake-provider seam) stayed. Two **removal guards** were added — one in
+that suite and one in `phase-brevo-provider.test.mjs` — which fail if `resend` is ever re-registered,
+re-documented or made selectable again. The directive scan in `phase26b-password-recovery.test.mjs` was
+re-pointed from `RESEND_`/`api.resend.com` to `BREVO_`/`api.brevo.com`, so it now asserts the property it
+was always about: the recovery service knows no provider internals.
+
+**Historical records were not rewritten.** The 26B entries above still describe the Resend transport that
+shipped at the time, with a note recording its removal; the design authority's §2.8 and AD-16 now name
+Brevo as the only built-in.
+
+**Verification.** Server **993 unit tests / 227 suites / 0 failures** (down 10, exactly the deleted
+transport cases), the DB recovery suite **31 pass / 1 skip / 0 fail**, `tsc` and `eslint` clean on both
+sides, both module-graph checks clean (440 modules). **Not device-verified** — no application path
+changed, and the device-verified AUTH-04 walkthrough of 2026-10-20 ran on these sources.
 
 ---
 
@@ -7826,7 +7918,7 @@ change is `mobile/.env`, which is git-ignored (see below).
 | Host tooling | `node v26.10.0` — **corrected 2026-10-12 (§27AY, F-43): this does NOT match `.nvmrc`, which pins `24`**, and `server/package.json` declares `engines.node: ">=24.0.0"`, so the run used a Node major ahead of CI's; `adb 1.0.41`, `scrcpy 4.1`, `npx expo --version` → `57.0.27` |
 | Device | OPPO `CPH1969`, Android 11 (SDK 30), serial `PV4DDMIZZLTCIVSK` |
 | `adb devices` | **`unauthorized`** on first inspection — the USB-debugging prompt had not been accepted. It reached `device` state only after the owner tapped it. (The runbook's own troubleshooting table already names this state and its fix.) |
-| `server/.env` | Complete — `PORT`, `MONGODB_URI`, `JWT_SECRET`, `AI_PROVIDER`, `OPENROUTER_*`, Firebase Admin, `MAIL_PROVIDER`, `RESEND_API_KEY`, `BREVO_API_KEY`, `MAIL_FROM`, `EMAIL_VERIFICATION_CODE_PEPPER`. The backend starts and reports `db: connected`. |
+| `server/.env` | Complete — `PORT`, `MONGODB_URI`, `JWT_SECRET`, `AI_PROVIDER`, `OPENROUTER_*`, Firebase Admin, `MAIL_PROVIDER`, `RESEND_API_KEY`, `BREVO_API_KEY`, `MAIL_FROM`, `EMAIL_VERIFICATION_CODE_PEPPER`. The backend starts and reports `db: connected`. (This is what the file held on that date; **Brevo is the mail provider in use** — see the current-state mail table in `README.md`.) |
 | `mobile/.env` | `EXPO_PUBLIC_API_URL=http://192.168.1.4:4000`, and the laptop's LAN IPv4 turned out to be exactly `192.168.1.4` — the committed default matched this network. |
 | Dev client on the phone | **None.** `adb shell cmd package list packages | grep inventory` was empty — the F2.9 build is no longer on this device, so the whole client had to be reinstalled before any device work could begin. |
 
@@ -16198,6 +16290,250 @@ Firebase identity remains (by design); one command recreates the tenant, and the
   in §27BG/§27DT are untouched by this run.
 * **The demo identity survives teardown** — deliberate, but it means a Firebase user exists with no
   MongoDB account until the tenant is recreated.
+
+# 27DX. The reset email's link comes back into the app (2026-10-20)
+
+**AUTH-05. One new public server route and the page it serves, one mobile request simplified. No
+permission, schema, session, dependency, environment variable or EAS change.** It fixes the one thing the
+owner's live test found once the reset email could finally be sent: **the mail arrives and the password
+change works, but the link opens the browser**, so the app's own reset screen — and the N-4 recovery
+marker it writes — is never reached.
+
+## Why Firebase could not simply be asked to open the app
+
+The client used to pass `ActionCodeSettings` with `url: 'inventoryai://reset-password'` and
+`handleCodeInApp: true`. Firebase validates that URL against the project's **Authorized domains**, and a
+custom scheme is not a domain: on this project the send was refused outright with
+`auth/unauthorized-domain` and **no mail was generated at all** (measured 2026-10-20). The previous fix
+for that — a one-time retry with no settings — produced a working email whose link lands on Firebase's
+hosted page, which is exactly the behaviour the owner reported.
+
+Neither shape can open an app. **What can is an HTTPS page that hands the code over**, because an HTTPS
+page on an authorized domain is something Firebase *will* mail a link to.
+
+## What changed
+
+* **`server/src/pages/resetPasswordLink.ts`** — the page, as a pure renderer. It accepts
+  `?mode=resetPassword&oobCode=…` (the four parameters Firebase appends are `mode`, `oobCode`,
+  `apiKey`, `lang`; confirmed against a real link generated by this project's Admin SDK) and forwards the
+  code to `inventoryai://reset-password?oobCode=…`. The code must match an **allow-list**
+  (`[A-Za-z0-9_.-]{1,512}`) or the link is answered as unusable — refused, not escaped and forwarded.
+  The only navigation targets are constants built on the server, so a crafted `continueUrl` cannot turn it
+  into an open redirect. The inline script and style are authorized by **CSP hash computed from the bytes
+  served**, and every response is `no-store`, `no-referrer`, `noindex`, `nosniff`. On the unusable-link
+  page the deep link points at the app's own request screen (`inventoryai://forgot-password`).
+* **`server/src/routes/authAction.routes.ts`**, mounted at `/auth` in `app.ts` — deliberately **outside
+  `/api`**, because this is an HTML page read by a phone's browser, not a JSON endpoint. It is public for
+  the reason recovery is public, it performs no I/O, and it can therefore not add a failure mode to
+  account recovery. The design doc's §2.6 inventory moves **72 → 73** routes (public **12 → 13**); the
+  gated tier stays 47.
+* **`mobile/lib/firebase-native.ts`** — the send passes **no `ActionCodeSettings` at all**. The link's
+  destination is now the project's password-reset template, which is the single place that answer lives.
+  Passing a continue URL would only add a second place for it to be wrong while depending on the client
+  build's idea of the server hostname.
+* **`mobile/lib/firebase-auth.ts`** — the two-shape recovery, its code pattern and its "contact your
+  administrator" sentence are **deleted** rather than left dead: with nothing to request there is nothing
+  for Firebase to refuse, and a blind retry would now mean two emails for one tap. One send, one honest
+  sentence.
+
+## Verification
+
+* **Server 1685 tests / 0 failures** (101 files), including 10 new cases in
+  `server/test/AUTH05-reset-link-page.test.mjs`: the deep link carries the code, a crafted `continueUrl`
+  never appears, six hostile codes are refused without reflection, missing/repeated/non-reset actions are
+  refused, the CSP hashes match the served script and style byte for byte, the headers are as listed, and
+  the route answers `text/html` at `GET /auth/reset` — over the real app, with the **access log proved to
+  record the path and never the query**, so neither the one-time code nor the `apiKey` can reach a log
+  line. `tsc`, `eslint` and both module-graph checks clean.
+* **Mobile 78 suites / 979 tests / 0 failures** after the N-3 suite was rewritten around the new
+  contract (one call, two arguments, never two sends) and the forgotten-module hash re-frozen with its
+  reason written in place. `tsc` and `eslint` clean.
+* **A real code shape was checked against the page**: `generatePasswordResetLink` for an existing account
+  in this project returned `mode,oobCode,apiKey,lang` with a 54-character code, and that exact query
+  rendered `200` with the code in the deep link and Firebase's hosted page as the fallback. No mail was
+  sent and nothing was consumed.
+* **On the phone (OPPO CPH1969, development build over Metro, `adb reverse tcp:4000`)** — Chrome was
+  pointed at the page on this laptop and the **app opened directly on *Set a new password***, which is the
+  whole chain: mail-shaped URL → page → custom scheme → expo-router → the reset form. A deliberately
+  truncated query (only `mode=resetPassword`) rendered the **400 *This reset link is not usable*** page with
+  its *Request a new link* button, so the invalid branch is a phone observation too, not a source read.
+* **The reset was then completed on the phone, not just started** (2026-10-20). For a throwaway Firebase
+  identity minted by this project's Admin SDK — `auth05.probe@example.invalid`, no MongoDB user, deleted
+  afterwards — a real `generatePasswordResetLink` code was loaded into the page exactly as the mail would
+  load it, the browser handed it to the app on *Set a new password*, a 12-character password was entered,
+  and the screen answered **Password changed**. Two follow-up sign-ins settle that the credential really
+  moved: the **new** password signed in far enough to reach the server's `REGISTRATION_REQUIRED` banner
+  (which can only be returned after a Firebase ID token has been verified), while the **old** password
+  answered ***Invalid email or password***. That is the property the page exists for, measured: the code
+  survives the HTML → custom-scheme hop **unconsumed** — Firebase's hosted page redeems the code when it is
+  shown, this page never does — so the app, not the browser, is what redeems it. It also exercises the
+  codepath the owner will use, on hardware, rather than a shortened version of it.
+
+## The owner's one step, and why it is not in the code
+
+Firebase console → **Authentication → Templates → Password reset → Customize action URL** must be set to
+this deployment's page — `https://ai-inventory-l1mi.onrender.com/auth/reset` — and that host must be in
+**Authentication → Settings → Authorized domains**. Both are project configuration; nothing in this
+repository can set either, which is why the chain is not called verified end to end until a real reset
+email from production opens the app.
+
+### The console refused the URL, and the page it points at was not deployed (measured 2026-10-20)
+
+The owner added the host to **Authorized domains** (that step succeeded, and it has to: it authorizes the
+**domain**, not the path), then tried to save the action URL and the console answered only
+***An error occurred updating action URL*** — a generic toast that names no rule. Measured, the cause is
+not the URL's shape: `GET https://ai-inventory-l1mi.onrender.com/auth/reset` returned **404**
+(`{"error":"Not Found"}` from this server's own handler) while `/api/health/live` on the same instance
+returned **200**, so the deployment was healthy and simply did not contain the route — because every
+AUTH-05 file (`pages/resetPasswordLink.ts`, `routes/authAction.routes.ts` and its mount in `app.ts`) was
+still **uncommitted working-tree change**, so nothing had ever deployed it. The page itself is fine: its
+own suite (`test/AUTH05-reset-link-page.test.mjs`, 10 tests) serves a **200** page for a reset-shaped
+query and a **400** invalid-link page for anything else, over HTTP.
+
+**So the order is: deploy the page first, then save the console setting.** That much is ours to fix and
+is necessary whatever else is true, because a URL that answers 404 cannot be the destination of a reset
+email.
+
+**The console section records the failure honestly because it is not fully resolved.** The toast names no
+rule, and there is a second candidate that this repository cannot rule out: a **platform-side
+refusal** to write email templates at all. Since mid-2026 there are open reports of exactly this toast
+backed by
+`{"error":{"code":400,"message":"EMAIL_TEMPLATE_UPDATE_NOT_ALLOWED","status":"INVALID_ARGUMENT"}}`
+in the console's Network panel, including when the same change is attempted through the Identity Toolkit
+Admin API, and Google's issue **520781452** is open for it. The cheap way to tell the two apart, in the
+console, is to repeat the save against something already valid — a default authorized domain
+(`https://inventoryai-d0d20.web.app/`) or a **Subject** edit: if *nothing* saves, the block is on the
+project's templates and is not about this URL, and no code change here can clear it.
+
+Two things that will bite at the console once the page is deployed:
+
+* **Warm the service before saving.** On this host the first request after a sleep took **32.6 s**
+  (`time=32.595652s` to the 404). Whatever the console does while saving, a host that takes half a minute
+  to answer is a bad place to do it — and a person clicking a reset link meets the same wall. Hit
+  `/api/health/live` until it answers promptly, then save.
+* **The setting is global.** The dialog says so — *your custom action URL applies to all email templates* —
+  and this page implements exactly one mode (`resetPassword`), answering anything else with its 400 *this
+  reset link is not usable* page. That is harmless here only because AUTH-04 replaced Firebase's
+  verification link with a 6-digit Inventory AI code, so no shipped flow depends on the verification,
+  email-change or recover-email templates; a future flow that does would need those modes added to the page
+  rather than pointed at it.
+
+## Limits
+
+* **The Console setting is outside the repository.** Until it is made, production keeps sending the
+  hosted-page link — no regression, no security change, just the old behaviour.
+* **A reset completed on Firebase's hosted page still revokes nothing**: it never reaches the server, so
+  the N-4 marker is not written by that path and other sessions live to the 14-day cap (the documented
+  D2/OD-9 gap). Opening the app fixes it for every link that does.
+* **iOS is unverified**, as before: the scheme is configured but no iOS build exists on this host.
+* The code travels in the URL's query string on a public page, which is unavoidable for an emailed link.
+  It is kept out of this server's logs, out of any cache, and away from the `Referer` of anything the page
+  loads (nothing does); Firebase expires it and it is single-use.
+
+# 27DY. Password reset by six-digit code, inside the app (2026-10-20)
+
+**AUTH-06. Two new public routes and one new mobile screen; no new dependency, no new environment
+variable, no permission, no schema change to an existing collection.** It replaces the browser half of
+password recovery with the experience account creation already has, and it is the answer to the two
+measurements recorded immediately above: the console refuses every email-template write, and the hosted
+page a working link lands on revokes nothing.
+
+## Why a code, and not a cleverer link
+
+AUTH-05 made the link reachable by pointing Firebase's template at `GET /auth/reset`, and that page works
+— on the phone, with a real code, with the credential actually moving. The console then refused to save
+the setting at all (`Email template updates are currently unavailable for this project`, backed by
+`EMAIL_TEMPLATE_UPDATE_NOT_ALLOWED`, Google issue **520781452**), so the destination of a reset email is
+not ours to choose. And even configured, the journey ends in a browser form that never reaches this
+server, so the N-4 marker is not written and **no session is revoked**.
+
+A six-digit code removes both problems at once: the mail is composed and sent by **this server** through
+the provider already in use, and the credential change happens **here**, where revoking sessions is
+something the server can do.
+
+## What shipped
+
+* **`POST /api/auth/password-reset/code` → 202** and **`POST /api/auth/password-reset/confirm` → 200**,
+  both **public** for the reason recovery is public: the caller has no usable password. No `requireAuth`,
+  no permission, no `req.user` read, and **neither route creates a session** — a successful reset ends
+  every existing one. Both reuse the **existing limiters** (account + IP on the request, IP on the
+  confirm) rather than adding near-identical factories, so the project keeps one place to change one
+  policy. The code and the new password travel in the **POST body**, never a URL, so neither can reach
+  `httpLogger`'s `req.path` or a `Referer`.
+* **`server/src/models/passwordResetChallenge.model.ts`** — `password_reset_challenges`, keyed by a keyed
+  digest of the address (`reset-email:`), carrying the code's digest (`reset-code:`), `userId`,
+  `expiresAt`, `attempts`, `usedAt` and `lastSentAt`, with `emailHmac` unique. **One row per address**, so
+  a second request replaces the first rather than leaving two live codes.
+* **No new secret.** The digests are keyed with `EMAIL_VERIFICATION_CODE_PEPPER`, and the two flows are
+  separated by **digest domain labels** rather than by a second pepper — a constant cannot be
+  misconfigured, whereas a new variable would have failed a validation that production deployments had
+  already passed, for no security gain. The code generator (rejection-sampled single draw) and the
+  `timingSafeEqual` comparison are the AUTH-04 primitives, reused rather than re-derived.
+* **`server/src/services/passwordResetCode/`** — `request.ts` (uniform 202, `MAIL_NOT_CONFIGURED` as a
+  **pre-lookup** 503, detached send with its rejection handled, one 60-second cooldown per address) and
+  `confirm.ts` (resolve the account from the **challenge**, never from the submitted address; five
+  attempts, one spent per wrong code; `confirmPassword` checked **before** the code is spent).
+* **`server/src/services/firebase/passwordUpdater.ts`** — the Admin bridge: `updateFirebaseUserPassword`
+  plus a best-effort `revokeFirebaseRefreshTokens`, injected so tests never build a credential. The
+  write is followed by `passwordChangedAt`, then **`revokeAllSessions`**, then the challenge is consumed
+  and a **`PASSWORD_RESET_COMPLETED`** audit row is written (non-fatal, like every other audit write).
+* **`server/src/services/mail/templates/passwordResetCode.ts`** + `sendPasswordResetCodeEmail` — the same
+  Brevo boundary, the same provider-agnostic shape, a new body. No provider work, no credential, no
+  new mail configuration.
+* **Mobile** — `forgot-password.tsx` now posts the address and **navigates** to the new
+  `reset-password-code.tsx`, which takes the six digits and the new password, honours the server's
+  `Retry-After` on a resend, and ends on *Password changed* → Login. **The Firebase sending path is
+  removed**, not disabled: `sendFirebasePasswordResetEmail`, its outcome union, its one-send-only
+  recovery sentence, its enumeration-resistance code list and the native verb behind it are gone, while
+  `verifyFirebasePasswordResetCode` and `confirmFirebasePasswordReset` **stay**, so a `?oobCode=` link
+  already sitting in somebody's inbox is not stranded.
+
+## Verification
+
+* **Server: 1742 tests across the two modes.** `npm run test:unit` **981 pass / 0 fail / 51 skipped**
+  (the DB halves of mixed files); `npm run test:db` **761 pass / 81 skipped / 1 fail**, and that one
+  failure is environmental rather than this work: `phase-ai-usage-report` shells out to `ai:usage --db`,
+  which answered `exit 2 — NOT VERIFIED, the database could not be read (MongoNetworkError)` on this
+  Atlas cluster — the same flakiness recorded in §27BC/§27BE. It passed in the preceding DB run, and
+  the AUTH-06 suites were green in both. **50 new cases** across `AUTH06-password-reset-code.test.mjs`
+  (17) and `AUTH06-password-reset-flow.test.mjs` (33). The ones that matter most: an unknown address and a known
+  one are indistinguishable at the route **and when Brevo throws**; an immediate second request answers
+  the **same 202** and sends nothing (see below — the 429 it shipped with for part of one day was an
+  oracle, not a throttle); a wrong code spends **exactly one** attempt and a malformed payload spends
+  **none**; the password is written for the **challenge's** account even when a different address is
+  submitted; a successful reset leaves no usable session; and the Admin failure leaves the challenge
+  **unspent**, so the person can retry rather than lose their code.
+* **One defect was found and fixed inside this same work, which is why the numbers above are worth
+  reading rather than skimming.** The resend cooldown was first answered `429` + `Retry-After`, by
+  analogy with AUTH-04's verification code — whose request route is **authenticated**, so refusing it
+  by timing discloses nothing. This route is **public**, and a challenge row exists only for an
+  eligible account: two requests would have classified an address (`202` then `429` ⇒ an account
+  exists). The cooldown now answers the ordinary 202 and sends nothing, the code already in the inbox
+  stays valid, and `PASSWORD_RESET_CODE_RATE_LIMITED`, its `retryAfterSeconds` field and the
+  controller's `Retry-After` site were **deleted with the fix** so the refusal cannot be reassembled
+  from leftovers. The only 429 on these routes is the limiter's, keyed on the submitted address and
+  the caller's IP and identical for both address classes — and a test now asserts the two classes are
+  indistinguishable **on the second request**, which is the request that used to tell them apart.
+* **Mobile 79 suites / 977 tests / 0 failures** (up from 78 / 979 — the removed send cases outnumber the
+  14 new ones in `password-reset-code.test.tsx`), after the N-3 suite was rewritten around what is left
+  and one whole-file hash was re-frozen with its reason written in place. `tsc`, `eslint` and both
+  module-graph checks clean on both sides.
+* **The copy is pinned to the server, not to a comment**: one case reads
+  `server/src/constants/passwordResetCode.ts` as **text** and asserts the screen's `CODE_LENGTH`,
+  `CODE_TTL_MINUTES` and `RESEND_COOLDOWN_SECONDS` are those numbers, because "expires in 10 minutes"
+  typed into a sentence is exactly the kind of number that drifts.
+
+## Limits
+
+* **Not device-verified.** The screens, the routes and the mail path are tested through their own
+  interfaces over HTTP and RNTL, but nobody has typed a code on the OPPO yet, and no real Brevo message
+  has been received through this flow.
+* **L-17 stays OPEN**, and now gates only the AUTH-05 hosted-link path. This flow does not need the
+  console setting — which is the point — but it also does not repair it: a person holding an older
+  Firebase link may still land on Firebase's hosted page, and that reset still revokes nothing.
+* **The delivery half is still an external fact.** A 202 means the code was minted and the send was
+  dispatched, never that Brevo delivered it; the first live inbox measurement is still owed.
+* **iOS is unverified**, as everywhere else on this host.
 
 # 28. Phase Gate System
 

@@ -328,9 +328,23 @@ unitSuite('AUTH-01 — source guards', () => {
     assert.ok(guardAt < appAt, 'a malformed value must be rejected before any credential is built');
   });
 
-  it('★ introduces no revokeRefreshTokens() anywhere in server/src', () => {
-    // The approved password-change flow does NOT require it (see the target
-    // architecture §20/§41), so its appearance would be an unapproved change.
+  it('★ allows revokeRefreshTokens() at exactly ONE site, and no other', () => {
+    // THE RULE, RESTATED RATHER THAN WEAKENED (AUTH-06, 2026-10-20).
+    //
+    // It used to say "nowhere in server/src", because the approved password-change flow of
+    // the time did not need it and an appearance would have been an unapproved change. The
+    // risk it was guarding is specific: calling `revokeRefreshTokens()` as a way to CHECK
+    // whether a credential is still good, which would revoke every valid session on every
+    // request. AUTH-01 answered that with `checkRevoked: true` instead, and that answer stands
+    // — nothing in the verification path may call this.
+    //
+    // AUTH-06 introduces the one case where revoking is the POINT: after a password reset the
+    // server has already ended every Inventory AI session, and a Firebase refresh token that
+    // survived would mint a fresh ID token which the exchange would turn back into a session,
+    // undoing the reset. So the call is permitted in exactly one file — the Admin bridge — and
+    // this assertion is a one-element ALLOW-LIST rather than a ban: a second site, a call in
+    // the verifier, or the same call moved into a route fails here.
+    const ALLOWED = ['src\\services\\firebase\\passwordUpdater.ts'];
     const offenders = [];
     const walk = (dir) => {
       for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -344,7 +358,12 @@ unitSuite('AUTH-01 — source guards', () => {
       }
     };
     walk(SRC_DIR);
-    assert.deepEqual(offenders, [], 'no revokeRefreshTokens() call may be introduced');
+    assert.deepEqual(
+      offenders.map((file) => file.split(path.sep).join('/')),
+      ALLOWED.map((file) => file.split('\\').join('/')),
+      'revokeRefreshTokens() is permitted at exactly one site — the Admin credential bridge — ' +
+        'and nowhere else; a second site needs its own argument here'
+    );
   });
 
   it('★ the installed firebase-admin version matches the classifier assumption', () => {

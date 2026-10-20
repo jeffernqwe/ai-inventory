@@ -71,7 +71,7 @@ const B_MODULES = [
   'services/mail/mailConfig.ts',
   'services/mail/mailErrors.ts',
   'services/mail/providers/index.ts',
-  'services/mail/providers/resendProvider.ts',
+  'services/mail/providers/brevoProvider.ts',
   'services/firebase/firebaseErrors.ts',
   'services/firebase/index.ts',
 ];

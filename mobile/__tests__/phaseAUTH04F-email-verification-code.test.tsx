@@ -249,6 +249,10 @@ describe('a failed confirm writes nothing', () => {
 
   it('★ an invalid code propagates as the server refusal and changes nothing', async () => {
     const view = await armed();
+    // Firebase still reports the address UNVERIFIED — the ordinary wrong-code case. The
+    // refusal is checked against Firebase before it is reported (see the recovery case
+    // below), so the reload DOES run; it must decide nothing else.
+    mockNativeReloadUser.mockResolvedValue(false);
     const invalid = new ApiError(400, 'INVALID_VERIFICATION_CODE', 'That code is not valid.');
     mockConfirmEmailVerification.mockRejectedValue(invalid);
 
@@ -256,7 +260,7 @@ describe('a failed confirm writes nothing', () => {
 
     expect(caught).toBe(invalid);
     expect((caught as ApiError).code).toBe('INVALID_VERIFICATION_CODE');
-    expect(mockNativeReloadUser).not.toHaveBeenCalled();
+    expect(mockNativeReloadUser).toHaveBeenCalledTimes(1);
     expect(mockNativeForceIdToken).not.toHaveBeenCalled();
     expect(mockFirebaseRegister).not.toHaveBeenCalled();
     expect(mockFirebaseExchange).not.toHaveBeenCalled();
@@ -264,8 +268,35 @@ describe('a failed confirm writes nothing', () => {
     expect(view.result.current.token).toBeNull();
   });
 
+  it('★ a code the server already spent can still finish the journey', async () => {
+    const view = await armed();
+    // THE DEAD END THIS CLOSES. The server consumes the challenge as part of a successful
+    // confirmation, so any failure AFTER that write — this response being lost, the reload,
+    // the forced refresh, registration, the exchange — leaves the person holding a code the
+    // server now refuses. Retrying it could only produce "invalid or has expired", and a
+    // new code is a silent no-op for an already-verified identity. So when the refusal
+    // arrives, Firebase is asked: it reports the address verified, because the code did its
+    // job, and the journey continues exactly as the success path would have.
+    mockConfirmEmailVerification.mockRejectedValue(
+      new ApiError(400, 'INVALID_VERIFICATION_CODE', 'That code is not valid.')
+    );
+    mockNativeReloadUser.mockResolvedValue(true);
+
+    await act(async () => {
+      await view.result.current.confirmVerificationCode(CODE);
+    });
+
+    expect(mockConfirmEmailVerification).toHaveBeenCalledTimes(1);
+    expect(mockNativeForceIdToken).toHaveBeenCalledTimes(1);
+    expect(mockFirebaseRegister).toHaveBeenCalledTimes(1);
+    expect(mockFirebaseExchange).toHaveBeenCalledTimes(1);
+    expect(view.result.current.status).toBe('signedIn');
+    expect(view.result.current.token).toBe(APP_TOKEN);
+  });
+
   it('★ a validation refusal is preserved with its field problems', async () => {
     const view = await armed();
+    mockNativeReloadUser.mockResolvedValue(false);
     mockConfirmEmailVerification.mockRejectedValue(
       new ApiError(400, 'VALIDATION_ERROR', 'Check the form.', [
         { field: 'code', message: 'That code is too long.' },
@@ -287,6 +318,7 @@ describe('a failed confirm writes nothing', () => {
     // this is deliberately answered 400 — an unrelated provider failure must not sign a
     // person out.
     const badToken = new ApiError(400, 'FIREBASE_TOKEN_INVALID', 'Your sign-in has expired.');
+    mockNativeReloadUser.mockResolvedValue(false);
     mockConfirmEmailVerification.mockRejectedValue(badToken);
 
     const caught = await capture(view.result.current.confirmVerificationCode(CODE));
@@ -336,6 +368,7 @@ describe('configuration and delivery failures mint nothing', () => {
       });
     });
     mockCurrentFirebaseIdToken.mockResolvedValue(ID_TOKEN);
+    mockNativeReloadUser.mockResolvedValue(false);
     mockConfirmEmailVerification.mockRejectedValue(
       new ApiError(503, 'EMAIL_VERIFICATION_MAIL_FAILED', 'Could not send mail.')
     );
@@ -419,6 +452,9 @@ describe('signUp — the initial code request fails (Option B)', () => {
       });
       // 4 — the failure is surfaced safely, using the server's own client-safe sentence.
       expect(view.result.current.verificationEntryError).toBe(failure.message);
+      // ...and NO code is claimed to be in flight: the send failed, so the screen must not
+      // present a countdown for mail that was never accepted.
+      expect(view.result.current.verificationCodeIssuedAt).toBeNull();
 
       // 12 — no Inventory AI JWT/session, and nothing written server-side. Negatives,
       // because a positive-only assertion would pass for an implementation that wrote.
@@ -511,5 +547,9 @@ describe('signUp — the initial code request fails (Option B)', () => {
     expect(view.result.current.firebaseOnboarding).toBe('verify-email');
     // A successful send has nothing to explain, so no stale reason can linger.
     expect(view.result.current.verificationEntryError).toBeNull();
+    // ...and the send is RECORDED, so the verify screen can say a code is in flight and
+    // start its countdown from the server's own window instead of offering a send that
+    // could only be refused. No timestamp is invented for a journey that sent nothing.
+    expect(view.result.current.verificationCodeIssuedAt).toEqual(expect.any(Number));
   });
 });

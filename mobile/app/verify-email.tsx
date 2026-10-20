@@ -43,15 +43,35 @@ import { useTheme } from '../lib/theme-context';
  * verbatim; a successful send starts the server's documented 60-second window locally, so
  * the button cannot be used to earn a guaranteed immediate 429. Nothing here invents a
  * cooldown length.
+ *
+ * A CODE MAY ALREADY HAVE BEEN SENT WHEN THIS SCREEN OPENS. Registration requests one
+ * before it navigates, so `verificationCodeIssuedAt` (in-memory context state) says so and
+ * the screen opens with the truthful subtitle, the "Resend" wording and the remainder of
+ * the server's window already counting down. A sign-in for an unverified identity passes
+ * `null`, and then the screen correctly says a code will be sent rather than pretending
+ * one already was.
  */
 const RESEND_COOLDOWN_SECONDS = 60;
 const CODE_LENGTH = 6;
+/**
+ * The server's `EMAIL_VERIFICATION_TTL_MINUTES`, stated to the person because an
+ * expired code is otherwise indistinguishably "wrong". The number is pinned to the
+ * server's own source by `__tests__/auth-ux-hardening.test.tsx`, so the two cannot
+ * drift apart silently — the same guard `lib/validation.ts` uses for the email and
+ * password rules.
+ */
+const CODE_TTL_MINUTES = 10;
 
 const CODE_SENT_MESSAGE = 'Verification code sent. Check your inbox and spam folder.';
 const STILL_UNVERIFIED_MESSAGE =
   'That code was accepted, but your email is not verified yet. Try again in a moment.';
 const GENERIC_FAILURE_MESSAGE = 'Something went wrong. Please try again.';
 const EMPTY_CODE_MESSAGE = 'Enter the 6-digit code from your email.';
+
+const SUBTITLE_SENT = `Enter the ${CODE_LENGTH}-digit code we emailed you. It expires in ${CODE_TTL_MINUTES} minutes.`;
+const SUBTITLE_NOT_SENT =
+  `We'll email you a ${CODE_LENGTH}-digit code to confirm this address. It expires in ` +
+  `${CODE_TTL_MINUTES} minutes.`;
 
 const UNREACHABLE_TITLE = 'Check your connection';
 const UNREACHABLE_SUBTITLE = 'We could not confirm your sign-in just now.';
@@ -99,6 +119,8 @@ export default function VerifyEmailScreen() {
     cancelFirebaseOnboarding,
     verificationEntryError,
     clearVerificationEntryError,
+    verificationCodeIssuedAt,
+    firebaseRegistrationRequired,
   } = useSession();
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -109,10 +131,23 @@ export default function VerifyEmailScreen() {
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [sending, setSending] = useState(false);
-  const [codeSent, setCodeSent] = useState(false);
+  // REGISTRATION SENDS BEFORE IT NAVIGATES, so the screen can open knowing a code is
+  // already in flight. Without that, it opened on an enabled "Send verification code"
+  // whose only possible answer was the server's resend refusal — a dead control offered
+  // at the exact moment the person should be reading their inbox.
+  // `typeof === 'number'` rather than `!== null`, so a context value that predates the
+  // field (undefined) reads as "nothing sent" instead of claiming a code is in flight.
+  const [codeSent, setCodeSent] = useState(typeof verificationCodeIssuedAt === 'number');
   // IN-MEMORY ONLY, deliberately: a cooldown is a fact about the server's current window,
-  // and persisting it would keep the button disabled after the window has moved on.
-  const [cooldownUntil, setCooldownUntil] = useState<number | null>(null);
+  // and persisting it would keep the button disabled after the window has moved on. The
+  // initial value continues the server's 60-second window from the send registration
+  // already made, so the countdown is the wait that actually remains rather than a fresh
+  // minute invented by this mount.
+  const [cooldownUntil, setCooldownUntil] = useState<number | null>(() => {
+    if (typeof verificationCodeIssuedAt !== 'number') return null;
+    const end = verificationCodeIssuedAt + RESEND_COOLDOWN_SECONDS * 1000;
+    return end > Date.now() ? end : null;
+  });
   const [now, setNow] = useState<number>(() => Date.now());
 
   // Ticks only while a cooldown is running, and clears the stale notice with it.
@@ -141,6 +176,23 @@ export default function VerifyEmailScreen() {
   const shownError = error ?? verificationEntryError;
 
   if (status === 'signedIn') return <Redirect href={defaultHomePath(user)} />;
+  /**
+   * VERIFIED, BUT WITH NO TENANT TO CREATE — FOUND ON A DEVICE.
+   *
+   * A confirmation that succeeds while `pendingRegistration` is absent (the ordinary
+   * result of a cold start: registration details are in-memory, and the restart/resume
+   * probe restores only the identity) ends at the exchange, which refuses with
+   * `REGISTRATION_REQUIRED`. That refusal armed the registration route — and this screen
+   * then sat on its own form showing the refusal's sentence, with no control that goes
+   * anywhere. Retrying Verify only re-ran the same exchange, and the only way out was
+   * "Wrong account? Sign out" followed by a fresh sign-in.
+   *
+   * So when the registration route is armed, this screen hands off to it, exactly as the
+   * login screen does for the same refusal. The screen does not render a second copy of
+   * that journey's form: it holds no identity, and `register-firebase` is where the
+   * business name is collected from the authenticated Firebase identity.
+   */
+  if (firebaseRegistrationRequired) return <Redirect href="/register-firebase" />;
   // Nothing is waiting to be verified: the probe found no identity, or a verified one.
   // A redirect rather than a dead-end screen — the probe already decided this.
   if (firebaseOnboarding === 'none') return <Redirect href="/login" />;
@@ -187,7 +239,12 @@ export default function VerifyEmailScreen() {
 
   async function submit(): Promise<void> {
     const trimmed = code.trim();
-    if (!trimmed) {
+    // THE ATTEMPT BUDGET IS FIVE PER CHALLENGE, so an obviously incomplete value must not
+    // spend one. The field already strips non-digits and caps at six, which means anything
+    // shorter here is an unfinished entry: the server would answer its one
+    // indistinguishable "invalid or has expired", describing a malformed submission as a
+    // wrong code and burning a guess the person never made.
+    if (trimmed.length !== CODE_LENGTH) {
       setFieldErrors({ code: EMPTY_CODE_MESSAGE });
       return;
     }
@@ -253,7 +310,7 @@ export default function VerifyEmailScreen() {
   return (
     <AuthLayout
       title="Verify your email"
-      subtitle="Enter the 6-digit code we sent to your email address."
+      subtitle={codeSent ? SUBTITLE_SENT : SUBTITLE_NOT_SENT}
       footer={
         <Text style={styles.footerText}>
           Wrong account?{' '}
@@ -269,9 +326,13 @@ export default function VerifyEmailScreen() {
         name="code"
         label="Verification code"
         value={code}
-        onChangeText={(value: string) =>
-          setCode(value.replace(/\D/g, '').slice(0, CODE_LENGTH))
-        }
+        onChangeText={(value: string) => {
+          // Typing is the person acting on the previous refusal, so the stale reason goes
+          // with it: leaving "that code is invalid or has expired" under a code they are
+          // halfway through replacing describes the old value, not this one.
+          if (fieldErrors.code) setFieldErrors({});
+          setCode(value.replace(/\D/g, '').slice(0, CODE_LENGTH));
+        }}
         keyboardType="number-pad"
         maxLength={CODE_LENGTH}
         placeholder="123456"
@@ -280,11 +341,18 @@ export default function VerifyEmailScreen() {
         returnKeyType="go"
         onSubmitEditing={submit}
       />
+      {/**
+       * THE RESEND COOLDOWN MUST NOT BLOCK VERIFYING. It used to: `coolingDown` was part
+       * of this button's `disabled`, so after a resend — or after the cooldown the screen
+       * starts on a successful send — the code in the person's inbox could not be
+       * submitted for a whole minute. The cooldown belongs to the SEND below, which
+       * already carries it.
+       */}
       <Button
         title="Verify"
         onPress={submit}
         loading={busy}
-        disabled={sending || coolingDown || code.length === 0}
+        disabled={sending || code.length !== CODE_LENGTH}
         full
       />
       <Button

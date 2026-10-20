@@ -89,7 +89,7 @@ const RESET_BASE = 'https://app.inventory-ai.test/reset-password';
 // clear all of them and no stray value from the developer's own .env survives.
 const MAIL_ENV_KEYS = [
   'MAIL_PROVIDER',
-  'RESEND_API_KEY',
+  'BREVO_API_KEY',
   'MAIL_FROM',
   'MAIL_APP_NAME',
   'MAIL_REQUEST_TIMEOUT_MS',
@@ -391,9 +391,9 @@ unitSuite('Phase 26B-2 — token helpers, password policy and domain errors', ()
     );
 
     assert.equal(source.includes('providers/'), false, 'no direct provider access');
-    assert.equal(source.includes('resendProvider'), false);
-    assert.equal(/RESEND_/i.test(source), false, 'no provider credential name may appear here');
-    assert.equal(/api\.resend\.com/i.test(source), false);
+    assert.equal(source.includes('brevoProvider'), false);
+    assert.equal(/BREVO_/i.test(source), false, 'no provider credential name may appear here');
+    assert.equal(/api\.brevo\.com/i.test(source), false);
 
     // Model access stays inside its own services: the token store and User, and
     // nothing else. Sessions are revoked through session.service, not directly.
@@ -1232,28 +1232,44 @@ dbSuite('Phase 26B-2 — password recovery over a real database', dbOk, () => {
     assert.equal(await bcrypt.compare(NEW_PASSWORD, stored.passwordHash), true);
   });
 
-  it('31. the recovery surface is exactly the two declared public routes', async () => {
+  it('31. the recovery surface is exactly the four declared public routes', async () => {
     // Written while 26B-2 was the domain layer only, as an inverted guard: it
     // then asserted that NO recovery route existed, so a future 26B-3 could not
     // be smuggled in unnoticed. Phase 26B-3 is that phase, and it is approved —
     // so the guard is inverted rather than deleted, and it still fails if a
     // THIRD recovery surface appears, if either route stops being public, or if
     // the routes get mounted a second time through another router.
+    //
+    // AUTH-06 (2026-10-20) EXTENDED IT FROM TWO ROUTES TO FOUR, DELIBERATELY, and this
+    // assertion is the reason the extension is visible rather than silent. The two added
+    // paths are the in-app six-digit code flow, which replaces Firebase's browser reset
+    // as the primary journey because the project's email-template editor refuses every
+    // write and the browser form a link lands on revokes nothing. They carry a
+    // `password-reset` prefix, so they fall inside this guard's `/forgot|reset/i` net
+    // rather than beside it — which is what a caller would want: any future recovery
+    // surface, whatever its spelling, lands in this list and has to be argued for here.
     const authRoutes = readSource(new URL('../src/routes/auth.routes.js', import.meta.url));
 
-    // Exactly the two recovery paths are registered, and nothing adjacent.
+    // Exactly the four recovery paths are registered, and nothing adjacent.
     const declared = [...authRoutes.matchAll(/router\.(get|post|patch|put|delete)\(\s*'([^']+)'/g)]
       .map(([, method, path]) => `${method.toUpperCase()} ${path}`)
       .filter((route) => /forgot|reset/i.test(route));
     assert.deepEqual(declared.sort(), [
       'POST /forgot-password',
+      'POST /password-reset/code',
+      'POST /password-reset/confirm',
       'POST /reset-password',
     ]);
 
-    // Both are public. `requireAuth` is not on either chain — and `requireAuth`
+    // All four are public. `requireAuth` is not on any chain — and `requireAuth`
     // does appear elsewhere in the file, so this is checked per route rather
     // than by a bare substring search.
-    for (const path of ['/forgot-password', '/reset-password']) {
+    for (const path of [
+      '/forgot-password',
+      '/reset-password',
+      '/password-reset/code',
+      '/password-reset/confirm',
+    ]) {
       const start = authRoutes.indexOf(`'${path}'`);
       assert.notEqual(start, -1, `${path} must be registered`);
       const end = authRoutes.indexOf(');', start);

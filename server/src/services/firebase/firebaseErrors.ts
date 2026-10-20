@@ -49,7 +49,7 @@ export class FirebaseNotConfigured extends Error {
  * `reason` is a coarse, ALLOWLISTED label derived from the SDK's error code, for
  * server-side logging and diagnosis. It is the only detail this error carries,
  * and it exists because the raw upstream error must not be relayed: the same
- * reasoning that makes the mail layer discard Resend's free-text message applies
+ * reasoning that makes the mail layer discard a provider's free-text message applies
  * here — an upstream error is an exfiltration surface, and the value being
  * handled is a live credential.
  *

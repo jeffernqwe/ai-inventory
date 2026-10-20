@@ -125,7 +125,7 @@ const ENV_KEYS = [
   'FIREBASE_CLIENT_EMAIL',
   'FIREBASE_PRIVATE_KEY',
   'MAIL_PROVIDER',
-  'RESEND_API_KEY',
+  'BREVO_API_KEY',
   'MAIL_FROM',
   'MAIL_APP_NAME',
   'MAIL_REQUEST_TIMEOUT_MS',
@@ -723,6 +723,15 @@ dbSuite('AUTH-04-C — the email-verification endpoints over HTTP (real database
       const second = await request({ idToken: ID_TOKEN });
       assert.equal(second.status, 429);
       assert.equal(second.json.code, EMAIL_VERIFICATION_RATE_LIMITED);
+      // THE COOLDOWN'S OWN SENTENCE, not the route limiter's. Both are 429s with this one
+      // code, but they are different facts: this one means "a code was issued for this
+      // identity moments ago", which is not "too many attempts" — the person made exactly
+      // one. The wording must name the wait, which is the only action that helps.
+      assert.match(second.json.error, /requested recently/i);
+      assert.doesNotMatch(second.json.error, /too many/i);
+      // And it must still name nothing about the identity.
+      assert.ok(!second.json.error.includes(USER_EMAIL));
+      assert.ok(!second.json.error.includes(uid));
       const seconds = retryAfterSeconds(second);
       assert.ok(Number.isInteger(seconds) && seconds >= 1 && seconds <= 60, `Retry-After was ${seconds}`);
       assertNoSecrets(second.json);
@@ -955,6 +964,11 @@ dbSuite('AUTH-04-C — the email-verification endpoints over HTTP (real database
         const blocked = await r();
         assert.equal(blocked.status, 429);
         assert.equal(blocked.json.code, EMAIL_VERIFICATION_RATE_LIMITED);
+        // The LIMITER's sentence, which is a different fact from the per-identity cooldown
+        // above: this one really is about the number of requests from one address, and it
+        // must not have been collapsed into the cooldown's wording.
+        assert.match(blocked.json.error, /too many/i);
+        assert.doesNotMatch(blocked.json.error, /requested recently/i);
         const seconds = retryAfterSeconds(blocked);
         assert.ok(
           Number.isInteger(seconds) && seconds >= 1 && seconds <= 60,

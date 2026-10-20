@@ -1,25 +1,24 @@
 /**
  * Brevo transport.
  *
- * This is the second module in the project that knows one provider exists — the
- * endpoint, the `api-key` header and Brevo's error shape all stop here, exactly as
- * resendProvider.ts keeps Resend's. Everything above it depends on the provider
- * registry and on a `send({ to, subject, text, html })` contract, so which of the
- * two transports delivers a message is a matter of `MAIL_PROVIDER` and nothing
- * else. The two providers are deliberately independent files: neither shares a
- * fetch helper, because the two upstreams do not share a payload, a header or an
- * error body, and the coupling a shared helper would introduce is exactly what
- * this boundary exists to prevent.
+ * This is the ONLY module in the project that knows a provider exists — the
+ * endpoint, the `api-key` header and Brevo's error shape all stop here. Everything
+ * above it depends on the provider registry and on a
+ * `send({ to, subject, text, html })` contract, so the wire format is a property of
+ * this file and of nothing else. A second provider would be a second file, not a
+ * branch in this one, because two upstreams do not share a payload, a header or an
+ * error body — the coupling a shared helper would introduce is exactly what this
+ * boundary exists to prevent.
  *
  * No SDK is used. Node >= 18.11 has a global fetch and AbortController, and
  * services/ai/providers/http.js already established this shape, so the mail layer
  * adds no dependency.
  *
- * THE SENDER IS THE ONE THING THIS PROVIDER DOES DIFFERENTLY, and it does it
- * locally. Resend is handed `from` verbatim as an RFC 5322 string; Brevo wants a
- * structured `sender: { name, email }`. `MAIL_FROM` stays the single generic
- * sender variable it always was — `mailConfig.ts` is NOT extended — and the
- * display-name form is split here, in the only module that needs it. A value
+ * THE SENDER IS PARSED HERE, locally. Brevo wants a structured
+ * `sender: { name, email }`, while `MAIL_FROM` is a single generic variable that
+ * may be either `Name <address>` or a bare address. `mailConfig.ts` is NOT
+ * extended — the display-name form is split here, in the only module that needs
+ * it. A value
  * without a display name falls back to `{ email: raw }`. No Brevo-specific sender
  * address is hardcoded anywhere: an operator points `MAIL_FROM` at a sender the
  * Brevo account has verified, and nothing in this file assumes which one.
@@ -71,7 +70,7 @@ interface ParsedSender {
  * `Inventory AI <no-reply@example.com>` becomes `{ name: 'Inventory AI', email:
  * 'no-reply@example.com' }`; a quoted display name is unquoted; a bare address
  * becomes `{ email: '<raw>' }`. This is a provider-local concern by design — it is
- * why `mailConfig.ts` needs no change and why the Resend path is untouched.
+ * why `mailConfig.ts` needs no change.
  *
  * The address itself is never validated here beyond being non-empty: an operator
  * misconfiguration is a provider rejection with a real status, not a local guess

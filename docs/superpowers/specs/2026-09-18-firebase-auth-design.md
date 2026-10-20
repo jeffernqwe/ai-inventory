@@ -156,7 +156,7 @@ set.
 
 ## 2.6 Route inventory
 
-Phase 23 classifies **72 routes**: **47 permission-gated**, **13 authenticated**, **12 public**,
+Phase 23 classifies **75 routes**: **47 permission-gated**, **13 authenticated**, **15 public**,
 **0 role-gated**. The `PUBLIC` and `AUTHENTICATED` buckets are explicit lists that each carry a
 written reason; a route in no bucket fails the guard, and a declared exemption that has stopped being
 true also fails. The guard deliberately asserts **no route count** — a route is *declared* or it is not,
@@ -183,6 +183,22 @@ fails if the two disagree.
 > `server/src/routes/*.ts` and the app-level registrations in `server/src/app.ts` by
 > `server/test/phase-docs-route-inventory.test.mjs`, which fails if this section and the code disagree. The **gated** tier is still **47** — the property the note above cares about —
 > so no provider, session or recovery work has added or moved a permission-gated route.
+>
+> **AUTH-05 (2026-10-20) added one public route, `GET /auth/reset`** — 47 + 13 + 13 = **73**. It is the
+> landing page Firebase's password-reset email points at, mounted outside `/api` because it is an HTML
+> page read by a phone's browser rather than a JSON endpoint (see `server/src/pages/resetPasswordLink.ts`).
+> It is public for the reason recovery is public: the person using it has no usable password. It
+> authorizes nothing — it forwards a one-time code to the app, which redeems it with Firebase. The
+> **gated** tier is still **47**.
+>
+> **AUTH-06 (2026-10-20) added two public routes, `POST /api/auth/password-reset/code` and
+> `POST /api/auth/password-reset/confirm`** — 47 + 13 + 15 = **75**. They are the in-app six-digit
+> code flow that replaces Firebase's browser reset as the primary journey, because the project's
+> email-template editor refused every write (`EMAIL_TEMPLATE_UPDATE_NOT_ALLOWED`), so a reset email
+> whose destination we choose could not be configured at all. Both are public for the reason
+> recovery is public, and **neither creates a session**: a completed reset ends every existing one
+> and asks the person to sign in with the password they just chose. The **gated** tier is still
+> **47** — no permission-gated route has been added or moved by any of this work.
 
 The auth surface (`server/src/routes/auth.routes.ts`):
 
@@ -192,6 +208,8 @@ The auth surface (`server/src/routes/auth.routes.ts`):
 | POST | `/api/auth/login` | account limiter → IP limiter → controller |
 | POST | `/api/auth/forgot-password` | account limiter → IP limiter → controller |
 | POST | `/api/auth/reset-password` | confirm limiter → controller |
+| POST | `/api/auth/password-reset/code` | account limiter → IP limiter → controller |
+| POST | `/api/auth/password-reset/confirm` | confirm limiter → controller |
 | POST | `/api/auth/firebase/exchange` | firebase exchange limiter → controller |
 | POST | `/api/auth/firebase/register` | firebase register limiter → controller |
 | GET | `/api/auth/me` | `requireAuth` |
@@ -237,8 +255,9 @@ entirely. Both facts are guarded by tests. All limiter stores are **in-memory an
 ## 2.8 Password recovery (Phases 26B / 27)
 
 Provider-agnostic mail boundary at `server/src/services/mail/` reached through `isMailConfigured()`,
-`mailProviderName()` and `sendPasswordResetEmail({to, resetUrl, expiresInMinutes})`. Resend is the
-only builtin transport. A `password_reset_tokens` collection stores `userId`, `tokenHash`,
+`mailProviderName()` and `sendPasswordResetEmail({to, resetUrl, expiresInMinutes})`. The transport is
+selected by `MAIL_PROVIDER`; **Brevo is the only built-in transport, the one configured in development
+and production** (the Resend transport was removed on 2026-10-20). A `password_reset_tokens` collection stores `userId`, `tokenHash`,
 `expiresAt`, `usedAt` and nothing else — the raw 32-byte token is emailed and **never persisted**.
 Single use is one conditional `findOneAndUpdate`; `usedAt` is never unset (fail-closed). Two public
 routes, `MAIL_NOT_CONFIGURED` as a **pre-lookup** 503, a uniform 202 on every non-error path, and
@@ -813,7 +832,7 @@ decision accepts, not one it resolves; whichever phase retires the legacy path m
 > `passwordChangedAt` would not fire — is designed in **§14C.3**, which is the resolution of O-9.
 
 **Still open:** does Firebase take over `POST /api/auth/forgot-password` and
-`POST /api/auth/reset-password`, displacing Phase 26B/27's Resend mail layer, token store and two
+`POST /api/auth/reset-password`, displacing Phase 26B/27's mail layer, token store and two
 mobile screens? Running both is possible but means a password can be reset through one system and not
 the other. If Firebase takes over: are the 26B/27 artefacts deleted, archived, or left in place? The
 project's conventions forbid silent deletion — **and nothing is removed now: the 26B/27 endpoints, mail
@@ -822,6 +841,14 @@ implied by the decision above.** *Related UX question:* Firebase's default reset
 would replace the in-app `inventoryai://reset-password` flow unless `ActionCodeSettings` is configured
 for a custom action URL. This choice also closes or preserves the B1/B2/E3 risk records in roadmap
 §27B/§27D/§27E.
+
+> **Answered in practice, 2026-10-20 (AUTH-05, roadmap §27DX).** `ActionCodeSettings` is **not** the
+> mechanism: a custom-scheme continue URL is refused by this project (`auth/unauthorized-domain`, measured
+> live, no mail generated), so the send now passes **no** settings at all and the link's destination is the
+> project's password-reset template — which points at this server's public `GET /auth/reset` page. That
+> page hands the one-time `oobCode` to `inventoryai://reset-password`, so the in-app flow is preserved
+> **without** a custom action URL that the client can request, and Firebase's hosted page stays as the
+> fallback for a phone without the app. The sentence above is left verbatim as the historical record.
 
 **14.2 Email-verification enforcement.** `emailVerified` is persisted but **not** enforced in
 Phase 32. Enforcing it later is a behaviour change: today `signUp` logs the owner straight in, so
@@ -1650,7 +1677,7 @@ cite them individually.
 | **L-8** | **The Inventory AI JWT + server-side session MUST remain.** Firebase does not replace backend authorization or session management. |
 | **L-9** | **MongoDB remains authoritative for `businessId`, `role`, `status`, permissions, business lifecycle and tenant isolation.** |
 | **L-10** | **Legacy bcrypt login and register will eventually be removed.** |
-| **L-11** | **Custom password-reset tokens, the reset endpoints and the Resend password-reset infrastructure will eventually be removed.** |
+| **L-11** | **Custom password-reset tokens, the reset endpoints and the mail infrastructure behind them will eventually be removed.** |
 | **L-12** | **Admin-created password accounts must eventually be replaced by invitation-based Firebase onboarding.** |
 | **L-13** | **The Inventory-specific Firebase link/unlink lifecycle should eventually be removed or re-scoped.** Firebase-native provider linking may remain where appropriate. **Done in part, 2026-10-01 (`Phase A / F-1 — 6e2252f4c63a7bd98e1d63a4703f21ab236c93a9`):** the server-side **unlink** half was **removed and re-scoped** into a credential change (roadmap §27AA); the link route and the Firebase-side provider linking remain as this item describes. |
 | **L-14** | **Before Firebase-native password recovery or change-password ships, a secure credential-change notification/revocation bridge must be designed** so a Firebase password change can invalidate existing Inventory AI sessions. Design: **§14C.3**. |
@@ -2440,7 +2467,7 @@ capability is never briefly absent between two phases.
 | **N-4** | **The revocation bridge (§14C.3).** `POST /api/auth/credentials-changed`, its validator, service, controller, audit action, the `phase23` `AUTHENTICATED` declaration, and the `401 SESSION_INVALIDATED`-is-success rule pinned by test. **D2 — the reset-path caller — is now RESOLVED (§14C.3.8, 2026-09-29):** the recovery flow establishes a temporary **recovery-context session** through the public exchange, calls the bridge (which revokes **all** sessions, including that one), and re-exchanges to a **final** session. The bridge's authentication is **not** relaxed. **Its trigger is now LOCKED (§14C.3.9, 2026-09-29 — OD-9 resolved, M-1…M-10);** the bridge itself is still **not implemented**, and its name and payload shape remain **OD-1**. | N-1 | nothing |
 | **N-5** | **Firebase-native change-password + email verification.** `updatePassword` calling N-4; `sendEmailVerification`; `reload()`; a verify-email screen; the L-6/L-7 gate. Reconcile `authMethods` and the Profile screen. **Its mechanics are now DECIDED (2026-09-29, §14C.9 — OD-3 resolved): the registration ordering, the verify screen, the client gate instead of a `requireAuth` change, and the selected deep-link return with its hosted-page fallback.** Its **delivery** half is still gated by **B-2/L-17**, and a forced token refresh is required for RG-9. | N-4 | nothing |
 | **N-6** | **Retire the legacy password path.** Remove `/login`, `/register`, `loginWithPassword`, `registerBusinessOwner`, the `FIREBASE_SIGN_IN_REQUIRED` guard, their limiters, `authMethodsFor`, and the legacy branches in `lib/auth.tsx` (L-10). | N-5 | legacy login + register |
-| **N-7** | **Retire the custom recovery stack.** The two reset routes, controller, service, token model, the **entire mail layer** (Resend's only production consumer), the six mail env names, and the 26B/27 test suites (L-11). | N-3, N-4 | 26B/27 + Resend |
+| **N-7** | **Retire the custom recovery stack.** The two reset routes, controller, service, token model, the **entire mail layer** (password recovery is its only production consumer), the six mail env names, and the 26B/27 test suites (L-11). | N-3, N-4 | 26B/27 + mail layer |
 | **N-8** | **Re-scope the identity lifecycle.** `/firebase/link` and `/firebase/unlink`, `firebaseLink.service.ts`, `firebaseUnlink.service.ts`, `constants/firebase.ts`, `disconnect-firebase.tsx`, `confirmFirebaseSignIn`, `connectFirebase` (L-13). — **server-side unlink portion DONE 2026-10-01 (`Phase A / F-1 — 6e2252f4c63a7bd98e1d63a4703f21ab236c93a9**):** `/firebase/unlink` and `firebaseUnlink.service.ts` are **removed** from the committed tree and the operation re-scoped into a credential change (roadmap §27AA); what remains of N-8 is the **link** side and the Firebase-side provider surface. | N-1, **OD-2** | link/unlink (Policy B has no destination) |
 | **N-9** | **Invitation-based onboarding (L-12).** Replaces `users.service.ts` `create`, which today writes a bcrypt `passwordHash` and **no `firebaseUid`** and therefore produces an account nobody can sign into once the legacy path is gone. | **O-10**, and **must land with or before N-6** | admin-created passwords |
 | **N-10** | **Final verification.** Full server suite + `test:unit` + `test:db`, mobile Jest, `typecheck`, `lint`, an Android development build; iOS deferred to macOS; documentation close-out with historical records left intact. | all | — |
@@ -2679,7 +2706,7 @@ verification-link email and its native resend. It changes no other decision in L
 **What changes, and what does not.** The superseded direction was *"Firebase sends the verification
 email; the user opens a Firebase link; the app reloads and reads the signed claim."* The new direction
 is *"Inventory AI originates a 6-digit code, emails it itself through the provider-agnostic mail
-boundary (Brevo or Resend), verifies it itself, and only
+boundary (Brevo), verifies it itself, and only
 then sets Firebase's own verification state through the Admin SDK."* **Firebase remains the identity
 provider and the authority of record** for the final `email_verified` state; **MongoDB remains
 authoritative** for `businessId`, `role`, `status`, permissions and lifecycle; **`requireAuth` is not
@@ -2713,7 +2740,7 @@ linking (**RG-15**); and no new `User`/`sessions` field, session type or session
 | **AD-13** | **Concurrency-safe confirmation** — two concurrent valid confirmations may both reach the idempotent Admin write, but only one `usedAt` transition occurs; repeats are idempotent and do not overwrite state. No distributed locking. |
 | **AD-14** | **Already-verified idempotency** — an identity whose Firebase `email_verified` is already true short-circuits to success without minting, reserving or consuming anything. |
 | **AD-15** | **Firebase Admin bridge** — the only new Firebase write capability is `updateUser(uid, { emailVerified: true })`. The **uid comes only from the verified Firebase ID token**, never from a client-supplied field. Admin initialization stays centralized in `services/firebase/adminApp.ts`; the bridge is expected under `services/firebase/` with a test seam mirroring `setFirebaseIdTokenVerifier`. |
-| **AD-16** | **Email is delivered by Inventory AI through the provider-agnostic mail boundary**, not by Firebase's verification email — extending `services/mail/` with a template and `sendEmailVerificationEmail`. **Brevo is a supported provider and was the provider used for the AUTH-04-G live acceptance (2026-10-04); Resend remains a supported provider.** |
+| **AD-16** | **Email is delivered by Inventory AI through the provider-agnostic mail boundary**, not by Firebase's verification email — extending `services/mail/` with a template and `sendEmailVerificationEmail`. **Brevo is the provider used in development and production, and the one used for the AUTH-04-G live acceptance (2026-10-04).** |
 | **AD-17** | **Mail/config failure semantics** — (A) missing/invalid mail or pepper configuration fails **before** a code is minted and leaves any existing challenge **untouched**; (B) a mail delivery failure after the challenge is created leaves the **new** challenge current, does **not** restore the old one, applies **no rollback**, keeps the **cooldown in force**, and returns a stable error (`EMAIL_VERIFICATION_MAIL_FAILED`). |
 | **AD-18** | **Structured logging by explicit allowlist** — only fixed event names (`email_verification_code_requested`, `email_verification_completed`, `email_verification_failed`, `email_verification_bridge_failed`); no code, `codeHmac`, `emailHmac`, email, pepper, Firebase ID token, password or raw body/provider payload is ever logged. |
 | **AD-19** | **Rate limiting** — new limiter factories in `middlewares/rateLimit.ts`, registered in `routes/auth.routes.ts`, using the existing draft-7 `limitResponse()` so `Retry-After` is emitted; code `EMAIL_VERIFICATION_RATE_LIMITED`. Stores remain in-memory/per-process (**E3**, deferred to V4). |

@@ -49,3 +49,8 @@ Desktop.ini
 
 # Local smoke-test artifacts (UIAutomator dumps, screenshots) — never commit
 .smoke/
+
+# Local device-verification scratch (screen captures, UIAutomator dumps, throwaway
+# helper scripts) — never commit. Same category as .smoke/, kept separate so a
+# verification run can be reviewed before it is thrown away.
+.scratch/

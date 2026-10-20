@@ -152,8 +152,7 @@ export function deploymentNotes(report: IntegrationReport): string[] {
       'email verification is ENABLED but mail is not configured: no new member can complete ' +
         'registration (POST /api/auth/email-verification/request answers 503 ' +
         'EMAIL_VERIFICATION_NOT_CONFIGURED) and POST /api/auth/forgot-password answers 503 ' +
-        'MAIL_NOT_CONFIGURED. Set MAIL_PROVIDER, MAIL_FROM and the selected provider key ' +
-        '(RESEND_API_KEY or BREVO_API_KEY) on this host.',
+        'MAIL_NOT_CONFIGURED. Set MAIL_PROVIDER=brevo, MAIL_FROM and BREVO_API_KEY on this host.',
     );
   }
 

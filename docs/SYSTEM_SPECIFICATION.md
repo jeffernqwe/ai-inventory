@@ -1738,7 +1738,7 @@ Phase 32F record and is not rewritten.)* The boundary is what Google and Faceboo
 ## Firebase-Only Authentication — the Locked Direction (design only; nothing removed)
 
 > **AUTH-04 supersession (2026-10-02).** Within this locked direction, email verification is now a
-> **custom 6-digit Inventory AI code delivered by Resend**, **not** a Firebase verification link, and the
+> **custom 6-digit Inventory AI code delivered by Brevo**, **not** a Firebase verification link, and the
 > client resends through Inventory AI rather than native Firebase Auth. A successful confirmation sets
 > Firebase's own `email_verified` state through the Admin SDK (`updateUser(uid, { emailVerified: true })`).
 > Everything else in this subsection is preserved: Firebase remains the identity provider and the authority
@@ -2340,7 +2340,7 @@ Password recovery is disabled unless mail delivery is configured. It requires:
 ```text
 MAIL_PROVIDER               the provider that sends mail; empty disables recovery entirely
 MAIL_FROM                   a sender address the provider has verified
-RESEND_API_KEY              provider credential — server-side only
+BREVO_API_KEY               provider credential — server-side only
 MAIL_APP_NAME               optional; product name shown in the email (default "Inventory AI")
 MAIL_REQUEST_TIMEOUT_MS     optional; abort a provider request slower than this (default 10000)
 PASSWORD_RESET_URL          the reset page an emailed link points at

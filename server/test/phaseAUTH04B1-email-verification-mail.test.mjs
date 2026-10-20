@@ -67,7 +67,7 @@ const RESET_URL = 'https://app.inventory-ai.test/reset-password?token=Kq7Qw3vT9x
 
 const MAIL_ENV_KEYS = [
   'MAIL_PROVIDER',
-  'RESEND_API_KEY',
+  'BREVO_API_KEY',
   'MAIL_FROM',
   'MAIL_APP_NAME',
   'MAIL_REQUEST_TIMEOUT_MS',

@@ -111,9 +111,23 @@ const VERIFIED_MESSAGE = 'Email verified.';
 const NOT_CONFIGURED_MESSAGE =
   'Email verification is temporarily unavailable. Please try again later.';
 
-/** 429 — either the AD-19 route limiter or the AD-17 resend cooldown. */
-const RATE_LIMITED_MESSAGE =
-  'Too many verification attempts. Please wait a moment and try again.';
+/**
+ * 429 — the AD-17 per-identity RESEND COOLDOWN.
+ *
+ * DELIBERATELY NOT THE ROUTE LIMITER'S SENTENCE. Both refusals are 429s with the same
+ * application code, but they are different facts: the limiter means "this IP has made too
+ * many requests", while this one means "a code was issued for this identity moments ago".
+ * It used to answer both with "Too many verification attempts", which was untrue for the
+ * cooldown — the person has usually made one request, and nothing about their attempts was
+ * excessive. The sentence now names the action that helps (wait, then request again) and
+ * the route limiter's own handler in `middlewares/rateLimit.ts` keeps its own wording, so
+ * each refusal describes the thing that actually happened.
+ *
+ * It says nothing about the identity: not the address, not the uid, not whether a code was
+ * delivered. The `Retry-After` this refusal carries is the server's own remaining seconds.
+ */
+const RESEND_COOLDOWN_MESSAGE =
+  'A verification code was requested recently. Please wait a moment before requesting another.';
 
 /** 503 — the code was minted but could not be delivered (AD-17 B). */
 const MAIL_FAILED_MESSAGE =
@@ -173,7 +187,7 @@ function mapEmailVerificationFailure(err: unknown) {
       return new ApiError(503, NOT_CONFIGURED_MESSAGE, EMAIL_VERIFICATION_NOT_CONFIGURED);
     }
     if (err.code === EMAIL_VERIFICATION_RATE_LIMITED) {
-      return new ApiError(429, RATE_LIMITED_MESSAGE, EMAIL_VERIFICATION_RATE_LIMITED);
+      return new ApiError(429, RESEND_COOLDOWN_MESSAGE, EMAIL_VERIFICATION_RATE_LIMITED);
     }
     if (err.code === EMAIL_VERIFICATION_MAIL_FAILED) {
       return new ApiError(503, MAIL_FAILED_MESSAGE, EMAIL_VERIFICATION_MAIL_FAILED);

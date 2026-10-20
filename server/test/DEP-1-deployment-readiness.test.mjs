@@ -65,7 +65,6 @@ import { registerProvider, deregisterProvider } from '../src/services/mail/provi
 const MANAGED_ENV = [
   'MAIL_PROVIDER',
   'MAIL_FROM',
-  'RESEND_API_KEY',
   'BREVO_API_KEY',
   'FIREBASE_SERVICE_ACCOUNT_JSON',
   'FIREBASE_PROJECT_ID',
@@ -148,7 +147,7 @@ describe('DEP-1 the boot line', () => {
     const line = deploymentLine(
       report({
         mail: true,
-        mailProvider: 'resend',
+        mailProvider: 'brevo',
         firebase: true,
         emailVerification: true,
         ai: true,
@@ -158,7 +157,7 @@ describe('DEP-1 the boot line', () => {
 
     assert.equal(
       line,
-      '[config] integrations mail=on(resend) firebase=on emailVerification=on ai=on(openrouter)',
+      '[config] integrations mail=on(brevo) firebase=on emailVerification=on ai=on(openrouter)',
     );
     assert.equal(line.split('\n').length, 1, 'the report must stay one line');
     assert.ok(line.startsWith('[config] integrations '), 'one token must find it in a deploy log');
@@ -197,10 +196,10 @@ describe('DEP-1 the boot line', () => {
   it('names a provider that is selected but incomplete, while reporting mail as unusable', () => {
     // The production case, inverted: an operator DID set the variable, and the
     // provider still cannot send. Both facts matter, and neither may be hidden.
-    withEnv({ ...FULL, MAIL_PROVIDER: 'resend' }, () => {
+    withEnv({ ...FULL, MAIL_PROVIDER: 'brevo' }, () => {
       const live = integrationReport();
       assert.equal(live.mail, false, 'a built-in provider without its key cannot send');
-      assert.equal(live.mailProvider, 'resend', 'the selected name is still worth reporting');
+      assert.equal(live.mailProvider, 'brevo', 'the selected name is still worth reporting');
       assert.equal(
         deploymentNotes(live).length,
         1,
@@ -220,7 +219,7 @@ describe('DEP-1 the deployment warnings', () => {
     assert.equal(notes.length, 1, 'exactly one note for this state');
     const note = notes[0];
     assert.match(note, /email verification is ENABLED but mail is not configured/);
-    for (const variable of ['MAIL_PROVIDER', 'MAIL_FROM', 'RESEND_API_KEY', 'BREVO_API_KEY']) {
+    for (const variable of ['MAIL_PROVIDER', 'MAIL_FROM', 'BREVO_API_KEY']) {
       assert.ok(note.includes(variable), `the note must name ${variable} to set`);
     }
     for (const code of ['EMAIL_VERIFICATION_NOT_CONFIGURED', 'MAIL_NOT_CONFIGURED']) {
@@ -253,7 +252,7 @@ describe('DEP-1 the deployment warnings', () => {
       report({ emailVerification: false, mail: false, firebase: false }),
       // Mail without Firebase is a password-recovery deployment — supported, not
       // degraded, because nothing about it needs a verification code.
-      report({ mail: true, mailProvider: 'resend' }),
+      report({ mail: true, mailProvider: 'brevo' }),
       // And everything on at once.
       report({
         mail: true,
@@ -280,7 +279,6 @@ describe('DEP-1 the deployment warnings', () => {
   it('cannot leak a secret through the line or the notes', () => {
     const SECRETS = {
       EMAIL_VERIFICATION_CODE_PEPPER: 'DEP1_SENTINEL_PEPPER_0123456789abcdef',
-      RESEND_API_KEY: 'DEP1_SENTINEL_RESEND_KEY',
       BREVO_API_KEY: 'DEP1_SENTINEL_BREVO_KEY',
       FIREBASE_SERVICE_ACCOUNT_JSON: JSON.stringify({
         project_id: 'DEP1_SENTINEL_PROJECT',
@@ -296,7 +294,6 @@ describe('DEP-1 the deployment warnings', () => {
       // absence assertions below cannot pass vacuously.
       for (const sentinel of [
         'DEP1_SENTINEL_PEPPER_0123456789abcdef',
-        'DEP1_SENTINEL_RESEND_KEY',
         'DEP1_SENTINEL_BREVO_KEY',
         'DEP1_SENTINEL_PROJECT',
         'DEP1_SENTINEL_EMAIL',
@@ -315,7 +312,6 @@ describe('DEP-1 the deployment warnings', () => {
 
       for (const sentinel of [
         'DEP1_SENTINEL_PEPPER',
-        'DEP1_SENTINEL_RESEND_KEY',
         'DEP1_SENTINEL_BREVO_KEY',
         'DEP1_SENTINEL_PROJECT',
         'DEP1_SENTINEL_EMAIL',

@@ -9,6 +9,7 @@ import requestId from './middlewares/requestId.ts';
 import requestLogger from './middlewares/httpLogger.ts';
 import healthRoutes from './routes/health.routes.ts';
 import { createAuthRouter } from './routes/auth.routes.ts';
+import authActionRoutes from './routes/authAction.routes.ts';
 import userRoutes from './routes/users.routes.ts';
 import categoryRoutes from './routes/categories.routes.ts';
 import locationRoutes from './routes/locations.routes.ts';
@@ -132,6 +133,10 @@ export function createApp({
 
   // API routes
   app.use('/api/health', healthRoutes);
+  // The landing page for Firebase password-reset emails. Deliberately outside `/api`:
+  // it is a browser-facing HTML page (2026-10-20, see pages/resetPasswordLink.ts), not
+  // a JSON endpoint, and its path is the one configured in the Firebase console.
+  app.use('/auth', authActionRoutes);
   app.use('/api/auth', createAuthRouter({ limits: authLimits }));
   app.use('/api/users', userRoutes);
   app.use('/api/categories', categoryRoutes);

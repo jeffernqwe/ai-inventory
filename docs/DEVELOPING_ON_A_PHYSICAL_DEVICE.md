@@ -466,7 +466,7 @@ curl.exe -s -X POST "https://identitytoolkit.googleapis.com/v1/accounts:signInWi
 # -> INVALID_LOGIN_CREDENTIALS / EMAIL_NOT_FOUND  = provider ENABLED, safe to proceed
 # -> OPERATION_NOT_ALLOWED = BLOCKER: enable Email/Password in the Firebase console
 
-# 4. Is the mail sender verified in the provider? (Brevo; adapt for Resend)
+# 4. Is the mail sender verified in Brevo?
 $bk = (Get-Content .\server\.env | Select-String '^BREVO_API_KEY=').ToString().Split('=',2)[1]
 curl.exe -s -H "api-key: $bk" -H "accept: application/json" `
   -H "User-Agent: InventoryAI-preflight/1.0" https://api.brevo.com/v3/senders
@@ -583,7 +583,7 @@ Two reading traps worth knowing:
 | *"An account with this email already exists"* | no line | Firebase has that address and **this password does not open it** | sign in instead, or use a different address |
 | You are **adopted** silently and land on the verify screen with a code in flight | `request → 200`, `code_requested` | the address already existed in Firebase and the **same password** opened it | expected, not an error — continue |
 | Failure shown right after **Create Account** | `email_verification_failed` with `mail_delivery_failure`, or HTTP 503 | the send failed; the challenge was kept and its cooldown is **still running** | wait out the on-screen cooldown, then **Resend** |
-| Resend is refused immediately | HTTP 429 `EMAIL_VERIFICATION_RATE_LIMITED` + `Retry-After` | the **60-second** cooldown | wait the seconds the app shows — it reads the server's own number |
+| A resend is refused immediately | HTTP 429 `EMAIL_VERIFICATION_RATE_LIMITED` + `Retry-After` | the **60-second** cooldown | wait the seconds the app shows — it reads the server's own number |
 | 429 persists across several attempts | 429 on every verify route | the **per-IP** limiter: 30 requests per 15 minutes, shared by everything the phone does | wait, or restart the server (development only) |
 | *"That verification code is invalid or has expired"* | HTTP 400, `email_verification_failed` with `invalid_code` | wrong, expired (10 min), already used, or **5 attempts spent** | request a new code — note this one answer is deliberately the same for every one of those causes |
 | A code was requested but never arrived | `code_requested` present, **no** failure record | it left the server | check **Spam/Promotions** — the sender is your own address, so it is in your own mailbox, not in the API's control |
@@ -733,6 +733,15 @@ a tap does not always move focus the way it looks like it did — signing in onc
 field and the login failed for a reason nothing on screen explained. Take a dump after the tap and confirm
 `focused="true"` on the node you are about to fill; the same dump tells you the field's **current** bounds, which is
 what the next tap needs.
+
+**A blank screen after `input text` is usually the dev menu reloading, not a crash.** `input text` injects real
+**hardware key events**, and React Native's development support maps a stray **`r`** — one that no text field consumed
+— to *reload*. On 2026-10-20 that looked exactly like a defect: typing into a password field whose tap had **not** yet
+focused it sent `r` to the activity, the React context was torn down and rebuilt (`getOrCreateReloadTask(): Starting
+React Native reload`), and `screencap` showed an empty dark screen because the red-box overlay is a `SurfaceView`
+that screenshots do not capture. Two lessons, both cheap: **confirm focus before typing** (the paragraph above), and
+**read `adb logcat` for `Starting React Native reload` before calling anything a crash** — the app is fine, the
+automation typed at the wrong thing. A password with no `r` in it (`Testpass9021`) removes the trap entirely.
 
 **A tap that opens the Expo dev menu is the dev-client's overlay, not your app.** In a development build a floating
 **`Tools`** control sits over the UI (on this phone at `[915,852][993,930]`). It is not part of Inventory AI; tapping it

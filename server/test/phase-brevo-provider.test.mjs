@@ -138,8 +138,17 @@ unitSuite('Brevo provider — transport, sender parse and error hygiene', () => 
       assert.deepEqual(mailProviderRequiredEnv('  BrEvO  '), ['BREVO_API_KEY', 'MAIL_FROM']);
     });
 
-    it('keeps resend registered alongside brevo', async () => {
-      assert.deepEqual(mailProviderRequiredEnv('resend'), ['RESEND_API_KEY', 'MAIL_FROM']);
+    it('★ is the ONLY built-in: resend was removed, not left selectable', async () => {
+      // The transport, its key variable and its documentation were deleted on
+      // 2026-10-20. This guard fails if the entry is quietly restored — a built-in with
+      // no credential configured anywhere is a path an operator can select and no test
+      // run reaches, which is exactly what "unused provider" means.
+      assert.equal(mailProviderRequiredEnv('resend'), null);
+      assert.equal(mailProviderRequiredEnv('sendgrid'), null);
+
+      await withMailEnv({ MAIL_PROVIDER: 'resend', MAIL_FROM }, () => {
+        assert.throws(() => selectProvider(), /not supported/i);
+      });
       await withMailEnv({ MAIL_PROVIDER: 'brevo', BREVO_API_KEY: API_KEY, MAIL_FROM }, () => {
         assert.equal(selectProvider().name, 'brevo');
       });

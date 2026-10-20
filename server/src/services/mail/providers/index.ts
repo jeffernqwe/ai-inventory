@@ -2,18 +2,24 @@
  * Mail provider registry, mirroring services/ai/providers/index.ts.
  *
  * A module-level registry sits in front of a small BUILTINS table so tests can
- * swap the transport through a seam rather than through the network. `resend` and
- * `brevo` are the two built-ins, and there is deliberately no console or file
- * provider: a development provider that "delivers" by printing would put the raw
- * reset token into the logs, which is the one thing this whole layer exists to
- * prevent. When mail is unconfigured the honest behaviour is to say so.
+ * swap the transport through a seam rather than through the network. **`brevo` is
+ * the only built-in** — the provider this project uses in development and
+ * production — and there is deliberately no console or file provider: a
+ * development provider that "delivers" by printing would put the raw reset token
+ * into the logs, which is the one thing this whole layer exists to prevent. When
+ * mail is unconfigured the honest behaviour is to say so.
+ *
+ * Adding a second built-in is meant to be cheap — one factory, one entry below —
+ * but it is not free: it also needs a credential variable, a documented setup
+ * step, and a decision about which provider an operator should choose. A
+ * transport nobody runs is a path nobody exercises, so it is not kept "just in
+ * case".
  *
  * Configuration is read at call time, never at import time, so a test can change
  * process.env and observe the new value without reloading the module — and so a
  * missing key can never stop the server from booting.
  */
 
-import { createResendProvider } from './resendProvider.ts';
 import { createBrevoProvider } from './brevoProvider.ts';
 import { MailNotConfigured } from '../mailErrors.ts';
 
@@ -61,10 +67,6 @@ interface MailProviderEntry {
 const registry = new Map<string, MailProviderFactory>();
 
 const BUILTINS: Record<string, MailProviderEntry> = {
-  resend: {
-    factory: createResendProvider,
-    requiredEnv: ['RESEND_API_KEY', 'MAIL_FROM'],
-  },
   brevo: {
     factory: createBrevoProvider,
     requiredEnv: ['BREVO_API_KEY', 'MAIL_FROM'],

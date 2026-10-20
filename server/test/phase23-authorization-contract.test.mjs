@@ -245,6 +245,14 @@ const PUBLIC_ROUTES = [
     why: 'Phase 26B-3: spends a reset link — reachable only by a caller with no working password; rate-limited per IP',
   },
   {
+    route: 'POST /api/auth/password-reset/code',
+    why: 'AUTH-06: how a six-digit reset code is requested — the caller has forgotten their password and holds no session by definition, and the endpoint resolves nothing but one fixed 202 so it cannot enumerate accounts; rate-limited per address + IP',
+  },
+  {
+    route: 'POST /api/auth/password-reset/confirm',
+    why: 'AUTH-06: spends a reset code and replaces the password — reachable only by a caller with no working password, and it ISSUES no session: a completed reset ends every session and asks the person to sign in again; rate-limited per IP',
+  },
+  {
     route: 'POST /api/auth/firebase/exchange',
     why: 'Phase 32C: turns a verified Firebase ID token into an application session — the caller holds no Inventory AI JWT by definition, which is what the exchange exists to remedy; rate-limited per IP',
   },

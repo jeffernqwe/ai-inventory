@@ -74,7 +74,7 @@ const REQUEST_ACCEPTED_MESSAGE =
 /**
  * Fixed copy for the one mail failure a caller may see. It deliberately does not
  * repeat the mail layer's own message: that text names the environment
- * variables that are missing (`MAIL_PROVIDER`, `RESEND_API_KEY`, `MAIL_FROM`),
+ * variables that are missing (`MAIL_PROVIDER`, `BREVO_API_KEY`, `MAIL_FROM`),
  * which is operator-facing detail appearing on an unauthenticated endpoint. The
  * operational reason is logged instead — see `logMailFailure`.
  */

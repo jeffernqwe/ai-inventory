@@ -40,8 +40,8 @@
  * failure can never be mistaken for an authentication failure.
  *
  * The mail layer is reached through its public interface only
- * (`services/mail/index.ts`), which is the boundary that keeps Resend — or any
- * other transport — out of this file. The one exception is `mailConfig`, the
+ * (`services/mail/index.ts`), which is the boundary that keeps the selected
+ * transport's wire details out of this file. The one exception is `mailConfig`, the
  * config reader of the same layer: the reset URL lives there and `index.ts`
  * deliberately does not re-export it (approved decision D2). `mailConfig.ts`
  * cannot reach a provider, so the transport boundary is intact either way.

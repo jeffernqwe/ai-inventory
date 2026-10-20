@@ -3,14 +3,13 @@
  *
  * WHAT THIS FILE PINS, AND WHY EACH CASE EARNS ITS PLACE.
  *
- *   ForgotPasswordScreen
- *     • a Firebase send ends in the SAME fixed sentence the custom flow has always shown,
- *       so the success state cannot become a way to learn whether an address exists;
- *     • an unconfigured build falls back to the custom endpoint — the 26B/27 flow is
- *       still reachable, which is the additive half of the phase;
- *     • a Firebase FAILURE does not fall back, because an outage must not be a route to
- *       the other mail system;
- *     • a malformed address lands on the email input, and nothing else does.
+ *   ForgotPasswordScreen (AUTH-06 rewrote this half; it no longer talks to Firebase)
+ *     • the address is posted to the server, and the SUCCESS state is a navigation to the
+ *       code screen — never a sentence about whether an account exists;
+ *     • the request body is never rendered, so the server's uniform 202 cannot be undone;
+ *     • a failure keeps the person on the screen with the server's own sentence, and a
+ *       malformed address lands on the email input rather than above the form;
+ *     • an empty field asks the network for nothing.
  *
  *   ResetPasswordScreen
  *     • `?oobCode=` is redeemed by Firebase and NOT sent to the server endpoint;
@@ -30,14 +29,15 @@
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import type { ReactNode } from 'react';
 
+import { router } from 'expo-router';
+
 import ForgotPasswordScreen from '../app/forgot-password';
 import ResetPasswordScreen from '../app/reset-password';
-import { forgotPassword, resetPassword } from '../lib/api';
+import { requestPasswordResetCode, resetPassword } from '../lib/api';
 import { ApiError } from '../lib/client';
 import { clearPasswordResetPending, markPasswordResetPending, useSession } from '../lib/auth';
 import {
   confirmFirebasePasswordReset,
-  sendFirebasePasswordResetEmail,
   verifyFirebasePasswordResetCode,
 } from '../lib/firebase-auth';
 import { ThemeProvider } from '../lib/theme-context';
@@ -51,7 +51,7 @@ jest.mock('expo-router', () => ({
 }));
 
 jest.mock('../lib/api', () => ({
-  forgotPassword: jest.fn(),
+  requestPasswordResetCode: jest.fn(),
   resetPassword: jest.fn(),
 }));
 
@@ -64,15 +64,16 @@ jest.mock('../lib/auth', () => ({
   clearPasswordResetPending: jest.fn(),
 }));
 
+// The Firebase sender is GONE from this boundary (AUTH-06), so the mock offers only what the
+// screens can still reach. A fake that kept it would let a reintroduced call pass unnoticed.
 jest.mock('../lib/firebase-auth', () => ({
-  sendFirebasePasswordResetEmail: jest.fn(),
   verifyFirebasePasswordResetCode: jest.fn(),
   confirmFirebasePasswordReset: jest.fn(),
 }));
 
-const mockedForgotPassword = forgotPassword as jest.Mock;
+const mockedRequestCode = requestPasswordResetCode as jest.Mock;
 const mockedResetPassword = resetPassword as jest.Mock;
-const mockedSendFirebase = sendFirebasePasswordResetEmail as jest.Mock;
+const mockedRouter = router as unknown as { push: jest.Mock; replace: jest.Mock };
 const mockedConfirmFirebase = confirmFirebasePasswordReset as jest.Mock;
 const mockedVerifyFirebase = verifyFirebasePasswordResetCode as jest.Mock;
 const mockedMarkPending = markPasswordResetPending as jest.Mock;
@@ -84,9 +85,6 @@ const clearSession = jest.fn(async () => {});
 /** The address Firebase resolves for the fixture code. Memory-only, by design. */
 const RESET_ACCOUNT_EMAIL = 'reset-owner@example.com';
 
-/** The server's own fixed sentence, which the Firebase path must reproduce unchanged. */
-const REQUEST_ACCEPTED =
-  'If an account exists for that email, a password reset link has been sent.';
 const RESET_COMPLETED = 'Password changed. Please sign in again.';
 const LINK_INVALID = 'This reset link is invalid or has expired. Request a new one.';
 const LINK_INCOMPLETE = 'This reset link is missing its code.';
@@ -112,9 +110,9 @@ const mountReset = (): Promise<View> =>
   );
 
 /** Types an address and presses the request button. */
-async function requestLink(view: View, email = 'user@example.com'): Promise<void> {
+async function requestCode(view: View, email = 'user@example.com'): Promise<void> {
   await fireEvent.changeText(view.getByPlaceholderText(EMAIL_FIELD), email);
-  await fireEvent.press(view.getByRole('button', { name: 'Send reset link' }));
+  await fireEvent.press(view.getByRole('button', { name: 'Send reset code' }));
 }
 
 /** Fills both password fields identically and submits. */
@@ -128,7 +126,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   for (const key of Object.keys(mockParams)) delete mockParams[key];
   mockedUseSession.mockReturnValue({ clearSession });
-  mockedForgotPassword.mockResolvedValue({});
+  mockedRequestCode.mockResolvedValue({});
   mockedResetPassword.mockResolvedValue({});
   // N-4 — the first Firebase step of every reset attempt now resolves the account.
   mockedVerifyFirebase.mockResolvedValue({ kind: 'verified', email: RESET_ACCOUNT_EMAIL });
@@ -136,130 +134,76 @@ beforeEach(() => {
   mockedClearPending.mockResolvedValue(undefined);
 });
 
-describe('N-3 — Forgot Password chooses the flow by the build, never by a failure', () => {
-  it('sends through Firebase and shows the custom flow’s own fixed sentence', async () => {
-    mockedSendFirebase.mockResolvedValue({ kind: 'sent' });
-
+describe('AUTH-06 — Forgot Password sends ONE request and continues in the app', () => {
+  it('posts the address and routes to the code screen, saying nothing about the account', async () => {
     const view = await mountForgot();
-    await requestLink(view);
+    await requestCode(view);
 
-    await waitFor(() => expect(view.getByText(REQUEST_ACCEPTED)).toBeTruthy());
-    expect(mockedSendFirebase).toHaveBeenCalledWith('user@example.com');
-    // The server endpoint is untouched: nothing about this visit went near 26B.
-    expect(mockedForgotPassword).not.toHaveBeenCalled();
-  });
-
-  it('falls back to the custom endpoint when the build has no Firebase configuration', async () => {
-    mockedSendFirebase.mockResolvedValue({ kind: 'legacyFallback' });
-
-    const view = await mountForgot();
-    await requestLink(view);
-
-    await waitFor(() => expect(mockedForgotPassword).toHaveBeenCalledWith('user@example.com'));
-    // The same success state, so the fallback is invisible to the person using it.
-    expect(view.getByText(REQUEST_ACCEPTED)).toBeTruthy();
-  });
-
-  it('does NOT fall back when Firebase is configured but failing', async () => {
-    mockedSendFirebase.mockResolvedValue({
-      kind: 'failure',
-      code: 'auth/network-request-failed',
-      message: 'Cannot reach the sign-in service. Check your connection and try again.',
-    });
-
-    const view = await mountForgot();
-    await requestLink(view);
-
+    await waitFor(() => expect(mockedRequestCode).toHaveBeenCalledWith('user@example.com'));
+    // THE SUCCESS STATE IS A NAVIGATION. The server answers one 202 whether or not the address
+    // exists, so there is no branch here that could render "no such account" — and the screen
+    // never reads the response body, which is the one place this client could undo that.
     await waitFor(() =>
-      expect(
-        view.getByText('Cannot reach the sign-in service. Check your connection and try again.')
-      ).toBeTruthy()
+      expect(mockedRouter.push).toHaveBeenCalledWith({
+        pathname: '/reset-password-code',
+        params: { email: 'user@example.com' },
+      })
     );
-    expect(mockedForgotPassword).not.toHaveBeenCalled();
-    expect(view.queryByText(REQUEST_ACCEPTED)).toBeNull();
+    expect(view.queryByText(/Diagnostic \(dev only\)/)).toBeNull();
   });
 
-  it('shows a malformed address on the input rather than above the form', async () => {
-    mockedSendFirebase.mockResolvedValue({
-      kind: 'failure',
-      code: 'auth/invalid-email',
-      message: 'Enter a valid email address.',
-      field: 'email',
-    });
-
+  it('trims the address before sending it, so a stray space is not a different one', async () => {
     const view = await mountForgot();
-    await requestLink(view, 'not-an-email');
+    await requestCode(view, '  spaced@example.com  ');
 
-    await waitFor(() => expect(view.getByText('Enter a valid email address.')).toBeTruthy());
-    expect(mockedForgotPassword).not.toHaveBeenCalled();
-    expect(view.queryByText(REQUEST_ACCEPTED)).toBeNull();
+    await waitFor(() => expect(mockedRequestCode).toHaveBeenCalledWith('spaced@example.com'));
   });
 
-  it('names the failing side and the SDK code to a DEVELOPER, and to nobody else', async () => {
-    mockedSendFirebase.mockResolvedValue({
-      kind: 'failure',
-      code: 'auth/email-not-found',
-      message: 'Unable to send the reset link. Please try again.',
-    });
-
-    const view = await mountForgot();
-    await requestLink(view);
-
-    // The person's sentence is unchanged: the diagnostic is a SECOND element, never a
-    // clause appended to theirs.
-    await waitFor(() =>
-      expect(view.getByText('Unable to send the reset link. Please try again.')).toBeTruthy()
-    );
-    // And the code the classification layer decided from is now observable, which is the
-    // whole of what this adds — before it, a device failure was one sentence and four
-    // different causes were indistinguishable behind it.
-    expect(
-      view.getByText('Diagnostic (dev only) — firebase: auth/email-not-found')
-    ).toBeTruthy();
-    expect(mockedForgotPassword).not.toHaveBeenCalled();
-  });
-
-  it('names the custom endpoint and its code when that is the side that failed', async () => {
-    // The one state a production deployment is in today: the 26B endpoint answers 503
-    // MAIL_NOT_CONFIGURED, because no mail transport is configured on it. The screen
-    // shows the server's own sentence and, to a developer, which server code produced it.
-    mockedSendFirebase.mockResolvedValue({ kind: 'legacyFallback' });
-    mockedForgotPassword.mockRejectedValue(
+  it('stays on the screen with the server’s sentence when the request fails', async () => {
+    mockedRequestCode.mockRejectedValue(
       new ApiError(
         503,
-        'MAIL_NOT_CONFIGURED',
+        'PASSWORD_RESET_CODE_NOT_CONFIGURED',
         'Password reset is temporarily unavailable. Please try again later.'
       )
     );
 
     const view = await mountForgot();
-    await requestLink(view);
+    await requestCode(view);
 
     await waitFor(() =>
       expect(
         view.getByText('Password reset is temporarily unavailable. Please try again later.')
       ).toBeTruthy()
     );
-    expect(view.getByText('Diagnostic (dev only) — server: MAIL_NOT_CONFIGURED')).toBeTruthy();
+    expect(mockedRouter.push).not.toHaveBeenCalled();
+    // The application code is shown to a DEVELOPER and nobody else: it names the failing side
+    // without a clause being appended to the person's sentence.
+    expect(
+      view.getByText('Diagnostic (dev only) — server: PASSWORD_RESET_CODE_NOT_CONFIGURED')
+    ).toBeTruthy();
   });
 
-  it('shows no diagnostic on the path where nothing failed', async () => {
-    mockedSendFirebase.mockResolvedValue({ kind: 'sent' });
+  it('reports a field problem on the input the server named', async () => {
+    mockedRequestCode.mockRejectedValue(
+      new ApiError(400, 'VALIDATION_ERROR', 'Please check the highlighted fields.', [
+        { field: 'email', message: 'Enter a valid email address.' },
+      ])
+    );
 
     const view = await mountForgot();
-    await requestLink(view);
+    await requestCode(view);
 
-    await waitFor(() => expect(view.getByText(REQUEST_ACCEPTED)).toBeTruthy());
-    expect(view.queryByText(/Diagnostic \(dev only\)/)).toBeNull();
+    await waitFor(() => expect(view.getByText('Enter a valid email address.')).toBeTruthy());
+    expect(mockedRouter.push).not.toHaveBeenCalled();
   });
 
   it('asks the network for nothing when the field is empty', async () => {
     const view = await mountForgot();
-    await fireEvent.press(view.getByRole('button', { name: 'Send reset link' }));
+    await fireEvent.press(view.getByRole('button', { name: 'Send reset code' }));
 
     await waitFor(() => expect(view.getByText('Email is required')).toBeTruthy());
-    expect(mockedSendFirebase).not.toHaveBeenCalled();
-    expect(mockedForgotPassword).not.toHaveBeenCalled();
+    expect(mockedRequestCode).not.toHaveBeenCalled();
   });
 });
 

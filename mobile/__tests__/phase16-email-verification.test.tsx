@@ -467,10 +467,12 @@ describe('confirmVerificationCode', () => {
     expect(view.result.current.status).toBe('signedOut');
   });
 
-  it('★ a rejected code changes nothing — no reload, no mint, no exchange', async () => {
+  it('★ a rejected code changes nothing — no mint and no exchange', async () => {
     const view = await mountSignedOut();
     await armVerification(view);
     mockCurrentFirebaseIdToken.mockResolvedValue(ID_TOKEN);
+    // Firebase still reports the address UNVERIFIED, which is the ordinary wrong-code case.
+    mockNativeReloadUser.mockResolvedValue(false);
     // The server answers ONE indistinguishable refusal for wrong, expired, exhausted,
     // absent and already-used codes.
     const invalid = new ApiError(400, 'INVALID_VERIFICATION_CODE', 'That code is not valid.');
@@ -480,8 +482,10 @@ describe('confirmVerificationCode', () => {
 
     expect(caught).toBe(invalid);
     expect((caught as ApiError).code).toBe('INVALID_VERIFICATION_CODE');
-    // The confirm failed, so nothing downstream may have run.
-    expect(mockNativeReloadUser).not.toHaveBeenCalled();
+    // The refusal is checked against Firebase exactly once (a code the server already spent
+    // must not strand someone whose address really is verified), and then NOTHING
+    // downstream may run: no forced token, no tenant, no exchange, no session.
+    expect(mockNativeReloadUser).toHaveBeenCalledTimes(1);
     expect(mockNativeForceIdToken).not.toHaveBeenCalled();
     expect(mockFirebaseRegister).not.toHaveBeenCalled();
     expect(mockFirebaseExchange).not.toHaveBeenCalled();
@@ -701,8 +705,40 @@ describe('the frozen modules stayed frozen', () => {
     // whole-file hash a scope TRIPWIRE (it forces exactly this deliberation) rather than
     // the thing that actually protects behaviour. Re-freezing it points the tripwire at
     // the next change instead of at this one.
+    //
+    // MOVED TWICE MORE ON 2026-10-20, BOTH TIMES BY A FIX TO THE RESET REQUEST THAT THE
+    // TRIPWIRE WAS RIGHT TO SURFACE.
+    //
+    // First: a real reset attempt was refused with `auth/unauthorized-domain`, because the
+    // app asked Firebase to return the emailed link to a custom scheme and only an
+    // Authorized domain can carry one, so the request gained a one-time recovery through
+    // Firebase's own hosted link.
+    //
+    // Second, and this is the state it is left in: that request no longer asks for a
+    // destination AT ALL. The emailed link reaches the app through this server's
+    // `GET /auth/reset` page, configured in the Firebase console as the password-reset
+    // template's action URL, so there is nothing left for Firebase to refuse and the
+    // recovery — and its pattern constant and its misconfiguration sentence — was deleted
+    // rather than left as dead code. Net effect on this module is a SMALLER request function.
+    //
+    // MOVED A THIRD TIME ON 2026-10-20, AND THIS TIME THE MODULE GOT SMALLER BECAUSE A
+    // CAPABILITY WAS WITHDRAWN (AUTH-06). Firebase can no longer be asked to mail this app's
+    // reset link: the project's email-template editor refuses every write
+    // (`EMAIL_TEMPLATE_UPDATE_NOT_ALLOWED`), so the destination of a Firebase-composed link
+    // cannot be chosen by us, and Firebase's own destination is a browser form that revokes
+    // nothing. The server now mints a six-digit code and mails it through Brevo. Removed here:
+    // `sendFirebasePasswordResetEmail`, its outcome union, its one-send-only recovery
+    // sentence, the enumeration-resistance code list whose only consumer it was, and the
+    // `nativeSendPasswordResetEmail` import that reached the SDK verb behind it.
+    //
+    // WHAT STILL DID NOT MOVE, which is the claim this pin actually makes: no verification
+    // code, no `LEGACY_FALLBACK_CODES` entry, no sign-in outcome union and no cached-token
+    // accessor is involved. The REDEMPTION half of recovery deliberately STAYS, because a
+    // `?oobCode=` link already in somebody's inbox has to keep working, and it is pinned by
+    // BEHAVIOUR in `phaseN3-firebase-recovery.test.ts` together with a source guard asserting
+    // that no sender grows back.
     expect(sha256(lf(read('lib/firebase-auth.ts')))).toBe(
-      'bf729373209f08fb1bc4d265c8b9e1b6575c13a8fdd996c59b1d60f551ec6170'
+      '7b142c26371aaa1bf68dc4ba9dd6f95be7ed899e6cb885fbe0e358c51be9c9c6'
     );
   });
 

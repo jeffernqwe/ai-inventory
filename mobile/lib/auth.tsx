@@ -481,6 +481,21 @@ async function readEmailVerified(): Promise<boolean> {
    */
   clearVerificationEntryError: () => void;
   /**
+   * WHEN a verification code was last issued during this app run, in ms since epoch, or
+   * `null` when none has been.
+   *
+   * WHY THIS IS CONTEXT STATE RATHER THAN SCREEN STATE. Registration SENDS a code before
+   * it navigates to the verify screen, so by the time that screen mounts a code is already
+   * in the person's inbox and the server's 60-second per-identity cooldown is already
+   * running. The screen could not know either fact, so it opened on "Send verification
+   * code" — an enabled button whose only possible outcome was a 429 — and its subtitle
+   * asked the person to enter a code it did not admit had been sent. Passing the instant
+   * across the navigation fixes both, without persisting anything and without a route
+   * parameter. It is in-memory, like the rest of the onboarding state, and cleared when
+   * the journey ends: a cold start has no pending send to describe.
+   */
+  verificationCodeIssuedAt: number | null;
+  /**
    * AUTH-04-F — requests a fresh six-digit verification code for the signed-in
    * Firebase identity. Replaces the Phase 16 verification-LINK resend: the code is
    * minted and mailed by the AUTH-04 server flow, and the plaintext code never
@@ -1100,6 +1115,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // actions take over from there. In-memory only, never persisted, and it holds nothing
   // but a safe client-facing sentence: no provider text, uid, email or token.
   const [verificationEntryError, setVerificationEntryError] = useState<string | null>(null);
+  // The instant the CURRENT journey's code was issued, in ms. Set by the signup path (which
+  // sends before it navigates) and by a resend; cleared whenever the journey ends or starts
+  // without a successful send. In-memory only — see `AuthValue.verificationCodeIssuedAt`.
+  const [verificationCodeIssuedAt, setVerificationCodeIssuedAt] = useState<number | null>(null);
   const firebaseRegistrationRequired = firebaseOnboarding === 'register';
 
   // Whether THIS attempt's `firebase/register` call already succeeded, so a retry
@@ -1145,11 +1164,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       info: PendingFirebaseRegistration | null,
       // AUTH-04-F (Option B) — present only when the INITIAL code request failed. Every
       // other caller (sign-in, Google) passes nothing, which CLEARS any stale reason.
-      entryError: string | null = null
+      entryError: string | null = null,
+      // The instant this journey's code was sent, when one was. Passed ONLY by the signup
+      // path, which mails a code before navigating: the verify screen then opens knowing a
+      // code is in flight and how much of the server's cooldown remains. Every other caller
+      // omits it, which clears a value left by a previous journey — a sign-in for an
+      // unverified identity has not had a code sent for it.
+      codeIssuedAt: number | null = null
     ): void => {
       firebaseAccountRegisteredRef.current = false;
       setPendingRegistration(info);
       setVerificationEntryError(entryError);
+      setVerificationCodeIssuedAt(codeIssuedAt);
       setFirebaseOnboarding('verify-email');
     },
     []
@@ -1193,6 +1219,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setFirebaseOnboarding('none');
     setPendingRegistration(null);
     setVerificationEntryError(null);
+    setVerificationCodeIssuedAt(null);
     setToken(nextToken);
     setUser(nextUser);
     setStatus(nextToken && nextUser ? 'signedIn' : 'signedOut');
@@ -1533,8 +1560,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // already in flight. The server mints and mails it; the plaintext never reaches
       // this app.
       const { idToken } = await ensureFirebaseAccount({ email, password, name });
+      // The instant the code was accepted, or `null` when the send failed. Recorded here
+      // rather than in the arming call inside the `try`, because the journey is armed on
+      // BOTH paths by the single call after this block — one place decides the state, and
+      // only the timestamp distinguishes "a code is in flight" from "the send failed".
+      let codeIssuedAt: number | null = null;
       try {
         await api.requestEmailVerification({ idToken });
+        // The send SUCCEEDED, so the code is in flight and the server's 60-second
+        // per-identity cooldown is running. Passing the instant lets the verify screen say
+        // so and start its countdown, instead of offering a send that could only be refused.
+        codeIssuedAt = Date.now();
       } catch (err) {
         // AUTH-04-F (Option B) — THE IDENTITY EXISTS AND IS UNVERIFIED, so the
         // verification journey is armed even though the FIRST send failed. The send is an
@@ -1548,7 +1584,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         armVerificationRequired({ businessName, name }, verificationSendFailureMessage(err));
         return null;
       }
-      armVerificationRequired({ businessName, name });
+      armVerificationRequired({ businessName, name }, null, codeIssuedAt);
       return null;
     },
     [armVerificationRequired, signIn]
@@ -1708,6 +1744,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setFirebaseOnboarding('none');
       setPendingRegistration(null);
       setVerificationEntryError(null);
+      setVerificationCodeIssuedAt(null);
       await endFirebaseSession();
     },
     [clearSession, endFirebaseSession]
@@ -2003,6 +2040,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw new FirebaseAuthError(NO_FIREBASE_IDENTITY, NO_FIREBASE_IDENTITY_MESSAGE);
     }
     await api.requestEmailVerification({ idToken });
+    // Recorded only after the call RESOLVES: a refusal sent nothing, so it must not start
+    // a countdown the screen would then present as "a code was sent".
+    setVerificationCodeIssuedAt(Date.now());
   }, []);
 
   /**
@@ -2031,9 +2071,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw new FirebaseAuthError(NO_FIREBASE_IDENTITY, NO_FIREBASE_IDENTITY_MESSAGE);
       }
 
-      await api.confirmEmailVerification({ idToken: confirmToken, code });
+      let verifiedByConfirm = false;
+      try {
+        await api.confirmEmailVerification({ idToken: confirmToken, code });
+      } catch (err) {
+        // NO DEAD END AFTER A CONSUMED CODE.
+        //
+        // The server CONSUMES the challenge as part of a successful confirmation
+        // (`usedAt`), so a failure AFTER that write — the reload below, the forced
+        // refresh, registration, the exchange, or just this response being lost — leaves
+        // the person holding a code the server will now refuse as invalid. Retrying the
+        // same code could only ever produce "that code is invalid or has expired", and
+        // requesting a new one would be a silent no-op, because an already-verified
+        // identity short-circuits the request path without sending anything. The one
+        // state the screen could not escape was the state it created itself.
+        //
+        // So before reporting the refusal, ask FIREBASE — the authority the whole flow
+        // exists to update — whether this identity is now verified. If it is, the code
+        // did its job and the journey continues exactly as it would have on the success
+        // path; if it is not, or the check itself fails, the original refusal stands.
+        //
+        // This cannot turn a wrong code into a sign-in: Firebase's signed
+        // `email_verified` state is what the server and the exchange re-check, and a
+        // forged or unverified identity still gets no session. It only stops a spent
+        // code from stranding someone who has already done what was asked.
+        const alreadyVerified = await readEmailVerified().catch(() => false);
+        if (!alreadyVerified) throw err;
+        // Already known, so the reload below is skipped rather than repeated.
+        verifiedByConfirm = true;
+      }
 
-      const verified = await readEmailVerified();
+      const verified = verifiedByConfirm || (await readEmailVerified());
       if (!verified) return null;
 
       let idToken: string | null;
@@ -2075,6 +2143,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * ever set the in-memory onboarding state.
    */
   const retryVerificationResume = useCallback(async (): Promise<void> => {
+    // The probe is READ-ONLY and describes a COLD START, so any earlier send belongs to a
+    // journey this probe is replacing: forget it rather than let a stale countdown describe
+    // a code this launch never sent.
+    setVerificationCodeIssuedAt(null);
     setFirebaseOnboarding(await probeVerificationResume());
   }, []);
 
@@ -2099,6 +2171,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       pendingRegistration,
       verificationEntryError,
       clearVerificationEntryError,
+      verificationCodeIssuedAt,
       requestVerificationCode,
       confirmVerificationCode,
       retryVerificationResume,
@@ -2128,6 +2201,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       pendingRegistration,
       verificationEntryError,
       clearVerificationEntryError,
+      verificationCodeIssuedAt,
       requestVerificationCode,
       confirmVerificationCode,
       retryVerificationResume,

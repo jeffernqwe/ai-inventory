@@ -8,9 +8,10 @@
  * password recovery simply answers a clean 503 until an operator fixes it.
  *
  * Every value here lives server-side only. Nothing in this module is ever sent
- * to the mobile application, and the Resend API key is deliberately NOT part of
- * this object: it is read by the provider that needs it (resendProvider.js) so
- * it cannot be spread into a log line or an error by accident.
+ * to the mobile application, and the provider API key (`BREVO_API_KEY`) is
+ * deliberately NOT part of this object: it is read by the transport that needs it
+ * (`brevoProvider.ts`) so it cannot be spread into a log line or an error by
+ * accident.
  */
 
 function positiveInt(raw: string | undefined, fallback: number) {

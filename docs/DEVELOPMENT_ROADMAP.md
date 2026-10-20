@@ -16523,11 +16523,45 @@ something the server can do.
   `CODE_TTL_MINUTES` and `RESEND_COOLDOWN_SECONDS` are those numbers, because "expires in 10 minutes"
   typed into a sentence is exactly the kind of number that drifts.
 
+## Deployed, and the error the owner saw (measured 2026-10-21)
+
+The owner tested *Forgot Password* on the phone with a real account's address, tapped **Send Reset Code**,
+and got an error with no mail. **The cause was version skew, not a defect in this flow**: the phone was
+running the new AUTH-06 client — the button it showed, *Send Reset Code*, exists only in the uncommitted
+work — while the deployed server was still `7c723c5`, which knows nothing about these routes. Measured
+against the live host before any change:
+
+```
+POST /api/auth/password-reset/code   → 404  {"error":"Not Found","message":"POST /api/auth/password-reset/code not found"}
+GET  /auth/reset                     → 404
+POST /api/auth/forgot-password       → 400 VALIDATION_ERROR   (the 26B route exists — older code, same server)
+```
+
+So this is the **same class of finding AUTH-05 recorded a day earlier** and it repeats the lesson: every
+AUTH-05 and AUTH-06 file was still working-tree change, so nothing had deployed them, and a client that
+was ahead of its server could only fail. The routes, the collection and the screen were correct; the
+deployment was missing.
+
+**The fix was to ship it.** The work was committed as `b9d6ec9` and pushed to `main`, and the host
+redeployed on its own — the route answered `404` on the first three probes and `400` on the fourth,
+about **70 s** later. Post-deploy probes, all against `https://ai-inventory-l1mi.onrender.com`:
+
+| Probe | Answer | What it proves |
+| --- | --- | --- |
+| `POST /api/auth/password-reset/code` `{}` | `400 VALIDATION_ERROR` | the route is mounted (not a 404) |
+| `POST /api/auth/password-reset/confirm` `{}` | `400 VALIDATION_ERROR` | the confirm route is mounted |
+| `GET /auth/reset` | `400`, 2 175-byte invalid-link page | the AUTH-05 page is deployed and refuses a query with no `oobCode` |
+| `POST /api/auth/password-reset/code` with an address that cannot exist | `202` in **0.21 s** | the pepper and the mail configuration are present, and the 202 does not wait on Brevo — an unknown address gets the same sentence with no send |
+
+**What is still owed is the inbox.** A 202 is a claim about a dispatched send, not a delivery, so the
+remaining measurement is the owner's: a real code into a real inbox, the six digits typed on the phone,
+the new password accepted and the old one refused. None of that is asserted here by inference.
+
 ## Limits
 
 * **Not device-verified.** The screens, the routes and the mail path are tested through their own
-  interfaces over HTTP and RNTL, but nobody has typed a code on the OPPO yet, and no real Brevo message
-  has been received through this flow.
+  interfaces over HTTP and RNTL, and the routes are now **deployed and probed** (above), but nobody has
+  typed a code on the OPPO yet, and no real Brevo message has been received through this flow.
 * **L-17 stays OPEN**, and now gates only the AUTH-05 hosted-link path. This flow does not need the
   console setting — which is the point — but it also does not repair it: a person holding an older
   Firebase link may still land on Firebase's hosted page, and that reset still revokes nothing.

@@ -17525,13 +17525,24 @@ Artifacts, including every screenshot, the printed PDF and the decoder used on i
 
 ## Where the branch stands — not merged, not released
 
-`chore/expo-sdk-58` carries the SDK 58 upgrade, this acceptance pass and the label fix. **It is not
-merged and nothing has been released**, and no release decision has been made: a successful
-`development` EAS build is not a production build, no store submission exists, and **iOS has not
-been run at all** (no macOS on this host). What a release decision would still need: the two required
-CI jobs green on this branch, a **`preview`/`production`-profile** EAS build rather than a
-`development` one (which is what the device was running), and the iOS half on a macOS or EAS build
-environment. Until then the device evidence above is Android-only and says so.
+`chore/expo-sdk-58` carries the SDK 58 upgrade, this acceptance pass, the label fix and the device
+harness. **It is not merged and nothing has been released**, and no release decision has been made:
+a successful `development` EAS build is not a production build, no store submission exists, and
+**iOS has not been run at all** (no macOS on this host).
+
+**CI is green on the branch (2026-10-21).** Workflow `ci` run `39642789958` was dispatched on
+`chore/expo-sdk-58` at head `f33675f` — the device-harness commit — and **all four jobs succeeded**:
+`mobile` (tests, typecheck, lint, the label decode), `server` (full suite against a real Mongo
+container, boot smoke, lint, both module-graph checks), `secret-guard` and `attribution-guard`. That
+is the first of the release gate's conditions now met, and met on the pushed tree rather than on a
+laptop. Note that this branch's pushes do **not** trigger CI on their own — the workflow runs on
+`pull_request`, on `push` to `main` and on `workflow_dispatch`, so the run above was dispatched
+deliberately; a future claim of "CI green" on this branch needs the same dispatch, and the head it
+was run at named with it.
+
+What a release decision would still need: a **`preview`/`production`-profile** EAS build rather than
+the `development` one the device ran, and **the iOS half** on a macOS or EAS build environment.
+Until then the device evidence above is Android-only and says so.
 
 # The device pass became a script — and found four bugs in itself (2026-10-21)
 
@@ -17616,10 +17627,11 @@ harness can produce here, and the reason the device items are not closed from Ja
 ## Release gate unchanged
 
 `chore/expo-sdk-58` still carries the SDK 58 upgrade, the label fix and now the harness. **Nothing is
-merged or released.** A release decision still needs the required CI jobs green on the branch, a
-`preview`/`production`-profile EAS build (the device ran a `development` one) and the iOS half on a
-macOS or EAS build environment. **Android has now been device-tested by a repeatable script; iOS has
-not been run at all** — and the two are never described with one word.
+merged or released.** Its CI **is green** — run `39642789958` at this commit, all four jobs — but a
+release decision still needs a `preview`/`production`-profile EAS build (the device ran a
+`development` one) and the iOS half on a macOS or EAS build environment. **Android has now been
+device-tested by a repeatable script; iOS has not been run at all** — and the two are never described
+with one word.
 
 Artifacts: `docs/evidence/device-runs/` (three passing runs, plus the first failing `label` run kept
 deliberately, because it is the record of the harness blaming the app for its own bug).

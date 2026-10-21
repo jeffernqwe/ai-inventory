@@ -386,6 +386,7 @@ against the database**, and only `perf:turns` spends AI quota.
 | `npm run ai:models` | The configured chain with each model's **live endpoint status and 5m/30m/1d uptime**, then the free tool-capable ids you can add — **no completions, no quota** |
 | `npm run ai:models -- --check=<id>` | That model's live endpoint health, then whether ONE id answers a tool-shaped request, before you add it — **one request** |
 | `npm run ai:check` | The configured primary (and chain) verified against the provider's catalogue — free; `-- --probe` proves each with one tool-shaped request |
+| `npm run ai:health` | One scheduled model-health check, in the terminal — quota-free endpoint GETs; exit 0 healthy, 1 unavailable/degraded, 2 could not check; `-- --alert` sends the alert |
 
 ### Changing the AI models yourself
 
@@ -457,6 +458,74 @@ window, not one per question). If every configured model is cooling, the assista
 normal temporary-unavailability message without spending a request. A quota refusal (429/402) is
 never treated as a model outage — the daily free allowance is shared by every model, so switching
 cannot help and the turn says so.
+
+### What watches the models (AI-34)
+
+Nothing used to notice a dead model until a member asked a question. The **model-health watchdog**
+now runs inside the server in production, once every 30 minutes, and reads the provider's own
+endpoint-health API for the primary and every configured fallback:
+
+```text
+GET /v1/models/{author}/{slug}/endpoints
+```
+
+That is a **GET, not a completion**, so it spends none of the free tier's daily request allowance.
+A model is:
+
+- **ok** — a current endpoint reports status 0 and its best 5-minute uptime is at least 90% and its
+  best 30-minute uptime is at least 95%;
+- **degraded** — an endpoint is down while another is up, an uptime window has fallen below its
+  threshold, or no endpoint reports status 0 but a recent uptime is still measurable (a negative
+  status with 100% five-minute uptime means *serving badly*, not *dead*);
+- **unavailable** — the provider publishes no endpoint, or none reports status 0 and no recent
+  uptime is measurable;
+- **unknown** — the health record could not be read. This is **not** called an outage, because the
+  check itself may be the broken thing. Two consecutive unreadable checks alert that the check
+  cannot run, and a later success reports the recovery.
+
+The watchdog alerts **only when the state changes**: one message when a model goes down or starts
+degrading, one when it recovers, and silence while nothing moves. A restart forgets the previous
+state, so a still-broken model produces one alert on the first check after the restart. That is
+deliberate for a single-instance deployment; there is no shared store for this state.
+
+**Where the alert goes.** Set the operator address and it is emailed through the same Brevo mail
+boundary that delivers verification and reset mail:
+
+```bash
+# the alert recipient; leave empty and the alert is written to the server log at error level
+AI_HEALTH_ALERT_EMAIL=owner@example.com
+
+# optional; the defaults are shown
+AI_HEALTH_WATCH_ENABLED=true            # production defaults on; development/test off
+AI_HEALTH_WATCH_INTERVAL_MS=1800000     # 30 minutes
+AI_HEALTH_WATCH_INITIAL_DELAY_MS=60000
+AI_HEALTH_MIN_UPTIME_5M=90
+AI_HEALTH_MIN_UPTIME_30M=95
+AI_HEALTH_UNKNOWN_ALERT_AFTER=2
+```
+
+Set these in the host's environment, not in a committed file. On Render a changed variable applies
+on the **next deploy**, not a restart. If mail is not configured, the alert is still logged — the
+watchdog never decides that an undeliverable alert is no alert.
+
+**Run the same check once, without waiting for the timer:**
+
+```bash
+cd C:/Users/jeffe/inventory-ai/server
+npm run ai:health                  # print the state; send nothing
+npm run ai:health -- --alert       # send the alert too, if a problem was found
+```
+
+It exits **0** healthy, **1** a model is unavailable or degraded, **2** the check could not run.
+A 2 is never a pass. This is also the command to use from an external scheduler if the host sleeps
+and the in-process timer therefore does not run; in that case `--alert` sends on every run that
+finds a problem, because a one-shot process has no previous state to compare.
+
+**What it cannot do.** A free hosting instance that sleeps stops checking while it sleeps. The
+watchdog watches the *model chain*, not the deployment: `/api/health/ready` and the 5xx counters are
+still the signals for "is the service itself healthy?" (Part 7).
+
+### Measuring turns, latency and answer changes
 
 ```bash
 cd C:/Users/jeffe/inventory-ai/server
@@ -773,7 +842,9 @@ The smallest service that does this is **[UptimeRobot](https://uptimerobot.com)*
 monitors, and an email when a check fails; create the monitor, paste the URL, choose your address as
 the alert contact, and nothing in this repository changes. (A cron job running `curl` on any machine
 you own works too, if you would rather not have an account anywhere. Anything that tells you is better
-than nothing, which is the current answer.)
+than nothing, which is the current answer.) The **model chain** now has its own in-process watchdog
+(above); this section remains about the **service** being up and answering, which the watchdog does
+not replace.
 
 **Two things to know about the counters** so they are read correctly:
 
@@ -817,6 +888,7 @@ than nothing, which is the current answer.)
 | `npm run ai:usage -- --log=…` | turns, failures and the allowance left | ✅ reads only (offline with `--no-provider`) |
 | `npm run ai:usage -- --db --days=30` | what was **answered**, and its degraded rate | ✅ reads only |
 | `npm run ai:usage -- --provider-only` | the free-model requests **left today** (AI-27: run it before `perf:turns`) | ✅ reads only |
+| `npm run ai:health` | one model-health check (endpoint GETs only, no quota); `-- --alert` sends the alert | ✅ reads only |
 | `npm run restore:db -- --from=…` | put a `backup:db` copy back | ⚠️⚠️ **destructive** — refuses production; `--dry-run` first |
 | `npm run cleanup:test-mongodb` | wipe the test database | ⚠️ destructive, throwaway data |
 | `npm run cleanup:dev-mongodb` | wipe the development database | ⚠️⚠️ **your data** |

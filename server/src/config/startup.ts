@@ -33,6 +33,8 @@ import { checkModelCatalogue } from '../services/ai/modelCheck.ts';
 import type { CatalogueResult } from '../services/ai/modelCheck.ts';
 import { refreshModelCapabilities, declaresToolSupport } from '../services/ai/modelCapabilities.ts';
 import { aiConfig } from '../services/ai/aiConfig.ts';
+import { healthWatchConfig, healthWatchEnabled, startAiHealthWatch } from '../services/ai/healthWatch.ts';
+import type { HealthWatchHandle } from '../services/ai/healthWatch.ts';
 import { boundPortOf, verifyBoundPort } from './portGuard.ts';
 import type { PortProbeResult } from './portGuard.ts';
 
@@ -75,6 +77,14 @@ type StartServerOptions = {
    * could never have grounded an answer.
    */
   capabilities?: (() => Promise<unknown>) | null;
+  /**
+   * AI-34 — the scheduled model-health watchdog.
+   *
+   * `undefined` decides from `healthWatchEnabled(nodeEnv)` (production on, development/test
+   * off) AND whether a model is configured; `null` disables it; a function is the test seam.
+   * The watchdog only sends endpoint-health GETs, so starting it costs no completion quota.
+   */
+  healthWatch?: ((options: { nodeEnv: string; logger: Logger }) => HealthWatchHandle) | null;
 };
 
 /**
@@ -110,6 +120,7 @@ export async function startServer({
   probe,
   modelCheck,
   capabilities,
+  healthWatch,
 }: StartServerOptions = {}): Promise<{
   server: ShutdownServer;
   shutdown: ShutdownHandler;
@@ -278,6 +289,32 @@ export async function startServer({
     });
   }
 
+  // AI-34 — the scheduled model-health watchdog. Fired only after the process is up, and only
+  // when a model is actually configured: a deployment without AI must not contact a provider on a
+  // timer. It is unattended, so a failure to start is logged and the server keeps serving.
+  const ai = aiConfig();
+  const wantsHealthWatch =
+    healthWatch === undefined
+      ? healthWatchEnabled(nodeEnv) && ai.provider === 'openrouter' && Boolean(ai.openrouterModel)
+      : healthWatch !== null;
+  let healthWatchHandle: HealthWatchHandle | null = null;
+  if (wantsHealthWatch) {
+    try {
+      const start = healthWatch ?? startAiHealthWatch;
+      healthWatchHandle = start({ nodeEnv, logger });
+      const schedule = healthWatchConfig();
+      const intervalMinutes = Math.max(1, Math.round(schedule.intervalMs / 60000));
+      const alertsByEmail = Boolean(process.env.AI_HEALTH_ALERT_EMAIL) && report.mail;
+      logger.log(
+        `[ai:watchdog] scheduled every ${intervalMinutes}m; first check in ` +
+          `${Math.max(0, Math.round(schedule.initialDelayMs / 1000))}s; ` +
+          (alertsByEmail ? 'alerts emailed to the configured recipient' : 'alerts logged only'),
+      );
+    } catch {
+      logger.error('[ai:watchdog] the model-health watchdog could not start; the assistant is still served.');
+    }
+  }
+
   // The port-ownership guard (2026-10-18). Fired unawaited, after the socket is listening, because a boot must
   // not wait on a loopback round trip; it exits the process only on the one unambiguous outcome (another
   // instance answering), and is silent when this process is provably the owner.
@@ -301,9 +338,17 @@ export async function startServer({
     logger,
     exit: exitFn,
   });
-  registerSignalHandlers(signalTarget, shutdown);
+  // Stop the watchdog before the drain. Its timers are unref'd, so this is hygiene rather than
+  // the thing that lets the process exit, but a stopped scheduler cannot start a health request
+  // while the database is closing.
+  const shutdownWithWatch: ShutdownHandler = (signal) => {
+    healthWatchHandle?.stop();
+    healthWatchHandle = null;
+    return shutdown(signal);
+  };
+  registerSignalHandlers(signalTarget, shutdownWithWatch);
 
-  return { server, shutdown, connected };
+  return { server, shutdown: shutdownWithWatch, connected };
 }
 
 /**

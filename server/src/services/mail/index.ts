@@ -8,7 +8,7 @@
  * place that knows the upstream it talks to. Brevo is the transport configured in
  * development and production.
  *
- * The four exported functions are deliberately small:
+ * The exported functions are deliberately small:
  *
  *   isMailConfigured()  — may this server send mail at all? Never throws. Answers
  *                         false when MAIL_PROVIDER is empty, when it names an
@@ -21,6 +21,11 @@
  *   sendEmailVerificationEmail({ to, code, expiresInMinutes })
  *                       — renders the AUTH-04 verification-code template and
  *                         hands it to the same provider.
+ *   sendPasswordResetCodeEmail({ to, code, expiresInMinutes })
+ *                       — renders the AUTH-06 six-digit reset-code template.
+ *   sendOperationalAlertEmail({ to, subject, text })
+ *                       — renders and transports the AI-34 model-health alert. It is
+ *                         operator mail, not member mail: no link, no token, no code.
  *
  * Note what sendPasswordResetEmail does NOT do: it does not build the reset URL,
  * does not mint or hash the token, and does not know a user exists. The caller
@@ -42,6 +47,7 @@ import { selectProvider } from './providers/index.ts';
 import { passwordResetEmail } from './templates/passwordReset.ts';
 import { emailVerificationEmail } from './templates/emailVerification.ts';
 import { passwordResetCodeEmail } from './templates/passwordResetCode.ts';
+import { operationalAlertEmail } from './templates/operationalAlert.ts';
 import { MailNotConfigured, MailDeliveryError, isMailError } from './mailErrors.ts';
 
 export { MailNotConfigured, MailDeliveryError, isMailError };
@@ -182,10 +188,47 @@ export async function sendPasswordResetCodeEmail({
   return { id: result?.id ?? null, provider: provider.name };
 }
 
+/**
+ * Everything `sendOperationalAlertEmail` needs. The caller owns the wording and the
+ * decision; this layer only renders and transports. `subject` and `text` are required
+ * because an alert with no content would be worse than no alert at all.
+ */
+interface OperationalAlertEmailRequest {
+  to: string;
+  subject: string;
+  text: string;
+}
+
+/**
+ * Renders the AI-34 model-health alert and sends it through the configured provider.
+ *
+ * Unlike the member-facing sends, this is operator mail: it never contains a reset link,
+ * a verification code, a password or a session. The watchdog builds a report of model
+ * ids, endpoint statuses and uptime, and this function adds only the HTML shell.
+ *
+ * Throws MailNotConfigured when mail is disabled or misconfigured, and MailDeliveryError
+ * when the provider fails. The watchdog catches both and falls back to its log — an alert
+ * that cannot be delivered must still be recorded.
+ */
+export async function sendOperationalAlertEmail({ to, subject, text }: OperationalAlertEmailRequest) {
+  const provider = selectProvider();
+  const { appName } = mailConfig();
+  const { subject: renderedSubject, text: renderedText, html } = operationalAlertEmail({
+    subject,
+    text,
+    appName,
+  });
+
+  const result = await provider.send({ to, subject: renderedSubject, text: renderedText, html });
+
+  return { id: result?.id ?? null, provider: provider.name };
+}
+
 export default {
   isMailConfigured,
   mailProviderName,
   sendPasswordResetEmail,
   sendEmailVerificationEmail,
   sendPasswordResetCodeEmail,
+  sendOperationalAlertEmail,
 };

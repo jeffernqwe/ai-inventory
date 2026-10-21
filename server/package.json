@@ -40,6 +40,7 @@
     "ai:usage": "node scripts/ai-usage.mjs",
     "ai:check": "node scripts/check-ai-model.mjs",
     "ai:models": "node scripts/ai-models.mjs",
+    "ai:health": "node scripts/ai-health-watch.mjs",
     "perf:measure": "node scripts/measure-ai-tools.mjs",
     "perf:golden": "node scripts/capture-ai-golden.mjs",
     "perf:turns": "node scripts/measure-ai-turns.mjs"

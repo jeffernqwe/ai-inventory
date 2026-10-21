@@ -7142,6 +7142,78 @@ behaviour improves with SDK 58 today, and the current setup is stable, verified 
 reading and a recommendation, not a decision to execute: no branch was cut, no dependency was touched, and the pins
 in this section remain the 2026-10-10 reading.
 
+## Gate 0 re-read — the evidence changed enough to recommend executing (2026-10-21)
+
+`npm view expo dist-tags` now reports **`latest = 58.0.16`** (`next = 58.0.11`), and the repository's own
+read-only watch reports the expo gate **READY**: `node scripts/check-upgrade-watches.mjs` prints
+`READY expo — gate: SDK 58 train (§27AI) — latest must be 58` and `1 gate(s) open: expo`. Three findings
+below are new since the 2026-10-16 deferral and together change the recommendation; they were measured,
+not read off a changelog.
+
+### 1. The target set resolves cleanly, and it is not the stale table
+
+A throwaway copy of `mobile/package.json` whose pins were read from **`expo@58.0.16`'s own
+`bundledNativeModules.json`** (not from the stale table) was resolved with
+`npm install --package-lock-only` (no `node_modules`, no build): **exit 0, no ERESOLVE, no peer warning**.
+The map and the resolved lockfile agree on: `expo 58.0.16`, `react 19.3.0`, `react-dom 19.3.0`, `react-native 0.88.0`,
+`expo-router 58.0.24`, `react-native-screens ~4.30.0`, `react-native-safe-area-context ~5.10.1`,
+`react-native-reanimated 4.7.1`, `react-native-worklets 0.13.0`, `jest-expo 58.0.11`, `jest 30.0.5`,
+`@react-native/jest-preset 0.88.0`, `eslint-config-expo ~58.0.4`, `@types/react ~19.3.0`. Compare this
+with the 2026-10-10 table: RN is **0.88.0 stable**, not `0.88.0-rc.4`; screens moved **4.28 → 4.30**
+and safe-area **5.9.1 → 5.10.1**. The old table must not be used to drive the upgrade. A clean
+resolution is a **dependency-graph** result only — it proves nothing about Gradle, the new
+architecture, or the device.
+
+### 2. RNFirebase 27 removes the ISS-02 PII log upstream
+
+`@react-native-firebase/app@27.0.0` and `@react-native-firebase/auth@27.0.0` declare `expo >= 47` and
+`react-native >= 0.60`, so they are compatible on paper. The important part is the source: in the
+published **27.0.0** tarball, `NativeRNFBTurboAuth.java` **no longer contains**
+`Log.d(TAG, "addAuthStateListener:eventBody " + eventBody.toString())`. The v26 remediation patched that
+exact line out; on v27 it does not exist to patch. Consequences for the execution plan:
+
+- Delete `mobile/patches/@react-native-firebase+auth+26.4.0.patch`, the `patch-package` `postinstall`,
+  and the now-unused `patch-package` dev dependency **in the same PR**.
+- Rewrite `mobile/__tests__/iss-02-rnfirebase-auth-pii-patch.test.ts`: its current contract is
+  "exactly one patch, named for the pinned version, applied on every install", which must **fail** when
+the patch is deliberately removed. Replace it with a guard on the new invariant (the pinned auth version
+  is at or above 27 and no patch ships), and record in it that the remediation is upstream. Do not
+delete the finding from the record — a future downgrade must trip a test.
+- The logcat check in the device pass stops being the proof that the patch applied and becomes a
+  confirmation that the upstream version really is clean on hardware.
+
+### 3. The upgrade closes the only runtime advisory
+
+`npm audit` on the current `mobile/` tree reports **4 distinct advisories** (braces high, node-forge
+high, decode-uri-component moderate, sprintf-js moderate); the count of affected nodes is larger because
+npm propagates severity up the tree. The SDK 58 resolution reports **3 distinct**: `decode-uri-component`
+is **absent**, because the `expo-router@58` dependency line no longer pulls the CommonJS
+`query-string@7`. This is the one alert that reaches a shipped bundle, and the upgrade removes it
+rather than forcing an ESM-only override that would break the bundle (§27CJ). `braces`, `node-forge`
+and `sprintf-js` remain build/development-only with no patched release; the upgrade is **not** a clean
+security sweep, and must not be described as one.
+
+### Recommendation: GO, as the next increment, with the device pass as the gate
+
+The 2026-10-16 conditions for reopening were "a defect only SDK 58 resolves" or "a native build that
+has to be re-cut anyway". The runtime advisory is the first, and the RNFirebase 27 patch removal is the
+second. Execute on a **branch cut after the current working tree is committed**, never mixed with the
+in-flight watchdog documentation:
+
+1. `npx expo install expo@^58.0.16`, then `npx expo install --fix`, then `--check` must report no mismatches.
+2. Remove the patch, `postinstall` and `patch-package`; rewrite the ISS-02 suite as above.
+3. `npx tsc --noEmit`, `npx eslint .`, `npx jest --ci`, `npx expo-doctor`; every failure is treated as an
+   SDK behavior change until proven otherwise.
+4. EAS **development** build, device pass: Firebase sign-in, AUTH-03 renewal, AUTH-04 verification,
+   stock in/out, a transfer, one label print-and-scan, and logcat showing no `addAuthStateListener:eventBody`
+   line. iOS stays export-only (no macOS).
+5. Merge only if CI and the device pass are both green; otherwise revert the single PR and reopen issue #32.
+
+Risks that remain real: RN 0.88 with the new architecture, reanimated 4.7 + worklets 0.13, Jest 30
+(and `@types/jest` 30) test-API changes, expo-router 58 behavior, and the fact that **none of this is
+validated by the resolution test**. The native build is the acceptance gate, and a native SDK move is
+exactly what JS-only CI cannot prove.
+
 ## Verified target set (read from the package, not guessed)
 
 `npm pack expo@58.0.7` → its `bundledNativeModules.json`, 2026-10-10:
@@ -17199,6 +17271,131 @@ Four open alerts, all in `mobile/package-lock.json` and all transitive:
 No dependency was changed. The runtime item is a **medium-severity client denial of service**, not a
 credential or data-exposure defect, and the only compatible fix would be a major Expo upgrade that
 this task must not smuggle in. The alerts remain open and visible rather than being dismissed.
+
+## Capacity ceiling — what an M0 cluster can actually hold (2026-10-21 addendum)
+
+A read-only audit of the dev cluster (`inventoryai_dev_db`; `db.stats()` plus per-collection `collStats`)
+turns the next scale step into an infrastructure question with numbers rather than a vague ambition:
+
+| Measurement | Value |
+|---|---:|
+| Products / inventory rows / transactions | 79,854 / 159,080 / 110,883 |
+| Logical data size | 83.9 MB |
+| Index size | 140.2 MB |
+| Total counted against the tier | **224.1 MB** |
+| `products` bytes per product (data + index) | ~600 B |
+| `inventory` bytes per row (data + index) | ~487 B |
+| Footprint per product with two stock rows | **~1.6 KB** |
+| `inventory_transactions` bytes per row | ~841 B |
+
+Atlas M0's documented ceiling is **512 MB for data plus indexes**, so this shared cluster has ~288 MB
+of headroom. A **1,000,000-product** tenant with two stock rows per product needs **~1.6 GB before any
+transaction history**, and ~2.5 GB at the history-to-product ratio observed here. That is **not
+reachable on M0**: an empty 512 MB cluster fits roughly **320,000** products of this shape, and the
+current database fits roughly **180,000 more products** before it is full. The projection is linear at
+this shape (catalogue + two stock rows, history excluded):
+
+| Products | Footprint | Fits an empty M0? |
+|---:|---:|---|
+| 100,000 | ~160 MB | yes |
+| 250,000 | ~400 MB | yes, with little headroom |
+| 320,000 | ~512 MB | no — exactly at the ceiling |
+| 1,000,000 | ~1.6 GB | no |
+
+A million-product claim is therefore a **paid-tier provisioning and seeding task**, not something that
+can be validated on this environment; no code change would be justified by pretending otherwise.
+
+The 50k tenant measured above is **present again** in the dev database at audit time (**50,626
+products**), which supersedes the "0 remaining" line for the current state; the earlier cleanup was real,
+and these rows are a later seed. That is why the next large seed must **clean up first** rather than
+stack another dataset into 288 MB of headroom. What the existing measurements do establish is narrower
+and still useful: the query shapes, index coverage and 12,000-character payload cap hold at 50k with no
+bottleneck; nothing below 50k is unmeasured. `test:db` passing 854 / 764 / 0 in the same window is the
+correctness half of that baseline.
+
+# 27EG. A dead model is found by a timer, not by a member's failed question (2026-10-21)
+
+**AI-34. Server only — no route, permission, schema, dependency, session or mobile change, and no
+prompt change.**
+
+## The gap it closes
+
+AI-28 can say whether the configured model is listed, AI-29/30/31 keep a turn alive when it is not,
+and AI-32 can print live endpoint health when an operator asks. All of them are **pulled**: the
+deployment learned that its model was dead on 2026-10-21 because a member asked a question and got
+`502 AI_UNAVAILABLE`. Nothing watched while nobody was asking, which is the worst possible detector.
+
+## The mechanism
+
+`server/src/services/ai/healthWatch.ts` runs the same quota-free read AI-32 uses —
+`GET /v1/models/{author}/{slug}/endpoints`, no completion, no request from the free allowance — for
+the configured primary and every fallback. It classifies each model:
+
+| Level | Meaning |
+|---|---|
+| `ok` | a current endpoint reports status 0; best 5-minute uptime ≥ **90%** and best 30-minute uptime ≥ **95%**. |
+| `degraded` | an endpoint is down while another is up, an uptime window is below its threshold, or **no endpoint reports status 0 but recent uptime is still measurable**. |
+| `unavailable` | the provider publishes no endpoint, or none reports status 0 **and no recent uptime is measurable** (best 5-minute is 0 or missing). |
+| `unknown` | the record could not be read. Never called an outage; two consecutive unreadable checks alert that the check itself cannot run. |
+
+The first draft classified every `status !== 0` as unavailable. The live run on 2026-10-21 corrected
+that: the provider published `status -2` with **100% five-minute uptime** for a model that was still
+serving, so calling it unavailable would have sent an operator to replace a working model. The rule
+is now evidence-based: **no healthy status + no current uptime = unavailable; no healthy status but
+still serving = degraded.**
+
+Alerts are **transition-only**: one message for a new problem, one for a worsening or improvement, one
+for the recovery, silence while the level is unchanged. The state is per process, like the AI-30
+breaker: a restart forgets it and re-sends one alert for a still-broken model, which is the correct
+trade for the single-instance deployment and requires no new collection or shared store. An unreadable
+check never overwrites a known outage.
+
+**Where it goes.** `sendOperationalAlertEmail` renders the report through the existing provider-agnostic
+mail boundary and sends it to `AI_HEALTH_ALERT_EMAIL`. If the address or the mail configuration is
+missing, the same report is written to the server log at error level — an undeliverable alert is still
+an alert. The message names model ids, endpoint statuses and uptime only: no API key, no base URL, no
+tenant, no user.
+
+**When it runs.** `startServer` starts the watchdog in production (and only when an OpenRouter model is
+configured). Defaults: first check after **60 s**, then every **30 min**; both configurable, and the
+timers are unref'd so a watchdog can never hold the process open. Shutdown stops it before the drain.
+`npm run ai:health` runs the same check once and exits **0** healthy, **1** unavailable/degraded, **2**
+could not check; `-- --alert` sends the alert too. That is the command for an external scheduler when
+free hosting sleeps the process.
+
+## Verified live, without spending quota
+
+`npm run ai:health` against the configured chain on 2026-10-21, five GETs and zero completions:
+
+```text
+primary  nvidia/nemotron-3.5-lightning:free       ok           best 5m 100%, 30m 100%
+fallback nvidia/nemotron-3-ultra-550b-a55b:free   ok           best 5m 100%, 30m 100%
+fallback nvidia/nemotron-3.5-super-vl:free        ok           best 5m 100%, 30m 100%
+fallback liquid/lfm-2.5-2.6b:free                 degraded     status -2, 5m 100%, 30m 76.7%
+fallback nvidia/nemotron-3-super-120b-a12b:free   unavailable  status -5, 5m 0%, 30m 0%
+```
+
+Exit **1** (attention), correctly: one model is genuinely unavailable, one is degraded but serving, and
+the then-dead primary replacement is last in the chain. The first run of the same command, before the
+`-2` correction, reported **3 unavailable**; that is the measurement the correction is based on.
+
+## Verification and limits
+
+**29 cases** in `AI34-ai-health-watchdog.test.mjs`: classification (including the `-2` case), the
+configured chain, transition-only alerts with recovery, unknown ≠ down, a prior outage surviving an
+unreadable check, GET-only reads, no key in an alert, a failed send not throwing, the scheduler's
+interval/stop, production/development/test enablement, the boot start/stop wiring, the template's
+HTML escaping and empty-input refusal, and the real fake mail provider. `npm run test:unit` passed
+**1168 tests / 1116 pass / 0 fail / 52 skipped** on the final re-run; an earlier 1166 / 1114 reading
+was taken before the two template cases were added (the file itself reported 29 / 29 at that point).
+`npm run test:db` passed **854 / 764 pass / 0 fail / 90 skipped**,
+`npm run typecheck`, `npm run lint` and both module-graph checks are clean (476 modules).
+
+Limits stated rather than discovered later: the state is **process-local**, so a restart re-alerts once
+and two instances keep independent histories; a free host that **sleeps** does not check while asleep
+(`npm run ai:health` is the external-scheduler answer); and the real email path was proven with the
+in-process fake provider, **not** by delivering to a mailbox — the recipient has to be set on the host
+and the first real alert observed.
 
 # 28. Phase Gate System
 

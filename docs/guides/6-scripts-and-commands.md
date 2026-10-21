@@ -427,6 +427,12 @@ failing, and move the ids rather than editing code.
 On the deployed server there is no file to edit: set the same two variables in the host's environment
 and redeploy. Nothing else changes — no code, no migration, no mobile build.
 
+**On Render, a plain restart is not enough.** A changed environment variable belongs to the next
+**deploy**; a restart keeps the environment the deployment started with. Measured 2026-10-21: after
+changing the primary from `super-vl` to `lightning`, a restart still served `super-vl`, and the next
+deploy served `lightning`. Trigger a deploy after editing the variables, then confirm with the AI-5
+turn line (`model=…`).
+
 Two more optional variables decide when a model is rested, if the defaults are not what you want:
 
 ```bash

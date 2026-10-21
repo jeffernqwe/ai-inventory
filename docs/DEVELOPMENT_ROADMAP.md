@@ -17027,6 +17027,43 @@ five) is fourth, and `super-120b` (**-5**, 2.4 % over 24 h) is last. The free ti
 tool support were re-read at the same time; nothing in the application code or the promotion logic
 changed, and the configured primary is still never overwritten at runtime.
 
+## Production verification, and what Render actually applies (2026-10-21)
+
+Commit **`7f3e6a1`** was pushed to `main`; Render auto-deployed it, `/api/health/ready` answered 200,
+and the production environment was set to the measured order with the explicit policy values:
+`AI_MODEL_OPENROUTER=nvidia/nemotron-3.5-lightning:free`,
+`AI_FALLBACK_MODELS_OPENROUTER=ultra,super-vl,liquid,super-120b`,
+`AI_MODEL_FAILURE_THRESHOLD=5`, `AI_MODEL_COOLDOWN_MS=30000`.
+
+**A changed environment variable is applied by the next DEPLOY, not by a restart.** The first deploy
+began before the environment write and served `super-vl`; a plain `render restart` kept serving
+`super-vl`; a fresh `render deploys create` served `lightning`. The guide now states this, because
+"the dashboard shows the new value" and "the running process uses the new value" were different
+facts for about two minutes.
+
+**Inventory accuracy, on the phone, against production.** The documented demo tenant was seeded into
+`inventoryai_prod_db` (6 products, 3 locations, 112 units; all 15 read-back checks matched), and the
+OPPO CPH1969 signed in through the production API (`https://ai-inventory-l1mi.onrender.com`). One
+turn answered **112 units**; the restock turn named **Demo Desk Lamp (0), Demo Coffee Beans 1kg (4)
+and Demo Paper Cups 100pk (15)**; the out-of-stock turn answered **one product, Demo Desk Lamp** —
+exactly the fixture, with `getInventorySummary`, `getReorderNeededProducts` and
+`getOutOfStockProducts` on the turn lines.
+
+**Promotion was exercised on production, not inferred.** The primary was temporarily set to the
+valid-but-dead `super-120b`, with `lightning` first in the fallback chain, and the phone sent five
+real turns. The first four observed `404 -> failover -> OK`; the fifth logged
+`model cooling down for 30s after 5 consecutive failure(s)` and then
+`promoted model: …super-120b… -> …lightning…`; the next turn logged
+`model cooling down, skipped: …super-120b… (9s left)`, `calls=1 failovers=0` and answered correctly
+from `lightning`. Production was then restored to the lightning-first order and redeployed; the final
+turn logged `model=nvidia/nemotron-3.5-lightning:free calls=1 failovers=0` and answered **112 units**.
+
+The temporary demo tenant was removed with `cleanup:demo-tenant` (7 inventory + 9 ledger + 6 products
++ 2 categories + 3 locations + 1 user + 1 business, **leftovers 0**); the Firebase identity remains by
+design. The exercise used **nine provider calls** (the allowance went from 42 to 33 of 50), and the
+phone was signed out afterwards by clearing its local session — no production credential was left on
+the device.
+
 ## Limits
 
 * **Per process and not persisted**, like the breaker. A restart forgets the promotion and returns to

@@ -12,7 +12,7 @@ import { ApiError } from '../lib/client';
 import { spacing, type } from '../lib/theme';
 import type { Palette } from '../lib/theme';
 import { useTheme } from '../lib/theme-context';
-import { emailProblem, passwordStrengthProblem } from '../lib/validation';
+import { passwordStrengthProblem } from '../lib/validation';
 
 /**
  * AUTH-06 — the in-app password reset: a six-digit code, then a new password.

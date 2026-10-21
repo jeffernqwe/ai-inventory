@@ -24,8 +24,8 @@ import { radius, spacing, type } from '../../../../lib/theme';
 import type { Palette } from '../../../../lib/theme';
 import { useTheme } from '../../../../lib/theme-context';
 
-function str(v: string | string[]): string {
-  return Array.isArray(v) ? v[0] : v;
+function str(v: string | string[] | undefined): string {
+  return Array.isArray(v) ? (v[0] ?? '') : (v ?? '');
 }
 
 /**

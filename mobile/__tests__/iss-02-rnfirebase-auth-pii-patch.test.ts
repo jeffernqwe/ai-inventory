@@ -1,22 +1,19 @@
 /**
- * ISS-02 — the RNFirebase Auth PII log remediation, held in place.
+ * ISS-02 — the RNFirebase Auth PII log, now fixed upstream.
  *
- * WHAT THIS FILE PROVES, AND WHY IT IS AT THIS LAYER. `@react-native-firebase/auth`
- * 26.4.0 logs the Firebase user object — uid, email, display name, provider metadata —
- * through `Log.d` in `NativeRNFBTurboAuth.java`, and that call is not build-gated, so it
- * reaches release builds. No supported library toggle removes it, so the fix is a
- * `patch-package` patch applied by `postinstall` (roadmap §27AJ).
+ * HISTORY. `@react-native-firebase/auth` 26.4.0 logged the Firebase user object — uid,
+ * email, display name, provider metadata — through `Log.d` in
+ * `NativeRNFBTurboAuth.java`, and that call was not build-gated, so it reached release
+ * builds. The v26 remediation was a `patch-package` patch applied by `postinstall`
+ * (roadmap §27AJ). **v27.0.0 removed that call upstream**, so the patch is gone.
  *
- * The native code cannot be compiled here and the patched file lives in `node_modules`,
- * which is neither committed nor guaranteed present. What CAN be asserted is the patch
- * itself: that it exists, that every install applies it, that it removes exactly the one
- * line and nothing else, and that it names the dependency version we actually depend on.
- * That last assertion is the important one — when the dependency is bumped the patch
- * stops applying, `postinstall` fails, and this test says why.
+ * WHAT THIS FILE PROVES NOW. The dependency is at or above the version that contains the
+ * fix, no patch or `postinstall` hook survives to be silently skipped, and — when the
+ * package is installed — the published source still has no user-object log at the auth
+ * listener while it still emits the event and still keeps `Log.e` diagnostics.
  *
- * WHAT IT DOES NOT PROVE: that an Android build compiles the patched source, or that the
- * log is gone on a device. That needs a native build, and §27AJ records it as the
- * outstanding acceptance step rather than claiming it.
+ * WHAT IT DOES NOT PROVE: that an Android build compiles the source, or that logcat is
+ * clean on a device. Those need the native build and the Phase 30B device pass.
  */
 
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
@@ -30,82 +27,62 @@ const packageJson = JSON.parse(readFileSync(join(projectRoot, 'package.json'), '
   dependencies?: Record<string, string>;
 };
 
-/** The pinned dependency version — the patch name is derived from it, so a bump fails here. */
 const AUTH_VERSION = packageJson.dependencies?.['@react-native-firebase/auth'] ?? 'VERSION-MISSING';
+const APP_VERSION = packageJson.dependencies?.['@react-native-firebase/app'] ?? 'VERSION-MISSING';
+
+/** The first release that removed the user-object log. */
+const FIXED_IN_MAJOR = 27;
 
 const PATCH_DIR = join(projectRoot, 'patches');
-const PATCH_NAME = `@react-native-firebase+auth+${AUTH_VERSION}.patch`;
-const PATCH_PATH = join(PATCH_DIR, PATCH_NAME);
 
-/** The one native source that logs the user object. */
 const TARGET_FILE =
   'node_modules/@react-native-firebase/auth/android/src/main/java/io/invertase/firebase/auth/NativeRNFBTurboAuth.java';
 
-/** The call that must be gone, as it appears on the patch's removed line. */
+/** The call v26 shipped and v27 no longer contains. */
 const PII_CALL = 'Log.d(TAG, "addAuthStateListener:eventBody "';
 
-describe('ISS-02 — the RNFirebase Auth PII log stays patched out', () => {
-  const patch = existsSync(PATCH_PATH) ? readFileSync(PATCH_PATH, 'utf8') : '';
-  const removed = patch
-    .split('\n')
-    .filter((line) => line.startsWith('-') && !line.startsWith('---'));
-  const added = patch
-    .split('\n')
-    .filter((line) => line.startsWith('+') && !line.startsWith('+++'));
+describe('ISS-02 — the RNFirebase Auth PII log stays fixed', () => {
+  it('pins the dependency at or above the release that removed the log', () => {
+    expect(AUTH_VERSION).not.toBe('VERSION-MISSING');
+    expect(APP_VERSION).toBe(AUTH_VERSION);
 
-  it('ships exactly one patch, named for the pinned dependency version', () => {
-    // A version bump renames the expected patch and fails here before anything else,
-    // which is the intended alarm — regenerate the patch, do not rename this test.
-    expect(packageJson.dependencies?.['@react-native-firebase/auth']).toBeDefined();
-    expect(existsSync(PATCH_DIR)).toBe(true);
-    expect(readdirSync(PATCH_DIR)).toEqual([PATCH_NAME]);
+    const major = Number.parseInt(AUTH_VERSION.split('.')[0] ?? '', 10);
+    expect(Number.isFinite(major)).toBe(true);
+    expect(major).toBeGreaterThanOrEqual(FIXED_IN_MAJOR);
   });
 
-  it('is applied by every install, so a fresh clone is never left unpatched', () => {
-    // `--error-on-fail` is not decoration: measured on 2026-10-10, patch-package exits 0 on a
-    // failed apply unless it is passed (or `CI` is set), so without the flag a Windows or macOS
-    // install would print the error and carry on unpatched. With it, the install fails.
-    expect(packageJson.scripts?.postinstall).toBe('patch-package --error-on-fail');
-    expect(packageJson.devDependencies?.['patch-package']).toBeDefined();
+  it('ships no patch and no install hook that could mask a downgrade', () => {
+    const patches = existsSync(PATCH_DIR) ? readdirSync(PATCH_DIR) : [];
+    expect(patches).toEqual([]);
+    expect(packageJson.scripts?.postinstall).toBeUndefined();
+    expect(packageJson.devDependencies?.['patch-package']).toBeUndefined();
   });
 
-  it('is a byte-stable patch file — LF endings, no carriage returns', () => {
-    // Verification note: a CRLF copy of this patch was measured to apply correctly, so line
-    // endings are not a correctness risk. Pinning them keeps the file identical everywhere
-    // instead of silently different on a Windows checkout.
-    expect(patch).not.toMatch(/\r/);
-  });
-
-  it('targets the one native file that logs the user object', () => {
-    expect(patch).toContain(`a/${TARGET_FILE}`);
-    expect(patch).toContain(`b/${TARGET_FILE}`);
-  });
-
-  it('removes the user-object log line', () => {
-    expect(removed.filter((line) => line.includes(PII_CALL))).toHaveLength(1);
-  });
-
-  it('removes nothing else — the listener still emits the event to JavaScript', () => {
-    expect(removed).toHaveLength(1);
-    expect(added).toHaveLength(0);
-    // Scoped to removed/added lines: context lines are the patch's business, but the
-    // patch must never delete the data emission or the event send.
-    expect(removed.some((line) => line.includes('firebaseUserToMap'))).toBe(false);
-    expect(removed.some((line) => line.includes('emitter.sendEvent'))).toBe(false);
-  });
-
-  it('keeps error diagnostics, so a failure is still visible in logcat', () => {
-    expect(removed.some((line) => line.includes('Log.e'))).toBe(false);
-    expect(added.some((line) => line.includes('Log.e'))).toBe(false);
-  });
-
-  it('is actually applied here once the package is installed', () => {
+  it('has no user-object log in the installed auth source', () => {
     const installed = join(projectRoot, TARGET_FILE);
     if (!existsSync(installed)) {
-      // Not installed in this environment; the static assertions above still hold and
-      // CI's `npm ci` (which runs `postinstall`) exercises this path.
+      // The package is not installed in this environment. CI installs it before this
+      // suite, and the static assertions above still hold; do not turn a missing
+      // node_modules into a false pass about the source.
       return;
     }
-    expect(readFileSync(installed, 'utf8')).not.toContain(PII_CALL);
+
+    const source = readFileSync(installed, 'utf8');
+    expect(source).not.toContain(PII_CALL);
+    expect(source).toContain('addAuthStateListener');
+  });
+
+  it('still emits the auth event and keeps failure diagnostics', () => {
+    const installed = join(projectRoot, TARGET_FILE);
+    if (!existsSync(installed)) {
+      return;
+    }
+
+    const source = readFileSync(installed, 'utf8');
+    // The data path is the feature; the remediation must never remove it.
+    expect(source).toContain('firebaseUserToMap');
+    expect(source).toContain('emitter.sendEvent');
+    // Failures must remain visible in logcat.
+    expect(source).toContain('Log.e');
   });
 });

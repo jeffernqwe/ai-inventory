@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
+import type { ComponentRef, ReactNode } from 'react';
 import { ScrollView } from 'react-native';
 import type { NativeScrollEvent, NativeSyntheticEvent, ScrollViewProps } from 'react-native';
 
@@ -18,7 +18,7 @@ export interface MeasurableField {
  * `measureInWindow` even though the host component has it; without this the measurement below
  * is a type error rather than a runtime one.
  */
-type MeasurableScrollView = ScrollView & NonNullable<MeasurableField>;
+type MeasurableScrollView = ComponentRef<typeof ScrollView> & NonNullable<MeasurableField>;
 
 type RegisterField = (field: MeasurableField | null) => void;
 
@@ -75,7 +75,7 @@ export default function KeyboardScrollView({
   scrollEventThrottle,
   ...rest
 }: KeyboardScrollViewProps) {
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<ComponentRef<typeof ScrollView>>(null);
   const offset = useRef(0);
   const field = useRef<MeasurableField | null>(null);
   const [focusTick, setFocusTick] = useState(0);

@@ -125,24 +125,26 @@ describe("the manifest is the installed Expo SDK's own pin set", () => {
     expect(escaped).toEqual([]);
   });
 
-  it('detects the recorded PR #34 move — the comparator is not vacuous', () => {
-    // The same manifest with exactly the five recorded moves applied to it: this is the
-    // state both CI jobs reported green, and it must not be green here.
-    const pr34Manifest: Manifest = {
-      dependencies: { ...packageJson.dependencies, ...PR_34_MOVES },
+  it('detects a move in each of the five packages whose move CI could not see — the comparator is not vacuous', () => {
+    // The recorded PR #34 values used to be the perturbation. On SDK 58 three of them are
+    // now the SDK's own pins, so replaying that manifest would make this control pass for
+    // the wrong reason (only two mismatches). Perturb the same five names away from the
+    // installed table instead, which keeps the control independent of the SDK version.
+    const WRONG = '0.0.1-comparator-control';
+    const perturbed: Manifest = {
+      dependencies: { ...packageJson.dependencies },
       devDependencies: packageJson.devDependencies,
     };
-    const mismatches = compare(pr34Manifest, sdkPins).sort((a, b) => a.name.localeCompare(b.name));
+    for (const name of Object.keys(PR_34_MOVES)) perturbed.dependencies![name] = WRONG;
+
+    const mismatches = compare(perturbed, sdkPins).sort((a, b) => a.name.localeCompare(b.name));
     expect(mismatches.map((m) => m.name)).toEqual(Object.keys(PR_34_MOVES).sort());
     // Each one carries the manifest's value on one side and the SDK's on the other, so
     // the failure a reader sees is actionable without a second look.
-    expect(mismatches.map((m) => `${m.name}: ${m.declared} (sdk ${m.sdk})`)).toEqual([
-      'react: 19.3.0 (sdk 19.2.3)',
-      'react-dom: 19.3.0 (sdk 19.2.3)',
-      'react-native: 0.87.1 (sdk 0.86.3)',
-      'react-native-safe-area-context: ~5.10.1 (sdk ~5.7.0)',
-      'react-native-screens: ~4.28.0 (sdk ~4.26.0)',
-    ]);
+    for (const mismatch of mismatches) {
+      expect(mismatch.declared).toBe(WRONG);
+      expect(mismatch.sdk).toBe(sdkPins[mismatch.name]);
+    }
   });
 
   it('ignores the native packages the SDK does not manage', () => {

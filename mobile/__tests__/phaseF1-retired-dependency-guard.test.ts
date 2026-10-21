@@ -55,12 +55,11 @@
  * claim to be corrected rather than merely extended: `package.json` says what the project ASKS
  * for, but `npm ci` installs from `package-lock.json`, and a resolver walks the installed tree —
  * so the honest property is REACHABILITY, not absence. `@react-native-firebase/app`, which this
- * phase deliberately KEEPS, declares `firebase` as a hard dependency, so the JS SDK is still
- * installed exactly once, nested inside it. It is absent from the root — `node_modules/firebase`
- * does not exist — which is what makes a bare `firebase` specifier unresolvable from `lib/` and
- * `app/`, and that, not deletion, is what the F1 import scan actually enforces. Asserting
- * "no `firebase` entry anywhere" would therefore have been a guard that could never pass; the
- * block below pins where the single legitimate occurrence is allowed to live instead.
+ * phase deliberately KEEPS, declares `firebase` as a hard dependency. Under RNFirebase 26 npm
+ * nested it; under **27** the unconflicted tree hoists it to the root, so "a bare specifier is
+ * unresolvable" is no longer true. What remains enforceable — and is what the F1 source scan
+ * actually checks — is that no module under `lib/` or `app/` imports it and that the app never
+ * declares it. The block below pins that ownership instead of a layout npm is free to choose.
  */
 
 import fs from 'fs';
@@ -386,10 +385,6 @@ describe('Phase F2.6 — the retired packages cannot be resolved from the app ro
    * `node_modules/expo-linking` -> `expo-linking`;
    * `node_modules/@react-native-firebase/app/node_modules/firebase` -> `firebase`.
    */
-  const bareName = (key: string): string =>
-    key.slice(key.lastIndexOf('node_modules/') + 'node_modules/'.length);
-
-  const allEntries = (): string[] => Object.keys(lock().packages).filter((key) => key !== '');
 
   it('declares none of the retired packages in the lockfile root package', () => {
     // `packages['']` is the project's own entry inside the lockfile — the manifest as the
@@ -406,28 +401,35 @@ describe('Phase F2.6 — the retired packages cannot be resolved from the app ro
     }
   });
 
-  it.each(RETIRED_NAMES)('%s is not hoisted, so no shipped module can resolve it', (name) => {
+  it.each(F2_RETIRED)('%s is not hoisted, so no shipped module can resolve it', (name) => {
     // THE assertion that makes the F1 import scan enforceable rather than aspirational. A bare
-    // `firebase` specifier is resolved by walking up from the importing file to the nearest
-    // `node_modules` that contains it; with no entry at the mobile root, a module under `lib/`
-    // or `app/` cannot reach one. A NESTED copy is not a hole in this: it is visible only to
-    // modules inside its own subtree, and the importing subtrees here are the native packages.
+    // specifier is resolved by walking up from the importing file to the nearest `node_modules`
+    // that contains it; with no entry at the mobile root, a module under `lib/` or `app/` cannot
+    // reach one. These three browser packages have no legitimate dependent left.
     expect(lock().packages[`node_modules/${name}`]).toBeUndefined();
   });
 
-  it('allows the retired names to appear only nested inside a package this phase keeps', () => {
-    // Deliberately a loop over whatever is found, with NO presence assertion. One retired name
-    // legitimately survives in the tree — `@react-native-firebase/app` (KEPT, and the whole
-    // shipped M1 architecture) declares `firebase` as a hard dependency, so the JS SDK is
-    // installed once beneath it. Demanding its absence would be a guard that can never pass;
-    // demanding it be present would break on a benign upstream change. What must never happen
-    // is a retired name appearing anywhere ELSE — a re-hoist, or a new dependent — so that is
-    // exactly what is pinned, and the failure names the offending path.
-    const nestedUnder = 'node_modules/@react-native-firebase/app/node_modules/';
+  it('keeps the Firebase JS SDK as RNFirebase\'s dependency, never the app\'s', () => {
+    // RNFirebase 27 pins `firebase@13` on `@react-native-firebase/app` as a HARD dependency.
+    // v26 left it nested; v27's tree is hoisted by npm because nothing else asks for that
+    // version, so `node_modules/firebase` now exists at the root. Presence is therefore not the
+    // thing to pin any more — ownership is. The root manifest must not declare it, the one
+    // package allowed to ask for it is the native app package we keep, and the F1 source scan
+    // above is what stops app code from importing it. If a second package starts depending on
+    // it, this still passes by design: the invariant is "never the app's own choice".
+    const packages = lock().packages;
+    const root = packages[''];
+    expect(root.dependencies?.firebase).toBeUndefined();
+    expect(root.devDependencies?.firebase).toBeUndefined();
+    expect(root.optionalDependencies?.firebase).toBeUndefined();
 
-    for (const key of allEntries().filter((k) => RETIRED_NAMES.includes(bareName(k)))) {
-      expect(key).toContain(nestedUnder);
-    }
+    const owner = packages['node_modules/@react-native-firebase/app'];
+    expect(owner).toBeDefined();
+    expect(owner.dependencies?.firebase).toBeDefined();
+
+    const installed = packages['node_modules/firebase'];
+    expect(installed).toBeDefined();
+    expect(installed.version).toBe(owner.dependencies.firebase);
   });
 
   it('keeps the packages the app still resolves hoisted at the root', () => {

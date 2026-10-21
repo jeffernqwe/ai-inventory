@@ -22,8 +22,8 @@ import type { Palette } from '../../lib/theme';
 import { useTheme } from '../../lib/theme-context';
 
 /** Route params are `string | string[]` (a key repeated in the link yields an array). */
-function str(v: string | string[]): string {
-  return Array.isArray(v) ? v[0] : v;
+function str(v: string | string[] | undefined): string {
+  return Array.isArray(v) ? (v[0] ?? '') : (v ?? '');
 }
 
 const TYPE_FILTERS = [

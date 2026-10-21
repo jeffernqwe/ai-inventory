@@ -323,7 +323,7 @@ export default function ProductDetailScreen() {
       ) : null}
 
       {canMove ? null : (
-        <Pressable style={styles.archivedNote} onPress={manage ? onToggleArchive : null}>
+        <Pressable style={styles.archivedNote} onPress={manage ? onToggleArchive : undefined}>
           <Text style={styles.archivedText}>
             {manage
               ? 'This product is archived. Restore it to use it in stock movements.'

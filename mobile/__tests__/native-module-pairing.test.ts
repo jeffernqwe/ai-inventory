@@ -115,6 +115,11 @@ function satisfiesAlternative(v: Version, alternative: string): boolean {
     return compare(v, floor) >= 0 && compare(v, { major: floor.major, minor: floor.minor + 1, patch: 0 }) < 0;
   }
 
+  // ">=0.13.0" — a floor with no ceiling. SDK 58's expo-modules-core states one for
+  // worklets, so the matcher has to read it rather than throw on a range it now meets.
+  const gte = /^>=(\d+)\.(\d+)\.(\d+)$/.exec(range);
+  if (gte) return compare(v, parseVersion(`${gte[1]}.${gte[2]}.${gte[3]}`)) >= 0;
+
   // "0.10.x" — pin the major and minor, ignore the patch.
   const xPinned = /^(\d+)\.(\d+)\.x$/.exec(range);
   if (xPinned) return v.major === Number(xPinned[1]) && v.minor === Number(xPinned[2]);
@@ -199,7 +204,9 @@ describe('the installed Reanimated / Worklets pairing', () => {
     expect(satisfies('5.7.3', '~5.7.0')).toBe(true);
     expect(satisfies('5.8.0', '~5.7.0')).toBe(false);
     expect(satisfies('1.2.3', '*')).toBe(true);
+    expect(satisfies('1.2.3', '>=1.2.3')).toBe(true);
+    expect(satisfies('1.2.2', '>=1.2.3')).toBe(false);
     // An unreadable range must throw, so this guard can never pass by not looking.
-    expect(() => satisfies('1.2.3', '>=1.2.3')).toThrow(/unsupported range/);
+    expect(() => satisfies('1.2.3', '<=1.2.3')).toThrow(/unsupported range/);
   });
 });

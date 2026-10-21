@@ -83,9 +83,9 @@ function AiConversations() {
   return (
     <Screen>
       {list.loading && list.items.length === 0 ? (
-        <FlatList data={[]} renderItem={null} ListHeaderComponent={header} ListEmptyComponent={<LoadingBlock label="Loading chats…" />} contentContainerStyle={styles.content} />
+        <FlatList data={[]} renderItem={() => null} ListHeaderComponent={header} ListEmptyComponent={<LoadingBlock label="Loading chats…" />} contentContainerStyle={styles.content} />
       ) : list.error && list.items.length === 0 ? (
-        <FlatList data={[]} renderItem={null} ListHeaderComponent={header} ListEmptyComponent={<ErrorState title="Couldn't load your chats" message={errorText(list.error)} onRetry={list.reload} />} contentContainerStyle={styles.content} />
+        <FlatList data={[]} renderItem={() => null} ListHeaderComponent={header} ListEmptyComponent={<ErrorState title="Couldn't load your chats" message={errorText(list.error)} onRetry={list.reload} />} contentContainerStyle={styles.content} />
       ) : (
         <FlatList
           data={list.items}
@@ -104,7 +104,7 @@ function AiConversations() {
           refreshControl={<RefreshControl refreshing={list.refreshing} onRefresh={list.refresh} tintColor={colors.primary} colors={[colors.primary]} />}
           onEndReached={list.loadMore}
           onEndReachedThreshold={0.4}
-          ListFooterComponent={list.loadingMore ? <LoadingBlock label="Loading more…" /> : null}
+          ListFooterComponent={list.loadingMore ? <LoadingBlock label="Loading more…" /> : undefined}
           showsVerticalScrollIndicator={false}
         />
       )}

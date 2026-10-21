@@ -455,21 +455,23 @@ describe('the frozen Phase 1 dependency versions', () => {
   it('pins React Native Firebase app and auth together, exactly', () => {
     // `@react-native-firebase/auth` peer-depends on ONE exact app version; a range
     // here would let the pair drift apart.
-    expect(dependencies['@react-native-firebase/app']).toBe('26.4.0');
-    expect(dependencies['@react-native-firebase/auth']).toBe('26.4.0');
+    expect(dependencies['@react-native-firebase/app']).toBe('27.0.0');
+    expect(dependencies['@react-native-firebase/auth']).toBe('27.0.0');
   });
 
   it('pins the approved Google Sign-In library', () => {
     expect(dependencies['@react-native-google-signin/google-signin']).toBe('16.1.5');
   });
 
-  it('no longer installs the Firebase JS SDK, which Phase F1 removed', () => {
+  it('does not declare the Firebase JS SDK itself, which Phase F1 removed', () => {
     // Phase B migrated email/password to the native SDK, Phase C moved Google sign-in and
     // Phase D the disconnect confirmation, so by Phase F1 nothing in the app reached the
     // JS SDK at all. Phase F1 then removed the package, `lib/firebase.ts` and the browser
     // OAuth path together (owner decision G-2 accepts that git history is now the rollback
-    // mechanism). This case is the assertion that it does not come back, and it is the
-    // mirror of the structural guard in `phaseF1-retired-dependency-guard.test.ts`.
+    // mechanism). RNFirebase 27 pins firebase@13 as ITS OWN dependency, so the JS SDK is
+    // installed transitively; what must stay true is that the app never asks for it and
+    // never imports it. The structural guard in `phaseF1-retired-dependency-guard.test.ts`
+    // pins both halves of that claim.
     expect(dependencies.firebase).toBeUndefined();
   });
 });

@@ -596,7 +596,7 @@ export default function AiChat({ conversationId = null }: AiChatProps) {
         keyExtractor={(item) => item.key}
         renderItem={({ item }) => <MessageBubble item={item} />}
         ListEmptyComponent={<Welcome onAsk={send} />}
-        ListFooterComponent={sending ? <ThinkingRow /> : stopped ? <StoppedRow /> : null}
+        ListFooterComponent={sending ? <ThinkingRow /> : stopped ? <StoppedRow /> : undefined}
         contentContainerStyle={styles.listContent}
         onContentSizeChange={scrollToEnd}
         keyboardShouldPersistTaps="handled"

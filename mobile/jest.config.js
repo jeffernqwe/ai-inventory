@@ -12,6 +12,8 @@
 // `*.test.tsx` in that tree would be bundled as a screen.
 const config = {
   preset: 'jest-expo',
+  // SDK 58 workaround for jest-expo's asset-registry mock; see jest.setup.js and expo/expo#51834.
+  setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
   // Build output (`.expo`, `dist`) and this repo's pre-existing QA artifacts
   // (`.smoke`) are not source. Jest already ignores `node_modules`, and
   // `android/`/`ios/` hold nothing because the project does not prebuild.

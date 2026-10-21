@@ -92,7 +92,7 @@ export default function RestockScreen() {
           ? `All ${formatNumber(list.total)} ${list.total === 1 ? 'product' : 'products'} shown`
           : `Showing ${formatNumber(list.items.length)} of ${formatNumber(list.total)} — scroll for more`}
       </Text>
-    ) : null;
+    ) : undefined;
 
   const renderItem: ListRenderItem<ApiResponse> = ({ item }) => {
     const isOut = item.stockStatus === 'OUT_OF_STOCK';

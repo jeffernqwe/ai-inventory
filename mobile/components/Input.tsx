@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
+import type { ComponentRef, ReactNode } from 'react';
 import { StyleSheet, Text, TextInput, View } from 'react-native';
 import type { TextInputProps } from 'react-native';
 import { useKeyboardScroll } from './KeyboardScrollView';
@@ -120,7 +120,9 @@ export default function Input({
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [focused, setFocused] = useState(false);
-  const inputRef = useRef<TextInput>(null);
+  // RN 0.88 no longer exposes the host instance through the `TextInput` value's type; the
+  // ref's element type is the component's own instance type.
+  const inputRef = useRef<ComponentRef<typeof TextInput>>(null);
   /**
    * The keyboard fix, from the field's side: on focus, tell the nearest keyboard-aware
    * scroll view which field was focused so IT can bring it above the keyboard. Null on a

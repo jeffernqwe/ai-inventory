@@ -17050,9 +17050,10 @@ exactly the fixture, with `getInventorySummary`, `getReorderNeededProducts` and
 `getOutOfStockProducts` on the turn lines.
 
 **Promotion was exercised on production, not inferred.** The primary was temporarily set to the
-valid-but-dead `super-120b`, with `lightning` first in the fallback chain, and the phone sent five
-real turns. The first four observed `404 -> failover -> OK`; the fifth logged
-`model cooling down for 30s after 5 consecutive failure(s)` and then
+valid-but-dead `super-120b`, with `lightning` first in the fallback chain, and the phone sent real
+turns. Every failed primary attempt was followed by a successful `lightning` answer; on the fifth
+consecutive failure the log recorded `model cooling down for 30s after 5 consecutive failure(s)`
+and then
 `promoted model: …super-120b… -> …lightning…`; the next turn logged
 `model cooling down, skipped: …super-120b… (9s left)`, `calls=1 failovers=0` and answered correctly
 from `lightning`. Production was then restored to the lightning-first order and redeployed; the final
@@ -17060,9 +17061,9 @@ turn logged `model=nvidia/nemotron-3.5-lightning:free calls=1 failovers=0` and a
 
 The temporary demo tenant was removed with `cleanup:demo-tenant` (7 inventory + 9 ledger + 6 products
 + 2 categories + 3 locations + 1 user + 1 business, **leftovers 0**); the Firebase identity remains by
-design. The exercise used **nine provider calls** (the allowance went from 42 to 33 of 50), and the
-phone was signed out afterwards by clearing its local session — no production credential was left on
-the device.
+design. The exercise spent **11 requests** (the allowance read **42 of 50** before the promotion run
+and **31** after the final verification), and the phone was signed out afterwards by clearing its
+local session — no production credential was left on the device.
 
 ## Limits
 

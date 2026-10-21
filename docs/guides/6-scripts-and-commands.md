@@ -142,6 +142,42 @@ stopped catching problems fails before it can report on a label. `2` means it co
 missing file) and is never a pass. This runs in CI with the app's tests; it is also what to run after
 a device print, replacing the fixture path with the file you just exported.
 
+### A phone pass you can re-run — `scripts/device/run.mjs`
+
+The device acceptance pass used to be a hand-written list of `adb input tap` coordinates, which only
+worked on the screen they were measured on and left nothing behind. It is now a script. From the
+**project root**, with the phone connected, the development build installed and the tunnels up
+(`adb reverse tcp:4000 tcp:4000` and `adb reverse tcp:8081 tcp:8081`):
+
+```bash
+node scripts/device/run.mjs --list                      # what can be run
+node scripts/device/run.mjs --self-test                 # the harness's own controls; needs no phone
+node scripts/device/run.mjs                             # the read-only walk over every main screen
+node scripts/device/run.mjs --all --product=<id>        # the walk + print a label and decode its PDF
+node scripts/device/run.mjs --journey=draft --allow-writes   # create a draft purchase order
+```
+
+It drives the app by **route** (`inventoryai://dashboard`) and by the **label a person reads**, not by
+coordinates, so the same journey works on a different screen size. Each run writes `report.md`,
+`report.json` and screenshots into `docs/evidence/device-runs/<timestamp>-<journey>/`, and prints one
+line per step. Exit codes are the repository's: **0** every step passed, **1** a step failed (the app
+did something wrong), **2** a step was **blocked** — no device, no signed-in session, no debuggable
+build, no artifact — and a block is never reported as a pass. `--until=<n>` stops after step `n` and
+writes the screen to `state.json`, which is how a journey that fails mid-form gets debugged without
+another guessing session.
+
+The `label` journey needs a product whose barcode is a 13-digit EAN-13, so it takes `--product=<id>`.
+It reads the code **off the screen**, taps *Share PDF*, then decodes the PDF the phone wrote and
+fails if the two disagree — the same decoder CI uses. Its PDF is read with `adb exec-out`: plain
+`adb shell cat` runs the file through the phone's shell, which rewrites every newline and turned a
+correct label into "contains no decodable EAN-13" on the harness's first run.
+
+**What a pass does not mean:** iOS (still unverified, no macOS here), paper (no printer — the PDF
+decode rules out clipped bars, but it is not a scan of paper), and the camera (a barcode in the room
+was read by hand: a *Clearance Multi-Purpose Wipes* pack scanned to the record entered for it). The
+journeys prove the screens render, the routes work, the print path writes a decodable PDF and a form
+submits; a person still looks at the screenshots.
+
 **About `check:extensions` / `check:specifiers`.** These are plumbing checks that catch a specific
 kind of half-finished edit (a file renamed but its import lines not updated). When clean they print
 a line beginning `[check-module-graph] … OK` with a count of what they scanned, then exit `0`; a
@@ -936,6 +972,8 @@ not replace.
 | `node scripts/check-upgrade-watches.mjs` | is a deferred upgrade ready yet? | ✅ (needs network) |
 | `node scripts/verify-label-barcode.mjs --html --expect=…` | does the label the app draws decode as that EAN-13, and does its geometry fit the page? | ✅ reads only |
 | `node scripts/verify-label-barcode.mjs --pdf=… --expect=…` | does a **printed** label PDF decode as that EAN-13? | ✅ reads only |
+| `node scripts/device/run.mjs` | walks every main screen on a **connected phone** and writes a report with screenshots | ⚠️ needs the phone + tunnels |
+| `node scripts/device/run.mjs --journey=draft --allow-writes` | creates one draft purchase order on the phone | ❌ **writes** to the tenant |
 
 ---
 

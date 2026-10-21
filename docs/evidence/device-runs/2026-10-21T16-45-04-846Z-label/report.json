@@ -1,0 +1,38 @@
+{
+  "journey": "label",
+  "startedAt": "2026-10-21T16:45:04.846Z",
+  "device": "CPH1969 · Android 11 (API 30) · PV4DDMIZZLTCIVSK",
+  "steps": [
+    {
+      "title": "open inventoryai://products/{{product}}",
+      "status": "pass",
+      "detail": "inventoryai://products/6ad84fc919af9d6a521274ae",
+      "durationMs": 1025
+    },
+    {
+      "title": "expect \"Barcode label\"",
+      "status": "pass",
+      "detail": "seen after 2340ms",
+      "durationMs": 2340
+    },
+    {
+      "title": "read the barcode off the screen",
+      "status": "pass",
+      "detail": "screen shows 2000053300018",
+      "durationMs": 2458
+    },
+    {
+      "title": "tap \"Share PDF\"",
+      "status": "pass",
+      "detail": "tapped Share PDF at 767,2175",
+      "durationMs": 4013
+    },
+    {
+      "title": "decode the printed PDF",
+      "status": "fail",
+      "detail": "6303fba5-b9e8-45cc-b107-fed3d597aaf9.pdf contains no decodable EAN-13 (clipped or damaged)",
+      "durationMs": 152
+    }
+  ],
+  "notes": "evidence: C:\\Users\\jeffe\\inventory-ai\\docs\\evidence\\device-runs\\2026-10-21T16-45-04-846Z-label"
+}

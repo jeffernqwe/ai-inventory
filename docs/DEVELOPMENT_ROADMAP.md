@@ -17533,6 +17533,97 @@ CI jobs green on this branch, a **`preview`/`production`-profile** EAS build rat
 `development` one (which is what the device was running), and the iOS half on a macOS or EAS build
 environment. Until then the device evidence above is Android-only and says so.
 
+# The device pass became a script — and found four bugs in itself (2026-10-21)
+
+**Not an application phase.** No route, permission, role, schema, index, dependency, environment,
+EAS or mobile change, and no server code was touched. It adds `scripts/device/` (a harness),
+`server/test/device-harness.test.mjs` (27 cases) and `docs/evidence/device-runs/`.
+
+## The problem it answers
+
+Every device acceptance pass in this project has been a hand-written sequence of
+`adb shell input tap <x> <y>` coordinates, measured on one screen. They proved a great deal and left
+nothing a second person could re-run: the evidence was a chat transcript, and a regression in the
+same screen would be found only by repeating the whole session by hand. §27EH's SDK 58 pass was the
+largest example — every write path exercised, none of it repeatable.
+
+`scripts/device/run.mjs` drives the app **by route** (`inventoryai://dashboard`) and **by the label a
+person reads**, reads the screen from `uiautomator dump`, writes `report.md`, `report.json` and
+screenshots per run, and exits **0 / 1 / 2** in this repository's convention — passed, failed, or
+*could not check*. A signed-out session, a missing debuggable build, a missing product id and a
+missing PDF are all **2**, never a pass: the first real run reported a perfectly healthy app as a
+failure because the phone had lost its session overnight, and that is exactly the inversion the exit
+codes exist to prevent.
+
+Three journeys: **`smoke`** (every main screen opens and names itself — read-only), **`label`**
+(reads the 13-digit code off the screen, taps *Share PDF*, decodes the PDF the phone wrote and fails
+if they disagree) and **`draft`** (creates one draft purchase order; opt-in behind `--allow-writes`).
+
+## Measured on the phone, 2026-10-21
+
+OPPO CPH1969 · Android 11 (API 30), SDK 58 development build over the USB tunnels against the local
+server, signed in as `role-owner@example.invalid` on the disposable four-role fixture (§27CT):
+
+| journey | result |
+|---|---|
+| `smoke` | **17/17 pass** |
+| `label` | **7/7 pass** — screen `2000053300018`, PDF decoded `2000053300018`, 95 modules, 30 bars, 4 pt module |
+| `draft` | **14/14 pass** — `Draft PO-0002` created through the form, its own confirmation dismissed |
+
+## Four defects the harness had, each caught by running it
+
+Every one of these produced a **wrong verdict about the app**, which is worse than no harness:
+
+1. **`adb shell cat` corrupted binaries.** The first `label` run said *"contains no decodable
+   EAN-13"* on a correct label. The shell's pseudo-terminal rewrote every LF as CRLF: **11,472 bytes
+   for an 11,225-byte PDF**, and the 247 extra bytes fell inside a Flate stream. Fixed by reading with
+   `exec-out`; a source guard fails if it regresses, with a control that must trip it.
+2. **Inverted dump boxes were treated as geometry.** A dump taken mid-scroll reported
+   `Create draft order` at `[48,1863][1032,1443]` — `y2` above `y1`. The centre computed to **y=1653,
+   inside the quantity field**, so a tap meant for the button typed a digit instead. `parseDump` now
+   marks such a node `brokenBounds`, `findTapTarget` refuses it, and `readScreen` retries an unstable
+   dump the same way it already retried a blank one. Text assertions may still use the label.
+3. **Typing went to whatever had focus.** `type` now takes `{ value, into: '<label>' }`, finds the
+   edit box below that label (exact-then-substring, because the form says `Quantity ordered *`),
+   **reads the field back** and fails if the value is not there. A form field that is empty can reach
+   the dump with no label at all, so there is a geometric fallback under the label — the read-back is
+   what makes that safe.
+4. **The keyboard, and the previous journey's dialog.** The keyboard covers a form's buttons, so a
+   swipe meant to scroll lands on keys; `type` now closes it **only when `dumpsys input_method` says
+   it is open** (a blind `BACK` left the form entirely and, on one run, the app). And the `draft`
+   journey now dismisses its own "order created" dialog: a leftover one covered the *next* journey's
+   first screen and failed a journey that had nothing to do with it.
+
+`tap` also scrolls to find a control below the fold, and `--until=<n>` stops after step `n` and writes
+the screen to `state.json` — added after two runs were spent guessing what a mid-form failure looked
+like.
+
+## A real barcode, scanned for real (owner report, 2026-10-21)
+
+The owner entered the barcode of a **Clearance Multi-Purpose Wipes** pack they had at home, scanned
+the **physical pack** with the app, and the app opened the record they had created. That is the camera
+half of the barcode feature proven against real packaging, with a real EAN-13 — a class of evidence no
+harness can produce here, and the reason the device items are not closed from JavaScript alone.
+
+## Still open, and said so
+
+- **Physical printing on paper**: no printer on this host. The PDF decode rules out clipped or
+  distorted bars (and now runs on every CI run for the generator and for two real device PDFs) but it
+  is **not** a scan of paper. ISS-13's print → *scan* round trip stays open.
+- **iOS**: no macOS on this host. Nothing in this entry is iOS evidence, and Phase 30B stays open.
+- **The camera, in general**: one product, one pack, by hand. Not automated, and not claimed to be.
+
+## Release gate unchanged
+
+`chore/expo-sdk-58` still carries the SDK 58 upgrade, the label fix and now the harness. **Nothing is
+merged or released.** A release decision still needs the required CI jobs green on the branch, a
+`preview`/`production`-profile EAS build (the device ran a `development` one) and the iOS half on a
+macOS or EAS build environment. **Android has now been device-tested by a repeatable script; iOS has
+not been run at all** — and the two are never described with one word.
+
+Artifacts: `docs/evidence/device-runs/` (three passing runs, plus the first failing `label` run kept
+deliberately, because it is the record of the harness blaming the app for its own bug).
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

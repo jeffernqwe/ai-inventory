@@ -1,0 +1,92 @@
+{
+  "journey": "draft",
+  "startedAt": "2026-10-21T17:03:31.725Z",
+  "device": "CPH1969 · Android 11 (API 30) · PV4DDMIZZLTCIVSK",
+  "steps": [
+    {
+      "title": "open inventoryai://purchase-orders/new",
+      "status": "pass",
+      "detail": "inventoryai://purchase-orders/new",
+      "durationMs": 1010
+    },
+    {
+      "title": "expect \"New Purchase Order\"",
+      "status": "pass",
+      "detail": "seen after 2534ms",
+      "durationMs": 2534
+    },
+    {
+      "title": "tap \"Choose a supplier\"",
+      "status": "pass",
+      "detail": "tapped Choose a supplier…, ▾ at 540,549",
+      "durationMs": 4160
+    },
+    {
+      "title": "tap the first row under \"Supplier\"",
+      "status": "pass",
+      "detail": "tapped \"Deluxe Industries 1004\"",
+      "durationMs": 3950
+    },
+    {
+      "title": "tap \"Where stock will land\"",
+      "status": "pass",
+      "detail": "tapped Where stock will land…, ▾ at 540,807",
+      "durationMs": 3835
+    },
+    {
+      "title": "tap the first row under \"Receiving location\"",
+      "status": "pass",
+      "detail": "tapped \"Shop Front\"",
+      "durationMs": 3955
+    },
+    {
+      "title": "tap \"Add line\"",
+      "status": "pass",
+      "detail": "tapped Add line at 579,1872",
+      "durationMs": 3910
+    },
+    {
+      "title": "tap \"Choose a product\"",
+      "status": "pass",
+      "detail": "tapped Choose a product…, ▾ at 540,1995",
+      "durationMs": 3789
+    },
+    {
+      "title": "tap the first row under \"Product 1\"",
+      "status": "pass",
+      "detail": "tapped \"Everyday Battery 10202\"",
+      "durationMs": 14748
+    },
+    {
+      "title": "type into the focused field",
+      "status": "pass",
+      "detail": "\"Quantity ordered\" now reads 1, keyboard closed",
+      "durationMs": 32759
+    },
+    {
+      "title": "tap \"Create draft order\"",
+      "status": "pass",
+      "detail": "tapped Create draft order at 540,1932",
+      "durationMs": 14895
+    },
+    {
+      "title": "expect \"Draft PO-\"",
+      "status": "pass",
+      "detail": "seen after 2152ms",
+      "durationMs": 2152
+    },
+    {
+      "title": "tap \"OK\"",
+      "status": "pass",
+      "detail": "tapped OK at 873,1303",
+      "durationMs": 4424
+    },
+    {
+      "title": "screenshot \"draft-created\"",
+      "status": "pass",
+      "detail": "C:\\Users\\jeffe\\inventory-ai\\docs\\evidence\\device-runs\\2026-10-21T17-03-31-725Z-draft\\draft-created.png",
+      "durationMs": 750
+    }
+  ],
+  "notes": "evidence: C:\\Users\\jeffe\\inventory-ai\\docs\\evidence\\device-runs\\2026-10-21T17-03-31-725Z-draft"
+}

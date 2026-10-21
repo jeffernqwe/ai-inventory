@@ -1,0 +1,50 @@
+{
+  "journey": "label",
+  "startedAt": "2026-10-21T17:03:08.653Z",
+  "device": "CPH1969 · Android 11 (API 30) · PV4DDMIZZLTCIVSK",
+  "steps": [
+    {
+      "title": "open inventoryai://products/{{product}}",
+      "status": "pass",
+      "detail": "inventoryai://products/6ad84fc919af9d6a521274ae",
+      "durationMs": 1002
+    },
+    {
+      "title": "expect \"Barcode label\"",
+      "status": "pass",
+      "detail": "seen after 2574ms",
+      "durationMs": 2574
+    },
+    {
+      "title": "read the barcode off the screen",
+      "status": "pass",
+      "detail": "screen shows 2000053300018",
+      "durationMs": 2313
+    },
+    {
+      "title": "tap \"Share PDF\"",
+      "status": "pass",
+      "detail": "tapped Share PDF at 767,2175",
+      "durationMs": 4003
+    },
+    {
+      "title": "decode the printed PDF",
+      "status": "pass",
+      "detail": "5d266b43-ff00-4615-ba3f-2a0f4f8a7a3e.pdf: 2000053300018, 95 modules, 30 bars, 4pt module",
+      "durationMs": 152
+    },
+    {
+      "title": "press BACK",
+      "status": "pass",
+      "detail": "pressed BACK",
+      "durationMs": 1528
+    },
+    {
+      "title": "screenshot \"label-done\"",
+      "status": "pass",
+      "detail": "C:\\Users\\jeffe\\inventory-ai\\docs\\evidence\\device-runs\\2026-10-21T17-03-08-653Z-label\\label-done.png",
+      "durationMs": 750
+    }
+  ],
+  "notes": "evidence: C:\\Users\\jeffe\\inventory-ai\\docs\\evidence\\device-runs\\2026-10-21T17-03-08-653Z-label"
+}

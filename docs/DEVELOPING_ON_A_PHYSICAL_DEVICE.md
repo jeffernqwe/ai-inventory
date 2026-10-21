@@ -786,6 +786,29 @@ grep '\[ai\] turn' server/logs/server.log | tail -1       # provider ms, tool ms
 grep 'empty completion' server/logs/server.log            # the shape line, when one fires
 ```
 
+**A whole pass, without the taps (2026-10-21).** Everything above is still the right way to *investigate*;
+for a *repeatable* pass use the harness, which drives the same app by route and by label and leaves a
+report behind:
+
+```bash
+node scripts/device/run.mjs --list
+node scripts/device/run.mjs --all --product=<id>          # read-only: screens + label PDF decode
+node scripts/device/run.mjs --journey=draft --allow-writes
+node scripts/device/run.mjs --journey=draft --until=9      # stop after step 9, write state.json
+```
+
+It needs the phone, the development build and the two tunnels, and it exits **2** ("could not check")
+rather than **1** when a precondition is missing — a signed-out session, no debuggable build, no
+fresh PDF. Evidence from the run that produced it is in
+[docs/evidence/device-runs](docs/evidence/device-runs/README.md).
+
+The traps above are encoded in it, because each one cost a run: **`exec-out` for binaries** (`adb shell
+cat` rewrote a PDF's newlines and a good label was reported undecodable), **distrust inverted dump
+boxes** (a mid-scroll dump put "Create draft order" at y=1653, inside the quantity field), **close the
+keyboard before tapping** (only when `dumpsys input_method` says it is open — a blind `BACK` left the
+form entirely), and **dismiss the app's own confirmation** (a leftover "order created" dialog covered
+the next journey's first screen).
+
 ---
 
 ## 10. Optional: go wireless *(documented, not verified on this machine)*

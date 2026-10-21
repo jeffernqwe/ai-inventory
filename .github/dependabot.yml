@@ -97,6 +97,11 @@ updates:
       # `expo-modules-core` reported invalid (`npm ls` ELSPROBLEMS), and the fix was to declare the
       # pair the pin table already named.
       #
+      # WHY ONE MORE WAS ADDED (2026-10-21, the SDK 58 upgrade). `expo-build-properties` became a
+      # direct dependency when `app.json` had to declare Android levels of its own (`minSdkVersion`
+      # 24 and Kotlin 2.4.0). The SDK pins it like the rest, so the pin guard compared it and failed
+      # until it was listed here — which is the guard doing exactly what it exists for.
+      #
       # THE FOUR THAT STAY OPEN: `@react-native-firebase/app`, `@react-native-firebase/auth`,
       # `@react-native-google-signin/google-signin` and `expo` itself are not pinned this way — the
       # first three are version choices this project makes and Dependabot may still propose them.
@@ -106,6 +111,7 @@ updates:
       - dependency-name: "@expo/vector-icons"
       - dependency-name: eslint-config-expo
       - dependency-name: expo
+      - dependency-name: expo-build-properties
       - dependency-name: expo-camera
       - dependency-name: expo-constants
       - dependency-name: expo-dev-client

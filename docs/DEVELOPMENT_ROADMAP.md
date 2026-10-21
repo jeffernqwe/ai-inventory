@@ -17397,6 +17397,132 @@ and two instances keep independent histories; a free host that **sleeps** does n
 in-process fake provider, **not** by delivering to a mailbox — the recipient has to be set on the host
 and the first real alert observed.
 
+# 27EH. Expo SDK 58 runs on the phone (2026-10-21)
+
+The SDK 58 upgrade was committed as `93f9130` with one sentence left open — *"Not verified yet: the
+Android build and the on-device pass"* — and this is that pass. The build under test is EAS
+`b1fecde3-fa6f-4235-829d-5bc35a72ea58` (`development`, Android, `FINISHED` 12:39Z) **built from that
+commit, not from a later one**, installed over the previous preview build on the owner's
+**OPPO CPH1969, Android 11 (API 30), arm64-v8a**. The backend was the local server over
+`adb reverse`, so the request log below is this repository's own code.
+
+The point of a device pass is the class of failure a green pipeline cannot see: a native module that
+compiles and never binds, a screen that renders in jsdom and not on a phone, a Kotlin/schema change
+that only bites at runtime. None of that happened. Every screen in the app was opened on the phone,
+and every write path was executed against the database.
+
+## What ran, and what the server recorded
+
+- **Sign-in** (Firebase email/password → exchange → JWT): dashboard with live counts `42,910` in
+  stock / `7,716` low / `3,077` out / `50,626` active; the sessions screen listed this device with a
+  correct `last active` a few minutes later, so AUTH-03's renewal wrote through.
+- **Stock In** `201 / 627 ms` — `0 → 5`, alert shown, a `+5` history row, and an audit row in the
+  same minute.
+- **Transfer** `201 / 1,084 ms` — both legs: Main Warehouse `416 → 413`, Transit Hub `0 → 3`.
+- **Stock Out** `200 / 576 ms` — `5 → 3`. **Adjust** `200 / 856 ms` — `3 → 4`.
+- **AI assistant** `201 / 14.1 s` — *"You hold 12,540,196 units on hand across 50,626 active
+  products"*, `getInventorySummary`, and the same population the dashboard showed minutes earlier.
+  This turn also exercised **AI-29/31 on the real provider from the app**: the configured primary
+  `nvidia/nemotron-3-super-120b-a12b:free` answered **HTTP 404**, the turn walked to
+  `nvidia/nemotron-3-ultra-550b-a55b:free`, and the answer was correct — `failovers=1 calls=3
+  iterations=2`. Reliability work that had only ever been proven by fake providers was observed on
+  the device it exists to protect.
+- **Label print** — the print preview rendered, *Save as PDF* wrote a 9,451-byte file, and the
+  file's content stream was decoded: **30 bars, 95 modules × 4.0 pt, decoding to
+  `2000053337540`**, the product's own code. That is the F-1 question (ISS-13) answered from the
+  artifact instead of from paper: the printed document's bars are complete.
+- **Share PDF** — share sheet with a real `*.pdf` payload. **Scanner** — permission gate → preview →
+  a barcode in the room decoded as EAN-13 and answered *Product not found* with *Scan again*.
+- **Registered barcode scan** — the same product's `2000053337540` label shown on the laptop was
+  scanned by the phone: `GET /api/products/barcode` **200** in **326.6 ms**, and 471 ms later
+  `GET /api/inventory` → 304, i.e. the product's stock record loading. This closes the earlier
+  gap where only an *unregistered* code had been read (that code answered 404 at 13:06:14 the same
+  session, so both outcomes of the lookup are now measured on hardware).
+- **Purchase order, end to end** — created from the phone (`POST /api/purchase-orders` **201 /
+  950.9 ms**, *Draft PO-0001 created*), **issued** (`POST /:id/issue` **200 / 625.9 ms**, Draft →
+  Open), then **received in full** (`POST /:id/receive` **200 / 1,290.4 ms**, *Received 24 unit(s)
+  across 1 line. This order is now fully received*). Read back from the API afterwards: the
+  product's Shop Front stock **0 → 24**, an inventory-history row `STOCK_IN 24 — reference PO-0001`
+  at the receive timestamp, and the order `RECEIVED` with `Ordered 24 · Received 24 · Remaining 0`.
+- **Assistant quota copy** — a turn answered `429 AI_QUOTA_EXCEEDED` and the phone showed
+  *"The assistant has used today's request allowance. It resets at midnight UTC (8AM in Manila) —
+  the rest of the app works as usual."* It was produced by a **local pass-through proxy in front of
+  the real server** that answers only `POST /api/ai/chat` with the server's own refusal: every other
+  request reached the real API unchanged, and no free-model allowance was spent to manufacture it.
+  That is a controlled measurement of the client's error path, not a real exhaustion.
+- Read-only screens all rendered: products, categories, locations, suppliers, purchase orders,
+  restock (7,716 rows), audit log, users, profile, sessions.
+
+## The two checks that did not pass first
+
+**`expo-sdk-pins` failed, and that is the guard working.** The upgrade made `expo-build-properties`
+a direct dependency (it is how `app.json` declares `minSdk 24` and Kotlin 2.4.0 for RNFirebase 27).
+The package is in the SDK's pin table, so the guard compared it and found it missing from
+`.github/dependabot.yml`'s ignore list — a real gap CI would never have surfaced, because the move
+it prevents is native-only. Fixed by adding the entry with its reason beside it.
+
+**One full-suite Jest run timed out `po-form-create-navigation`** at the 5 s default while the
+machine was also running the screen mirror and a build. Alone: **3.0 s, passes**. Clean full run
+afterwards: **80 suites / 978 tests / 0 failures in 16.5 s**, `tsc` clean, `eslint` clean. Recorded as
+a load-sensitive flake rather than a defect, but it is the second UI test to fail only under
+contention, so it belongs on a list rather than in a footnote.
+
+## The label decode is now a permanent check, not a one-off
+
+The manual decode below was the only thing that could answer the F-1 question, and a one-off script
+on a developer's machine answers it once. It is now `scripts/verify-label-barcode.mjs`, wired into the
+mobile CI job in two modes: `--html` decodes the label the app generates **at that commit** (so a
+regression in `mobile/lib/ean13.ts` — module width, quiet zone, run collapse — fails CI), and
+`--pdf=scripts/fixtures/label-2000053337540.pdf` decodes the **real** PDF this pass printed (the one
+thing CI cannot regenerate, because the rasteriser is the device's). A second PDF fixture,
+`label-2000053337540-both-quiet-zones.pdf`, is the label the phone produced **after** the fix below;
+both artifacts are decoded on every run. Both print the code, module
+count, bar count and module width, and exit `0` only on a match; `2` means it could not look and is
+never a pass. The decoder's own must-fail controls run before every report — clipped, thickened,
+stray bar, damaged digit, page furniture — so a decoder that stopped catching problems fails first,
+and each of those controls was watched failing against a deliberately broken decoder (disabling the
+check digit, dropping the height grouping). Two real defects were found by building it: the first
+version took the **tallest** rectangle as the bar height and discarded every bar on a real page (the
+label PDF carries one 3300-unit rule), and a first "damaged digit" control flipped a bit inside a
+pattern, which the digit tables reject anyway and which therefore proved nothing about the checksum.
+
+**A decode cannot see geometry, so the check now reads the page too.** A label with a complete
+95-module pattern decodes perfectly whether or not it has quiet zones and whether or not it fits the
+page it is printed on — and two real defects lived exactly there. The printed label's SVG carried
+**11 modules of white space on the left and none on the right** (`width` stopped at the last bar,
+contradicting `QUIET_MODULES`' own "either side"; the on-screen preview had always padded both), and
+`barcodeLabelHtml` honoured a caller's `moduleWidth` while keeping the page at 595 pt, so asking for
+a 6 pt module produced **702 pt of label on a 595 pt page** — the F-1 clipping failure, reachable by
+changing one argument. Both are fixed in `mobile/lib/ean13.ts` (the SVG width now adds the trailing
+quiet zone; the page grows to the label rather than the label being scaled down, because a module
+below a scanner's resolution is unreadable too), and `--html` now checks the geometry against the
+page at module 4 and module 8, failing with the measured numbers. Reverting either fix makes it
+fail: `right quiet zone is 0pt, expected 44pt`, `a 936pt label on a 595pt page would be clipped`.
+
+The fixed label was then printed from the phone and pulled back: its clip box is **1462.5/3.125 =
+468 pt = 117 modules** (the pre-fix artifact: 424 pt = 106 modules), the digit line re-centred by
+22 pt, and its bars still decode to `2000053337540` at 95 modules × 4.0 pt. That is the fix observed
+on the device, not only in the unit-level generator check.
+
+## Verification and limits
+
+Measured facts this entry adds: `minSdk 24` / `targetSdk 36` read out of the installed APK and
+`compileSdk 37` from RN 0.88's own `libs.versions.toml` (ISS-06); **zero** occurrences of the
+signed-in email address or Mongo user id in `adb logcat` across the whole buffer after a full
+sign-in, which is the device half of **ISS-02** and what the JavaScript guard explicitly cannot read
+— the fix there is upstream in RNFirebase 27, not a local patch; and no `FATAL EXCEPTION` or
+`ANR in com.inventoryai.app` on the day.
+
+Stated as limits, not as passes: **iOS** is unverified (no macOS on this host); **paper print → scan**
+was not done — the PDF decode rules out clipped geometry but it is not a scan of paper; the **429
+quota copy** was measured through a controlled refusal, not by exhausting the shared daily allowance,
+so the *copy* is proven and a genuine end-of-allowance day is not; and the label's **right quiet zone
+was added after** the first artifact was printed, so the fixed document is recorded as the second
+fixture rather than by re-printing on paper.
+
+Artifacts, including every screenshot, the printed PDF and the decoder used on it, are in
+`docs/evidence/expo-sdk-58-2026-10-21/`.
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

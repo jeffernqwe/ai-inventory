@@ -53,6 +53,10 @@ const FIRST_DIGIT_PARITY: Readonly<Record<string, string>> = {
 
 export const QUIET_MODULES = 11; // required white space either side
 export const MODULE_COUNT = 95; // 3 + 6*7 + 5 + 6*7 + 3
+/** Bars plus both quiet zones: the label's full width, in modules. */
+export const LABEL_MODULES = MODULE_COUNT + 2 * QUIET_MODULES; // 117
+/** Vertical space beneath the bars: the digit line `ean13Svg` draws (26 px gap + 22 px text). */
+const DIGIT_LINE_PX = 48;
 export const EAN13_PATTERN = /^\d{13}$/;
 
 /** One alternating run of modules: `on` = bar, `len` = width in modules. */
@@ -147,7 +151,13 @@ export function ean13Svg(
     if (run.on) rects += `<rect x="${x}" y="0" width="${w}" height="${barHeight}" fill="#000" />`;
     x += w;
   }
-  const width = x; // includes both quiet zones
+  // `x` is now the right edge of the last bar, so the trailing quiet zone has to be added:
+  // without it the bars end flush with the SVG box and a label printed to that box loses the
+  // 11-module white space EAN-13 needs on BOTH sides of the pattern (`QUIET_MODULES` above).
+  // The on-screen preview (`components/Ean13Barcode.tsx`) has always padded both sides; this
+  // makes the printed document agree with it. `scripts/verify-label-barcode.mjs` (CI) pins it:
+  // `--html` measures both quiet zones and fails when this line is reverted.
+  const width = x + quietPx; // 95 + 2 × 11 modules
   const textY = barHeight + Math.round(digitSize * 1.2);
   const height = textY + digitSize;
   return (
@@ -188,11 +198,22 @@ export function barcodeLabelHtml(
   { productName = '', sku = null, width = 595, height = 340, moduleWidth = 4, barHeight = 150 }: LabelOptions = {},
 ): BarcodeLabel {
   const svg = ean13Svg(code13, { moduleWidth, barHeight });
+  // THE PAGE GROWS TO THE LABEL; THE LABEL IS NEVER CLIPPED TO THE PAGE. A page narrower than
+  // the label cuts bars off at its edge — the F-1 failure, which printed a label that looked
+  // right and could not be scanned — and the caller's `moduleWidth` is exactly the knob that can
+  // cause it (module 6 is 702 pt of label on a 595 pt page). Shrinking the bars to fit is not the
+  // answer either: a module narrower than a scanner resolves is unreadable too. So the page takes
+  // the larger of what was asked for and what the label needs, and both print actions receive the
+  // same grown geometry.
+  const labelWidth = LABEL_MODULES * moduleWidth;
+  const labelHeight = barHeight + DIGIT_LINE_PX;
+  const pageWidth = Math.max(width, labelWidth);
+  const pageHeight = Math.max(height, labelHeight);
   const name = escapeHtml(productName);
   const skuLine = sku ? `<div style="font-size:16px;color:#111;margin-top:8px;">SKU ${escapeHtml(sku)}</div>` : '';
   const html =
     `<!doctype html><html><head><meta charset="utf-8" /></head>` +
-    `<body style="margin:0;padding:0;width:${width}px;height:${height}px;background:#fff;` +
+    `<body style="margin:0;padding:0;width:${pageWidth}px;height:${pageHeight}px;background:#fff;` +
     `display:flex;align-items:center;justify-content:center;box-sizing:border-box;">` +
     `<div style="display:flex;flex-direction:column;align-items:center;text-align:center;">` +
     `<div style="font-family:system-ui,sans-serif;font-size:24px;font-weight:700;color:#000;` +
@@ -200,12 +221,13 @@ export function barcodeLabelHtml(
     `${skuLine}` +
     `<div style="margin-top:16px;">${svg}</div>` +
     `</div></body></html>`;
-  return { html, width, height };
+  return { html, width: pageWidth, height: pageHeight };
 }
 
 export default {
   QUIET_MODULES,
   MODULE_COUNT,
+  LABEL_MODULES,
   isEan13,
   ean13CheckDigit,
   ean13Bits,

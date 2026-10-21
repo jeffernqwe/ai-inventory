@@ -122,6 +122,26 @@ node scripts/check-build-env.mjs --live   # the same question, including EAS (ne
 your real data. If the database cannot be reached, a DB test **fails loudly** rather than being
 quietly skipped — a green run always means the tests really ran.
 
+### The label barcode — does it decode?
+
+A product label's barcode is drawn as vector bars, and a label whose bars are clipped or the wrong
+width prints perfectly and cannot be scanned. From the **project root**:
+
+```bash
+node scripts/verify-label-barcode.mjs --html --expect=2000053337540
+node scripts/verify-label-barcode.mjs --pdf=scripts/fixtures/label-2000053337540.pdf --expect=2000053337540
+```
+
+The first decodes the label the app generates **right now** and also checks its geometry against the
+page — both 11-module quiet zones, and a page big enough to hold the label (a decode alone cannot see
+either defect, and both were real). The second decodes a **real** printed PDF (the fixtures record two
+that a phone produced, one either side of the quiet-zone fix). Both print what they found — code,
+module count, bar count, module width — and exit `0` only on a match. The decoder's own must-fail controls
+(clipped, thickened, stray bar, damaged digit) run first on every invocation, so a decoder that had
+stopped catching problems fails before it can report on a label. `2` means it could not look (a
+missing file) and is never a pass. This runs in CI with the app's tests; it is also what to run after
+a device print, replacing the fixture path with the file you just exported.
+
 **About `check:extensions` / `check:specifiers`.** These are plumbing checks that catch a specific
 kind of half-finished edit (a file renamed but its import lines not updated). When clean they print
 a line beginning `[check-module-graph] … OK` with a count of what they scanned, then exit `0`; a
@@ -914,6 +934,8 @@ not replace.
 | `node scripts/check-secrets.mjs` | scan tracked files for credentials | ✅ |
 | `node scripts/audit-access.mjs` | repository privacy/access audit | ✅ |
 | `node scripts/check-upgrade-watches.mjs` | is a deferred upgrade ready yet? | ✅ (needs network) |
+| `node scripts/verify-label-barcode.mjs --html --expect=…` | does the label the app draws decode as that EAN-13, and does its geometry fit the page? | ✅ reads only |
+| `node scripts/verify-label-barcode.mjs --pdf=… --expect=…` | does a **printed** label PDF decode as that EAN-13? | ✅ reads only |
 
 ---
 

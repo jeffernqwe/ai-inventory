@@ -266,3 +266,18 @@ jobs:
 
       - name: Test
         run: npx jest .
+
+      # The label barcode, decoded from bytes. `--html` decodes what the generator produces NOW and
+      # checks its geometry against the page (both quiet zones, and a page big enough to hold the
+      # label); `--pdf` decodes the artifacts a real device printed (the fixtures record those
+      # prints, which CI cannot repeat — one before the quiet-zone fix, one after it). Both run the
+      # decoder's own must-fail controls first — a check that cannot fail is not a check — and exit
+      # 2 when they cannot look, so a missing fixture is a failure rather than a pass. This is the
+      # F-1/ISS-13 geometry class: a label that prints but cannot scan. Runs from the repository
+      # root because the decoder, the generator and the fixtures live in different places.
+      - name: Decode the label barcode — generator and printed artifacts
+        working-directory: ${{ github.workspace }}
+        run: |
+          node scripts/verify-label-barcode.mjs --html --expect=2000053337540
+          node scripts/verify-label-barcode.mjs --pdf=scripts/fixtures/label-2000053337540.pdf --expect=2000053337540
+          node scripts/verify-label-barcode.mjs --pdf=scripts/fixtures/label-2000053337540-both-quiet-zones.pdf --expect=2000053337540

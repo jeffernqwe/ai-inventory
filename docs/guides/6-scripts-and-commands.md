@@ -383,8 +383,8 @@ against the database**, and only `perf:turns` spends AI quota.
 | `npm run perf:turns -- --business=<id> --only=2` | One or two **real** assistant conversations, timed end to end |
 | `npm run ai:usage -- --log=<path>` | What the assistant has actually cost and how it failed — **no AI calls, no database, no quota** |
 | `npm run ai:usage -- --provider-only` | **Just the allowance left today** — no log, no database, no model call, no quota |
-| `npm run ai:models` | The assistant's model list as this deployment reads it, then the free tool-capable ids you can add — **no completions, no quota** |
-| `npm run ai:models -- --check=<id>` | Whether ONE model id answers a tool-shaped request, before you add it — **one request** |
+| `npm run ai:models` | The configured chain with each model's **live endpoint status and 5m/30m/1d uptime**, then the free tool-capable ids you can add — **no completions, no quota** |
+| `npm run ai:models -- --check=<id>` | That model's live endpoint health, then whether ONE id answers a tool-shaped request, before you add it — **one request** |
 | `npm run ai:check` | The configured primary (and chain) verified against the provider's catalogue — free; `-- --probe` proves each with one tool-shaped request |
 
 ### Changing the AI models yourself
@@ -403,11 +403,13 @@ AI_MODEL_OPENROUTER=nvidia/nemotron-3.5-lightning:free
 AI_FALLBACK_MODELS_OPENROUTER=nvidia/nemotron-3-ultra-550b-a55b:free,nvidia/nemotron-3.5-super-vl:free,liquid/lfm-2.5-2.6b:free,nvidia/nemotron-3-super-120b-a12b:free
 ```
 
-1. **See what is available:** `npm run ai:models` lists the ids you could add (free ones that declare
-tool support), and marks which of your configured candidates the server will actually use.
-2. **Try one first:** `npm run ai:models -- --check=nvidia/nemotron-3.5-lightning:free` sends a single
-tool-shaped request. A model that cannot call tools cannot read inventory, so it is worth one request
-before it becomes part of the chain.
+1. **See what is available:** `npm run ai:models` prints the configured chain with each model's
+   **live endpoint health** — the provider's own status code and its uptime over the last 5 minutes,
+   30 minutes and 1 day — then lists the ids you could add (free ones that declare tool support).
+   The health read is a GET, so it spends **no completion and no quota**.
+2. **Try one first:** `npm run ai:models -- --check=nvidia/nemotron-3.5-lightning:free` reads that
+   model's endpoint health, then sends a single tool-shaped request. A model that cannot call tools
+   cannot read inventory, so it is worth one request before it becomes part of the chain.
 3. **Edit the line** — reorder it to change priority, delete an id to drop it, add ids to try them. The
    primary is skipped automatically wherever it appears, and duplicates are collapsed.
 4. **Restart the server** (`Ctrl+C`, then `npm start`, or `npm run dev`). `.env` is read at boot, so a
@@ -417,12 +419,14 @@ before it becomes part of the chain.
    model proven to answer (one request each).
 
 **How to choose the order.** Put the model with the best *measured* behaviour first — uptime alone is
-not enough, because a model can be up and still answer inventory questions badly. The provider's
-endpoint report (`GET /v1/models/{id}/endpoints`) shows recent uptime, and a real turn on your own
-tenant shows whether its tool calls ground the numbers. A degraded model belongs below a healthy one,
-and a model reported at `status: -5` (no live endpoint) belongs last. The configured order is a
-snapshot of that judgement, not a permanent ranking: re-measure when answers slow down or start
-failing, and move the ids rather than editing code.
+not enough, because a model can be up and still answer inventory questions badly. `npm run ai:models`
+now shows the provider's endpoint status and 5-minute, 30-minute and 1-day uptime beside each
+configured model, so the first half of that judgement needs no separate script. The second half is a
+real turn on your own tenant (`npm run perf:turns`), which shows whether its tool calls ground the
+numbers. A degraded model belongs below a healthy one, and a model reported at `status: -5` (no live
+endpoint) belongs last. The configured order is a snapshot of that judgement, not a permanent
+ranking: re-measure when answers slow down or start failing, and move the ids rather than editing
+code.
 
 On the deployed server there is no file to edit: set the same two variables in the host's environment
 and redeploy. Nothing else changes — no code, no migration, no mobile build.

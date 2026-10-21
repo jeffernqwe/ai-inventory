@@ -440,7 +440,16 @@ const closeServer = (server) => new Promise((resolve) => server.close(resolve));
 describe('M2 graceful shutdown (Phase 07D)', () => {
   it('drains in-flight requests, stops accepting new ones, closes the DB, exits 0', async () => {
     const app = express();
+    // Resolve when the handler has actually STARTED, rather than assuming a fixed 60 ms is
+    // enough for the fetch to reach it. Under a loaded CI runner the old fixed sleep could
+    // leave the connection idle when shutdown closed the listener, which produced a
+    // `fetch failed: ECONNRESET` in an otherwise passing suite (observed 2026-10-21).
+    let startedResolve;
+    const started = new Promise((resolve) => {
+      startedResolve = resolve;
+    });
     app.get('/slow', (req, res) => {
+      startedResolve();
       setTimeout(() => res.json({ ok: true }), 150);
     });
     const server = app.listen(0);
@@ -456,9 +465,9 @@ describe('M2 graceful shutdown (Phase 07D)', () => {
       exit: (code) => exitCodes.push(code),
     });
 
-    // A request is in-flight when shutdown begins.
+    // A request is in-flight when shutdown begins: wait for the handler itself, not a clock.
     const slow = fetch(`http://127.0.0.1:${port}/slow`);
-    await new Promise((r) => setTimeout(r, 60));
+    await started;
 
     const draining = shutdown('SIGTERM');
     await new Promise((r) => setTimeout(r, 30));

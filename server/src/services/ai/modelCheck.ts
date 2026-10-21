@@ -41,6 +41,29 @@ export type CatalogueStatus = 'ok' | 'missing' | 'unreachable' | 'not_applicable
 /** The statuses `probeModel` can return. `quota` is deliberately not `unusable`. */
 export type ProbeStatus = 'usable' | 'unusable' | 'quota' | 'unreachable' | 'not_applicable';
 
+/** The statuses `readModelHealth` can return. */
+export type ModelHealthStatus = 'ok' | 'not_found' | 'no_endpoints' | 'unreachable' | 'not_applicable';
+
+/** One provider endpoint, reduced to the facts an operator chooses a model by. */
+export interface EndpointHealth {
+  provider: string;
+  /** The provider's own health code (0 is healthy); null when it did not publish one. */
+  status: number | null;
+  uptime5m: number | null;
+  uptime30m: number | null;
+  uptime1d: number | null;
+}
+
+export interface ModelHealthResult {
+  status: ModelHealthStatus;
+  model: string;
+  message: string;
+  /** Every endpoint the provider published, in its own order. */
+  endpoints: EndpointHealth[];
+  /** The HTTP status the read saw, for an operator; absent when nothing was sent. */
+  httpStatus?: number;
+}
+
 export interface CatalogueResult {
   status: CatalogueStatus;
   model: string;
@@ -80,19 +103,57 @@ function endpoint(base: string, rest: string): string {
 }
 
 /**
- * The first of the three settings that is missing, or `null`.
+ * The provider settings this module needs, or the first one that is missing.
  *
  * `not_applicable` is returned for a provider this module does not know how to ask, and for a
  * deployment with no AI at all: a server without AI must not contact a provider at boot.
+ * The model is checked separately, because endpoint health can be read for an arbitrary id
+ * (`--check=<id>`) even when no default is configured.
  */
-function unusableConfig(env: Record<string, string | undefined>): string | null {
+function providerProblem(env: Record<string, string | undefined>): string | null {
   const provider = (env.AI_PROVIDER || '').trim().toLowerCase();
   if (provider === '') return 'AI_PROVIDER is not set';
   if (provider !== 'openrouter') return `AI_PROVIDER=${provider} is not a provider this check knows`;
   if (!(env.OPENROUTER_API_KEY || '').trim()) return 'OPENROUTER_API_KEY is not set';
   if (!(env.OPENROUTER_BASE_URL || '').trim()) return 'OPENROUTER_BASE_URL is not set';
+  return null;
+}
+
+/** The first of the configuration settings `checkModelCatalogue`/`probeModel` need. */
+function unusableConfig(env: Record<string, string | undefined>): string | null {
+  const problem = providerProblem(env);
+  if (problem) return problem;
   if (!configuredModel(env)) return 'AI_MODEL_OPENROUTER is not set';
   return null;
+}
+
+/** `{base}/v1/models/{author}/{slug}/endpoints`, without doubling a `/v1` base. */
+function modelEndpointsUrl(base: string, model: string): string {
+  const encodedModel = model
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/');
+  const trimmed = base.trim().replace(/\/+$/, '');
+  const apiRoot = /\/v\d+$/.test(trimmed) ? trimmed : `${trimmed}/v1`;
+  return `${apiRoot}/models/${encodedModel}/endpoints`;
+}
+
+/** A finite number published by the provider, or null — never NaN, never a guessed zero. */
+function finiteNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+/** One published endpoint, with the fields this module promises and nothing else. */
+function endpointHealth(value: unknown): EndpointHealth {
+  const row = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>;
+  const provider = typeof row.provider_name === 'string' ? row.provider_name.trim() : '';
+  return {
+    provider: provider || 'unknown',
+    status: finiteNumber(row.status),
+    uptime5m: finiteNumber(row.uptime_last_5m),
+    uptime30m: finiteNumber(row.uptime_last_30m),
+    uptime1d: finiteNumber(row.uptime_last_1d),
+  };
 }
 
 /** A fixed, credential-free sentence for a result that is logged. */
@@ -173,6 +234,110 @@ export async function checkModelCatalogue({
         'the provider could not be reached, so the configured model was NOT verified:',
         model,
       ]),
+    };
+  }
+}
+
+/**
+ * Read the provider's live endpoint health for a model.
+ *
+ * This is the decision the model ORDER should be made from: it is free (a GET, no completion),
+ * so `npm run ai:models` can show it every time instead of relying on a remembered measurement.
+ * It never throws, for the same reason the other checks do not: a diagnostic that can take the
+ * server or an operator's shell down is worse than no diagnostic.
+ *
+ * `not_found` means the provider does not publish this model, `no_endpoints` means it publishes
+ * the model but no endpoint rows, and `unreachable` means the question could not be asked. None
+ * of those is `ok`, and none is a claim that the model cannot answer — `probeModel` is the only
+ * check that makes that claim.
+ */
+export async function readModelHealth({
+  env = process.env,
+  fetchImpl = fetch,
+  timeoutMs = 5000,
+  model: overrideModel,
+}: CheckOptions = {}): Promise<ModelHealthResult> {
+  const model = (overrideModel || '').trim() || configuredModel(env);
+  const problem = providerProblem(env);
+  if (problem) {
+    return {
+      status: 'not_applicable',
+      model,
+      endpoints: [],
+      message: sentence(['endpoint health skipped:', problem]),
+    };
+  }
+  if (!model) {
+    return {
+      status: 'not_applicable',
+      model,
+      endpoints: [],
+      message: 'endpoint health skipped: no model is configured or named',
+    };
+  }
+
+  try {
+    const res = await fetchImpl(modelEndpointsUrl(env.OPENROUTER_BASE_URL as string, model), {
+      method: 'GET',
+      headers: {
+        accept: 'application/json',
+        authorization: `Bearer ${(env.OPENROUTER_API_KEY as string).trim()}`,
+      },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+
+    if (res.status === 404) {
+      return {
+        status: 'not_found',
+        model,
+        endpoints: [],
+        httpStatus: 404,
+        message: sentence(['the provider does not publish endpoint health for:', model]),
+      };
+    }
+
+    if (!res.ok) {
+      return {
+        status: 'unreachable',
+        model,
+        endpoints: [],
+        httpStatus: res.status,
+        message: sentence([
+          'endpoint health could not be read (HTTP',
+          String(res.status) + '), so',
+          model,
+          'was NOT verified',
+        ]),
+      };
+    }
+
+    const body = (await res.json()) as { data?: { endpoints?: unknown } };
+    const rows = Array.isArray(body?.data?.endpoints) ? body.data.endpoints : [];
+    const endpoints = rows
+      .filter((row) => row !== null && typeof row === 'object')
+      .map((row) => endpointHealth(row));
+
+    if (endpoints.length === 0) {
+      return {
+        status: 'no_endpoints',
+        model,
+        endpoints: [],
+        message: sentence(['the provider published no endpoints for:', model]),
+      };
+    }
+
+    return {
+      status: 'ok',
+      model,
+      endpoints,
+      message: sentence(['the provider published', String(endpoints.length), 'endpoint(s) for:', model]),
+    };
+  } catch {
+    return {
+      status: 'unreachable',
+      model,
+      endpoints: [],
+      message: sentence(['the provider could not be reached, so', model, 'was NOT verified']),
     };
   }
 }
@@ -268,4 +433,4 @@ export async function probeModel({
   }
 }
 
-export default { checkModelCatalogue, probeModel };
+export default { checkModelCatalogue, readModelHealth, probeModel };

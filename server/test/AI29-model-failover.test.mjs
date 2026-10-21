@@ -212,16 +212,23 @@ unitSuite('AI-29 model failover (DB-free)', () => {
     assert.equal(failoverLines.length, 1, 'one failover, not one per round');
   });
 
-  it('fails over on the 5xx family too, which is what a dead upstream often returns', async () => {
-    const seen = [];
-    const { result } = await turnCapturingLogs((ctx) => {
-      seen.push(ctx.model);
-      if (seen.length === 1) throw upstream(503);
-      return fakeText('ok');
+  // The whole MODEL_FAILOVER_STATUSES set, not just the two codes that happened to be seen
+  // in production. 410 is a withdrawn model, 502/504 are gateway/upstream timeouts, and 529
+  // is the provider's overloaded signal; all of them mean "this model, not this request".
+  for (const status of [410, 500, 502, 503, 504, 529]) {
+    it(`fails over on HTTP ${status}, which is a model-availability answer`, async () => {
+      const seen = [];
+      const { result, failoverLines } = await turnCapturingLogs((ctx) => {
+        seen.push(ctx.model);
+        if (seen.length === 1) throw upstream(status);
+        return fakeText('ok');
+      });
+      assert.equal(result.content, 'ok');
+      assert.deepEqual(seen, [undefined, FALLBACK]);
+      assert.equal(failoverLines.length, 1);
+      assert.match(failoverLines[0], new RegExp(String(status)));
     });
-    assert.equal(result.content, 'ok');
-    assert.equal(seen.length, 2);
-  });
+  }
 
   // -------------------------------------------------------------------------
   // When it must NOT fail over

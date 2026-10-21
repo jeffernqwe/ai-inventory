@@ -17080,6 +17080,126 @@ local session — no production credential was left on the device.
   six-turn run above over the real provider; the in-app turn path it feeds was measured in §27EA,
   and this record changes neither the prompt nor the response shape, so no phone run was needed.
 
+# 27ED. The model list carries live evidence, not a remembered measurement (2026-10-21)
+
+**AI-32. Server tooling only — no route, permission, schema, dependency, session or mobile change,
+and no prompt change.** It closes the gap between "the chain was measured once" and "the chain can be
+re-measured by the command an operator already runs".
+
+`readModelHealth` in `server/src/services/ai/modelCheck.ts` reads the provider's own endpoint record,
+`GET /v1/models/{author}/{slug}/endpoints`, and returns every endpoint with its `status` and its
+5-minute, 30-minute and 1-day uptime. It is a **GET, not a completion**, so it spends none of the
+free tier's request allowance and can run on every `npm run ai:models`.
+
+The result is deliberately raw evidence, not a verdict: the command prints the provider's code and
+uptime rather than translating a negative code into "do not use". A 404 is `not_found`, an empty
+endpoint list is `no_endpoints`, and any other refusal or transport error is `unreachable` — none of
+those is `ok`, and none is a claim that the model cannot answer. That claim remains `probeModel`'s,
+which is the only check that sends a request.
+
+```text
+[ai:models] health   : live endpoint status and uptime (GET only — no completion, no quota)
+[ai:models]   primary nvidia/nemotron-3.5-lightning:free
+[ai:models]           Nvidia | status 0 | 5m 100% | 30m 100% | 1d 100%
+[ai:models]   2.      nvidia/nemotron-3.5-super-vl:free
+[ai:models]           Nvidia | status -2 | 5m 100% | 30m 83.3% | 1d 92.8%
+```
+
+**10 cases** in `AI32-model-health.test.mjs` pin the parsing and every failure shape (non-numeric
+fields become `null`, never a guessed zero or `NaN`; the model override and URL are exact; the key
+stays in the header; a `/v1` base is not doubled). `AI28` still passes unchanged. The operator guide
+now explains that the health read is free and that `ai:models -- --check=<id>` shows the health before
+spending its one request.
+
+**Not a health promise.** The provider's `status: 0` and 100 % uptime are availability evidence, not
+evidence that a model grounds inventory questions; §27EE's real turns are the other half. The command
+does not change the configured order, the active model, the breaker or any file.
+
+# 27EE. The comparison is measured, and the measuring instrument is fixed (2026-10-21)
+
+**AI-33. Server tooling and tests only — no production AI path, prompt, route or mobile change.**
+
+## The instrument had two false results
+
+`perf:turns` checked an answer with `normalizedAnswer.includes(normalizedFact)`. That is wrong in both
+directions, and both were measured:
+
+* Lightning's correct *"none are out of stock"* was reported `MISSING 0`, because a count of zero is
+often written as a word;
+* an expected `2` matched the `2` inside `1281`, `12` or `24`, so a wrong answer could be reported
+grounded.
+
+The second is the dangerous one: a false PASS hides a defect. `server/scripts/perf/factCheck.mjs` now
+compares numbers as **whole numbers** (so `2` is not found inside `1281` and `6` is not found inside
+`64`), accepts `0`/`none`/`nothing`/`no ... products` for a zero count, and leaves text facts compared
+after whitespace and case normalization. **9 cases** in `AI33-turn-fact-check.test.mjs` pin both
+directions, including a control that `10` is not a zero.
+
+## Ultra and Lightning, same tenant, same five questions
+
+The questions were dashboard health, restock count, one SKU's name and quantity, total units, and the
+per-location breakdown. Ground truth was read at run time through `dashboardService`, `productService`
+and `inventoryService`; the dashboard itself was then called over HTTP with a minted session and
+agreed exactly: **6 products, 1,281 units, 2 low-stock, 0 out-of-stock**, `SEEDSKU-0` **64 units** across
+three locations, and **433 / 424 / 424** units per location.
+
+| Model | Answers | Grounded | Times (ms) |
+|---|---|---|---|
+| `nvidia/nemotron-3-ultra-550b-a55b:free` | 5/5 | **5/5** | 2,504 · 3,887 · 4,650 · 5,300 · 8,142 |
+| `nvidia/nemotron-3.5-lightning:free` | 5/5 | **5/5** after the fix | 2,962 · 3,898 · 4,535 · 6,706 · 14,528 |
+
+Lightning's first pass printed `MISSING 0` on the zero-count answer; rerunning that one question after
+the fact-check fix printed `all expected facts present`. Both models used the correct tools
+(`getInventorySummary`, `getReorderNeededProducts`, `getProduct`, `getLocationBreakdown`), and both
+reported the same exact figures. Ultra answered the product quantity and the location split correctly,
+not merely the headline counts.
+
+**The order did not change.** Lightning remains primary because it has the larger body of evidence
+(6/6 earlier plus 5/5 here) and is already the production-proven model; Ultra remains the first
+fallback, now with its own 5/5 record. One equally good run is not a reason to churn a production
+primary. The comparison spent **21 of the 31 requests available at the start**; **10 remained** when the
+measurement finished. No further live turns are required to justify the current order.
+
+# 27EF. Large tenants and dependency alerts: measured, not assumed (2026-10-21)
+
+**Measurement and review only — no production code, dependency, schema or configuration change.**
+
+## Scale
+
+The performance tenant was seeded deterministically at two sizes and every AI tool was timed through
+the same `executeTool` the turn loop calls, with **zero model calls**:
+
+| Size | Products | Inventory rows | Transactions | Heavy-tool medians |
+|---|---:|---:|---:|---|
+| 10k | 10,000 | 20,105 | 19,944 | 368–418 ms (max 656 ms) |
+| 50k | 50,000 | 100,143 | 100,096 | 733–1,019 ms (one 4,780 ms outlier) |
+
+At 50k the HTTP endpoints behind the dashboard were also timed five times: `/api/dashboard` median
+**1,042 ms** (p95 1,258), `/api/products/reorder` **1,230 ms**, product search **669 ms**, product list
+**435 ms**, inventory list **318 ms**, inventory history **320 ms**. No tool payload exceeded the
+12,000-character cap at either size, so the model received every result whole.
+
+The index audit reported **64 declared indexes across 16 collections, 0 declaration/database
+disagreements**, and `test:db` passed **854 tests / 764 pass / 0 fail / 90 skipped**. The 50k tenant was
+then removed with `cleanup:perf`: **250,256 documents removed, 0 remaining**. No bottleneck required a
+code change at these sizes; the measurements are the baseline for the next scale step, not a claim
+about millions of rows.
+
+## Dependabot
+
+Four open alerts, all in `mobile/package-lock.json` and all transitive:
+
+| Alert | Package | Severity | Where it runs | Disposition |
+|---|---|---|---|---|
+| #2 | `decode-uri-component@0.2.2` | medium | runtime, `expo-router` → `query-string@7.1.3` | **No safe upgrade.** The patched `0.5.0` is ESM-only; `query-string@7` is CommonJS, so forcing it would break the bundle. The real fix is an Expo SDK upgrade, which is the separate SDK 58 train. |
+| #5 | `node-forge@1.4.0` | high | build only, `@expo/cli` code signing | No patched release; never shipped in the app. |
+| #6 | `braces@3.0.3` | high | development only, Jest → micromatch | No patched release; not in the app runtime. |
+| #8 | `sprintf-js@1.0.3` | medium | development only, Jest → js-yaml → argparse | No advisory fix; forcing the 1.1.x line under `argparse@1.0.10` is outside its supported range. |
+
+No dependency was changed. The runtime item is a **medium-severity client denial of service**, not a
+credential or data-exposure defect, and the only compatible fix would be a major Expo upgrade that
+this task must not smuggle in. The alerts remain open and visible rather than being dismissed.
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

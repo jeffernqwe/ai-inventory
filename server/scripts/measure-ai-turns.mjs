@@ -72,6 +72,7 @@ import { createSessionForToken, newSessionId } from '../src/services/session.ser
 // rather than re-implemented: a second copy of that knowledge is how two tools end up
 // disagreeing about the same day's budget.
 import { DEFAULT_BASE_URL, allowanceLine, readProviderUsage, shortfall } from './ai-usage.mjs';
+import { factPresent } from './perf/factCheck.mjs';
 
 function argValue(flag) {
   const hit = process.argv.find((a) => a.startsWith(`${flag}=`));
@@ -80,10 +81,6 @@ function argValue(flag) {
 
 /** Names the answer must contain once the product-specific fact is known. */
 const PRODUCT_SKU = 'SEEDSKU-0';
-
-function normalize(value) {
-  return String(value).replace(/[,\s\u00a0]/g, '');
-}
 
 async function main() {
   const businessId = argValue('--business');
@@ -131,8 +128,12 @@ async function main() {
     },
     {
       message: `What is the current stock of the product with SKU ${PRODUCT_SKU}? Tell me its name and quantity.`,
-      expects: [String(product.name)],
-      why: `product lookup (on hand across locations: ${onHand})`,
+      // The question asks for BOTH facts, so both are checked. The first version checked only
+      // the name, which meant an answer that named the right product and omitted — or
+      // invented — its quantity still printed OK. The dashboard's on-hand figure is the
+      // authority, and it is read from the database above.
+      expects: [String(product.name), onHand],
+      why: `product lookup (name ${product.name}, on hand across locations ${onHand}, read now)`,
     },
     {
       // THE QUESTION THIS HARNESS WAS MISSING. On 2026-10-13 this exact wording
@@ -270,7 +271,7 @@ async function main() {
     const succeeded = status === 201;
     const missing = succeeded
       ? question.expects
-          .filter((fact) => !normalize(answer).includes(normalize(fact)))
+          .filter((fact) => !factPresent(answer, fact))
           .map((fact) => String(fact).slice(0, 40))
       : [];
 

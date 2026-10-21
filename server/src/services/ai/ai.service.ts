@@ -14,7 +14,24 @@
 
 import { trimIncompleteAnswer, humaniseStatusConstants } from './answerCompletion.ts';
 import { aiConfig } from './aiConfig.ts';
-import { AiAbandoned, AiProviderError, AiTimeout, aiErrorAccounting, isAiError } from './aiErrors.ts';
+import {
+  AiAbandoned,
+  AiProviderError,
+  AiTimeout,
+  aiErrorAccounting,
+  isAiError,
+  isModelAvailabilityFailure,
+  isModelSpecificProviderFailure,
+} from './aiErrors.ts';
+import { declaresToolSupport } from './modelCapabilities.ts';
+import {
+  coolingModels,
+  isModelCooling,
+  modelCooldownRemainingMs,
+  recordModelFailure,
+  recordModelSuccess,
+} from './modelBreaker.ts';
+import { activeModel, promoteModel } from './modelSelection.ts';
 import { selectProvider, type ProviderMessage, type ProviderResponse, type ProviderUsage, type ToolDefinition } from './providers/index.ts';
 import { capToolResult } from './toolPayload.ts';
 import { executeTool, AI_TOOL_DEFS } from './tools.ts';
@@ -160,9 +177,37 @@ export function systemPrompt(): string {
   ].join('\n');
 }
 
+/**
+ * AI-29 — how much of the turn's single deadline must be LEFT before a second model is
+ * attempted.
+ *
+ * A failover spends the member's time, so it has to be a real chance at an answer rather
+ * than a formality. Measured turns on this tier take 5.3–19.4 s (§27BE, §27DZ), so five
+ * seconds is the smallest budget that can plausibly return anything — below it the
+ * honest failure arrives sooner, and the member is not made to wait for a request that
+ * cannot finish. A constant rather than a knob: it is a property of the turn budget, not
+ * a deployment preference, and the deadline is already configurable for anyone who needs
+ * a different shape.
+ */
+const FAILOVER_MIN_REMAINING_MS = 5000;
+
 function truncate(str: string, max: number): string {
   if (str.length <= max) return str;
   return `${str.slice(0, max - 1)}…`;
+}
+
+/**
+ * AI-31 — a provider 2xx that actually did something.
+ *
+ * An upstream 200 carrying neither text nor a tool call is the empty-completion fault
+ * AI-2 retries; it is not evidence that the model is healthy, and it is not an answer a
+ * member received. It therefore neither clears a failure streak nor promotes the model.
+ */
+function hasUsableContent(response: ProviderResponse | null | undefined): boolean {
+  if (!response) return false;
+  const text = String(response.text ?? '').trim();
+  const calls = Array.isArray(response.toolCalls) ? response.toolCalls : [];
+  return text.length > 0 || calls.length > 0;
 }
 
 /**
@@ -219,7 +264,11 @@ export async function runAiChat({ businessId, userId, role, history = [], messag
 
   let finalText: string | null = null;
   const toolsUsed = new Set<string>();
-  let model: string | null = null;
+  // AI-28 — seeded from the provider's CONFIGURED model, so a turn whose every call failed still
+  // names what it was trying. Before this, a provider-side 404 (a withdrawn or broken model,
+  // 2026-10-21) produced `model=unknown` on the one line an operator reads to find out which model
+  // to change. A successful response still overwrites this with the model the provider reported.
+  let model: string | null = provider.model ?? null;
   let usage: ProviderUsage | null = null;
   let steps = 0;
   // AI-2 — the degraded path's own state: why the turn gave up (null while it is
@@ -234,6 +283,10 @@ export async function runAiChat({ businessId, userId, role, history = [], messag
   // AI-26 — how much of a truncated answer the incomplete-unit trim removed. Reported
   // beside the reason so the effect is measurable from the log instead of inferred.
   let trimmedChars = 0;
+  // AI-29 — how many candidate models this turn tried. On the turn line because "it worked"
+  // and "it worked on the fourth model" are different facts about the deployment, and the
+  // second one is the reason to change the primary.
+  let failovers = 0;
 
   // AI-5 — the turn's own cost.
   //
@@ -262,7 +315,7 @@ export async function runAiChat({ businessId, userId, role, history = [], messag
       `[ai] turn outcome=${outcome} total=${Date.now() - turnStartedAt}ms` +
         ` providerMs=${providerMs}ms calls=${providerCalls}` +
         ` toolMs=${toolMs}ms toolRuns=${toolRuns} tools=${[...toolsUsed].join(',') || 'none'}` +
-        ` empty=${emptyResponses}` +
+        ` empty=${emptyResponses} failovers=${failovers}` +
         ` in=${usage?.inputTokens ?? 0} out=${usage?.outputTokens ?? 0}` +
         ` model=${model ?? 'unknown'} iterations=${steps}`,
     );
@@ -273,6 +326,277 @@ export async function runAiChat({ businessId, userId, role, history = [], messag
   // ceiling is stated in one place and cannot be the product of two unrelated
   // knobs. Runs out at any point -> AiTimeout, which the controller maps to 504.
   const deadlineAt = Date.now() + cfg.turnDeadlineMs;
+
+  // AI-29 / AI-30 — WHICH MODEL THIS TURN IS TALKING TO, and which models it may still try.
+  //
+  //   null   -> the provider's configured model, which is every turn until something fails
+  //   string -> an explicit model, chosen because the configured one is cooling down
+  //             (AI-30) or because it failed during this turn (AI-29)
+  //
+  // Sticky for the rest of the turn on purpose: a question that needs a tool makes several
+  // model calls, and returning to a model that just answered 404 would re-pay for that
+  // refusal on every round. It is also what bounds the feature — the chain is walked once
+  // per turn, and never again.
+  let currentModel: string | null = null;
+
+  /** The configured primary, as the provider reports it. */
+  const primaryModel = provider.model ?? cfg.openrouterModel ?? null;
+
+  /**
+   * The full ordered chain this turn may use: the primary first, then the operator's
+   * candidates, de-duplicated. Two exclusions, both paid for already: a candidate that is
+   * the primary (the same refusal spent twice) and one the provider's catalogue says cannot
+   * call tools (it would answer an inventory question without reading the inventory). The
+   * PRIMARY is never excluded for tool support — it is what the deployment chose, and a
+   * catalogue read must not become a configuration veto.
+   *
+   * Excluded ids are named on ONE line per turn rather than left silent, because a candidate
+   * that is never used is exactly the kind of configuration mistake nobody notices until the
+   * day it is needed.
+   */
+  const orderedChain: string[] = (() => {
+    const primaryIds = new Set([provider.model, cfg.openrouterModel].filter((id): id is string => Boolean(id)));
+    const out: string[] = [];
+    const seen = new Set<string>();
+    const skipped: string[] = [];
+    for (const [index, id] of [primaryModel, ...cfg.fallbackModels].entries()) {
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      const isPrimarySlot = index === 0;
+      // A candidate that IS the configured model is the same refusal spent twice, whichever
+      // of its two names (`provider.model` or the environment's id) it was written as.
+      if (!isPrimarySlot && primaryIds.has(id)) continue;
+      if (!isPrimarySlot && declaresToolSupport(id) === false) {
+        skipped.push(id);
+        continue;
+      }
+      out.push(id);
+    }
+    if (skipped.length > 0) {
+      console.error(`[ai] fallback skipped (no declared tool support): ${skipped.join(', ')}`);
+    }
+    return out;
+  })();
+
+  // AI-31 — the runtime active model comes first; the configured order is the rotation.
+  //
+  // The promotion is process-local and never written back to `.env`, so the configured
+  // default stays exactly what the operator chose. A promoted id that has since been removed
+  // from the configured chain is ignored (there is nothing left to use it with).
+  const configuredActive = activeModel(primaryModel);
+  const activeInChain =
+    configuredActive && orderedChain.includes(configuredActive) ? configuredActive : null;
+  const turnChain = activeInChain
+    ? [activeInChain, ...orderedChain.filter((id) => id !== activeInChain)]
+    : orderedChain;
+
+  // Whether the active model was ALREADY confirmed unhealthy when this turn began. A turn
+  // can outlast the 30-second cooldown (a tool-heavy answer near the 60-second deadline), and
+  // `isModelCooling` would then be false by the time the fallback answers — even though the
+  // fallback is the model that just proved itself and the active is still unproven. Capturing
+  // the fact here keeps that turn's evidence from being discarded by the clock, while the
+  // success-time check below still covers the other direction: a concurrent request may open
+  // the active's breaker WHILE this turn is in flight.
+  const activeCoolingAtStart = Boolean(activeInChain && isModelCooling(activeInChain));
+
+  /**
+   * AI-31 — promote the model that just answered, but only once the active is confirmed
+   * unhealthy. A single transient failure must not churn which model future requests start
+   * with (1–4 consecutive failures keep the active); the fallback still serves THIS turn.
+   * The compare-and-set in `promoteModel` makes a stale concurrent request harmless.
+   */
+  const maybePromote = (responder: string | null): void => {
+    if (!responder || !activeInChain || responder === activeInChain) return;
+    if (!activeCoolingAtStart && !isModelCooling(activeInChain)) return;
+    if (promoteModel(responder, activeInChain)) {
+      console.log(`[ai] promoted model: ${activeInChain} -> ${responder}`);
+    }
+  };
+
+  // AI-30 — a model that has failed five times in a row is skipped for a short cooldown.
+  // The primary is skipped LIKE ANY OTHER, which is the point: a deployment with one dead
+  // model and four healthy ones should not pay for the dead one on every turn. It is not
+  // removed from configuration, so the moment its cooldown ends it is eligible again.
+  const coolingNow = coolingModels(turnChain);
+  if (coolingNow.length > 0) {
+    console.error(
+      `[ai] model cooling down, skipped: ${coolingNow
+        .map((id) => `${id} (${Math.ceil(modelCooldownRemainingMs(id) / 1000)}s left)`)
+        .join(', ')}`,
+    );
+  }
+  const eligibleChain = turnChain.filter((id) => !isModelCooling(id));
+  if (turnChain.length > 0 && eligibleChain.length === 0) {
+    // Every model this deployment knows is inside a cooldown. Spending a request to prove it
+    // once more is exactly the repeated waiting this feature exists to stop, so the turn ends
+    // here — with the same honest sentence a failed provider call would produce.
+    console.error('[ai] every configured model is cooling down — failing fast without a provider call');
+    reportTurn('AI_UNAVAILABLE');
+    throw new AiProviderError('The AI service is temporarily unavailable. Please try again in a moment.');
+  }
+
+  const startModel = eligibleChain[0] ?? null;
+  // No override when the turn starts on the configured primary: that keeps the configuration
+  // the source of truth, and the request carries exactly the model it always did.
+  if (startModel && startModel !== primaryModel) {
+    currentModel = startModel;
+    model = startModel;
+  }
+
+  /** The candidates left after whichever model this turn starts on. */
+  const walkRemaining = eligibleChain.filter((id) => id !== startModel);
+
+  /**
+   * One provider call, counted on both paths.
+   *
+   * Counting moved into this `finally` when failover arrived: the line has to reflect a
+   * SECOND call, and the previous shape could only ever count the one call per iteration.
+   * The budget is read here rather than at the top of the loop so a fallback call gets the
+   * time that is actually left — never more than the turn's own deadline.
+   */
+  const callProvider = async (): Promise<ProviderResponse> => {
+    const budget = deadlineAt - Date.now();
+    if (budget <= 0) throw new AiTimeout();
+    const startedAt = Date.now();
+    try {
+      // AI_TOOL_DEFS is the frozen tool catalog; the provider contract wants the
+      // neutral `ToolDefinition` shape, which the frozen entries already satisfy
+      // (their `parameters` are JSON Schema objects). The assertion is
+      // compiler-only — no runtime conversion, no copy of the array.
+      return await withBudget(
+        provider.complete({
+          system: systemPrompt(),
+          messages,
+          tools: AI_TOOL_DEFS as ToolDefinition[],
+          timeoutMs: budget,
+          signal,
+          ...(currentModel ? { model: currentModel } : {}),
+        }),
+        budget,
+        signal,
+      );
+    } finally {
+      providerMs += Date.now() - startedAt;
+      providerCalls += 1;
+    }
+  };
+
+  /**
+   * One model call, with at most ONE model-level failover walk (AI-29), and a failure
+   * memory that keeps a broken model out of the NEXT turns for a short cooldown (AI-30).
+   *
+   * The classification is the whole feature. Only a failure that blames the MODEL — a
+   * 404/410 from the gateway, or a 5xx from an upstream that is down — reaches the
+   * fallback. A spent allowance never does: 402/429 arrive as their own class (AI-6)
+   * because the account's daily cap is shared by every free model, so switching models
+   * cannot succeed and would spend the refusal twice. Neither does an auth or a
+   * bad-request answer (another model changes nothing), nor a transport failure — another
+   * model travels the same broken network. A classified transport failure (AI-31) is
+   * still COUNTED by the breaker, because five consecutive ones mean the assistant cannot
+   * serve at all; it simply ends the turn instead of walking the chain.
+   *
+   * A failure of the fallback is not bounced back to a model that has just failed: the
+   * walk continues FORWARD through the chain and nowhere else.
+   */
+  let walkStarted = false;
+  const completeWithFailover = async (): Promise<ProviderResponse> => {
+    const attempted = currentModel ?? primaryModel;
+    try {
+      const response = await callProvider();
+      // AI-30 — a usable 2xx is the only evidence that a model is healthy, so it is the only
+      // thing that clears a failure streak. A half-open trial that succeeds closes the breaker
+      // here. AI-31 — the same event promotes a model that is serving while the active is
+      // cooling, so the next request starts with the model that just proved it works.
+      if (hasUsableContent(response)) {
+        if (attempted) recordModelSuccess(attempted);
+        maybePromote(attempted);
+      }
+      return response;
+    } catch (err) {
+      // AI-30 / AI-31 — the BREAKER counts availability failures: a model-specific
+      // status, and a classified transport failure (network, timeout, unparseable body).
+      // Quota, auth and bad-request failures are still not evidence about this model and
+      // never make a healthy model's next turn skip it. A classified transport failure
+      // counts but does not fail over — the throw below is unchanged for it.
+      if (attempted && isModelAvailabilityFailure(err)) {
+        const outcome = recordModelFailure(attempted, Date.now(), {
+          threshold: cfg.modelFailureThreshold,
+          cooldownMs: cfg.modelCooldownMs,
+        });
+        if (outcome.opened) {
+          console.error(
+            `[ai] model cooling down for ${Math.round(outcome.cooldownMs / 1000)}s after ` +
+              `${outcome.failures} consecutive failure(s): ${attempted}`,
+          );
+        }
+      }
+      if (!isModelSpecificProviderFailure(err)) throw err;
+
+      // Already walked this turn: a later tool round failing on the model that answered is
+      // final. Walking again would re-pay every attempt on every round of the same turn.
+      if (walkStarted) throw err;
+      walkStarted = true;
+
+      let lastError: unknown = err;
+      // The model the NEXT attempt is coming FROM. It starts as the one that just failed and
+      // then follows the chain, so attempt 2 names the candidate that just failed rather than
+      // repeating the primary — a log that named the primary on every line would make a
+      // three-model walk read as if the same model were tried three times.
+      let from = attempted ?? 'unknown';
+      for (const candidate of walkRemaining) {
+        // AI-30 — a candidate inside its cooldown is not worth a request. The primary is
+        // skipped before this loop (it would not be this turn's start model), so this is the
+        // normal case for a fallback that has been failing too.
+        if (isModelCooling(candidate)) {
+          console.error(`[ai] failover skipped (cooling down): ${candidate}`);
+          continue;
+        }
+        const remaining = deadlineAt - Date.now();
+        // The caller's interest and the turn's deadline outrank the chain: a model that
+        // cannot finish before the deadline only delays the honest failure.
+        if (signal?.aborted || remaining < FAILOVER_MIN_REMAINING_MS) throw lastError;
+        currentModel = candidate;
+        failovers += 1;
+        // One greppable line per attempt, naming the model it came FROM, the status that
+        // sent it there and what was left of the budget. Model ids and an HTTP status only:
+        // no credential, no prompt and no upstream body is ever on it.
+        console.error(
+          `[ai] failover attempt=${failovers} model=${from} -> ${candidate}` +
+            ` reason=HTTP ${(lastError as AiProviderError).status} remaining=${remaining}ms`,
+        );
+        from = candidate;
+        try {
+          const response = await callProvider();
+          if (hasUsableContent(response)) {
+            recordModelSuccess(candidate);
+            maybePromote(candidate);
+          }
+          return response;
+        } catch (next) {
+          // A refusal that is NOT about the model ends the walk: quota is shared by every
+          // free model (so the next candidate would be refused identically), and a key or
+          // request problem travels with us. Only a model-specific failure moves on — a
+          // classified transport failure on a candidate counts toward its own breaker and
+          // ends the walk, because it would travel with the next candidate too.
+          if (isModelAvailabilityFailure(next)) {
+            const outcome = recordModelFailure(candidate, Date.now(), {
+              threshold: cfg.modelFailureThreshold,
+              cooldownMs: cfg.modelCooldownMs,
+            });
+            if (outcome.opened) {
+              console.error(
+                `[ai] model cooling down for ${Math.round(outcome.cooldownMs / 1000)}s after ` +
+                  `${outcome.failures} consecutive failure(s): ${candidate}`,
+              );
+            }
+          }
+          if (!isModelSpecificProviderFailure(next)) throw next;
+          lastError = next;
+        }
+      }
+      throw lastError;
+    }
+  };
 
   for (let i = 0; i < cfg.maxToolIterations; i += 1) {
     steps = i + 1;
@@ -288,32 +612,9 @@ export async function runAiChat({ businessId, userId, role, history = [], messag
       throw new AiTimeout();
     }
     let response: ProviderResponse;
-    const callStartedAt = Date.now();
-    // Counted on BOTH paths — and on the failure path BEFORE the report, because a
-    // call that timed out is exactly the call whose cost the line most needs to
-    // show, and a `finally` would run after the line had already been written.
-    const countCall = (): void => {
-      providerMs += Date.now() - callStartedAt;
-      providerCalls += 1;
-    };
     try {
-      // AI_TOOL_DEFS is the frozen tool catalog; the provider contract wants the
-      // neutral `ToolDefinition` shape, which the frozen entries already satisfy
-      // (their `parameters` are JSON Schema objects). The assertion is
-      // compiler-only — no runtime conversion, no copy of the array.
-      response = await withBudget(
-        provider.complete({
-          system: systemPrompt(),
-          messages,
-          tools: AI_TOOL_DEFS as ToolDefinition[],
-          timeoutMs: remaining,
-          signal,
-        }),
-        remaining,
-        signal,
-      );
+      response = await completeWithFailover();
     } catch (err) {
-      countCall();
       if (isAiError(err)) {
         // A failure can still know what it cost. `AiOutputLimit` is raised at the one
         // place where the model and the reported token spend are already parsed, and a
@@ -331,7 +632,6 @@ export async function runAiChat({ businessId, userId, role, history = [], messag
       reportTurn('AI_UNAVAILABLE');
       throw new AiProviderError('The AI service failed unexpectedly. Please try again.');
     }
-    countCall();
 
     model = response?.model || model;
     usage = response?.usage || usage;

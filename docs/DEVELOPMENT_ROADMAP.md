@@ -16613,6 +16613,435 @@ server file was touched by the pass.
   dispatched, never that Brevo delivered it; the first live inbox measurement is still owed.
 * **iOS is unverified**, as everywhere else on this host.
 
+# 27DZ. The assistant's model is checked, not assumed (2026-10-21)
+
+**AI-28. Server only — no route, permission, schema, dependency, session or mobile change, and no
+prompt change, so the token cost of a turn is untouched by construction.**
+
+## The incident this answers
+
+On 2026-10-21 every assistant turn answered `502 AI_UNAVAILABLE` — *"The AI service is temporarily
+unavailable. Please try again in a moment."* — and neither the answer nor the log could say why:
+
+```text
+[ai:openrouter] upstream HTTP 404
+bodyPrefix="… not_found_error … Function '<uuid>': Not found for account '<uuid>' … provider_name":"Nvidia" …"
+[ai] turn outcome=AI_UNAVAILABLE … calls=1 … model=unknown iterations=1
+```
+
+Two blind spots produced that. **Nothing asked whether the configured model worked** until a member
+did, and the turn line said `model=unknown` at the one moment its `model=` field decided what an
+operator would change. The model id was still listed by the gateway, so a catalogue read alone would
+not have been enough either — only a completion reveals that an upstream refuses it.
+
+## Why it stopped, measured
+
+Neither cause is this project's configuration, and they are separate:
+
+* **The model was not withdrawn; its only endpoint is down.** `GET /v1/models` lists
+  `nvidia/nemotron-3-super-120b-a12b:free`, and `GET /v1/models/{id}/endpoints` reports its single
+  Nvidia endpoint at `status: -5` with `uptime_last_5m: 0`, `uptime_last_30m: 0` and
+  `uptime_last_1d: 60` — it went down recently, having been healthy for most of the day. The
+  replacement, `nvidia/nemotron-3.5-lightning:free`, reports `status: 0` with uptime
+  `100 / 100 / 99.93` on the same call. A correct id pointing at an unhealthy provider is the whole
+  failure.
+* **The free allowance is per ACCOUNT, not per model.** The same key answered
+  `429 free-models-per-day … "X-RateLimit-Limit":"50", "X-RateLimit-Remaining":"0"` once today's
+  turns were spent, on **both** models. So "some free models are occasionally unavailable" has two
+  distinct causes, and the second one takes every free model down at once until 00:00 UTC.
+
+## What shipped
+
+* **`server/src/services/ai/modelCheck.ts`** — two questions, deliberately kept apart.
+  `checkModelCatalogue` asks the provider's own model list whether the configured id exists; it sends
+  **no completion**, so it spends no quota on a tier metered by requests (AI-6). `probeModel` sends
+  **one** tool-shaped message with the configured model and reads the status — the check that would
+  have caught this incident, because the gateway still listed the broken model. Neither retries,
+  neither changes a model, neither stores anything and **neither throws**: a network error is
+  `unreachable` rather than a claim about the model, and **429/402 is `quota`, never `unusable`**,
+  because a spent allowance says nothing about the id and reporting it as a bad model sends an
+  operator to change a working configuration. No credential appears in any result.
+* **`npm run ai:check`** (`server/scripts/check-ai-model.mjs`) — exit **0** VERIFIED, **1** WRONG
+  (change `AI_MODEL_OPENROUTER`), **2** NOT VERIFIED (nothing was proven — unreachable, unconfigured,
+  or quota-refused). A pipeline cannot read "could not check" as "checked and fine". `--probe` adds
+  the one-request proof.
+* **A boot warning, never a boot failure.** `startServer` fires `checkModelCatalogue` unawaited (like
+  the port guard) and logs **only** a `missing` model, naming it. `unreachable` is silent on purpose:
+  a line that fires when the check itself could not run would train an operator to ignore it. A
+  throwing check cannot stop the server, and `NODE_ENV=test` checks nothing by default so a suite
+  never reaches a provider.
+* **A failing turn names its model.** `AIProvider` gained an optional `model` (a **getter** on the
+  Anthropic-compatible provider, so it reads the environment at call time like everything else in
+  that service), and `ai.service` seeds the turn line from it. `model=unknown` is gone from exactly
+  the case that needed the field.
+
+## Verification
+
+* **The live model answered 6 of 6 questions, grounded and numerically exact** — `perf:turns`
+  against a freshly seeded tenant (200 products, 3 locations): dashboard totals `200 / 32 / 8`, the
+  reorder total `32`, a SKU lookup (`Eco Tape 1000`, 5 kg), the out-of-stock count with its `8 ÷ 200`
+  base, total on-hand `49,217` units and a per-location breakdown **rendered as a table**. Tools called:
+  `getReorderNeededProducts`, `getProduct`, `getInventorySummary`, `getLocationBreakdown`. Latency
+  **5.3 / 7.0 / 7.4 / 8.6 / 8.7 / 15.7 s**, no `degraded` mark on any turn, and every number equal to
+  the figure read from MongoDB through the same services the tools call.
+* **The failure path, measured on the running server once the allowance ran out:** `POST /api/ai/chat`
+  answered **429 `AI_QUOTA_EXCEEDED` in 704 ms** with *"The AI assistant has reached its usage limit.
+  Please try again later."*, nothing persisted, and the turn line now reads
+  `outcome=AI_QUOTA_EXCEEDED … model=nvidia/nemotron-3.5-lightning:free` — the AI-28 fix observed on
+  the failing path it was written for. The mobile copy for that code (`ai6-assistant-quota-copy`) is
+  unchanged and still names the reset, **08:00 in Manila**, rather than an unspecified "later".
+* **`npm run ai:check`**: `ok` → exit **0**; `--probe` → `quota (HTTP 429)` → exit **2**, **NOT
+  VERIFIED** — the distinction that stops a spent allowance from being reported as a broken model.
+* **Server 1048 tests / 997 pass / 0 fail / 51 skipped** (`test:unit`, which includes the 16 new
+  `AI28-ai-model-config` cases and the strengthened `AI5` case), `tsc`, `eslint` and both
+  module-graph checks clean; mobile's three assistant-copy suites **57/57**.
+
+## Limits
+
+* **The model-down 404 was not re-observed live today.** Once the allowance is spent the gateway
+  answers 429 before it ever looks at the model, so the exact `upstream HTTP 404` shape is pinned by
+  the provider suite and by this record, not by a fresh reproduction.
+* **No successful in-app turn was re-run today** — the 6/6 measurement spent the last of the 50 free
+  requests, and the app's render of a successful turn is covered by the earlier device runs
+  (§27BG), not by this one. The app path was re-verified for the failure it now shows.
+* **A check is not a guarantee.** `ai:check` proves the model answers *at the moment it runs*; on a
+  free tier the endpoint can go unhealthy minutes later, which is what happened here.
+
+# 27EA. A fallback chain that is verified, bounded, and never spends a refusal twice (2026-10-21)
+
+**AI-29. Server only — no route, permission, schema, dependency, session or mobile change, and no
+prompt change.** It is the other half of §27DZ: that record made a dead model *visible*, this one
+makes it *survivable*.
+
+## The five candidates, measured rather than assumed
+
+Read from the provider's own catalogue on 2026-10-21 (`supported_parameters` and the per-model
+`endpoints` call — both free, no completion):
+
+| Candidate | Declares `tools` | Endpoint status / 30-min uptime | Context |
+|---|---|---|---|
+| `nvidia/nemotron-3.5-lightning:free` | yes | **0 / 100 %** | 1 000 000 |
+| `nvidia/nemotron-3-ultra-550b-a55b:free` | yes | **0 / 100 %** | 1 000 000 |
+| `nvidia/nemotron-3.5-super-vl:free` | yes | **-2 / 96.7 %** (degraded) | 1 000 000 |
+| `liquid/lfm-2.5-2.6b:free` | yes | **0 / 100 %** | 65 536 |
+| `nvidia/nemotron-3-super-120b-a12b:free` | yes | **-5 / 0 %** (the outage §27DZ records) | 262 144 |
+
+All five declare tool calling, so none is excluded by the catalogue — but a declaration is not a
+demonstration, and a 2.6 B model declaring `tools` is not evidence that it uses them well. The
+chain order therefore puts the two proven-and-healthy large models first, the degraded multimodal
+one third, the small model **fourth** (it is reached only after three better candidates have
+failed), and the currently-down model **last**, where it costs nothing while it recovers and is
+still available if it comes back.
+
+The configured order:
+
+```text
+AI_FALLBACK_MODELS_OPENROUTER=nvidia/nemotron-3.5-lightning:free,\
+  nvidia/nemotron-3-ultra-550b-a55b:free,nvidia/nemotron-3.5-super-vl:free,\
+  liquid/lfm-2.5-2.6b:free,nvidia/nemotron-3-super-120b-a12b:free
+```
+
+The primary is still `AI_MODEL_OPENROUTER` and is simply **skipped** in the list, so changing the
+primary in one variable cannot leave a duplicate attempt behind.
+
+## What shipped
+
+* **`AI_FALLBACK_MODELS_OPENROUTER`** — comma-separated, ordered, trimmed, deduplicated, **capped at
+  5** (`MAX_FALLBACK_MODELS`). Empty is a supported deployment: every turn behaves exactly as it did
+  before. A candidate equal to the primary is removed, because paying twice for the same broken model
+  is not a fallback.
+* **A chain walk, not a retry.** `ai.service` tries the configured model; on a *model-specific*
+  failure it walks the candidates **in the configured order**, once each, and returns the first
+  answer. The model that answered is **sticky for the rest of the turn**, so a question that needs a
+  tool does not re-pay the dead model on every round — and the walk itself happens **at most once per
+  turn**, which is what makes "no infinite retry loop" structural rather than hopeful.
+* **The classification is the feature**, and it lives on the error rather than in the loop
+  (`MODEL_FAILOVER_STATUSES`, `isModelSpecificProviderFailure`): a failover happens on **404, 410,
+  500, 502, 503, 504 and 529** — a model the gateway cannot route to, or an upstream that is down.
+  Everything else stops the walk:
+  * **402 / 429 are `AiQuotaExceeded`, not `AiProviderError`** (AI-6), so they never reach the walk at
+    all — the allowance is per account and shared by every free model, so the next candidate would be
+    refused identically. Measured again today: with five candidates configured and the allowance
+    spent, a turn made **exactly one** provider call.
+  * **400 / 401 / 403** are our request or our key; another model changes nothing.
+  * **A transport failure carries no status**, so it is not model-specific: another model would
+    travel the same broken network.
+* **A deadline floor.** A candidate is attempted only when at least `FAILOVER_MIN_REMAINING_MS`
+  (5 000 ms) is left of the turn's single deadline (AI-1). Below that, a second model cannot finish,
+  and the honest failure arrives sooner instead of later.
+* **Tool capability is required, and checked for free.** `modelCapabilities.ts` reads the provider's
+  catalogue at boot (unawaited, no completion, so **no quota**), caches which models declare
+  `tools`, and the turn loop skips a candidate that declares it cannot call tools — before a request
+  is spent on it. An unread catalogue is **`unknown`, never `false`**: refusing to fall back because
+  a free check did not run would be an outage of the check's own. A boot line names any configured
+  candidate that will be skipped, because that is otherwise discovered on the worst possible day.
+* **Observation without secrets.** One `[ai] failover attempt=N model=<from> -> <to> reason=HTTP
+  <status> remaining=<ms>ms` line per attempt (model ids and a status only — no key, no prompt, no
+  upstream body), the skipped candidates named once, and `failovers=<n>` added to the AI-5 turn line
+  so "it worked" and "it worked on the third model" are different facts in the log.
+* **`npm run ai:models`** — the list is owned by whoever runs the deployment, not by a code change.
+  It prints the primary and the chain exactly as the turn loop reads them (marking the candidates that
+  will be skipped and why), then the free ids that declare tool support; `--check=<id>` proves a
+  single id answers a tool-shaped request for one request, so a model can be tried **before** it joins
+  the chain. Changing the order is editing `AI_FALLBACK_MODELS_OPENROUTER` and restarting the server
+  (`docs/guides/6-scripts-and-commands.md`, "Changing the AI models yourself").
+* **`npm run ai:check` grew the chain**: it lists every candidate with its declared tool support,
+  and `--probe` sends one tool-shaped request to the primary **and each candidate** (6 requests for a
+  5-model chain), failing with exit **1** if any candidate cannot call tools or cannot answer.
+* **No duplicate inventory work.** The tools are read-only (CLAUDE.md §4 and `AI2`'s guard), so a
+  failover cannot apply a change twice — there is no write to apply. Business isolation, permissions
+  and the prompt are untouched: a candidate receives the same server-derived `businessId`, the same
+  role-gated tool table and the same messages.
+
+## Verification
+
+* **26 new cases** in `AI29-model-failover.test.mjs`, of which the ones that matter most: the chain
+  walks in order and stops at the first answer; a 429 **ends the walk** (one call, the quota error is
+  what the member sees); every candidate failing reports the **last** failure and reports
+  `failovers=3` while never exceeding one attempt each; a tool-less candidate is **skipped and
+  named**; the primary and duplicates are never tried; the chain is sticky across a tool round; a
+  fallback equal to the primary is not attempted; too little deadline means no attempt; the probe
+  sends the candidate's own id and calls a quota refusal `quota`, never `unusable`.
+* **Server 1073 tests / 1021 pass / 0 fail / 52 skipped** (`test:unit`), `tsc`, `eslint` and both
+  module-graph checks clean (464 modules).
+* **Live, with the five candidates configured and the allowance spent:** `POST /api/ai/chat` answered
+  **429 `AI_QUOTA_EXCEEDED` in 545 ms**, and the turn line read
+  `outcome=AI_QUOTA_EXCEEDED … calls=1 … failovers=0 … model=nvidia/nemotron-3.5-lightning:free` —
+  no failover line, no second request. That is the requirement this feature could most easily get
+  wrong, observed on the real route.
+* **`npm run ai:check`** lists the chain with declared tool support for all five (exit 0).
+
+## Limits
+
+* **A real failover was not observed live today.** The account's 50 free requests were spent by the
+  §27DZ measurement, so every candidate answers 429 before the model is ever consulted — the very
+  case that correctly does **not** fail over. The walk is proven by the DB-gated wire test (a real
+  route, real auth, a 404 from the primary answered by the fallback as an ordinary 201) and by the
+  unit cases; the first live walk is owed once the allowance resets (**08:00 Manila**), and
+  `npm run ai:check -- --probe` is the command that verifies the candidates themselves.
+* **Declared tool support is not proven skill.** `liquid/lfm-2.5-2.6b:free` is a 2.6 B model: it
+  declares `tools` and is placed last for that reason. If the probe shows it cannot ground an answer,
+  it should be removed from the list rather than trusted on a technicality.
+* **`nvidia/nemotron-3.5-super-vl:free` is degraded** (-2 / 96.7 %) and
+  **`nvidia/nemotron-3-super-120b-a12b:free` is down** (-5 / 0 %) as this was written. Both stay in
+  the chain — the second costs nothing while it is unavailable and is worth having if it returns.
+* **The whole chain can still be down.** The member then sees the existing 502 `AI_UNAVAILABLE`
+  sentence, which is accurate; a new client code was deliberately not added, because it would need a
+  mobile copy and tests to say the same thing, and the per-model detail belongs in the log.
+
+# 27EB. A model that just failed five times is not tried first on the next turn (2026-10-21)
+
+**AI-30. Server only — no route, permission, schema, dependency, session or mobile change, and no
+prompt change.** It closes the recurring cost §27EA left in place.
+
+## The problem it removes
+
+AI-29 makes a dead model survivable: a turn that hits it walks to a healthy candidate and still
+answers. But the configured primary is tried **first on every new turn**, so a model the deployment
+already knows is broken costs one failed request — and a share of the free tier's shared allowance —
+on every turn until an operator edits `.env` and restarts. Survivable is not the same as cheap.
+
+## The mechanism
+
+`server/src/services/ai/modelBreaker.ts` is a process-local, in-memory breaker per model id:
+
+| State | When | Behaviour |
+|---|---|---|
+| **closed** | fewer than 5 consecutive model-specific failures | the model is selected normally |
+| **open** | the 5th consecutive failure | skipped entirely for **30 s** |
+| **half-open** | 30 s have passed | tried again; a failure **re-opens it at once**, a success closes it |
+
+The failure count is **not** reset when the cooldown ends. Resetting it would let a dead model cost
+five more requests every 30 seconds; keeping it means the first failed trial re-opens the breaker,
+so the steady-state cost of a permanently dead primary is **one request per 30 s**, not one per turn.
+A single 2xx clears the streak and the cooldown — the model returns to normal selection by itself.
+
+The **primary is skipped like any other model**. When it is cooling, the turn starts directly on the
+first eligible candidate; when the cooldown expires it is first in the chain again, because
+configuration was never changed. Every skip is one line naming the model and the seconds left, and
+the moment a breaker opens is its own line (`model cooling down for 30s after 5 consecutive
+failure(s): <id>`). If **every** configured model is cooling, the turn fails fast with **zero
+provider calls** and the existing 502 `AI_UNAVAILABLE` sentence — the honest answer without spending
+a request to prove it a sixth time.
+
+**What never counts.** Only `MODEL_FAILOVER_STATUSES` (404/410/500/502/503/504/529) is recorded.
+Quota (429/402) is the account's shared allowance, auth and bad requests (400/401/403) travel with
+us, and a configuration error never reaches the loop. None of them is evidence about a model, so none
+may make a healthy model's next turn skip it. *(A status-less transport failure was also excluded
+here; §27EC revisits that one — a CLASSIFIED transport failure now counts, while still never
+triggering an in-turn failover.)*
+
+## Verification
+
+* **18 new cases** in `AI30-model-cooldown.test.mjs`: the fifth failure opens and the fourth does
+  not; the window expires on its own; a failed half-open trial re-opens immediately while one
+  success clears the streak; counts are per model; the primary is skipped after five failing turns
+  with configuration untouched; a cooling candidate is skipped inside the walk; every model cooling
+  answers with zero calls; and 429/402, 400/401/403 and an UNCLASSIFIED provider error leave the
+  breaker untouched. *(A classified transport failure was excluded when this was written; §27EC
+  changed that deliberately — it now counts, still without failing over.)*
+* **`AI29-model-failover.test.mjs` still passes in full** (the pre-existing failover contract), with
+  a breaker reset between cases because the state is process-wide by design.
+* **Server 1093 tests / 1041 pass / 0 fail / 52 skipped** (`test:unit`), `tsc`, `eslint` and both
+  module-graph checks clean (467 modules).
+
+## Limits
+
+* **Per process and not persisted.** A restart forgets every cooldown — which is the right default,
+  because a restart is exactly the moment to re-test the whole chain. Two server instances keep
+  independent breakers; neither learns from the other.
+* **No live device run of the cooldown itself.** It is proven by the fake-provider cases; the live
+  failover it builds on was measured on the phone in the same session (§27EA), and a live cooldown
+  would need five real failing turns against the dead primary.
+* **The breaker is not a health registry.** It remembers this process's recent failures, not the
+  provider's uptime; `npm run ai:check` and `npm run ai:models` remain the way to prove a model
+  answers before trusting it.
+
+# 27EC. The model that answers becomes the model the deployment uses (2026-10-21)
+
+**AI-31. Server only — no route, permission, schema, dependency, session or mobile change, and no
+prompt change.** It turns §27EA's in-turn rescue and §27EB's cooldown into a self-managing rotation.
+
+## The problem it removes
+
+AI-29 rescues a turn with a fallback, and AI-30 stops a dead primary being tried first. But the
+fallback was still only a fallback: the next request started on the configured primary again, so a
+deployment whose primary had died re-paid for the same refusal once per cooldown window, forever. The
+operator had to notice and edit `.env` — the thing this record removes.
+
+## The mechanism
+
+`server/src/services/ai/modelSelection.ts` holds one process-local value: the **promoted** model, or
+`null` while the configured default is still the active one. `activeModel(configuredPrimary)` returns
+the promotion first, and a turn's chain becomes `[active, ...configured order without it]`.
+
+**Promotion is threshold-gated, not eager.** A fallback that answers one transient failure still
+serves that turn, but does not seize the deployment — `maybePromote` requires the active model to be
+**cooling**, which only happens after `AI_MODEL_FAILURE_THRESHOLD` (default **5**) consecutive
+availability failures. The check is "cooling when the turn began, or cooling now": a tool-heavy
+turn can outlast the 30-second window, and its fallback's success must not be discarded just because
+the clock, rather than a success, ended the cooldown. When the fallback then answers a turn, it is
+promoted:
+
+```text
+[ai] promoted model: <old active> -> <responder>
+```
+
+and every later turn starts there. A promoted model that later fails five times is replaced the same
+way, by whichever configured model answers next; the walk keeps moving forward through the chain.
+
+**Configuration is never overwritten.** `AI_MODEL_OPENROUTER` remains the operator's default, is what
+`npm run ai:models` prints, and is what a restart returns to — deliberately, because a restart is the
+moment to re-test it. Promotion is a runtime fact, not an environment edit, and the process could not
+portably write `.env` anyway.
+
+**Concurrency is a compare-and-set.** Node runs the mutator synchronously, and `promoteModel` accepts
+a candidate only when the caller's `expectedActive` still matches. Two requests that both read the old
+active before either promotes: the first wins, the second is refused, so they cannot overwrite one
+another's decision. Failure counters are mutated synchronously in `modelBreaker`, so concurrent turns
+neither lose an increment nor reset one another.
+
+## Transport failures now count (and still do not fail over)
+
+§27EB excluded a status-less failure from the breaker because it is not the model's fault. That is
+still true of the *failover* — another model travels the same broken network — but five consecutive
+ones mean the assistant cannot serve at all, and paying for the same outage on every turn is exactly
+the recurring cost the breaker exists to stop. `AiProviderError` now carries a declared `kind`:
+`network`, `timeout` or `invalid_response`, set at the one place that knows (`providers/http.ts`).
+
+| Failure | Breaker counts it | In-turn failover |
+|---|---|---|
+| 404/410/5xx (`MODEL_FAILOVER_STATUSES`) | yes | yes |
+| `network` / `timeout` / `invalid_response` | **yes** | **no** — same path would fail |
+| 400/401/403 | no | no |
+| 402/429 (`AiQuotaExceeded`) | no | no — one shared allowance |
+| configuration error / unclassified provider error | no | no |
+
+The kind is a declared enum, not a string match on error copy: rewording a sentence can never turn a
+timeout into a model verdict. An `AiProviderError` with neither a status nor a kind still counts for
+nothing, so a provider bug cannot cool a healthy model.
+
+## Verification
+
+* **19 cases** in `AI31-model-promotion.test.mjs`: a healthy active stays active; 1–4 failures do not
+  promote (the fallback still serves); the fifth promotes; the next request starts on the promoted
+  model; a promoted model failing five times is replaced by the next working one; a cooled model
+  rejoins the rotation after its window; the environment order decides who is tried first; a
+  configured threshold/cooldown is honoured; all models cooling fails fast with the existing 502;
+  quota and 400/401/403 never promote or count; a configuration error is not counted; a tool is not
+  executed twice when the model fails after it; concurrent turns keep correct counters, promote
+  once, and a stale promotion is refused; and five network failures cool the active model, after
+  which the first model that answers is promoted (`promoted model: fake-model -> fallback-model`).
+* **`AI29` and `AI30` still pass in full.** AI-30's transport case was split into “classified counts,
+  never fails over” and “unclassified counts for nothing”, so the old guarantee is pinned more
+  precisely rather than dropped.
+* **Server `test:unit` 1115 tests / 1063 pass / 0 fail / 52 skipped**; **`test:db` 852 tests / 764
+  pass / 0 fail / 88 skipped**; `tsc`, `eslint` and both module-graph checks clean (469 modules).
+
+## Verified live, on the real provider (2026-10-21)
+
+A one-off script (not committed) pointed the configured primary at
+**`nvidia/nemotron-3-super-120b-a12b:free`** — a VALID id whose upstream is dead (`ai:models --
+--check=…` measured `unusable (HTTP 404)`), which is the exact class this feature acts on — with
+**`nvidia/nemotron-3.5-lightning:free`** as the only candidate, and ran six turns through
+`runAiChat` against OpenRouter:
+
+```text
+turn 1-4  primary 404 -> failover -> OK   failures=1..4  promoted=null
+turn 5    primary 404 -> failover -> OK   failures=5  model cooling down for 30s
+                                         promoted model: …super-120b… -> …lightning…
+turn 6    calls=1 failovers=0 model=…lightning…
+```
+
+So the five-failure threshold, the cooldown, the in-turn fallback and the promotion were all
+observed on a real request path, not only on the fake provider; turn 6 is the promoted model
+serving first with no failed attempt. A bogus id was tried first and answered **HTTP 400**; it was
+not counted and did not fail over — the classification that keeps a bad configuration out of the
+breaker, observed on the same real gateway. The 404 attempts did not change the day's free-model
+allowance reading (`44 of 50` before and after); the six successful answers did not exhaust it.
+
+**The configured order at measurement time** (`/v1/models/:author/:slug/endpoints`, no completion
+and no quota): `super-vl` **-2**, 100 % / 91.7 % (degraded); `liquid/lfm-2.5-2.6b` **-5**, 100 % /
+72.8 % (degraded); `lightning` **0**, 100 % / 100 %; `ultra-550b` **0**, 100 % / 100 %;
+`super-120b` **-5**, 0 % / 3.75 % (down, and its completion probe answers 404). The owner's
+requested order is what is configured, so the first two candidates are currently the weakest —
+which is a reason to reorder the variable, not to edit the code. The live run above used
+`lightning` because it is the one that answers.
+
+## Configured order changed the same day, on that measurement
+
+The requested initial order was recorded above rather than quietly rewritten, because the reason it
+changed is the measurement beside it. Once the six-turn run and the endpoint report agreed, the
+configured order was changed to put the model that had actually answered inventory questions first,
+and the degraded models later:
+
+```bash
+AI_MODEL_OPENROUTER=nvidia/nemotron-3.5-lightning:free
+AI_FALLBACK_MODELS_OPENROUTER=nvidia/nemotron-3-ultra-550b-a55b:free,nvidia/nemotron-3.5-super-vl:free,liquid/lfm-2.5-2.6b:free,nvidia/nemotron-3-super-120b-a12b:free
+```
+
+`lightning` and `ultra-550b` were both at **status 0 / 100 % / 100 %**; `lightning` is first because it
+is also the model with the 6/6 grounded-turn record, which uptime alone cannot show. `super-vl`
+(**-2**, 91.7 % over 24 h) is third, `liquid` (2.6 B, 73.1 % over 24 h, and the weakest reasoning of the
+five) is fourth, and `super-120b` (**-5**, 2.4 % over 24 h) is last. The free tier's per-model ids and
+tool support were re-read at the same time; nothing in the application code or the promotion logic
+changed, and the configured primary is still never overwritten at runtime.
+
+## Limits
+
+* **Per process and not persisted**, like the breaker. A restart forgets the promotion and returns to
+  the configured default; several instances each promote independently and converge on a model that
+  answers. No shared store was introduced for a decision that is cheap to rediscover.
+* **A promotion is only as good as its evidence.** It follows one usable 2xx from a model whose active
+  peer is cooling; it is not a benchmark, and a model can be promoted and demoted within a minute if
+  the provider is flapping. The cooldown is what keeps that from churning on every request.
+* **The free tier can still be spent.** Promotion cannot create quota: when the account's 50 daily
+  requests are gone, every model answers 429 and the member sees `AI_QUOTA_EXCEEDED`, correctly. No
+  amount of failover changes that.
+* **Not device-verified in the app.** The rotation is proven by fake-provider cases AND by the live
+  six-turn run above over the real provider; the in-app turn path it feeds was measured in §27EA,
+  and this record changes neither the prompt nor the response shape, so no phone run was needed.
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

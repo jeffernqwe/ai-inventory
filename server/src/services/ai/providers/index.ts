@@ -64,6 +64,15 @@ export interface ProviderRequest {
   messages: ProviderMessage[];
   tools: ToolDefinition[];
   /**
+   * The model to call INSTEAD of the configured one (AI-29).
+   *
+   * It exists for one caller: the turn loop's failover, after the configured model's
+   * upstream refused the call. Absent on every normal request, so a provider's own
+   * configuration stays the single place a model is chosen — this is an override, not a
+   * second setting. A provider that ignores it simply keeps using its configured model.
+   */
+  model?: string;
+  /**
    * Wall-clock budget for THIS call, in ms (AI-1). runAiChat passes the time
    * remaining in the turn's single deadline, so the turn's total cost is bounded
    * by that deadline rather than by (per-call cap x tool iterations). Optional:
@@ -111,6 +120,17 @@ export interface ProviderResponse {
  */
 export interface AIProvider {
   name: string;
+  /**
+   * The model this provider is CONFIGURED to call, when it has one (AI-28).
+   *
+   * WHY IT BELONGS ON THE CONTRACT. `ProviderResponse.model` only exists when a call SUCCEEDS, so
+   * a turn whose every call failed could not name the model it was trying — the log said
+   * `model=unknown` exactly when the question "is it this model?" was the one that mattered (a
+   * provider-side 404 for a withdrawn or broken model, 2026-10-21). This is the value the request
+   * would have carried, so a failing turn can report it. Optional: a provider with no single model
+   * (or a test double) simply omits it.
+   */
+  model?: string;
   complete(request: ProviderRequest): Promise<ProviderResponse>;
 }
 

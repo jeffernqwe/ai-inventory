@@ -15,6 +15,29 @@ function positiveInt(raw: string | undefined, fallback: number) {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
+/**
+ * AI-29 — the most candidates one turn may ever attempt.
+ *
+ * A bound, not a preference: the list is operator-supplied configuration, and a turn's extra
+ * requests must be capped by something that is not the configuration itself. Five is the
+ * documented candidate set, so a longer list is truncated rather than trusted.
+ */
+export const MAX_FALLBACK_MODELS = 5;
+
+/** `a, b ,,a` -> ['a', 'b'] — trimmed, empty-free, deduplicated in first-seen order. */
+function parseModelList(raw: string | undefined): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const part of String(raw ?? '').split(',')) {
+    const id = part.trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+    if (out.length === MAX_FALLBACK_MODELS) break;
+  }
+  return out;
+}
+
 export function aiConfig() {
   return {
     // Provider + keys (keys are read here but never returned/logged).
@@ -29,6 +52,24 @@ export function aiConfig() {
     // different tool-calling ability, so the model is REQUIRED — the provider
     // factory refuses to build without it rather than silently guessing one here.
     openrouterModel: (process.env.AI_MODEL_OPENROUTER || '').trim(),
+    // AI-29 — the candidate models a turn fails over to, in preference order, when the
+    // configured model's upstream refuses the call (a 404/410 or 5xx, never a quota
+    // refusal). Comma-separated; optional on purpose, because unset means "no failover",
+    // which is a supported deployment and leaves every turn exactly as it was.
+    //
+    // Parsed here rather than at use so the shape is stated once: trimmed, empties dropped,
+    // duplicates collapsed (paying for the same model twice is not a second attempt) and
+    // capped, so a pasted catalogue cannot turn one turn into an unbounded sweep. The
+    // service removes the primary and any candidate the catalogue says cannot call tools.
+    fallbackModels: parseModelList(process.env.AI_FALLBACK_MODELS_OPENROUTER),
+
+    // AI-31 — how many consecutive model-specific failures make a model temporarily
+    // unhealthy, and how long it is then left out of selection. Both are operator-owned
+    // configuration: a deployment that wants a jumpier or calmer policy edits `.env`, not
+    // this file. The defaults are the documented policy (5 failures, 30 s); a value that is
+    // not a positive integer falls back to the default rather than disabling the breaker.
+    modelFailureThreshold: positiveInt(process.env.AI_MODEL_FAILURE_THRESHOLD, 5),
+    modelCooldownMs: positiveInt(process.env.AI_MODEL_COOLDOWN_MS, 30000),
     openrouterBaseUrl: (process.env.OPENROUTER_BASE_URL || '').trim(),
 
     // Cost / rate protection (V1). See SYSTEM_SPECIFICATION.md §25.

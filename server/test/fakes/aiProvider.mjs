@@ -21,6 +21,9 @@ export function setFakeScenario(fn) {
 export function registerFakeProvider() {
   registerProvider('fake', () => ({
     name: 'fake',
+    // AI-28 — the model this provider is CONFIGURED to use. The real factory exposes the same
+    // value, which is what lets a failing turn name its model instead of reporting `unknown`.
+    model: 'fake-model',
     async complete(ctx) {
       if (current) return current(ctx);
       return { model: 'fake-model', text: 'ok', toolCalls: [], usage: { inputTokens: 0, outputTokens: 0 } };

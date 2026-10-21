@@ -29,6 +29,10 @@ import type { Logger, ShutdownHandler, ShutdownServer, SignalTarget } from './sh
 import { validateProductionConfig } from './validateConfig.ts';
 import type { ConfigProblem } from './validateConfig.ts';
 import { INSTANCE_ID } from './instanceIdentity.ts';
+import { checkModelCatalogue } from '../services/ai/modelCheck.ts';
+import type { CatalogueResult } from '../services/ai/modelCheck.ts';
+import { refreshModelCapabilities, declaresToolSupport } from '../services/ai/modelCapabilities.ts';
+import { aiConfig } from '../services/ai/aiConfig.ts';
 import { boundPortOf, verifyBoundPort } from './portGuard.ts';
 import type { PortProbeResult } from './portGuard.ts';
 
@@ -54,6 +58,23 @@ type StartServerOptions = {
   signalTarget?: SignalTarget;
   shutdownTimeoutMs?: number;
   probe?: (port: number) => Promise<PortProbeResult>;
+  /**
+   * AI-28 — the boot-time question "is the configured AI model still one the provider lists?"
+   *
+   * Injectable for the same reason the port probe is: a test must be able to answer it without a
+   * network. `null` means "do not check", which is what `NODE_ENV=test` defaults to so the suite
+   * never contacts a provider.
+   */
+  modelCheck?: (() => Promise<CatalogueResult>) | null;
+  /**
+   * AI-29 — the boot-time read of which models the provider DECLARES can call tools.
+   *
+   * Same contract as `modelCheck`: unawaited, non-fatal, and `null` means "do not read", which is
+   * the `NODE_ENV=test` default so a suite never contacts a provider. It is free (no completion, so
+   * no quota), and the turn loop reads the resulting cache synchronously to skip a fallback that
+   * could never have grounded an answer.
+   */
+  capabilities?: (() => Promise<unknown>) | null;
 };
 
 /**
@@ -87,6 +108,8 @@ export async function startServer({
   signalTarget = process,
   shutdownTimeoutMs = env.shutdownTimeoutMs,
   probe,
+  modelCheck,
+  capabilities,
 }: StartServerOptions = {}): Promise<{
   server: ShutdownServer;
   shutdown: ShutdownHandler;
@@ -203,6 +226,55 @@ export async function startServer({
       }
       logger.error(`[server] the HTTP server could not start (${code}) — refusing to start.`);
       exitFn(1);
+    });
+  }
+
+  // AI-28 — the model check, fired unawaited for the same reason the port guard is: a boot must not
+  // wait on an outbound request, and a wrong model is a warning rather than a reason to refuse to
+  // start. It was added after every assistant turn failed with `model=unknown` and nothing in the
+  // deployment said which model — the id is the one fact an operator needs when the assistant stops
+  // answering, and this is the earliest place it can be questioned.
+  //
+  // `NODE_ENV=test` defaults to no check at all: a unit suite must not reach a provider, and a
+  // check that silently spent a free-tier request per test file would be a cost, not a guard.
+  const resolvedModelCheck = modelCheck === undefined ? (nodeEnv === 'test' ? null : checkModelCatalogue) : modelCheck;
+  if (resolvedModelCheck) {
+    void (async () => {
+      const result = await resolvedModelCheck();
+      // ONLY a model the provider does not list is worth a line. `unreachable` means the check could
+      // not run, which is not evidence of anything and would train an operator to ignore the line.
+      if (result?.status === 'missing') {
+        logger.error(`[config] warning: ${result.message}`);
+      }
+    })().catch(() => {
+      // A check that cannot run must never be the reason a server is down.
+    });
+  }
+
+  // AI-29 — the fallback capability map, fired unawaited next to the model check and for the same
+  // reason: a boot must not wait on an outbound request. A candidate the catalogue says cannot call
+  // tools is skipped by the turn loop instead of being spent on, and the ONE thing worth a boot line
+  // is a configured fallback that is in that state — it is otherwise discovered only on the day the
+  // primary breaks, which is the worst possible day to learn it.
+  const resolvedCapabilities =
+    capabilities === undefined ? (nodeEnv === 'test' ? null : refreshModelCapabilities) : capabilities;
+  if (resolvedCapabilities) {
+    void (async () => {
+      const status = await resolvedCapabilities();
+      // `unreachable` is silence: it says nothing about any model, and a line that fires when the check
+      // could not run trains an operator to ignore the line that matters.
+      if (status !== 'ok') return;
+      const ai = aiConfig();
+      const unusable = ai.fallbackModels.filter(
+        (id) => id !== ai.openrouterModel && declaresToolSupport(id) === false,
+      );
+      if (unusable.length > 0) {
+        logger.error(
+          `[config] warning: fallback model(s) declare no tool support and will be skipped: ${unusable.join(', ')}`,
+        );
+      }
+    })().catch(() => {
+      // A capability read that cannot run must never be the reason a server is down.
     });
   }
 

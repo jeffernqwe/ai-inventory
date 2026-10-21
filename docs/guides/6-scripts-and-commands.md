@@ -383,6 +383,70 @@ against the database**, and only `perf:turns` spends AI quota.
 | `npm run perf:turns -- --business=<id> --only=2` | One or two **real** assistant conversations, timed end to end |
 | `npm run ai:usage -- --log=<path>` | What the assistant has actually cost and how it failed — **no AI calls, no database, no quota** |
 | `npm run ai:usage -- --provider-only` | **Just the allowance left today** — no log, no database, no model call, no quota |
+| `npm run ai:models` | The assistant's model list as this deployment reads it, then the free tool-capable ids you can add — **no completions, no quota** |
+| `npm run ai:models -- --check=<id>` | Whether ONE model id answers a tool-shaped request, before you add it — **one request** |
+| `npm run ai:check` | The configured primary (and chain) verified against the provider's catalogue — free; `-- --probe` proves each with one tool-shaped request |
+
+### Changing the AI models yourself
+
+The model list is **configuration, not code**. Two variables in `server/.env` (and the same two in
+the deployed host's environment) are the whole of it:
+
+```bash
+# the model every turn starts on — measured healthy (100% endpoint uptime, 6/6 grounded
+# inventory turns) and therefore first
+AI_MODEL_OPENROUTER=nvidia/nemotron-3.5-lightning:free
+
+# the chain a turn falls back through, in preference order, comma-separated (max 5);
+# the primary is skipped automatically, so it does not need to be repeated here.
+# Order follows the same measurement: healthy second, degraded later, dead last.
+AI_FALLBACK_MODELS_OPENROUTER=nvidia/nemotron-3-ultra-550b-a55b:free,nvidia/nemotron-3.5-super-vl:free,liquid/lfm-2.5-2.6b:free,nvidia/nemotron-3-super-120b-a12b:free
+```
+
+1. **See what is available:** `npm run ai:models` lists the ids you could add (free ones that declare
+tool support), and marks which of your configured candidates the server will actually use.
+2. **Try one first:** `npm run ai:models -- --check=nvidia/nemotron-3.5-lightning:free` sends a single
+tool-shaped request. A model that cannot call tools cannot read inventory, so it is worth one request
+before it becomes part of the chain.
+3. **Edit the line** — reorder it to change priority, delete an id to drop it, add ids to try them. The
+   primary is skipped automatically wherever it appears, and duplicates are collapsed.
+4. **Restart the server** (`Ctrl+C`, then `npm start`, or `npm run dev`). `.env` is read at boot, so a
+   saved file does nothing until the process restarts; source edits under `npm run dev` do not reload
+   it either.
+5. **Verify:** `npm run ai:check` — and `npm run ai:check -- --probe` when you want each configured
+   model proven to answer (one request each).
+
+**How to choose the order.** Put the model with the best *measured* behaviour first — uptime alone is
+not enough, because a model can be up and still answer inventory questions badly. The provider's
+endpoint report (`GET /v1/models/{id}/endpoints`) shows recent uptime, and a real turn on your own
+tenant shows whether its tool calls ground the numbers. A degraded model belongs below a healthy one,
+and a model reported at `status: -5` (no live endpoint) belongs last. The configured order is a
+snapshot of that judgement, not a permanent ranking: re-measure when answers slow down or start
+failing, and move the ids rather than editing code.
+
+On the deployed server there is no file to edit: set the same two variables in the host's environment
+and redeploy. Nothing else changes — no code, no migration, no mobile build.
+
+Two more optional variables decide when a model is rested, if the defaults are not what you want:
+
+```bash
+# how many consecutive availability failures open the cooldown (default 5)
+AI_MODEL_FAILURE_THRESHOLD=5
+
+# the first cooldown, in milliseconds (default 30000); repeated failed trials back off
+# 30 s, 60 s, 2 min, 4 min, then no more than every 5 min until the model answers again
+AI_MODEL_COOLDOWN_MS=30000
+```
+
+**What happens by itself.** When the active model fails five times in a row it is skipped for the
+cooldown and the next configured model serves the turn. Once that model answers, it becomes the
+**active** model for later turns — the configured default is not edited and still comes back after a
+restart. A cooled model is retried when its window ends; one success puts it back in the rotation,
+and one failure re-opens its cooldown immediately (so a permanently dead model costs one probe per
+window, not one per question). If every configured model is cooling, the assistant answers its
+normal temporary-unavailability message without spending a request. A quota refusal (429/402) is
+never treated as a model outage — the daily free allowance is shared by every model, so switching
+cannot help and the turn says so.
 
 ```bash
 cd C:/Users/jeffe/inventory-ai/server

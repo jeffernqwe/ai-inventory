@@ -178,6 +178,11 @@ unitSuite('AI-5 turn cost (DB-free)', () => {
     assert.equal(f.outcome, 'AI_TIMEOUT', 'the reason a turn died is the first thing to know');
     assert.equal(f.calls, '1');
     assert.ok(ms(f.providerMs) >= 50, 'a call that timed out still spent the time it burned');
+    // AI-28 — AND IT NAMES THE MODEL IT WAS TRYING. A provider-side failure (the 2026-10-21
+    // withdrawn-model 404) reported `model=unknown` at the one moment that field decides what an
+    // operator changes; the configured model is known before any call and is therefore reportable
+    // even when every call fails.
+    assert.equal(f.model, 'fake-model', 'a turn that never got an answer still names its model');
   });
 
   it('reports an abandoned turn, even one that never reached the provider', async () => {

@@ -47,11 +47,108 @@ export class AiNotConfigured extends Error {
 export class AiProviderError extends Error {
   declare code: string;
 
-  constructor(message = 'The AI service could not be reached.', code = AI_UNAVAILABLE) {
+  /**
+   * The upstream HTTP status, when the failure came from an ANSWER rather than from
+   * the transport (AI-29).
+   *
+   * It exists so the turn loop can tell "this MODEL is gone" (404/410, or a 5xx that a
+   * dead upstream returns) from "our key, our request or the network is wrong" — a
+   * distinction the fallback decision depends on and that used to be erased here,
+   * because every non-quota status became the same shapeless error. Absent for a
+   * timeout, a network failure and an unparseable body: none of those carries a status.
+   */
+  status?: number;
+
+  /**
+   * How the call failed when no HTTP status names it (AI-31).
+   *
+   * A transport failure is still not evidence that a *model* is bad — another model
+   * would travel the same broken network, which is why it never triggers an in-turn
+   * failover (AI-29). It IS evidence that the assistant cannot currently serve anyone,
+   * so repeated ones count toward the same breaker that any other availability failure
+   * counts toward; after the threshold the deployment stops paying for them on every
+   * turn and waits out a cooldown. Kept as a separate field rather than inferred from
+   * the message, because string matching on error copy is exactly how a timeout becomes
+   * a 404 the day someone rewords a sentence.
+   */
+  kind?: AiProviderFailureKind;
+
+  constructor(
+    message = 'The AI service could not be reached.',
+    code = AI_UNAVAILABLE,
+    status?: number,
+    kind?: AiProviderFailureKind,
+  ) {
     super(message);
     this.name = 'AiProviderError';
     this.code = code;
+    // Adopted only when it is a real status. Anything else (undefined, NaN, a string a
+    // caller guessed at) stays absent rather than becoming a classification input.
+    if (typeof status === 'number' && Number.isInteger(status) && status > 0) this.status = status;
+    // Same rule for the kind: only a value this module declares is adopted, so a provider
+    // cannot smuggle an arbitrary string into a classification input.
+    if (kind && MODEL_AVAILABILITY_FAILURE_KINDS.has(kind)) this.kind = kind;
   }
+}
+
+/**
+ * The ways a provider call can fail without an HTTP status (AI-31).
+ *
+ *   network           `fetch` itself rejected: DNS, TLS, a refused or dropped socket.
+ *   timeout           this layer's own clock ran out before a response arrived.
+ *   invalid_response  a 2xx whose body could not be parsed as a JSON object.
+ *
+ * All three are availability facts about the assistant's path to the model. None of
+ * them says *which* model is at fault, which is why they count but do not fail over.
+ */
+export type AiProviderFailureKind = 'network' | 'timeout' | 'invalid_response';
+
+export const MODEL_AVAILABILITY_FAILURE_KINDS: ReadonlySet<AiProviderFailureKind> = new Set([
+  'network',
+  'timeout',
+  'invalid_response',
+]);
+
+/**
+ * The statuses that mean "this MODEL cannot answer", and are therefore worth a second
+ * model (AI-29).
+ *
+ * WHY THESE AND NOT EVERYTHING. The measured incident was a 404 — the gateway routed to
+ * an upstream that refused the call — and a dead upstream also surfaces as 5xx. What is
+ * deliberately absent matters more than what is present: 400 is our request shape, 401
+ * and 403 are credentials, and **402/429 are the account's allowance**, which every model
+ * shares. Those four are exactly where a retry would spend the refusal a second time and
+ * change nothing.
+ */
+export const MODEL_FAILOVER_STATUSES: ReadonlySet<number> = new Set([404, 410, 500, 502, 503, 504, 529]);
+
+/**
+ * True when a failure is best explained by the chosen model rather than by us.
+ *
+ * A transport failure is NOT one: another model would travel the same broken network.
+ * A quota refusal never reaches here at all — it is an `AiQuotaExceeded`, not an
+ * `AiProviderError` (AI-6) — which is what keeps the two rules from having to agree.
+ */
+export function isModelSpecificProviderFailure(err: unknown): boolean {
+  if (!(err instanceof AiProviderError)) return false;
+  return typeof err.status === 'number' && MODEL_FAILOVER_STATUSES.has(err.status);
+}
+
+/**
+ * True when a failure is evidence that the assistant cannot serve a turn right now,
+ * whether or not it is the model's own fault (AI-31).
+ *
+ * This is the BREAKER's question, and it is deliberately broader than the failover's:
+ * a model-specific status counts, and so does a classified transport failure (see
+ * `AiProviderFailureKind`). It is not broader in the other direction, though — a 400, a
+ * 401/403, a quota refusal, a configuration error and a provider error that carries
+ * neither a status nor a kind all stay out, because none of them is evidence that the
+ * assistant is unavailable for a while.
+ */
+export function isModelAvailabilityFailure(err: unknown): boolean {
+  if (isModelSpecificProviderFailure(err)) return true;
+  if (!(err instanceof AiProviderError)) return false;
+  return err.kind !== undefined && MODEL_AVAILABILITY_FAILURE_KINDS.has(err.kind);
 }
 
 /**
@@ -206,6 +303,10 @@ export function isAiError(err: unknown) {
 export default {
   AiNotConfigured,
   AiProviderError,
+  MODEL_FAILOVER_STATUSES,
+  MODEL_AVAILABILITY_FAILURE_KINDS,
+  isModelSpecificProviderFailure,
+  isModelAvailabilityFailure,
   AiQuotaExceeded,
   AiTimeout,
   AiAbandoned,

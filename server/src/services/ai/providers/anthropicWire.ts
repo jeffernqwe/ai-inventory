@@ -277,9 +277,25 @@ export function createAnthropicCompatibleProvider(opts: AnthropicCompatibleOptio
   return {
     name,
 
-    async complete({ system, messages, tools, timeoutMs, signal }) {
+    /**
+     * AI-28 — the model a request from this provider would carry, reported on the CONTRACT rather
+     * than only on a successful response.
+     *
+     * A getter, not a captured value: `aiConfig()` reads the environment at call time everywhere in
+     * this service, and a module-load snapshot here would disagree with the model the very next
+     * request sends — the exact drift a check must not have. `ai.service` seeds its turn line from
+     * this, so a turn whose provider call FAILED still names the model instead of `unknown`.
+     */
+    get model() {
+      return aiConfig()[modelKey] || defaultModel;
+    },
+
+    async complete({ system, messages, tools, timeoutMs, signal, model: requestedModel }) {
       const cfg = aiConfig();
-      const model = cfg[modelKey] || defaultModel;
+      // AI-29 — a per-request override, used by the turn loop's failover. It stays a
+      // parameter rather than a second environment variable so the request itself
+      // records which model answered, and the parsed response reports that model.
+      const model = requestedModel || cfg[modelKey] || defaultModel;
       const data = await postJson({
         url: messagesUrl,
         providerName: name,

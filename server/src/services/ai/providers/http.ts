@@ -172,10 +172,24 @@ export async function postJson({ url, headers = {}, body, timeoutMs = 60000, pro
         throw new AiAbandoned();
       }
       console.error(`[ai:${providerName}] request timed out after ${timeoutMs}ms`);
-      throw new AiProviderError('The AI service took too long to respond. Please try again.');
+      // AI-31 — classified so repeated failures can count toward the model breaker, while
+      // still NOT triggering an in-turn failover: another model would hit the same clock.
+      throw new AiProviderError(
+        'The AI service took too long to respond. Please try again.',
+        undefined,
+        undefined,
+        'timeout',
+      );
     }
     console.error(`[ai:${providerName}] network error: ${(err as { message?: unknown })?.message ?? 'unknown'}`);
-    throw new AiProviderError('The AI service could not be reached. Please try again.');
+    // AI-31 — a dropped connection is an availability fact, not a model verdict: counted
+    // by the breaker when it repeats, never used to walk to another model in the same turn.
+    throw new AiProviderError(
+      'The AI service could not be reached. Please try again.',
+      undefined,
+      undefined,
+      'network',
+    );
   }
   clearTimeout(timer);
 
@@ -207,7 +221,11 @@ export async function postJson({ url, headers = {}, body, timeoutMs = 60000, pro
     const errorBody = await res.text().catch(() => '');
     logUpstreamDiagnostics({ providerName, res, body: errorBody, reason: 'HTTP error' });
     if (isQuotaRefusal) throw new AiQuotaExceeded();
-    throw new AiProviderError('The AI service returned an error. Please try again.');
+    // AI-29 — the status travels with the error so the turn loop can tell a broken
+    // MODEL (404/410/5xx, worth a second model) from a broken REQUEST, KEY or NETWORK
+    // (400/401/403, where another model changes nothing). It is a classification input,
+    // never client copy: the sentence stays the safe generic one.
+    throw new AiProviderError('The AI service returned an error. Please try again.', undefined, res.status);
   }
 
   // `unknown` at the untrusted boundary: the guard below is what narrows it, so
@@ -226,11 +244,21 @@ export async function postJson({ url, headers = {}, body, timeoutMs = 60000, pro
   } catch {
     console.error(`[ai:${providerName}] upstream returned a non-JSON body`);
     logUpstreamDiagnostics({ providerName, res, body: bodyText, reason: 'non-JSON' });
-    throw new AiProviderError('The AI service returned an unexpected response.');
+    throw new AiProviderError(
+      'The AI service returned an unexpected response.',
+      undefined,
+      undefined,
+      'invalid_response',
+    );
   }
   if (data === null || typeof data !== 'object' || Array.isArray(data)) {
     console.error(`[ai:${providerName}] upstream returned an unexpected payload shape`);
-    throw new AiProviderError('The AI service returned an unexpected response.');
+    throw new AiProviderError(
+      'The AI service returned an unexpected response.',
+      undefined,
+      undefined,
+      'invalid_response',
+    );
   }
   return data as UpstreamJsonBody;
 }

@@ -47,7 +47,7 @@ import { checkModelCatalogue, probeModel } from '../src/services/ai/modelCheck.t
 
 const MODEL = 'vendor/model-one:free';
 const BASE = 'https://openrouter.example/api';
-const KEY = 'sk-or-v1-super-secret-value';
+const KEY = 'sk-or-v1-super-secret-value'; // secret-guard:allow — a deliberate non-working fixture
 
 /** The environment a configured OpenRouter deployment has. */
 const env = (over = {}) => ({

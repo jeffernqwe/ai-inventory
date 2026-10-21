@@ -36,7 +36,7 @@ import { readModelHealth } from '../src/services/ai/modelCheck.ts';
 const MODEL = 'vendor/model-one:free';
 const OTHER = 'other/model-two:free';
 const BASE = 'https://openrouter.example/api';
-const KEY = 'sk-or-v1-super-secret-value';
+const KEY = 'sk-or-v1-super-secret-value'; // secret-guard:allow — a deliberate non-working fixture
 
 /** The environment a configured OpenRouter deployment has. */
 const env = (over = {}) => ({

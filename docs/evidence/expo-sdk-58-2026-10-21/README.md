@@ -154,6 +154,12 @@ so it is worth a follow-up rather than being forgotten.
 - **A scan of paper.** The PDF and the fixed PDF both decode, and a real barcode in the room was
   read by the camera — but no sheet came off a printer and back into the scanner.
 
+## What this record is not
+
+It is **not a release acceptance**. The build was a `development` profile from EAS, the backend was a
+local server over USB, and nothing was submitted to a store. iOS was not run at all. The branch is
+unmerged and no release decision has been made; roadmap §27EH, *Where the branch stands*.
+
 ## Repeating it
 
 1. `adb reverse tcp:4000 tcp:4000`, then start the server (`npm start` in `server/`).

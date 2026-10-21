@@ -17523,6 +17523,16 @@ fixture rather than by re-printing on paper.
 Artifacts, including every screenshot, the printed PDF and the decoder used on it, are in
 `docs/evidence/expo-sdk-58-2026-10-21/`.
 
+## Where the branch stands — not merged, not released
+
+`chore/expo-sdk-58` carries the SDK 58 upgrade, this acceptance pass and the label fix. **It is not
+merged and nothing has been released**, and no release decision has been made: a successful
+`development` EAS build is not a production build, no store submission exists, and **iOS has not
+been run at all** (no macOS on this host). What a release decision would still need: the two required
+CI jobs green on this branch, a **`preview`/`production`-profile** EAS build rather than a
+`development` one (which is what the device was running), and the iOS half on a macOS or EAS build
+environment. Until then the device evidence above is Android-only and says so.
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

@@ -161,6 +161,56 @@ export function databaseNameInputs(): DatabaseNameInputs {
   };
 }
 
+/**
+ * The NODE_ENV values this server actually recognises.
+ *
+ * Anything else — including `prod`, `Production`, `staging`, or nothing at all — is treated as
+ * development everywhere in this codebase (`env.nodeEnv` defaults to it, and the production
+ * checks are keyed on the exact string). That fallback is convenient locally and dangerous on a
+ * hosted deployment, which is why it is named here and reported at boot rather than left to be
+ * inferred from three unrelated behaviours.
+ */
+export const KNOWN_NODE_ENVS: readonly string[] = ['development', 'test', 'production'];
+
+/**
+ * May this process include DEBUG DETAIL (an error stack trace) in a response?
+ *
+ * ★ FAIL-CLOSED, AND THAT IS THE WHOLE POINT. The previous rule was `NODE_ENV !== 'production'`,
+ * which answers YES to an unset, empty or misspelled value: `NODE_ENV=Production` on a host that
+ * capitalised it would have returned absolute local file paths, internal module names and line
+ * numbers to any caller who provoked a 4xx — measured on the local server on 2026-10-22, where a
+ * failed login answered `… at loginWithPassword (file:///C:/Users/…/auth.service.ts:322:11)`.
+ * Requiring an EXPLICIT development or test environment inverts that: a value nobody thought about
+ * hides the detail instead of publishing it.
+ *
+ * Deliberately narrower than "not production": a staging box running with `NODE_ENV=staging` also
+ * gets no stacks, which is the correct default for anything that is not a developer's machine. A
+ * developer who runs without `.env` sees no stack AND the warning `nodeEnvWarning` below produces,
+ * so the reason is stated instead of guessed at.
+ */
+export function isDebugNodeEnv(raw: string | undefined = process.env.NODE_ENV): boolean {
+  return raw === 'development' || raw === 'test';
+}
+
+/**
+ * The boot warning for a NODE_ENV that is missing or unrecognised, or `null` when it is fine.
+ *
+ * The consequences are listed because they are neither obvious nor local: the production config
+ * checks are skipped, the DEVELOPMENT database is selected, and debug detail is withheld only
+ * because of the rule above. An operator who sees this line has a one-variable fix.
+ */
+export function nodeEnvWarning(raw: string | undefined = process.env.NODE_ENV): string | null {
+  const value = typeof raw === 'string' ? raw.trim() : '';
+  const consequence =
+    'this process is treated as DEVELOPMENT: production configuration checks are skipped, the development database is selected, and error stack traces are withheld from responses';
+
+  if (!value) return `NODE_ENV is not set, so ${consequence}. Set NODE_ENV=production on a deployed host.`;
+  if (!KNOWN_NODE_ENVS.includes(value)) {
+    return `NODE_ENV="${value}" is not one of ${KNOWN_NODE_ENVS.join(', ')}, so ${consequence}. Set NODE_ENV=production on a deployed host.`;
+  }
+  return null;
+}
+
 const env = {
   nodeEnv: process.env.NODE_ENV || 'development',
   port: Number(process.env.PORT) || 4000,

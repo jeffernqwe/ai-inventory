@@ -2290,6 +2290,77 @@ full engineering record is roadmap **§27DY**.
 
 ---
 
+## 50. ERROR DETAIL IS RELEASED ONLY TO AN EXPLICITLY DEVELOPMENT PROCESS (2026-10-22)
+
+**A hardening fix inside the existing error boundary, not an application phase.** Two helpers in
+`config/env.ts`, one condition in `middlewares/errorHandler.ts`, one boot warning in
+`config/startup.ts`, and a 12-case suite. No route, permission, role, session, schema, index,
+dependency or environment-variable change, and no response field changed except the one being
+withheld.
+
+### The finding, measured
+
+A failed login on the local server answered:
+
+```json
+{"error":"Invalid email or password","code":"INVALID_CREDENTIALS",
+ "stack":"ApiError: Invalid email or password\n    at loginWithPassword
+          (file:///C:/Users/jeffe/inventory-ai/server/src/services/auth.service.ts:322:11)"}
+```
+
+`stack` was appended whenever `process.env.NODE_ENV !== 'production'` — a predicate that is **true**
+for an unset, empty or misspelled value. `NODE_ENV=Production`, `prod`, `staging`, or a host that sets
+only its platform's own variable would therefore publish absolute local paths, internal module names
+and line numbers to any caller who can provoke a 4xx. In development that is a convenience; deployed
+it is a disclosure nobody chose.
+
+### The fix
+
+- **`isDebugNodeEnv(raw)`** — `development` or `test` only. Fail-closed: an environment nobody thought
+  about withholds the detail instead of publishing it.
+- **`nodeEnvWarning(raw)`** — one line naming the consequences (production checks skipped, development
+  database selected, stack traces withheld), logged once by `startServer` and **silent under
+  `TEST_MODE`** (the suite leaves `NODE_ENV` unset by design, so the line would otherwise fire on
+  every test boot and mean nothing).
+- **`KNOWN_NODE_ENVS`** — one list, so the switch and the warning cannot drift.
+
+### What is deliberately unchanged
+
+- A **5xx never carried a stack or `err.message`**, and the body-parser and database-down paths are
+  untouched — they already answered a fixed shape before the generic handler.
+- The **status, `error`, `code`, `fields` and `applied`** a client branches on are identical in both
+  postures; only `stack` differs, pinned by a case that compares the two bodies.
+- **Development and test keep their stacks**, so local debugging is what it was.
+
+### Verified
+
+- **12 cases** in `phase-sec-debug-detail.test.mjs`: the truth table (including `Production`, `prod`,
+  `staging`, empty and absent), the warning's content, five integration cases over the real app, and
+  three wiring guards. **Must-trip control: restoring the old condition fails 3 of them.**
+- **Live, at boot:** `NODE_ENV= PORT=4002 node src/index.ts` printed
+  `[config] warning: NODE_ENV is not set, so this process is treated as DEVELOPMENT: … error stack
+  traces are withheld from responses. Set NODE_ENV=production on a deployed host.` and answered
+  `POST /api/auth/login {}` with `400 VALIDATION_ERROR` and **no `stack`**; the same request against
+  the `NODE_ENV=development` server still carries one.
+- Server **1946 tests / 0 failures**, `tsc` and `eslint` clean.
+
+### What this does not do, and the two observations recorded instead
+
+- **It does not make a host set the variable.** The warning is the mechanism; the fix removes the
+  disclosure if the variable is wrong, it cannot supply it.
+- **The wider fail-open posture is unchanged and now said out loud**: `env.nodeEnv` still defaults to
+  `development`, so an unset `NODE_ENV` also skips the production configuration checks and selects
+  the **development database**. Only the response detail was corrected here; the rest is a
+  deployment decision, not a code one.
+- **Authenticated routes remain unlimited**, including `POST /api/auth/change-password`, which spends
+  bcrypt (~140 ms measured on a login comparison). That is the documented policy (no authenticated
+  route in this application is limited) and each attempt requires a live session; it is recorded
+  here as an accepted availability consideration rather than a finding.
+- **`change-password`'s strict `iat < passwordChangedAt` window** (a token minted in the same second
+  survives) is the pinned contract of §phase15, not an oversight, and was left alone.
+
+---
+
 > **MAINTENANCE.** This is a living navigation document. On any authentication/security change:
 > reconcile against evidence, update only evidence-supported statuses, record newly completed and
 > remaining work, preserve unresolved decisions and deferred items, update external-verification

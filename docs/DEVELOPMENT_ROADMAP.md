@@ -17948,6 +17948,81 @@ Artifacts: `docs/evidence/device-runs/` — the three runs above; the README the
 - **The two write journeys (`stock`, `transfer`) still check numbers, not lists** — they were already
   proving a server round trip through the app's own `from → to` line, so they never had this gap.
 
+# Error stack traces were published unless NODE_ENV said exactly "production" (2026-10-22)
+
+**An authentication-surface hardening fix, not an application phase.** Two helpers in
+`config/env.ts`, one condition in `middlewares/errorHandler.ts`, one boot warning in
+`config/startup.ts`, and a 12-case suite. No route, permission, role, session, schema, index,
+dependency or environment variable changed, and the only response field affected is the one being
+withheld.
+
+## How it was found
+
+The auth audit started from the live surface rather than from the code: ten probes against the local
+API (unknown-email login, malformed bodies, a garbage reset code, missing and forged tokens, an
+unauthenticated session revoke). Two things came out of it. Nine answered exactly as designed —
+`INVALID_CREDENTIALS` with no enumeration signal, a uniform `202` for the reset-code request,
+`AUTH_REQUIRED`/`INVALID_TOKEN` kept apart, `FIREBASE_TOKEN_INVALID` as a `401`. The tenth answered
+with this:
+
+```json
+{"error":"Invalid email or password","code":"INVALID_CREDENTIALS",
+ "stack":"ApiError: Invalid email or password\n    at loginWithPassword
+          (file:///C:/Users/jeffe/inventory-ai/server/src/services/auth.service.ts:322:11)"}
+```
+
+Every error response carried the server's own stack. The gate was
+`process.env.NODE_ENV !== 'production'`, and that predicate is **true** for an unset, empty or
+misspelled value — so `NODE_ENV=Production`, `prod`, `staging`, or a host that sets only its
+platform's own variable would publish absolute local paths, module names and line numbers to any
+caller who can provoke a 4xx.
+
+## The fix
+
+- **`isDebugNodeEnv(raw)`** in `config/env.ts` — `development` or `test` only, **fail-closed**: an
+  environment nobody thought about withholds the detail instead of publishing it.
+- **`nodeEnvWarning(raw)`** — the three consequences in one sentence (production config checks
+  skipped, development database selected, stack traces withheld), logged once by `startServer` and
+  **silent under `TEST_MODE`**, because the suite leaves `NODE_ENV` unset by design and a line that
+  fires on every test boot is noise.
+- **`KNOWN_NODE_ENVS`** — one list, so the predicate and the warning cannot drift.
+
+## Verified
+
+- **`phase-sec-debug-detail.test.mjs` — 12 cases, 0 failures.** The truth table (including
+  `Production`, `PRODUCTION`, `prod`, `staging`, empty and absent), the warning's exact content, five
+  integration cases over the real app, and three wiring guards (the handler no longer compares the
+  variable itself; the boot calls the helper; the handler holds no private copy of the rule).
+- **The control trips.** Restoring the old condition fails **3** of the 12.
+- **Live at boot** — `NODE_ENV= PORT=4002 node src/index.ts` printed
+  `[config] warning: NODE_ENV is not set, so this process is treated as DEVELOPMENT: … error stack
+  traces are withheld from responses.` and answered `POST /api/auth/login {}` with
+  `400 VALIDATION_ERROR` and **no `stack`**. The `NODE_ENV=development` server still answers with a
+  stack, so local debugging is unchanged.
+- **Nothing else about the error moved** — status, `error`, `code`, `fields` and `applied` are
+  identical in both postures, pinned by a case that compares the two bodies.
+- Server **1946 tests / 0 failures**, `tsc` and `eslint` clean.
+
+## What the audit also established, and what it did not change
+
+Ten probes and four modules read covered the rest of the surface: JWT verification pins `HS256`, the
+issuer and the audience; `PATCH /api/auth/me` allowlists its fields, so an email cannot be changed
+through it (email change has no approved phase); session listing and revocation are scoped by
+`userId` in the **query filter**, not by a check after the fact; `deviceLabel` is clamped; login is
+timing-equalized through the shared placeholder; and the reset/verification paths reserve attempts
+atomically before comparing a digest.
+
+Recorded rather than changed, because each is a documented decision:
+
+- **Authenticated routes are unlimited**, including `change-password`, which spends bcrypt (~140 ms
+  measured on a login comparison). Each attempt needs a live session, and the policy is explicit; it
+  is an accepted availability consideration, not a finding.
+- **`change-password`'s strict `iat < passwordChangedAt` window** — a token minted in the same second
+  as the change survives — is pinned by the Phase 15 suite as the contract, not an oversight.
+- **The wider fail-open posture is untouched**: `env.nodeEnv` still defaults to `development`, so an
+  unset variable also skips the production configuration checks and selects the development
+  database. That is a deployment decision, and the new boot warning now names it.
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

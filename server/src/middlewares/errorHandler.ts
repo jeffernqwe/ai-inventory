@@ -5,6 +5,7 @@
 import type { NextFunction, Request, Response } from 'express';
 
 import { isDatabaseDownError, sanitizeMongoMessage } from '../config/db.ts';
+import { isDebugNodeEnv } from '../config/env.ts';
 import { error as logError } from '../utils/logger.ts';
 
 /**
@@ -169,14 +170,20 @@ const errorHandler = (
     body.applied = err.applied;
   }
 
-  // Expose stack traces only in non-production environments for easier debugging.
-  if (envNonProd() && err.stack) {
+  // Expose stack traces only to a process that is EXPLICITLY development or test.
+  //
+  // The rule used to publish the stack unless the environment string was exactly `production`,
+  // which is true for an unset, empty or misspelled value — so `NODE_ENV=Production` (or no
+  // NODE_ENV at all on a host that only sets its platform's own variable) published absolute local
+  // file paths and internal module names to every caller who could provoke a 4xx. `isDebugNodeEnv`
+  // is fail-closed: an environment nobody thought about withholds the detail, and
+  // `nodeEnvWarning` says so at boot so a developer running without `.env` is not left guessing why
+  // the stack disappeared.
+  if (isDebugNodeEnv() && err.stack) {
     body.stack = err.stack;
   }
 
   return res.status(status).json(body);
 };
-
-const envNonProd = () => process.env.NODE_ENV !== 'production';
 
 export default errorHandler;

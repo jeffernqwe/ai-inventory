@@ -17,7 +17,7 @@
  */
 
 import app from '../app.ts';
-import env from './env.ts';
+import env, { nodeEnvWarning } from './env.ts';
 import { connectDatabase, disconnectDatabase } from './db.ts';
 import { deploymentLine, deploymentNotes, integrationReport } from './deploymentReadiness.ts';
 import type { IntegrationReport } from './deploymentReadiness.ts';
@@ -127,6 +127,17 @@ export async function startServer({
   connected: boolean;
 } | null> {
   const exitFn = exit || ((code: number) => process.exit(code));
+
+  // A NODE_ENV that is missing or misspelled silently selects the development posture: production
+  // config checks are skipped, the development database is chosen, and error stack traces are
+  // withheld (see `isDebugNodeEnv`). Said out loud once, before anything else is attempted, because
+  // the failure it prevents lives on a host — and never fatal, since refusing to boot over a
+  // variable would take a working deployment down on its next restart.
+  //
+  // Silent under TEST_MODE: the suite leaves NODE_ENV unset by design (see `databaseNameInputs`),
+  // so the line would fire on every test boot and mean nothing.
+  const envWarning = nodeEnvWarning(process.env.NODE_ENV);
+  if (envWarning && !process.env.TEST_MODE) logger.error(`[config] warning: ${envWarning}`);
 
   // H7 — production fail-fast on invalid configuration.
   if (nodeEnv === 'production') {

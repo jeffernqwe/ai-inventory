@@ -18131,6 +18131,32 @@ makes the rule a property of the host rather than of the server.
   production cannot hit it is the measurement above, and manufacturing a refusal there would mean
   breaking the live service.
 
+## Deployed and measured (2026-10-22)
+
+Merged to `main` by fast-forward and pushed, so the release line is `0c79450` — the same commit CI
+ran green on (workflow `ci` run **`39756616296`**: `mobile`, `server` full suite, `secret-guard`,
+`attribution-guard`, all **success**). The deployment was then verified from outside, without
+touching a single environment variable on the host:
+
+| Probe | Answer |
+| --- | --- |
+| `GET /api/health` | **200** `{"status":"ok","db":"connected","environment":"production","commit":"0c79450…"}` — the deployed build, the posture it believes it is in, and zero 5xx since boot |
+| `GET /api/health/ready` / `/live` | **200** / **200** — the database gate and the dependency-free probe unchanged |
+| `POST /api/auth/login {}` | **400** `VALIDATION_ERROR`, `fields` only, **no `stack`** |
+| `POST /api/auth/login` unknown address | **401** `INVALID_CREDENTIALS` in **0.78 s** — the timing-equalized path, and nothing that distinguishes the address |
+| `GET /api/products` without a token | **401** `AUTH_REQUIRED` |
+| `POST /api/auth/renew` without a token | **401** `AUTH_REQUIRED` — the AUTH-03 route merged in this release is mounted |
+| `GET /api/no-such-route` | **404** with the path echoed back, no internal detail |
+| `GET /auth/reset` (no code) | **400**, the *"This reset link is not usable"* page, 2,175 bytes |
+
+No response carried `stack`, `file:///`, `node_modules` or an absolute local path, and the
+`environment` field reads `production` — which is the deployment-level proof that the new gate is
+inert here and that the process is not serving from the development database.
+
+One caveat about what this does **not** show: the probe bodies were checked for the shapes a leaked
+stack takes, not every response the application can produce. The suites cover the rest, and the
+refusal path itself was exercised locally rather than by breaking the live service.
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

@@ -2288,6 +2288,40 @@ full engineering record is roadmap **§27DY**.
 | **What it does NOT close** | **L-17 remains OPEN** and now gates only the AUTH-05 hosted-link path, which this flow neither needs nor repairs. A reset on Firebase's hosted page still revokes nothing. The **old** password's refusal after a reset was not re-typed by the owner (the server suite pins it), no second device's live session was observed ending, and **iOS is unverified** |
 | **Nothing else moved** | No permission, role, session-model, JWT, limiter policy, dependency or environment-variable change; the gated tier stays at **47** routes, and the mobile RBAC mirror is untouched |
 
+### Addendum — the journey is split into two steps (2026-10-22)
+
+The UI now proves the code on one screen and takes the new password on the next, so "the code was
+checked" has to survive a navigation. It survives as a **server-minted credential**, never a client
+flag:
+
+- **`POST /api/auth/password-reset/verify`** (`{ email, code }`) spends one attempt and, on a correct
+  code, answers a **32-byte CSPRNG reset authorization** plus its lifetime. The only persisted form is
+  a keyed digest under its own domain label (`reset-authorize:`), on the challenge row, under a
+  **sparse unique** index — still **no new secret**. It writes no credential and issues no session.
+- **`POST /api/auth/password-reset/confirm`** now takes `{ resetToken, newPassword, confirmPassword }`
+  and **no code and no email**: the challenge is found by the authorization's digest, so the account is
+  the one recorded when the code was issued. Reaching the password screen by navigation therefore
+  yields nothing the server will accept.
+- **Single use, twice**: `verifiedAt` is part of the verify predicate, so the six digits cannot be
+  verified again; the authorization is consumed only after a successful password write, and the row's
+  `expiresAt` is pushed forward so the TTL index cannot delete a live authorization. The authorization
+  gets **15 minutes** of its own, and is **not** consumed by a failed Admin write, so an outage does
+  not force a new email. A new code request unsets both.
+- **Same refusal surface**: generic `INVALID_PASSWORD_RESET_CODE` / new
+  `INVALID_PASSWORD_RESET_AUTHORIZATION`; the verify path answers the same 400 for an unknown address
+  as for a wrong code; both routes share the existing per-IP confirm limiter, so the two steps draw
+  on one guess budget.
+- **Verified**: the full two-step journey over HTTP, plus cases for no-verification, wrong code,
+  expired code, replay of each credential, cross-account body keys, and a failed credential write.
+- **Device-verified (2026-10-22)**, on an EAS `development` build on the owner's OPPO CPH1969 against
+  the local server: wrong code → one attempt spent and nothing minted; expired code → the same
+  generic refusal; correct code → the password step; *Password changed* → **Login**, where the **old**
+  password was refused (`INVALID_LOGIN_CREDENTIALS`), the new one was accepted and reached the
+  dashboard, and a session issued **before** the reset answered `GET /api/auth/me` → **401
+  `SESSION_INVALIDATED`**. The same run drove **Create Account's** email verification to a new
+  tenant. Codes were minted by a throwaway script because a probe address has no inbox; Brevo
+  delivery of this flow's code is the 2026-10-21 measurement. iOS remains unverified.
+
 ---
 
 ## 50. ERROR DETAIL IS RELEASED ONLY TO AN EXPLICITLY DEVELOPMENT PROCESS (2026-10-22)

@@ -194,9 +194,44 @@ export function requestPasswordResetCode(email: string): Promise<ApiResponse> {
   return apiFetch('/api/auth/password-reset/code', { method: 'POST', body: { email } });
 }
 
-export interface PasswordResetCodePayload {
+/**
+ * POST /api/auth/password-reset/verify -> { message, resetToken, expiresInSeconds } (200). PUBLIC.
+ *
+ * STEP ONE OF TWO. A correct six-digit code buys a short-lived, single-use RESET AUTHORIZATION —
+ * the only thing the server will accept as proof that a code was checked. The token is a
+ * credential: it is kept in memory by `lib/passwordResetSession.ts`, never in a route param, never
+ * persisted and never logged.
+ *
+ * 400 `INVALID_PASSWORD_RESET_CODE` for a wrong, expired, used or exhausted code — one code for
+ * all four, deliberately; 400 `VALIDATION_ERROR` with `fields` when the code is not six digits;
+ * 503 `PASSWORD_RESET_CODE_NOT_CONFIGURED` when the deployment cannot run the flow.
+ */
+export interface PasswordResetCodeVerifyPayload {
   email: string;
   code: string;
+}
+
+export interface PasswordResetCodeVerification {
+  message?: string;
+  /** Proof that the code was verified. Consumed by `confirmPasswordResetCode`. */
+  resetToken: string;
+  /** How long the authorization stays usable, in seconds. */
+  expiresInSeconds: number;
+}
+
+export function verifyPasswordResetCode({
+  email,
+  code,
+}: PasswordResetCodeVerifyPayload): Promise<PasswordResetCodeVerification> {
+  return apiFetch<PasswordResetCodeVerification>('/api/auth/password-reset/verify', {
+    method: 'POST',
+    body: { email, code },
+  });
+}
+
+export interface PasswordResetConfirmPayload {
+  /** The authorization `verifyPasswordResetCode` returned. Never a code, never an address. */
+  resetToken: string;
   newPassword: string;
   confirmPassword: string;
 }
@@ -204,24 +239,27 @@ export interface PasswordResetCodePayload {
 /**
  * POST /api/auth/password-reset/confirm -> { message } (200). PUBLIC.
  *
- * `confirmPassword` is checked server-side BEFORE the code is spent, so the field name must
- * match the server's exactly or a mistyped confirmation could cost the person the code.
- * 400 `INVALID_PASSWORD_RESET_CODE` for a wrong, expired, used or exhausted code — one code
- * for all four, deliberately; 400 `VALIDATION_ERROR` with `fields` when the password breaks
- * the policy or the code is not six digits.
+ * STEP TWO OF TWO, and the only route that writes the password. It carries NO code and no email:
+ * the account is resolved from the authorization, so there is nothing here for a client to point
+ * at a different account.
+ *
+ * `confirmPassword` is checked server-side BEFORE the authorization is spent, so the field name
+ * must match the server's exactly or a mistyped confirmation could cost the person their
+ * verification. 400 `INVALID_PASSWORD_RESET_AUTHORIZATION` for a missing, unknown, expired or
+ * already-used authorization; 400 `VALIDATION_ERROR` with `fields` when the password breaks the
+ * policy.
  *
  * A SUCCESSFUL RESET ISSUES NO SESSION. The server ends every existing one and the person
  * signs in with the password they just chose.
  */
 export function confirmPasswordResetCode({
-  email,
-  code,
+  resetToken,
   newPassword,
   confirmPassword,
-}: PasswordResetCodePayload): Promise<ApiResponse> {
+}: PasswordResetConfirmPayload): Promise<ApiResponse> {
   return apiFetch('/api/auth/password-reset/confirm', {
     method: 'POST',
-    body: { email, code, newPassword, confirmPassword },
+    body: { resetToken, newPassword, confirmPassword },
   });
 }
 

@@ -1,80 +1,75 @@
 /**
- * AUTH-06 — the reset-code CONFIRM lifecycle.
+ * AUTH-06 (two-step recovery) — the reset-code CONFIRM lifecycle.
  *
- * One exported operation: `confirmPasswordResetCode({ email, code, newPassword })`. It checks a
- * submitted six-digit code against the caller's challenge and — only if the code is correct —
- * replaces the account's password through Firebase, stamps `passwordChangedAt`, and revokes every
- * existing session.
+ * One exported operation: `confirmPasswordResetCode({ resetToken, newPassword })`. It spends the
+ * one-time authorization a successful code verification minted and — only then — replaces the
+ * account's password through Firebase, stamps `passwordChangedAt`, and revokes every existing
+ * session.
  *
- * THE ORDER OF THE STEPS IS THE DESIGN, and every reordering that looks harmless is not.
+ * WHY IT NO LONGER TAKES A CODE. The code is verified on its own screen, and this step runs after
+ * it. Accepting a code here as well would mean two paths to the same write, one of which would
+ * have to re-implement the guess budget; and a flow that could complete from this screen alone
+ * would be a flow a client could reach by navigation rather than by proof. So the only thing this
+ * step accepts is the authorization the verify step issued, and the only way to hold one is to have
+ * presented a correct code.
+ *
+ * THE ORDER OF THE STEPS IS THE DESIGN.
  *
  *   1. `now` IS READ ONCE. Every predicate and the `usedAt` stamp derive from one instant, so the
- *      reservation, the expiry check and the consumption cannot disagree about what time it is.
+ *      lookup, the expiry check and the consumption cannot disagree about what time it is.
  *
- *   2. THE CONFIGURATION QUESTION COMES BEFORE ANY DATABASE WORK. A server that cannot key a
- *      digest cannot verify anything, so asking it to try would burn an attempt and answer a lie.
+ *   2. THE CONFIGURATION QUESTION COMES BEFORE ANY DATABASE WORK: without the pepper nothing can be
+ *      compared, so trying would answer a lie.
  *
- *   3. A BLANK CODE IS REFUSED BEFORE ANY DATABASE WORK, with the same single code as every other
- *      refusal: a client-side formatting bug must never spend an attempt on the person's behalf.
+ *   3. A BLANK TOKEN IS REFUSED BEFORE ANY DATABASE WORK, with the one generic code: a client-side
+ *      bug must never look like an expired authorization to the person.
  *
- *   4. ONE ATOMIC RESERVATION. A single conditional `findOneAndUpdate` carries the whole gate —
- *      the address digest, `usedAt: null`, an unexpired `expiresAt`, and `attempts` below the cap
- *      — and its only effect is `$inc: { attempts: 1 }`. No upsert, no transaction, no lock: the
- *      unique `{ emailHmac }` index and single-document atomicity are the mechanism.
+ *   4. THE CHALLENGE IS FOUND BY THE AUTHORIZATION'S DIGEST, never by an address. The token is the
+ *      only thing the caller supplies, so it is the only thing that can choose a row — and a row is
+ *      what names the account. That is the binding the requirement asks for: the authorization
+ *      belongs to one challenge, the challenge to one account, and neither can be re-pointed by a
+ *      submitted email, a `userId` or a `businessId` (there is no such field here at all).
  *
- *   5. A MISS IS ONE INDISTINGUISHABLE REFUSAL. Absent, already-used, expired and exhausted all
- *      fail the same predicate and produce the same code, because telling them apart would
- *      describe account state a caller presenting a code is not entitled to.
+ *   5. ONE INDISTINGUISHABLE REFUSAL for missing, unknown, expired and already-used authorizations.
+ *      Telling them apart would describe account state to a caller who has proved nothing.
  *
- *   6. THE DIGEST IS COMPARED AFTER THE RESERVATION, which is the attempt budget: a wrong code has
- *      already spent its attempt, so guessing is bounded to `MAX_ATTEMPTS` submissions per
- *      challenge. The comparison fails closed on anything unusable.
+ *   6. THE ACCOUNT IS THE ONE THE CHALLENGE NAMED. A row whose user has since been removed,
+ *      disabled or lost its `firebaseUid` answers the SAME refusal, because it is the same class of
+ *      fact.
  *
- *   7. THE ACCOUNT IS THE ONE THE CHALLENGE NAMED. `reserved.userId` is read here and nowhere is
- *      the address used to look an account up again — a submitted address can address a challenge
- *      and can never choose an account. A row whose user has since been removed, disabled, or
- *      lost its `firebaseUid` answers the SAME refusal, because it is the same class of fact.
+ *   7. THE PASSWORD IS WRITTEN THROUGH THE ADMIN BRIDGE, FIRST, AND FAILS HONESTLY. On failure the
+ *      classified domain error propagates unchanged and `usedAt` is NOT set — so the authorization
+ *      stays usable for its remaining lifetime, at no cost, which is the reason a transient outage
+ *      does not force a new email.
  *
- *   8. THE PASSWORD IS WRITTEN THROUGH THE NEW ADMIN BRIDGE, FIRST, AND FAILS HONESTLY. On failure
- *      the classified domain error propagates unchanged and `usedAt` is NOT set — so the code
- *      stays retryable, at the cost that an outage spends the attempt budget (the AUTH-04 AD-12
- *      ordering, reused rather than re-invented). Nothing is compensated, because the existing
- *      architecture compensates only for inventory.
- *
- *   9/10. THE STAMP AND THE REVOCATION COME NEXT, IN THAT ORDER, AND NEVER BOTH SKIPPED. The
+ *   8/9. THE STAMP AND THE REVOCATION COME NEXT, IN THAT ORDER, AND NEVER BOTH SKIPPED. The
  *      `passwordChangedAt` stamp is what `authenticate.ts` compares a token's `iat` against, and
- *      `revokeAllSessions` closes the same-second hole the integer-second comparison cannot — the
- *      pair `credentialsChanged.service.ts` and 26B's reset both use. THIS is the guarantee a
- *      Firebase-native reset could not give, and the reason the server performs the change.
+ *      `revokeAllSessions` closes the same-second hole the integer-second comparison cannot.
  *
- *   11. THE REFRESH-TOKEN REVOCATION IS BEST EFFORT. By this point the password has changed and
- *      every Inventory AI session is ended, so failing the request would report a false failure.
- *      A failure is recorded with a fixed reason, so the residual ("a Firebase session may survive
- *      if this failed") is visible to an operator instead of hidden.
+ *   10. THE REFRESH-TOKEN REVOCATION IS BEST EFFORT. By this point the password has changed and
+ *       every Inventory AI session is ended, so failing the request would report a false failure.
  *
- *   12. THE CONSUME IS SEPARATE AND NON-FATAL. Only after the password write succeeds is `usedAt`
- *      stamped, with the predicate `{ _id, usedAt: null }`, and the result is deliberately not
- *      asserted: two concurrent valid confirmations both reach the Admin write, and only one may
- *      transition `usedAt`, so the loser's miss means "already consumed microseconds ago".
+ *   11. THE CONSUME IS SEPARATE AND NON-FATAL. Only after the password write succeeds is `usedAt`
+ *       stamped, with the predicate `{ _id, usedAt: null }`, and the result is deliberately not
+ *       asserted: two concurrent valid confirmations both reach the Admin write, and only one may
+ *       transition `usedAt`, so the loser's miss means "already consumed microseconds ago". WHAT IS
+ *       GUARANTEED is the property that matters: once consumed, the same authorization can never
+ *       start a second reset, and a replay is refused by predicate (4).
  *
- *   13. THE AUDIT ROW IS WRITTEN LAST AND IS NON-FATAL. Unlike the verification flow, a tenant
- *      DOES exist here, so `recordAudit` can be called with a real `businessId` — and it must be,
- *      because a password change is exactly the governance event the audit trail exists for. A
- *      failure to record it does not unsucceed the reset: the password has already changed, and
- *      reporting a failure would invite a second attempt that cannot help.
+ *   12. THE AUDIT ROW IS WRITTEN LAST AND IS NON-FATAL, exactly as before: a password change is
+ *       the governance event the trail exists for, but reporting a failure after the password has
+ *       changed would invite an attempt that cannot help.
  *
- * NO PLAINTEXT CODE IS STORED, LOGGED OR RETURNED, and no password is either: the password is an
- * argument that goes to the Admin boundary, and nothing in this module retains it.
+ * NOTHING HERE LOGS OR RETURNS A TOKEN, A CODE OR A PASSWORD: the new password is an argument that
+ * goes to the Admin boundary, and nothing in this module retains it.
  */
 
 import { error as logError, info as logInfo } from '../../utils/logger.ts';
-import { normalizeEmail } from '../../utils/validate.ts';
 import User from '../../models/user.model.ts';
 import PasswordResetChallenge from '../../models/passwordResetChallenge.model.ts';
 import {
-  INVALID_PASSWORD_RESET_CODE,
+  INVALID_PASSWORD_RESET_AUTHORIZATION,
   PASSWORD_RESET_CODE_LOG_EVENTS,
-  PASSWORD_RESET_CODE_MAX_ATTEMPTS,
   PASSWORD_RESET_CODE_NOT_CONFIGURED,
 } from '../../constants/passwordResetCode.ts';
 import { isPasswordResetCodeConfigured, passwordResetCodePepper } from '../../config/passwordResetCode.ts';
@@ -82,45 +77,45 @@ import { revokeAllSessions } from '../session.service.ts';
 import { recordAudit } from '../audit.service.ts';
 import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../../constants/audit.ts';
 import { revokeFirebaseRefreshTokens, updateFirebaseUserPassword } from '../firebase/passwordUpdater.ts';
-import { hashResetCode, hashResetEmail, resetDigestMatches } from './code.ts';
+import { hashResetAuthorization } from './code.ts';
 import { PasswordResetCodeError } from './errors.ts';
 
 /**
- * The `{ email, code, newPassword }` a caller submits.
+ * The `{ resetToken, newPassword }` a caller submits.
  *
- * All three stay `unknown`: this service is where they are interpreted, so it cannot assume the
- * caller validated them. There is deliberately NO `userId`, `businessId`, `role`, `status` or
- * `firebaseUid` field — the account comes from the challenge row, so a body carrying any of those
- * is inert by construction rather than rejected by a check someone could later delete.
+ * Both stay `unknown`: this service is where they are interpreted, so it cannot assume the caller
+ * validated them. There is deliberately no `email`, `code`, `userId`, `businessId`, `role` or
+ * `firebaseUid` field — the account comes from the challenge the token addresses, so a body
+ * carrying any of those is inert by construction rather than rejected by a check someone could
+ * later delete.
  */
 export interface ConfirmPasswordResetCodeInput {
-  email?: unknown;
-  code?: unknown;
+  resetToken?: unknown;
   newPassword?: unknown;
 }
 
-const INVALID_CODE_MESSAGE =
-  'That password reset code is invalid or has expired. Please request a new one.';
+const INVALID_TOKEN_MESSAGE =
+  'That verification has expired. Please verify your reset code again.';
 
 const NOT_CONFIGURED_MESSAGE =
   'Password reset is temporarily unavailable. Please try again later.';
 
 const ACTIVE_STATUS = 'ACTIVE';
 
-function invalidCode() {
-  return new PasswordResetCodeError(INVALID_PASSWORD_RESET_CODE, INVALID_CODE_MESSAGE);
+function invalidToken() {
+  return new PasswordResetCodeError(INVALID_PASSWORD_RESET_AUTHORIZATION, INVALID_TOKEN_MESSAGE);
 }
 
 function notConfigured() {
   return new PasswordResetCodeError(PASSWORD_RESET_CODE_NOT_CONFIGURED, NOT_CONFIGURED_MESSAGE);
 }
 
-/** Records a refusal. Fixed event name, no identifier and no value — not the code, not the address. */
+/** Records a refusal. Fixed event name, no identifier and no value. */
 function logRefused(reason: string) {
   logError({
     type: PASSWORD_RESET_CODE_LOG_EVENTS.FAILED,
     reason,
-    message: '[password-reset-code] a reset code was not accepted',
+    message: '[password-reset-code] a reset authorization was not accepted',
   });
 }
 
@@ -156,8 +151,7 @@ function logRevokeFailed(err: unknown) {
  * Records a failed audit write. Never throws — see the note at its call site.
  *
  * Carries a fixed reason and no upstream message: the audit layer's error is not a credential, but
- * this is still a record written on an unauthenticated path, and the closed-set reason is what an
- * operator greps for anyway.
+ * this is still a record written on an unauthenticated path.
  */
 function logAuditFailed() {
   logError({
@@ -168,107 +162,88 @@ function logAuditFailed() {
 }
 
 /**
- * Spend a reset code and replace the account's password.
+ * Spend a verified reset authorization and replace the account's password.
  *
  * Resolves with `{ changedAt }` on success. Throws:
  *
  *   * `PasswordResetCodeError` `PASSWORD_RESET_CODE_NOT_CONFIGURED` for an unusable pepper;
- *   * `PasswordResetCodeError` `INVALID_PASSWORD_RESET_CODE` for a blank code, a reservation miss,
- *     a digest mismatch, or an account that is no longer writable;
+ *   * `PasswordResetCodeError` `INVALID_PASSWORD_RESET_AUTHORIZATION` for a blank token, an unknown
+ *     token, an expired or already-used one, or an account that is no longer writable;
  *   * the unchanged, classified Firebase errors from the Admin bridge — with `usedAt` left unset.
  */
 export async function confirmPasswordResetCode({
-  email,
-  code,
+  resetToken,
   newPassword,
 }: ConfirmPasswordResetCodeInput = {}): Promise<{ changedAt: Date }> {
   // ---- 1. One instant for every predicate and for the `usedAt` stamp. -----------------
   const now = new Date();
 
-  // ---- 2. A server that cannot key a digest cannot verify a code. --------------------
+  // ---- 2. A server that cannot key a digest cannot verify a token. -------------------
   if (!isPasswordResetCodeConfigured()) throw notConfigured();
 
-  // ---- 3. Refuse a blank code before any database work. ------------------------------
-  const raw = typeof code === 'string' ? code.trim() : '';
+  // ---- 3. Refuse a blank token before any database work. -----------------------------
+  const raw = typeof resetToken === 'string' ? resetToken.trim() : '';
   if (!raw) {
-    logRefused('blank_code');
-    throw invalidCode();
+    logRefused('blank_token');
+    throw invalidToken();
   }
 
   const pepper = passwordResetCodePepper();
-  const address = normalizeEmail(email);
 
-  // ---- 4. One atomic reservation. ---------------------------------------------------
-  // The whole gate is this predicate — address, liveness, expiry and the attempt cap — and the
-  // only effect is one increment. `findOneAndUpdate` runs no schema validators and nothing else is
-  // written, so there is no required field to forget. No upsert: a missing challenge must NOT be
-  // created by a guess.
-  const reserved = await PasswordResetChallenge.findOneAndUpdate(
-    {
-      emailHmac: hashResetEmail(pepper, address),
-      usedAt: null,
-      expiresAt: { $gt: now },
-      attempts: { $lt: PASSWORD_RESET_CODE_MAX_ATTEMPTS },
-    },
-    { $inc: { attempts: 1 } },
-    { returnDocument: 'after' }
-  );
+  // ---- 4/5. Find the challenge the authorization belongs to, or refuse indistinguishably.
+  // `verifiedAt: { $ne: null }` is belt-and-braces: an authorization digest is only ever written
+  // by a successful verification, so a row that has one must have passed through that path.
+  const challenge = await PasswordResetChallenge.findOne({
+    authorizationHmac: hashResetAuthorization(pepper, raw),
+    usedAt: null,
+    verifiedAt: { $ne: null },
+    authorizationExpiresAt: { $gt: now },
+  });
 
-  // ---- 5. A miss is one indistinguishable refusal. ----------------------------------
-  if (!reserved) {
-    logRefused('invalid_code');
-    throw invalidCode();
+  if (!challenge) {
+    logRefused('invalid_authorization');
+    throw invalidToken();
   }
 
-  // ---- 6. Compare the digest, with the attempt already spent. ------------------------
-  if (!resetDigestMatches(reserved.codeHmac, hashResetCode(pepper, raw))) {
-    logRefused('invalid_code');
-    throw invalidCode();
-  }
-
-  // ---- 7. The account is the one the challenge named. -------------------------------
-  // Never the submitted address: that value only addressed the challenge.
-  const user = await User.findById(reserved.userId);
+  // ---- 6. The account is the one the challenge named. -------------------------------
+  const user = await User.findById(challenge.userId);
   if (!user || user.status !== ACTIVE_STATUS) {
     logRefused('account_not_writable');
-    throw invalidCode();
+    throw invalidToken();
   }
   if (typeof user.firebaseUid !== 'string' || user.firebaseUid.trim() === '') {
     logRefused('account_not_writable');
-    throw invalidCode();
+    throw invalidToken();
   }
 
-  // ---- 8. The credential write, first, and it fails honestly. ------------------------
+  // ---- 7. The credential write, first, and it fails honestly. -----------------------
   // The error travels unchanged; no HTTP status is decided here. `usedAt` stays unset, so the
-  // code remains retryable at the cost of the attempt already reserved — the AUTH-04 AD-12
-  // ordering, stated rather than hidden.
+  // authorization remains usable for its remaining lifetime.
   await updateFirebaseUserPassword(user.firebaseUid, newPassword);
 
-  // ---- 9. The stamp `authenticate.ts` compares a token's `iat` against. --------------
+  // ---- 8. The stamp `authenticate.ts` compares a token's `iat` against. -------------
   const changedAt = now;
   await User.updateOne({ _id: user._id }, { $set: { passwordChangedAt: changedAt } });
 
-  // ---- 10. End every session, closing the same-second hole the stamp cannot. --------
+  // ---- 9. End every session, closing the same-second hole the stamp cannot. --------
   await revokeAllSessions({ userId: user._id, businessId: user.businessId, now });
 
-  // ---- 11. Best effort: invalidate the identity's refresh tokens too. --------------
-  // Not fatal — the password has changed and the sessions are gone — but recorded, so the residual
-  // is visible rather than assumed away.
+  // ---- 10. Best effort: invalidate the identity's refresh tokens too. --------------
   try {
     await revokeFirebaseRefreshTokens(user.firebaseUid);
   } catch (err) {
     logRevokeFailed(err);
   }
 
-  // ---- 12. Consume, non-fatally. ----------------------------------------------------
-  // The result is deliberately NOT asserted: a concurrent valid confirmation may already have
-  // transitioned `usedAt`, which is the intended behaviour rather than a failure of this request.
+  // ---- 11. Consume, non-fatally. ---------------------------------------------------
+  // Deliberately not asserted — see the header: a concurrent confirmation may already have
+  // transitioned `usedAt`, and that is the intended single-use outcome rather than a failure.
   await PasswordResetChallenge.findOneAndUpdate(
-    { _id: reserved._id, usedAt: null },
+    { _id: challenge._id, usedAt: null },
     { $set: { usedAt: now } }
   );
 
-  // ---- 13. The audit row, non-fatal. ------------------------------------------------
+  // ---- 12. The audit row, non-fatal. -----------------------------------------------
   try {
     await recordAudit({
       businessId: user.businessId,

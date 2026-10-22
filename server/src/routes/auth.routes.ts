@@ -4,6 +4,7 @@ import { register, login, me, changePassword, updateMe, logout, listSessions, re
 import { forgotPassword, resetPassword as resetPasswordHandler } from '../controllers/passwordReset.controller.ts';
 import {
   passwordResetCodeRequest,
+  passwordResetCodeVerify,
   passwordResetCodeConfirm,
 } from '../controllers/passwordResetCode.controller.ts';
 import { firebaseExchange, firebaseRegister, firebaseLink, credentialsChanged, renew } from '../controllers/firebaseAuth.controller.ts';
@@ -92,18 +93,23 @@ export function createAuthRouter({ limits }: AuthRouterOptions = {}) {
   // THE LIMITERS ARE THE EXISTING ONES, deliberately rather than new factories: they already key
   // on the submitted address and the caller's IP, which is exactly the budget this surface needs,
   // and adding a near-identical factory would give the project two places to change one policy.
-  // The request route is limited per address AND per IP; the confirm route per IP.
+  // The request route is limited per address AND per IP; the verify and confirm routes per IP, on
+  // the SAME limiter instance, so the two steps of one journey draw on one guess budget rather
+  // than each getting a fresh allowance.
+  //
+  // THE FLOW IS TWO STEPS (2026-10-22). `/verify` proves the emailed code and answers with a
+  // short-lived, single-use authorization; `/confirm` spends that authorization and writes the
+  // password. `/confirm` reads no code, so there is no second path to the credential write — a
+  // client that skips the first screen holds nothing the second route will accept.
+  const passwordResetConfirmLimiter = createPasswordResetConfirmLimiter(limits);
   router.post(
     '/password-reset/code',
     createPasswordResetRequestAccountLimiter(limits),
     createPasswordResetRequestIpLimiter(limits),
     passwordResetCodeRequest
   );
-  router.post(
-    '/password-reset/confirm',
-    createPasswordResetConfirmLimiter(limits),
-    passwordResetCodeConfirm
-  );
+  router.post('/password-reset/verify', passwordResetConfirmLimiter, passwordResetCodeVerify);
+  router.post('/password-reset/confirm', passwordResetConfirmLimiter, passwordResetCodeConfirm);
 
   // Public — Firebase authentication (Phase 32C). Both routes are reachable ONLY
   // by a caller who does not hold an Inventory AI JWT, which is why they carry no

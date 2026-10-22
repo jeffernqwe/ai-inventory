@@ -79,6 +79,35 @@ const passwordResetChallengeSchema = new Schema(
       default: 0,
       min: 0,
     },
+    // When the CODE was verified. Null means the code has not been checked yet.
+    //
+    // ITS PRESENCE IS ONE-WAY, and that is what makes the code non-reusable: the verify predicate
+    // includes `verifiedAt: null`, so a code that has been successfully presented once can never
+    // be verified again — not by the same person, and not by anyone who read the inbox later. A
+    // person who loses the verified state asks for a new code, which supersedes this row.
+    verifiedAt: {
+      type: Date,
+      default: null,
+    },
+    // The keyed digest of the reset AUTHORIZATION minted by a successful verification.
+    //
+    // Sparse and unique: one live authorization per challenge, and absent rows stay out of the
+    // index entirely (a plain unique index would allow exactly one unverified challenge, because
+    // every unverified row would carry the same `null`). The digest is what the second step
+    // presents; the token itself is never stored.
+    authorizationHmac: {
+      type: String,
+      trim: true,
+      unique: true,
+      sparse: true,
+    },
+    // When that authorization stops working. A dedicated field rather than a reuse of the code's
+    // `expiresAt`, because the two credentials are issued at different moments and the person is
+    // entitled to a full working window after they type the code correctly.
+    authorizationExpiresAt: {
+      type: Date,
+      default: null,
+    },
     // When the challenge was consumed. Null means live. Never unset, so a spent code stays spent
     // and a partially completed confirmation is never replayable.
     usedAt: {

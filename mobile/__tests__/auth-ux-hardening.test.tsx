@@ -58,8 +58,17 @@ type View = Awaited<ReturnType<typeof render>>;
 const mount = (element: React.ReactElement): Promise<View> =>
   render(<ThemeProvider>{element}</ThemeProvider>);
 
+/**
+ * The six-digit code field is no longer a placeholder-bearing `Input`: it is six boxes over one
+ * transparent text field, so it is addressed by its testID. Every other field keeps working by
+ * placeholder, which is what these cases were written against.
+ */
 const fill = async (view: View, placeholder: string, text: string): Promise<void> => {
-  await fireEvent.changeText(view.getByPlaceholderText(placeholder), text);
+  const field =
+    placeholder === '123456'
+      ? view.getByTestId('code-input')
+      : view.getByPlaceholderText(placeholder);
+  await fireEvent.changeText(field, text);
 };
 
 // ---------------------------------------------------------------------------
@@ -234,7 +243,7 @@ describe('verification screen', () => {
     ).toBe(true);
 
     // The keyboard's Go key reaches the same guard, not the network.
-    await fireEvent(view.getByPlaceholderText('123456'), 'submitEditing');
+    await fireEvent(view.getByTestId('code-input'), 'submitEditing');
     expect(confirmVerificationCode).not.toHaveBeenCalled();
     expect(view.getByText('Enter the 6-digit code from your email.')).toBeTruthy();
 

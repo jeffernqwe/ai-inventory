@@ -31,6 +31,7 @@
 import crypto from 'node:crypto';
 
 import {
+  PASSWORD_RESET_AUTHORIZATION_DOMAIN,
   PASSWORD_RESET_CODE_DOMAIN,
   PASSWORD_RESET_CODE_LENGTH,
   PASSWORD_RESET_EMAIL_DOMAIN,
@@ -79,6 +80,22 @@ export function hashResetEmail(pepper: string, email: unknown): string {
 }
 
 /**
+ * A fresh reset authorization: 32 random bytes as base64url (43 characters).
+ *
+ * THIS IS THE CREDENTIAL THE SECOND STEP PRESENTS, and it is not derived from the code, the
+ * address or the account — a caller who saw one reset cannot compute another. Only its keyed
+ * digest is stored, so a stolen collection yields nothing to present.
+ */
+export function generateResetAuthorization(): string {
+  return crypto.randomBytes(32).toString('base64url');
+}
+
+/** The only form of an authorization that may ever be persisted or compared. */
+export function hashResetAuthorization(pepper: string, token: string): string {
+  return keyedDigest(pepper, PASSWORD_RESET_AUTHORIZATION_DOMAIN + String(token));
+}
+
+/**
  * Compares two digests without leaking, through timing, how far a guess got.
  *
  * FAILS CLOSED on anything that is not two non-empty strings of equal length — the platform's
@@ -105,5 +122,7 @@ export default {
   generateResetCode,
   hashResetCode,
   hashResetEmail,
+  generateResetAuthorization,
+  hashResetAuthorization,
   resetDigestMatches,
 };

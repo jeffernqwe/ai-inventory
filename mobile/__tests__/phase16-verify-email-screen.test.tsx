@@ -134,7 +134,7 @@ describe('the verify screen', () => {
     const view = await mount();
 
     expect(view.getByText(TITLE)).toBeTruthy();
-    expect(view.getByPlaceholderText('123456')).toBeTruthy();
+    expect(view.getByTestId('code-input')).toBeTruthy();
     expect(view.getByRole('button', { name: VERIFY })).toBeTruthy();
     expect(view.getByRole('button', { name: SEND })).toBeTruthy();
 
@@ -218,7 +218,7 @@ describe('the unreachable state', () => {
     expect(view.getByText('Sign out')).toBeTruthy();
 
     // No code form — there is no readable identity to verify yet.
-    expect(view.queryByPlaceholderText('123456')).toBeNull();
+    expect(view.queryByTestId('code-input')).toBeNull();
     expect(view.queryByRole('button', { name: VERIFY })).toBeNull();
     // And NOTHING ran by itself: an automatic retry here would be an unattended loop.
     expect(retryVerificationResume).not.toHaveBeenCalled();
@@ -270,7 +270,7 @@ describe('an initial request failure (Option B)', () => {
 
     expect(view.getByText(REASON)).toBeTruthy();
     // The code form is present — the person is in the journey, not stranded.
-    expect(view.getByPlaceholderText('123456')).toBeTruthy();
+    expect(view.getByTestId('code-input')).toBeTruthy();
     // And it must NOT have been auto-resent on arrival.
     expect(requestVerificationCode).not.toHaveBeenCalled();
   });
@@ -290,7 +290,7 @@ describe('the code field', () => {
   it('accepts digits only and caps the value at six', async () => {
     const view = await mount();
 
-    await fireEvent.changeText(view.getByPlaceholderText('123456'), '1a2b3c4d5e6f7g');
+    await fireEvent.changeText(view.getByTestId('code-input'), '1a2b3c4d5e6f7g');
 
     // The non-digits are stripped and the value is capped, so the field holds the code.
     expect(view.getByDisplayValue('123456')).toBeTruthy();
@@ -298,7 +298,7 @@ describe('the code field', () => {
 
   it('★ declares what the field holds, so the platform can offer the emailed code', async () => {
     const view = await mount();
-    const field = view.getByPlaceholderText('123456');
+    const field = view.getByTestId('code-input');
 
     // A six-digit code cannot be recalled from memory; this declaration is what makes Android
     // offer an autofill chip and iOS show the code from Mail above the keyboard.
@@ -313,7 +313,7 @@ describe('the code field', () => {
       Boolean(view.getByRole('button', { name: VERIFY }).props.accessibilityState?.disabled);
     expect(disabled()).toBe(true);
 
-    await fireEvent.changeText(view.getByPlaceholderText('123456'), '123456');
+    await fireEvent.changeText(view.getByTestId('code-input'), '123456');
     expect(disabled()).toBe(false);
   });
 });
@@ -325,7 +325,7 @@ describe('the code field', () => {
 describe('verify', () => {
   it('submits the trimmed code through the context exactly once', async () => {
     const view = await mount();
-    await fireEvent.changeText(view.getByPlaceholderText('123456'), ' 123456 ');
+    await fireEvent.changeText(view.getByTestId('code-input'), ' 123456 ');
 
     await fireEvent.press(view.getByRole('button', { name: VERIFY }));
 
@@ -337,7 +337,7 @@ describe('verify', () => {
   it('★ treats "still not verified" as a NOTICE, not an error', async () => {
     confirmVerificationCode.mockResolvedValue(null);
     const view = await mount();
-    await fireEvent.changeText(view.getByPlaceholderText('123456'), '123456');
+    await fireEvent.changeText(view.getByTestId('code-input'), '123456');
 
     await fireEvent.press(view.getByRole('button', { name: VERIFY }));
 
@@ -352,7 +352,7 @@ describe('verify', () => {
       new ApiError(400, 'INVALID_VERIFICATION_CODE', 'That code is not valid or has expired.')
     );
     const view = await mount();
-    await fireEvent.changeText(view.getByPlaceholderText('123456'), '000000');
+    await fireEvent.changeText(view.getByTestId('code-input'), '000000');
 
     await fireEvent.press(view.getByRole('button', { name: VERIFY }));
 
@@ -366,7 +366,7 @@ describe('verify', () => {
       ])
     );
     const view = await mount();
-    await fireEvent.changeText(view.getByPlaceholderText('123456'), '123456');
+    await fireEvent.changeText(view.getByTestId('code-input'), '123456');
 
     await fireEvent.press(view.getByRole('button', { name: VERIFY }));
 
@@ -376,7 +376,7 @@ describe('verify', () => {
   it('falls back to a generic message when a failure carries none of its own', async () => {
     confirmVerificationCode.mockRejectedValue({});
     const view = await mount();
-    await fireEvent.changeText(view.getByPlaceholderText('123456'), '123456');
+    await fireEvent.changeText(view.getByTestId('code-input'), '123456');
 
     await fireEvent.press(view.getByRole('button', { name: VERIFY }));
 

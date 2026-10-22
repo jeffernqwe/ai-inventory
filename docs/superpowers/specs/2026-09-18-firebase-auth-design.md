@@ -156,8 +156,7 @@ set.
 
 ## 2.6 Route inventory
 
-Phase 23 classifies **75 routes**: **47 permission-gated**, **13 authenticated**, **15 public**,
-**0 role-gated**. The `PUBLIC` and `AUTHENTICATED` buckets are explicit lists that each carry a
+Phase 23 classifies **76 routes**: **47 permission-gated**, **13 authenticated**, **16 public**, **0 role-gated**. The `PUBLIC` and `AUTHENTICATED` buckets are explicit lists that each carry a
 written reason; a route in no bucket fails the guard, and a declared exemption that has stopped being
 true also fails. The guard deliberately asserts **no route count** — a route is *declared* or it is not,
 and the number is derived from the declarations — so the figure above is pinned separately, by
@@ -200,6 +199,15 @@ fails if the two disagree.
 > and asks the person to sign in with the password they just chose. The **gated** tier is still
 > **47** — no permission-gated route has been added or moved by any of this work.
 
+> **AUTH-06 two-step recovery (2026-10-22) added one public route,
+> `POST /api/auth/password-reset/verify`** — 47 + 13 + 16 = **76**. The flow now proves the emailed
+> code on one screen and takes the new password on the next, so "the code was checked" has to
+> survive the navigation. It does so as a short-lived, single-use **reset authorization** minted by
+> `/verify` and spent by `/confirm`; `/confirm` reads no code and no address, so the second screen
+> cannot be navigated into. The route is public for the same reason the other two are, issues no
+> session, and shares the confirm limiter with `/confirm` so both steps draw on one per-IP budget.
+> The **gated** tier is still **47**.
+
 The auth surface (`server/src/routes/auth.routes.ts`):
 
 | Method | Path | Chain |
@@ -209,7 +217,8 @@ The auth surface (`server/src/routes/auth.routes.ts`):
 | POST | `/api/auth/forgot-password` | account limiter → IP limiter → controller |
 | POST | `/api/auth/reset-password` | confirm limiter → controller |
 | POST | `/api/auth/password-reset/code` | account limiter → IP limiter → controller |
-| POST | `/api/auth/password-reset/confirm` | confirm limiter → controller |
+| POST | `/api/auth/password-reset/verify` | confirm limiter → controller (AUTH-06 step one; mints the reset authorization) |
+| POST | `/api/auth/password-reset/confirm` | confirm limiter → controller (AUTH-06 step two; spends the authorization, reads no code) |
 | POST | `/api/auth/firebase/exchange` | firebase exchange limiter → controller |
 | POST | `/api/auth/firebase/register` | firebase register limiter → controller |
 | GET | `/api/auth/me` | `requireAuth` |

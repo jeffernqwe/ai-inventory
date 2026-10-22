@@ -249,8 +249,12 @@ const PUBLIC_ROUTES = [
     why: 'AUTH-06: how a six-digit reset code is requested — the caller has forgotten their password and holds no session by definition, and the endpoint resolves nothing but one fixed 202 so it cannot enumerate accounts; rate-limited per address + IP',
   },
   {
+    route: 'POST /api/auth/password-reset/verify',
+    why: 'AUTH-06 (two-step): proves the emailed six-digit code and mints a short-lived single-use reset authorization — the caller has no working password by definition, so no session can be required; it writes no credential and issues no session, and it answers one generic 400 for a wrong code and an unknown address alike; rate-limited per IP on the same budget as /confirm',
+  },
+  {
     route: 'POST /api/auth/password-reset/confirm',
-    why: 'AUTH-06: spends a reset code and replaces the password — reachable only by a caller with no working password, and it ISSUES no session: a completed reset ends every session and asks the person to sign in again; rate-limited per IP',
+    why: 'AUTH-06: spends the reset authorization and replaces the password — reachable only by a caller with no working password, accepts no code and no address (the account comes from the challenge), and it ISSUES no session: a completed reset ends every session and asks the person to sign in again; rate-limited per IP on the same budget as /verify',
   },
   {
     route: 'POST /api/auth/firebase/exchange',

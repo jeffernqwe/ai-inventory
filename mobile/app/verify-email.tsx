@@ -5,7 +5,7 @@ import { StyleSheet, Text } from 'react-native';
 import AuthLayout from '../components/AuthLayout';
 import Banner from '../components/Banner';
 import Button from '../components/Button';
-import Input from '../components/Input';
+import CodeInput from '../components/CodeInput';
 import { ApiError } from '../lib/client';
 import { useSession } from '../lib/auth';
 import { defaultHomePath } from '../lib/permissions';
@@ -322,8 +322,13 @@ export default function VerifyEmailScreen() {
     >
       {notice ? <Banner type="info" text={notice} /> : null}
       <Banner type="error" text={shownError} />
-      <Input
-        name="code"
+      {/**
+       * THE SAME CONTROL THE RESET JOURNEY USES, and deliberately not a second one: both screens
+       * ask for the same thing — six digits read out of an email — so they get the same boxes, the
+       * same autofill declaration, the same paste and backspace behaviour and the same error slot.
+       * Only the wiring around it differs.
+       */}
+      <CodeInput
         label="Verification code"
         value={code}
         onChangeText={(value: string) => {
@@ -331,20 +336,10 @@ export default function VerifyEmailScreen() {
           // with it: leaving "that code is invalid or has expired" under a code they are
           // halfway through replacing describes the old value, not this one.
           if (fieldErrors.code) setFieldErrors({});
-          setCode(value.replace(/\D/g, '').slice(0, CODE_LENGTH));
+          setCode(value);
         }}
-        keyboardType="number-pad"
-        maxLength={CODE_LENGTH}
-        placeholder="123456"
         error={fieldErrors.code}
         required
-        // The same declaration the reset-code screen makes, and for the same reason: six digits
-        // read out of an email are exactly what the platform's autofill can offer — Android as an
-        // autofill chip (`one-time-code`), iOS from Mail in the QuickType bar (`oneTimeCode`) —
-        // where an undeclared field gets no suggestion at all.
-        autoComplete="one-time-code"
-        textContentType="oneTimeCode"
-        returnKeyType="go"
         onSubmitEditing={submit}
       />
       {/**

@@ -271,12 +271,7 @@ export function validatePasswordResetCodeRequest(body: Body) {
 }
 
 /**
- * The confirmation payload.
- *
- * `confirmPassword` is an HTTP-LAYER field and is handled here on purpose: checking it before the
- * service is called is what guarantees a mistyped confirmation cannot spend one of the challenge's
- * five attempts. It is deliberately ABSENT from the returned object, so no caller has a variable
- * to forward or persist.
+ * The VERIFY payload — step one of the two-step flow.
  *
  * THE CODE IS SHAPE-CHECKED HERE, which is a deliberate divergence from
  * `validateEmailVerificationConfirm` (where a present but wrong code is never shape-checked). The
@@ -285,11 +280,8 @@ export function validatePasswordResetCodeRequest(body: Body) {
  * shorter value is an UNFINISHED ENTRY rather than a guess. Refusing it as a field problem costs
  * nothing secret — it says nothing about whether the address exists — while charging it an attempt
  * would make a typo indistinguishable from a wrong code.
- *
- * `newPassword` is returned UNTRIMMED: trimming would silently change the credential the person
- * typed. Its problems are re-labelled `newPassword`, exactly as validateChangePassword does.
  */
-export function validatePasswordResetCodeConfirm(body: Body) {
+export function validatePasswordResetCodeVerify(body: Body) {
   const problems = [];
   const email = normalizeEmail(body?.email);
   problems.push(...emailProblems(email));
@@ -300,6 +292,34 @@ export function validatePasswordResetCodeConfirm(body: Body) {
   } else if (!/^\d{6}$/.test(rawCode)) {
     problems.push({ field: 'code', message: 'code must be the 6-digit code from your email' });
   }
+
+  return { problems, email, code: rawCode };
+}
+
+/**
+ * The CONFIRM payload — step two, and the only step that writes a password.
+ *
+ * It reads `resetToken`, `newPassword` and `confirmPassword`, and NOTHING else: no email, no code,
+ * no `userId`, no `businessId`. The account is resolved from the challenge the authorization
+ * addresses, so a body carrying any other key has no variable to travel through.
+ *
+ * `confirmPassword` is an HTTP-LAYER field and is handled here on purpose: checking it before the
+ * service is called is what guarantees a mistyped confirmation cannot reach the credential write at
+ * all. It is deliberately ABSENT from the returned object, so no caller has a variable to forward
+ * or persist.
+ *
+ * The token is bounded but NOT format-checked, exactly as `validateResetPassword` treats the 26B
+ * token: a value that merely looks wrong is the service's one generic refusal, not a 400 that would
+ * imply the server knows what a real authorization looks like.
+ *
+ * `newPassword` is returned UNTRIMMED: trimming would silently change the credential the person
+ * typed. Its problems are re-labelled `newPassword`, exactly as validateChangePassword does.
+ */
+export function validatePasswordResetCodeConfirm(body: Body) {
+  const problems = [];
+
+  const token = requiredString(body?.resetToken, 'resetToken', RESET_TOKEN_MAX);
+  problems.push(...token.problems);
 
   problems.push(
     ...passwordProblems(body?.newPassword).map((p) => ({ ...p, field: 'newPassword' }))
@@ -312,7 +332,7 @@ export function validatePasswordResetCodeConfirm(body: Body) {
     problems.push({ field: 'confirmPassword', message: 'confirmPassword must match newPassword' });
   }
 
-  return { problems, email, code: rawCode, newPassword: body?.newPassword };
+  return { problems, resetToken: token.value, newPassword: body?.newPassword };
 }
 
 // ---------------------------------------------------------------------------

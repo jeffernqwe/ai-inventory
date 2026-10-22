@@ -4,7 +4,14 @@
  * Two PUBLIC routes, and the ONLY place a reset-code domain failure becomes an HTTP status:
  *
  *   POST /api/auth/password-reset/code     — issue a six-digit reset code by email.
- *   POST /api/auth/password-reset/confirm  — spend that code and replace the password.
+ *   POST /api/auth/password-reset/verify   — check that code and mint a one-time authorization.
+ *   POST /api/auth/password-reset/confirm  — spend that authorization and replace the password.
+ *
+ * WHY VERIFICATION AND THE PASSWORD ARE TWO ROUTES. The product asks for the code and the new
+ * password on separate screens, so "the code was checked" has to survive the navigation. It does
+ * so as a server-minted credential, never as a client flag: `/verify` is the only thing that can
+ * produce one, `/confirm` is the only thing that can spend one, and `/confirm` accepts no code at
+ * all. Reaching the second screen by any other route yields nothing the server will honour.
  *
  * WHY PUBLIC, AND WHY THAT IS NOT A CONCESSION. The person resetting a password has, by definition,
  * no usable password, so no session can be required without making the route useless. Nothing here
@@ -17,9 +24,11 @@
  *     has NO field it could reflect. `REQUEST_ACCEPTED` is one module constant returned from every
  *     non-error exit — a code sent, an unknown address, an ineligible account, and a delivery that
  *     failed are all the same bytes.
- *   * Its two refusals are both checked BEFORE the account lookup, so they are reachable
- *     identically for every caller and distinguish nothing: an unusable configuration is a 503, and
- *     an active resend cooldown is a 429.
+ *   * Its one refusal is checked BEFORE the account lookup, so it is reachable identically for
+ *     every caller and distinguishes nothing: an unusable configuration is a 503. The resend
+ *     cooldown is not a refusal at all — it answers the same 202 and sends nothing (see the
+ *     service header), because a 429 issued only when a challenge exists would answer "does this
+ *     address have an account".
  *
  * EVERY CALLER-FACING MESSAGE IS A CONTROLLER-OWNED CONSTANT. Nothing from a caught error ever
  * becomes a response field: not the service's message, not a Firebase reason, not an SDK code, not
@@ -35,14 +44,17 @@ import type { Request, Response } from 'express';
 
 import {
   validatePasswordResetCodeRequest,
+  validatePasswordResetCodeVerify,
   validatePasswordResetCodeConfirm,
 } from '../utils/validate.ts';
 import {
   requestPasswordResetCode,
+  verifyPasswordResetCode,
   confirmPasswordResetCode,
   PasswordResetCodeError,
 } from '../services/passwordResetCode/index.ts';
 import {
+  INVALID_PASSWORD_RESET_AUTHORIZATION,
   INVALID_PASSWORD_RESET_CODE,
   PASSWORD_RESET_CODE_MAIL_FAILED,
   PASSWORD_RESET_CODE_NOT_CONFIGURED,
@@ -64,6 +76,9 @@ import ApiError from '../utils/ApiError.ts';
  */
 const REQUEST_ACCEPTED_MESSAGE =
   'If an account exists for that email, a password reset code has been sent.';
+
+/** THE verify response, sent only to a caller that presented a correct code. */
+const CODE_VERIFIED_MESSAGE = 'Code verified. Choose a new password.';
 
 /** THE confirm response — the same sentence change-password uses for the same outcome. */
 const RESET_COMPLETED_MESSAGE = 'Password changed. Please sign in again.';
@@ -90,6 +105,15 @@ const MAIL_FAILED_MESSAGE = 'Password reset is temporarily unavailable. Please t
  */
 const INVALID_CODE_MESSAGE =
   'That password reset code is invalid or has expired. Please request a new one.';
+
+/**
+ * 400 — the one sentence for a missing, unknown, expired or already-used reset authorization.
+ *
+ * It says what the person has to do (verify again) and nothing about the account: an authorization
+ * token is not an email address, so this refusal cannot be used to learn whether one exists.
+ */
+const INVALID_AUTHORIZATION_MESSAGE =
+  'That verification has expired. Please verify your reset code again.';
 
 // ---------------------------------------------------------------------------
 // Domain error -> HTTP
@@ -126,6 +150,10 @@ function mapPasswordResetCodeFailure(err: unknown) {
       return new ApiError(400, INVALID_CODE_MESSAGE, INVALID_PASSWORD_RESET_CODE);
     }
 
+    if (err.code === INVALID_PASSWORD_RESET_AUTHORIZATION) {
+      return new ApiError(400, INVALID_AUTHORIZATION_MESSAGE, INVALID_PASSWORD_RESET_AUTHORIZATION);
+    }
+
     // An unrecognised code on this class is a programming fault, not a contract.
     return err;
   }
@@ -159,19 +187,48 @@ export async function passwordResetCodeRequest(req: Request, res: Response) {
 }
 
 /**
- * POST /api/auth/password-reset/confirm — public, rate-limited per IP.
+ * POST /api/auth/password-reset/verify — public, rate-limited per IP.
  *
- * A malformed payload is refused by the VALIDATOR before the service runs, so it cannot spend an
- * attempt and cannot spend the code. A well-formed but wrong code reaches the service, which is the
- * sole owner of the code's semantics.
+ * A malformed payload is refused by the VALIDATOR before the service runs, so an unfinished entry
+ * cannot spend one of the challenge's five attempts. A well-formed but wrong code reaches the
+ * service, which is the sole owner of the code's semantics.
+ *
+ * THE RESPONSE IS THE ONLY PLACE AN AUTHORIZATION IS EVER SENT, and it is sent only down this
+ * path — after the service has compared a digest and promoted the challenge. The token travels in
+ * the BODY of the next request, never in a URL, and the screen that receives it keeps it in memory
+ * rather than in navigation state.
  */
-export async function passwordResetCodeConfirm(req: Request, res: Response) {
+export async function passwordResetCodeVerify(req: Request, res: Response) {
   const body = req.body ?? {};
-  const { problems, email, code, newPassword } = validatePasswordResetCodeConfirm(body);
+  const { problems, email, code } = validatePasswordResetCodeVerify(body);
   if (problems.length > 0) throwValidation(problems);
 
   try {
-    await confirmPasswordResetCode({ email, code, newPassword });
+    const { resetToken, expiresInSeconds } = await verifyPasswordResetCode({ email, code });
+    return res.status(200).json({
+      message: CODE_VERIFIED_MESSAGE,
+      resetToken,
+      expiresInSeconds,
+    });
+  } catch (err) {
+    throw mapPasswordResetCodeFailure(err);
+  }
+}
+
+/**
+ * POST /api/auth/password-reset/confirm — public, rate-limited per IP.
+ *
+ * A malformed payload is refused by the VALIDATOR before the service runs, so a mistyped
+ * confirmation never reaches the credential write. The body carries the authorization and the new
+ * password, and no code: the code was proved on the previous step and is spent there.
+ */
+export async function passwordResetCodeConfirm(req: Request, res: Response) {
+  const body = req.body ?? {};
+  const { problems, resetToken, newPassword } = validatePasswordResetCodeConfirm(body);
+  if (problems.length > 0) throwValidation(problems);
+
+  try {
+    await confirmPasswordResetCode({ resetToken, newPassword });
   } catch (err) {
     throw mapPasswordResetCodeFailure(err);
   }
@@ -179,4 +236,4 @@ export async function passwordResetCodeConfirm(req: Request, res: Response) {
   return res.status(200).json({ message: RESET_COMPLETED_MESSAGE });
 }
 
-export default { passwordResetCodeRequest, passwordResetCodeConfirm };
+export default { passwordResetCodeRequest, passwordResetCodeVerify, passwordResetCodeConfirm };

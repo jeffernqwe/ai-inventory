@@ -195,14 +195,25 @@ export async function requestPasswordResetCode({
     codeHmac: hashResetCode(pepper, code),
     expiresAt,
     attempts: 0,
+    // A NEW CODE SUPERSEDES ANY VERIFIED STATE AND ANY OUTSTANDING AUTHORIZATION. A person who
+    // asks for another code is starting the flow again, so the previous six digits and any
+    // authorization minted from them must both stop working in the same write — otherwise an old
+    // verification could outlive the code it was proved with.
+    verifiedAt: null,
     usedAt: null,
     lastSentAt: now,
   };
 
   // ---- 6. One conditional update: supersede in place, or match nothing. ---------------
+  // `$unset` rather than `$set: null` for the authorization fields: `authorizationHmac` is a
+  // SPARSE UNIQUE index, so a row that wrote `null` there would participate in it and the second
+  // such row would collide. Unset keeps every unverified row out of the index entirely.
   const superseded = await PasswordResetChallenge.findOneAndUpdate(
     { emailHmac, lastSentAt: { $lte: cooldownFloor } },
-    { $set: currentChallenge },
+    {
+      $set: currentChallenge,
+      $unset: { authorizationHmac: '', authorizationExpiresAt: '' },
+    },
     { returnDocument: 'after' }
   );
 

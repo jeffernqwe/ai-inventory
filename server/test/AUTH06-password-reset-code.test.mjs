@@ -23,6 +23,7 @@ import assert from 'node:assert/strict';
 import { unitSuite } from './testEnv.mjs';
 
 import {
+  PASSWORD_RESET_AUTHORIZATION_TTL_MINUTES,
   PASSWORD_RESET_CODE_LENGTH,
   PASSWORD_RESET_CODE_MAX_ATTEMPTS,
   PASSWORD_RESET_CODE_RESEND_COOLDOWN_SECONDS,
@@ -32,6 +33,8 @@ import {
 import {
   formatResetCode,
   generateResetCode,
+  generateResetAuthorization,
+  hashResetAuthorization,
   hashResetCode,
   hashResetEmail,
   resetDigestMatches,
@@ -64,6 +67,14 @@ unitSuite('AUTH-06 reset code — policy vocabulary', () => {
     // test of either flow alone would catch.
     assert.equal(PASSWORD_RESET_CODE_LENGTH, 6);
     assert.equal(PASSWORD_RESET_CODE_TTL_MINUTES, 10);
+  });
+
+  it('gives the post-verification authorization its own, longer window', () => {
+    // The code is spent on verification; the authorization it mints is a different credential and
+    // is what the person types their new password against. Fifteen minutes is enough to type one
+    // and short enough that a leaked authorization is not a standing key.
+    assert.equal(PASSWORD_RESET_AUTHORIZATION_TTL_MINUTES, 15);
+    assert.ok(PASSWORD_RESET_AUTHORIZATION_TTL_MINUTES > 0);
   });
 });
 
@@ -110,6 +121,27 @@ unitSuite('AUTH-06 reset code — primitives', () => {
       hashResetEmail(PEPPER, 'owner@example.test'),
       hashVerificationEmail(PEPPER, 'owner@example.test')
     );
+  });
+
+  it('mints a 43-character base64url authorization, fresh on every call, stored only as a digest', () => {
+    const first = generateResetAuthorization();
+    const second = generateResetAuthorization();
+
+    assert.match(first, /^[A-Za-z0-9_-]{43}$/);
+    assert.notEqual(first, second, 'two authorizations must never be the same value');
+
+    const digest = hashResetAuthorization(PEPPER, first);
+    assert.match(digest, /^[0-9a-f]{64}$/);
+    assert.equal(digest, hashResetAuthorization(PEPPER, first));
+    assert.ok(!digest.includes(first));
+  });
+
+  it('separates the authorization domain from the code and address domains', () => {
+    // All three are credentials for the same account under one pepper; only the labels keep a
+    // digest minted for one from being accepted as another.
+    const authorization = hashResetAuthorization(PEPPER, '123456');
+    assert.notEqual(authorization, hashResetCode(PEPPER, '123456'));
+    assert.notEqual(authorization, hashResetEmail(PEPPER, '123456'));
   });
 
   it('normalizes the address before digesting, so case and whitespace cannot disagree', () => {
@@ -165,6 +197,23 @@ unitSuite('AUTH-06 reset code — the challenge row', () => {
     assert.equal(isRequired('expiresAt'), true);
     assert.equal(isRequired('attempts'), true);
     assert.equal(PasswordResetChallenge.schema.path('usedAt').defaultValue, null);
+  });
+
+  it('records verification and holds only the digest of the authorization it minted', () => {
+    // THE TWO-STEP BOUNDARY LIVES HERE: `verifiedAt` is what makes a code single-use, and the
+    // authorization digest is the only thing the password step can present. The token itself is
+    // never a path on the row.
+    assert.equal(PasswordResetChallenge.schema.path('verifiedAt').defaultValue, null);
+    assert.equal(PasswordResetChallenge.schema.path('authorizationHmac').options.unique, true);
+    assert.equal(
+      PasswordResetChallenge.schema.path('authorizationHmac').options.sparse,
+      true,
+      'a non-sparse unique index would allow only one unverified challenge to exist'
+    );
+    assert.equal(PasswordResetChallenge.schema.path('authorizationExpiresAt').defaultValue, null);
+    const paths = Object.keys(PasswordResetChallenge.schema.paths);
+    assert.ok(!paths.includes('resetToken'), 'the authorization itself must never be stored');
+    assert.ok(!paths.includes('authorizationToken'));
   });
 
   it('expires rows at their own expiry through a TTL index', () => {

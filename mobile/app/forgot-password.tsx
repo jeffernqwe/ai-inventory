@@ -119,7 +119,7 @@ export default function ForgotPasswordScreen() {
   return (
     <AuthLayout
       title="Forgot password?"
-      subtitle="We'll email you a 6-digit code to set a new password."
+      subtitle="We'll email you a 6-digit code. Verify it here, then choose a new password."
       footer={
         <Text style={styles.footerText}>
           Remembered it?{' '}
@@ -151,7 +151,8 @@ export default function ForgotPasswordScreen() {
       />
       <Button title="Send reset code" onPress={submit} loading={busy} full />
       <Text style={styles.body}>
-        The code expires in 10 minutes. You will choose the new password inside the app.
+        The code expires in 10 minutes. You will choose the new password inside the app, on the
+        next screen.
       </Text>
     </AuthLayout>
   );

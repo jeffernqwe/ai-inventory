@@ -1232,7 +1232,7 @@ dbSuite('Phase 26B-2 — password recovery over a real database', dbOk, () => {
     assert.equal(await bcrypt.compare(NEW_PASSWORD, stored.passwordHash), true);
   });
 
-  it('31. the recovery surface is exactly the four declared public routes', async () => {
+  it('31. the recovery surface is exactly the five declared public routes', async () => {
     // Written while 26B-2 was the domain layer only, as an inverted guard: it
     // then asserted that NO recovery route existed, so a future 26B-3 could not
     // be smuggled in unnoticed. Phase 26B-3 is that phase, and it is approved —
@@ -1248,9 +1248,14 @@ dbSuite('Phase 26B-2 — password recovery over a real database', dbOk, () => {
     // `password-reset` prefix, so they fall inside this guard's `/forgot|reset/i` net
     // rather than beside it — which is what a caller would want: any future recovery
     // surface, whatever its spelling, lands in this list and has to be argued for here.
+    //
+    // AUTH-06 TWO-STEP (2026-10-22) EXTENDED IT FROM FOUR TO FIVE, again deliberately: the flow
+    // now verifies the code on one screen and takes the password on the next, so `/verify` mints
+    // a short-lived single-use authorization and `/confirm` spends it and reads no code. Both
+    // remain public for the same reason, and neither issues a session.
     const authRoutes = readSource(new URL('../src/routes/auth.routes.js', import.meta.url));
 
-    // Exactly the four recovery paths are registered, and nothing adjacent.
+    // Exactly the five recovery paths are registered, and nothing adjacent.
     const declared = [...authRoutes.matchAll(/router\.(get|post|patch|put|delete)\(\s*'([^']+)'/g)]
       .map(([, method, path]) => `${method.toUpperCase()} ${path}`)
       .filter((route) => /forgot|reset/i.test(route));
@@ -1258,10 +1263,11 @@ dbSuite('Phase 26B-2 — password recovery over a real database', dbOk, () => {
       'POST /forgot-password',
       'POST /password-reset/code',
       'POST /password-reset/confirm',
+      'POST /password-reset/verify',
       'POST /reset-password',
     ]);
 
-    // All four are public. `requireAuth` is not on any chain — and `requireAuth`
+    // All five are public. `requireAuth` is not on any chain — and `requireAuth`
     // does appear elsewhere in the file, so this is checked per route rather
     // than by a bare substring search.
     for (const path of [
@@ -1269,6 +1275,7 @@ dbSuite('Phase 26B-2 — password recovery over a real database', dbOk, () => {
       '/reset-password',
       '/password-reset/code',
       '/password-reset/confirm',
+      '/password-reset/verify',
     ]) {
       const start = authRoutes.indexOf(`'${path}'`);
       assert.notEqual(start, -1, `${path} must be registered`);

@@ -55,6 +55,17 @@ export const PASSWORD_RESET_CODE_MAX_ATTEMPTS = 5;
  */
 export const PASSWORD_RESET_CODE_RESEND_COOLDOWN_SECONDS = 60;
 
+/**
+ * How long a VERIFIED code's reset authorization stays usable.
+ *
+ * This is a separate credential with its own lifetime, not a second copy of the code's: the code
+ * is spent when it is verified, and the person then has this long to type a new password. It is
+ * longer than the time anyone needs to type one, and short enough that a leaked authorization is
+ * not a standing key to the account. The challenge's `expiresAt` is pushed forward to cover it, so
+ * the TTL index can never delete an authorized row before its authorization ends.
+ */
+export const PASSWORD_RESET_AUTHORIZATION_TTL_MINUTES = 15;
+
 /** The challenge collection. Named once so the model, the service and the tests agree. */
 export const PASSWORD_RESET_CHALLENGE_COLLECTION = 'password_reset_challenges';
 
@@ -69,6 +80,14 @@ export const PASSWORD_RESET_CHALLENGE_COLLECTION = 'password_reset_challenges';
  */
 export const PASSWORD_RESET_CODE_DOMAIN = 'reset-code:';
 export const PASSWORD_RESET_EMAIL_DOMAIN = 'reset-email:';
+/**
+ * The domain for the post-verification reset authorization.
+ *
+ * Distinct from `reset-code:` on purpose: the two values are both bearer credentials for the same
+ * account, so a digest minted for one must never be accepted as the other. It is also distinct
+ * from every email-verification label, because both flows share one pepper.
+ */
+export const PASSWORD_RESET_AUTHORIZATION_DOMAIN = 'reset-authorize:';
 
 /**
  * The reset flow cannot run because its configuration is unusable — today, because the code pepper
@@ -96,6 +115,16 @@ export const PASSWORD_RESET_CODE_NOT_CONFIGURED = 'PASSWORD_RESET_CODE_NOT_CONFI
 export const INVALID_PASSWORD_RESET_CODE = 'INVALID_PASSWORD_RESET_CODE';
 
 /**
+ * The reset authorization was missing, unknown, expired or already used.
+ *
+ * ONE code for all four, for the same reason the code's refusal is one code: the person holding a
+ * stale authorization is told to start again, and nothing about the account is described. It is a
+ * different code from `INVALID_PASSWORD_RESET_CODE` because it names a different failure — the
+ * new-password step never sees a six-digit code at all.
+ */
+export const INVALID_PASSWORD_RESET_AUTHORIZATION = 'INVALID_PASSWORD_RESET_AUTHORIZATION';
+
+/**
  * The code was minted but could not be delivered.
  *
  * NOT answered to the caller: the request path's response is detached from delivery (the Phase 28
@@ -114,6 +143,7 @@ export const PASSWORD_RESET_CODE_MAIL_FAILED = 'PASSWORD_RESET_CODE_MAIL_FAILED'
  */
 export const PASSWORD_RESET_CODE_LOG_EVENTS = Object.freeze({
   CODE_REQUESTED: 'password_reset_code_requested',
+  CODE_VERIFIED: 'password_reset_code_verified',
   COMPLETED: 'password_reset_code_completed',
   FAILED: 'password_reset_code_failed',
   REVOKE_FAILED: 'password_reset_code_revoke_failed',
@@ -124,11 +154,14 @@ export default {
   PASSWORD_RESET_CODE_TTL_MINUTES,
   PASSWORD_RESET_CODE_MAX_ATTEMPTS,
   PASSWORD_RESET_CODE_RESEND_COOLDOWN_SECONDS,
+  PASSWORD_RESET_AUTHORIZATION_TTL_MINUTES,
   PASSWORD_RESET_CHALLENGE_COLLECTION,
   PASSWORD_RESET_CODE_DOMAIN,
   PASSWORD_RESET_EMAIL_DOMAIN,
+  PASSWORD_RESET_AUTHORIZATION_DOMAIN,
   PASSWORD_RESET_CODE_NOT_CONFIGURED,
   INVALID_PASSWORD_RESET_CODE,
+  INVALID_PASSWORD_RESET_AUTHORIZATION,
   PASSWORD_RESET_CODE_MAIL_FAILED,
   PASSWORD_RESET_CODE_LOG_EVENTS,
 };

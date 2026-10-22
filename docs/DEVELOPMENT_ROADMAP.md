@@ -18412,6 +18412,128 @@ installed again.
 **case 7** a session past the cap is refused `SESSION_REVOKED`, i.e. terminal, so the client signs out
 instead of recovering forever), but no live session was driven to its cap.
 
+# 27EI. Password recovery, split into two steps (2026-10-22)
+
+**AUTH-06UX. One new public route and one new mobile screen; the existing six-digit code, mail
+boundary, limiter policy and Firebase credential write are unchanged.** The recovery journey used to
+ask for the code and the new password on one form. It now proves the code on its own screen, then
+takes the password on another — and the proof that the code was checked is a **server-minted,
+short-lived, single-use reset authorization**, not a client flag.
+
+## Why the split needed a server-side credential
+
+Two screens mean the fact "this code was verified" has to survive a navigation. A boolean, a route
+param or a navigation flag would all be promises the client makes to itself: the second screen could
+be reached directly, and the server would still have to be willing to change a password for whoever
+asked. So the verification mints something the server will honour and nothing else will:
+
+* **`POST /api/auth/password-reset/verify`** — takes `{ email, code }`, spends one attempt, and on a
+  correct code returns `{ resetToken, expiresInSeconds }`. It writes no credential, issues no session
+  and changes nothing on the account. The token is 32 CSPRNG bytes as base64url; only its keyed
+  digest (`reset-authorize:` domain, the same `EMAIL_VERIFICATION_CODE_PEPPER` as the other flows) is
+  stored, on the challenge row, under a **sparse unique** index.
+* **`POST /api/auth/password-reset/confirm`** now takes `{ resetToken, newPassword, confirmPassword }`
+  and **no code and no email**. The challenge is found by the authorization's digest, so the account
+  is the one recorded when the code was issued — a `userId`, `businessId` or address in the body has
+  no field to travel through. A caller who navigates straight to the password screen therefore holds
+  nothing the server will accept.
+* **The code is single-use from verification, not from the password write.** `verifiedAt` is set on
+  success and is part of the verify predicate, so replaying the six digits is refused. The password
+  step gets its own **15-minute** window (`PASSWORD_RESET_AUTHORIZATION_TTL_MINUTES`), and the row's
+  `expiresAt` is pushed forward so the TTL index cannot delete a live authorization. A new code
+  request unsets the old verification and authorization in the same superseding write.
+* **The authorization survives a failed credential write.** Unlike the code, it is consumed only
+  after the Admin write succeeds, so a transient Firebase outage costs the person nothing and does
+  not force a new email.
+* Every refusal is the existing single generic code (`INVALID_PASSWORD_RESET_CODE` for the code,
+  `INVALID_PASSWORD_RESET_AUTHORIZATION` for the token) — wrong, expired, used and exhausted stay
+  indistinguishable, and the verify path answers the same 400 for an unknown address as for a wrong
+  code. Both routes share the existing per-IP confirm limiter, so the two steps draw on one guess
+  budget.
+
+## Mobile
+
+`reset-password-code.tsx` is now **code-only**: one field, *Verify code*, the resend control with its
+server-stated cooldown, and a note that checking the code does not change anything yet. On success it
+stores the authorization in `lib/passwordResetSession.ts` — **module memory, never a route param and
+never persisted** — and `router.replace`s to the new `reset-password-new.tsx`, which takes the
+password and confirmation, applies the shared policy client-side, posts only the token and the
+password, then clears both the authorization and this device's session before showing *Password
+changed* → Login. With no authorization in memory it renders a *Verify your code first* state instead
+of a form; a definitive `INVALID_PASSWORD_RESET_AUTHORIZATION` refusal from the server drops the form
+and offers *Start again*.
+
+## Verification
+
+Server `test:unit` **1264 tests / 1211 pass / 0 fail / 53 skipped**; `test:db` **864 / 774 pass / 0
+fail / 90 skipped**; `tsc`, `eslint` and both module-graph checks clean. Mobile **81 suites / 997
+tests / 0 failures**, `tsc` clean. New cases cover: a correct code mints an authorization whose
+token is never stored; a wrong code spends exactly one attempt and mints nothing; the same code
+cannot be verified twice; a new code request invalidates an outstanding authorization; a password
+cannot be changed without a verification (blank, junk and code-as-token all refused); the
+authorization is bound to its account even when the body names another; it cannot be replayed after a
+successful reset; it expires on its own window; and it survives a failed credential write. Route
+inventory 75 → **76** (public 15 → **16**), recorded in design §2.6, the Phase 23 public register and
+the Phase 26B recovery-surface guard.
+
+## The six-box code field (2026-10-22)
+
+Both screens that ask for a six-digit code — **Forgot password** step one and **Create Account's**
+email verification — now use one shared control, `mobile/components/CodeInput.tsx`, instead of a
+single text input. Six boxes, one per digit, with the active box ringed and a drawn caret.
+
+The boxes are decoration over **one real, invisible `TextInput`**, and that is what makes the three
+behaviours work rather than needing to be emulated:
+
+* **auto-advance** is "the caret is after the last digit", so the ringed box is the next one by
+  construction — no per-field focus transfer, and so no `setTimeout` to survive Android's focus races;
+* **paste** is native: the whole six-digit string arrives in one `onChangeText`, is filtered to
+  digits and capped, and every box fills. The platform's own copy/paste, selection and
+  `one-time-code`/`oneTimeCode` autofill all still work, because the control *is* a text field;
+* **backspace** is a shorter value, so the last box empties and holding the key clears the field, with
+  no "which box was focused" state to get wrong.
+
+Filtering happens **before** the cap, not through `maxLength`: `maxLength` truncates the raw string,
+so a pasted `" 481 902 "` would have lost its last three digits before they were filtered. The
+component decides nothing else — it never validates, submits or counts attempts, so the screens keep
+their own *Verify* control and a mistyped sixth digit is not a request nobody asked for.
+
+A real defect was caught by `tsc` before the device run: RN 0.88's generated types no longer expose
+`StyleSheet.absoluteFillObject`, so the overlay's positioning spread resolved to nothing and the
+invisible field would have sat in the layout flow, shifting the boxes. It is now sized explicitly.
+
+## Device verification (2026-10-22)
+
+An EAS **`development`** build — the environment that carries the development Firebase files — was
+installed on the owner's **OPPO CPH1969 (Android 11 / API 30)** and pointed at the local server over
+`adb reverse` (`http://localhost:4000`, database `inventoryai_dev_db`). Every step below was observed
+on the handset:
+
+| Step | Observed |
+| --- | --- |
+| Request a code | 202, and the app moved to the code screen; the field renders six empty boxes |
+| Wrong code (`999999`) | 400 `INVALID_PASSWORD_RESET_CODE`, the generic sentence on screen, **one** attempt spent on the challenge row, **no** authorization minted |
+| Expired code (row past `expiresAt`) | the same 400 and the same sentence — expired is not distinguishable from wrong |
+| Typing | digits fill left to right and the ring moves with them; two backspaces empties the last two boxes |
+| Paste | the OS paste (`KEYCODE_PASTE`) filled **all six** boxes in one action |
+| Correct code | 200, authorization stored in memory, *Set a new password* opened with the address in its subtitle |
+| Empty / weak / mismatched password | the local rules fired before any request; no attempt was spent |
+| New password | *Password changed*; challenge `usedAt` set |
+| Credential | old password `REJECTED (INVALID_LOGIN_CREDENTIALS)`, new password `ACCEPTED`, and signing in on the phone reached the dashboard |
+| Revocation | a session issued **before** the reset answered `GET /api/auth/me` → **401 `SESSION_INVALIDATED`**, twice (once per reset) |
+
+**Create Account** was driven end to end on the same build: registration → the *Verify your email*
+screen with the same six boxes → a challenge minted for the throwaway address → code typed → **Verify**
+→ tenant created ("Signup Probe", Owner) → dashboard. The probe accounts, tenants, challenges and
+Firebase identities were deleted afterwards.
+
+**What this does not cover.** The codes were minted by a throwaway script rather than read from an
+inbox, because a probe address has no mailbox — Brevo delivery of this flow's code is the measurement
+recorded on 2026-10-21, and nothing about the mail boundary changed here. **iOS is unverified**, as is
+the OS autofill suggestion itself (the declaration is asserted in tests; the chip was not observed).
+
+Mobile **82 suites / 1010 tests / 0 failures**; `tsc` and `eslint` clean.
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

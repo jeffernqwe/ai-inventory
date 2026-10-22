@@ -57,7 +57,9 @@ import AuditLog from '../src/models/auditLog.model.ts';
 import PasswordResetChallenge from '../src/models/passwordResetChallenge.model.ts';
 import { AUDIT_ACTIONS } from '../src/constants/audit.ts';
 import {
+  INVALID_PASSWORD_RESET_AUTHORIZATION,
   INVALID_PASSWORD_RESET_CODE,
+  PASSWORD_RESET_AUTHORIZATION_TTL_MINUTES,
   PASSWORD_RESET_CODE_MAX_ATTEMPTS,
   PASSWORD_RESET_CODE_NOT_CONFIGURED,
   PASSWORD_RESET_CODE_TTL_MINUTES,
@@ -68,6 +70,7 @@ import {
 } from '../src/services/passwordResetCode/code.ts';
 import {
   requestPasswordResetCode,
+  verifyPasswordResetCode,
   confirmPasswordResetCode,
   PasswordResetCodeError,
 } from '../src/services/passwordResetCode/index.ts';
@@ -81,6 +84,7 @@ import {
 import { FirebaseUnavailableError } from '../src/services/firebase/firebaseErrors.ts';
 import {
   validatePasswordResetCodeRequest,
+  validatePasswordResetCodeVerify,
   validatePasswordResetCodeConfirm,
 } from '../src/utils/validate.ts';
 
@@ -145,6 +149,21 @@ function codeFromMessage(message) {
 
 async function challengeFor(email) {
   return PasswordResetChallenge.findOne({ emailHmac: hashResetEmail(PEPPER, email) });
+}
+
+/**
+ * Request a code, read it out of the delivered mail, and verify it — the ordinary first step.
+ *
+ * Returns the token the second step presents, so a confirm case can only exist for a real
+ * verification. That is the point of the two-step split and the reason this helper exists: there is
+ * no way to build a confirm case from an address alone any more.
+ */
+async function requestAndVerify(email) {
+  await requestPasswordResetCode({ email });
+  await awaitPendingMail();
+  const code = codeFromMessage(lastSentMessage());
+  const verified = await verifyPasswordResetCode({ email, code });
+  return { code, ...verified };
 }
 
 /** Records what the Admin bridge was asked to do, so the assertions are about real calls. */
@@ -237,36 +256,57 @@ unitSuite('AUTH-06 reset payloads', () => {
     assert.ok(validatePasswordResetCodeRequest({ email: 'nope' }).problems.some((p) => p.field === 'email'));
   });
 
-  it('accepts a well-formed confirmation payload and never returns the confirmation password', () => {
-    const result = validatePasswordResetCodeConfirm({
-      email: 'owner@example.test',
+  it('★ accepts the two-step payloads and never returns the confirmation password', () => {
+    const verify = validatePasswordResetCodeVerify({
+      email: '  Owner@Example.TEST ',
       code: ' 123456 ',
+      userId: 'someone-else',
+      businessId: 'another-tenant',
+    });
+    assert.deepEqual(verify.problems, []);
+    assert.equal(verify.email, 'owner@example.test');
+    assert.equal(verify.code, '123456');
+
+    const confirm = validatePasswordResetCodeConfirm({
+      resetToken: '  authorization-value  ',
+      newPassword: NEW_PASSWORD,
+      confirmPassword: NEW_PASSWORD,
+      // INERT BY CONSTRUCTION: the confirm step has no email, code, userId or businessId field for
+      // any of these to travel through, so a caller cannot point the write at another account.
+      email: 'someone-else@example.test',
+      userId: 'someone-else',
+      businessId: 'another-tenant',
+    });
+    assert.deepEqual(confirm.problems, []);
+    assert.equal(confirm.resetToken, 'authorization-value');
+    assert.equal(confirm.newPassword, NEW_PASSWORD);
+    for (const field of ['email', 'code', 'confirmPassword', 'userId', 'businessId']) {
+      assert.equal(
+        Object.prototype.hasOwnProperty.call(confirm, field),
+        false,
+        `${field} must have no variable to forward or persist`
+      );
+    }
+  });
+
+  it('requires the authorization for the password step', () => {
+    const { problems } = validatePasswordResetCodeConfirm({
       newPassword: NEW_PASSWORD,
       confirmPassword: NEW_PASSWORD,
     });
-    assert.deepEqual(result.problems, []);
-    assert.equal(result.email, 'owner@example.test');
-    assert.equal(result.code, '123456');
-    assert.equal(result.newPassword, NEW_PASSWORD);
-    assert.equal(
-      Object.prototype.hasOwnProperty.call(result, 'confirmPassword'),
-      false,
-      'the confirmation must have no variable to forward or persist'
-    );
+    assert.ok(problems.some((p) => p.field === 'resetToken'));
   });
 
   it('refuses a short password and a mismatched confirmation, before any request is made', () => {
     const short = validatePasswordResetCodeConfirm({
-      email: 'owner@example.test',
-      code: '123456',
+      resetToken: 'token',
       newPassword: 'short',
       confirmPassword: 'short',
     });
     assert.ok(short.problems.some((p) => p.field === 'newPassword'));
 
     const mismatched = validatePasswordResetCodeConfirm({
-      email: 'owner@example.test',
-      code: '123456',
+      resetToken: 'token',
       newPassword: NEW_PASSWORD,
       confirmPassword: `${NEW_PASSWORD}x`,
     });
@@ -274,11 +314,9 @@ unitSuite('AUTH-06 reset payloads', () => {
   });
 
   it('refuses an unfinished code as a field problem, so a typo cannot spend a guess', () => {
-    const { problems } = validatePasswordResetCodeConfirm({
+    const { problems } = validatePasswordResetCodeVerify({
       email: 'owner@example.test',
       code: '1234',
-      newPassword: NEW_PASSWORD,
-      confirmPassword: NEW_PASSWORD,
     });
     assert.ok(problems.some((p) => p.field === 'code'));
   });
@@ -446,25 +484,58 @@ dbSuite('AUTH-06 reset code — request', dbOk, () => {
 });
 
 // ---------------------------------------------------------------------------
-// The confirm lifecycle
+// Step one — verifying the code
 // ---------------------------------------------------------------------------
 
-dbSuite('AUTH-06 reset code — confirm', dbOk, () => {
-  it('spends exactly one attempt on a wrong code and writes nothing', async () => {
+dbSuite('AUTH-06 reset code — verify', dbOk, () => {
+  it('★ mints an authorization, stores only its digest, and records the verification', async () => {
     const { user } = await makeFirebaseUser();
     passwordWrites = [];
+    await requestPasswordResetCode({ email: user.email });
+    await awaitPendingMail();
+    const code = codeFromMessage(lastSentMessage());
+
+    const verified = await verifyPasswordResetCode({ email: user.email, code });
+
+    assert.match(verified.resetToken, /^[A-Za-z0-9_-]{43}$/, 'an opaque 32-byte credential');
+    assert.equal(
+      verified.expiresInSeconds,
+      PASSWORD_RESET_AUTHORIZATION_TTL_MINUTES * 60,
+      'the lifetime the client is told is the one the server enforces'
+    );
+
+    const challenge = await challengeFor(user.email);
+    assert.ok(challenge.verifiedAt, 'the verification is recorded');
+    assert.equal(challenge.usedAt, null, 'verifying does not spend the challenge — the password step does');
+    assert.equal(challenge.attempts, 1, 'the successful guess is the one attempt it wanted');
+    assert.ok(challenge.authorizationExpiresAt > new Date(), 'the authorization has a live window');
+    assert.ok(
+      challenge.expiresAt.getTime() >= challenge.authorizationExpiresAt.getTime(),
+      'the row must outlive its authorization, or the TTL sweep would delete a live credential'
+    );
+    assert.ok(
+      !JSON.stringify(challenge.toObject()).includes(verified.resetToken),
+      'the authorization itself must never be stored'
+    );
+    assert.equal(passwordWrites.length, 0, 'verifying a code changes no credential');
+  });
+
+  it('★ spends exactly one attempt on a wrong code and mints nothing', async () => {
+    const { user } = await makeFirebaseUser();
     await requestPasswordResetCode({ email: user.email });
     await awaitPendingMail();
     const code = codeFromMessage(lastSentMessage());
     const wrong = code === '111111' ? '222222' : '111111';
 
     const err = await captureError(() =>
-      confirmPasswordResetCode({ email: user.email, code: wrong, newPassword: NEW_PASSWORD })
+      verifyPasswordResetCode({ email: user.email, code: wrong })
     );
     assert.equal(err.code, INVALID_PASSWORD_RESET_CODE);
-    assert.equal((await challengeFor(user.email)).attempts, 1);
-    assert.equal(passwordWrites.length, 0, 'a wrong code must never reach the credential write');
-    assert.equal((await challengeFor(user.email)).usedAt, null);
+
+    const challenge = await challengeFor(user.email);
+    assert.equal(challenge.attempts, 1);
+    assert.equal(challenge.verifiedAt, null);
+    assert.equal(challenge.authorizationHmac, undefined, 'no authorization may be minted');
   });
 
   it('refuses once the attempt budget is exhausted, without incrementing past it', async () => {
@@ -478,7 +549,7 @@ dbSuite('AUTH-06 reset code — confirm', dbOk, () => {
     );
 
     const err = await captureError(() =>
-      confirmPasswordResetCode({ email: user.email, code: '000000', newPassword: NEW_PASSWORD })
+      verifyPasswordResetCode({ email: user.email, code: '000000' })
     );
     assert.equal(err.code, INVALID_PASSWORD_RESET_CODE);
     assert.equal(
@@ -499,26 +570,98 @@ dbSuite('AUTH-06 reset code — confirm', dbOk, () => {
       { $set: { expiresAt: new Date(Date.now() - 1000) } }
     );
 
-    const err = await captureError(() =>
-      confirmPasswordResetCode({ email: user.email, code, newPassword: NEW_PASSWORD })
-    );
+    const err = await captureError(() => verifyPasswordResetCode({ email: user.email, code }));
     assert.equal(err.code, INVALID_PASSWORD_RESET_CODE);
   });
 
-  it('changes the password through Firebase, revokes every session, and writes the audit row', async () => {
+  it('refuses a blank code without spending an attempt', async () => {
+    const { user } = await makeFirebaseUser();
+    await requestPasswordResetCode({ email: user.email });
+    await awaitPendingMail();
+    const err = await captureError(() =>
+      verifyPasswordResetCode({ email: user.email, code: '   ' })
+    );
+    assert.equal(err.code, INVALID_PASSWORD_RESET_CODE);
+    assert.equal((await challengeFor(user.email)).attempts, 0);
+  });
+
+  it('★ cannot verify the same code twice', async () => {
+    // THE CODE IS SINGLE-USE FROM THE MOMENT IT IS VERIFIED, not from the moment the password
+    // changes. A person who verified and then walked away asks for a new code; anyone who read the
+    // inbox afterwards cannot re-open the journey with the old one.
     const { user } = await makeFirebaseUser();
     await requestPasswordResetCode({ email: user.email });
     await awaitPendingMail();
     const code = codeFromMessage(lastSentMessage());
+    await verifyPasswordResetCode({ email: user.email, code });
+
+    const err = await captureError(() => verifyPasswordResetCode({ email: user.email, code }));
+    assert.equal(err.code, INVALID_PASSWORD_RESET_CODE);
+    assert.equal((await challengeFor(user.email)).attempts, 1, 'the replay spends nothing');
+  });
+
+  it('★ a new code request invalidates an outstanding authorization', async () => {
+    const { user } = await makeFirebaseUser();
+    await requestPasswordResetCode({ email: user.email });
+    await awaitPendingMail();
+    const firstCode = codeFromMessage(lastSentMessage());
+    const { resetToken } = await verifyPasswordResetCode({ email: user.email, code: firstCode });
+
+    // Move the cooldown anchor into the past so the next request supersedes in place, as it would
+    // after the real sixty-second window.
+    const challenge = await challengeFor(user.email);
+    await PasswordResetChallenge.updateOne(
+      { _id: challenge._id },
+      { $set: { lastSentAt: new Date(Date.now() - 120_000) } }
+    );
+    await requestPasswordResetCode({ email: user.email });
+    await awaitPendingMail();
+
+    const superseded = await challengeFor(user.email);
+    assert.equal(superseded.authorizationHmac, undefined, 'the old authorization is unset');
+    assert.equal(superseded.verifiedAt, null, 'and so is the verification it came from');
+
+    const err = await captureError(() =>
+      confirmPasswordResetCode({ resetToken, newPassword: NEW_PASSWORD })
+    );
+    assert.equal(err.code, INVALID_PASSWORD_RESET_AUTHORIZATION);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Step two — spending the authorization
+// ---------------------------------------------------------------------------
+
+dbSuite('AUTH-06 reset code — confirm', dbOk, () => {
+  it('★ cannot change the password without a successful verification', async () => {
+    // THE REQUIREMENT, ASSERTED AT ITS STRONGEST: a challenge exists and the person knows the
+    // address, and there is still no way to write a password from this step.
+    const { user } = await makeFirebaseUser();
+    await requestPasswordResetCode({ email: user.email });
+    await awaitPendingMail();
+    const code = codeFromMessage(lastSentMessage());
+    passwordWrites = [];
+
+    for (const resetToken of [undefined, '', 'not-an-authorization', code]) {
+      const err = await captureError(() =>
+        confirmPasswordResetCode({ resetToken, newPassword: NEW_PASSWORD })
+      );
+      assert.equal(err.code, INVALID_PASSWORD_RESET_AUTHORIZATION);
+    }
+
+    assert.equal(passwordWrites.length, 0);
+    assert.equal((await User.findById(user._id)).passwordChangedAt, null);
+    assert.equal((await challengeFor(user.email)).usedAt, null);
+  });
+
+  it('changes the password through Firebase, revokes every session, and writes the audit row', async () => {
+    const { user } = await makeFirebaseUser();
+    const { code, resetToken } = await requestAndVerify(user.email);
     const { token } = await issueSessionToken(user._id);
     passwordWrites = [];
     tokenRevocations = [];
 
-    const result = await confirmPasswordResetCode({
-      email: user.email,
-      code,
-      newPassword: NEW_PASSWORD,
-    });
+    const result = await confirmPasswordResetCode({ resetToken, newPassword: NEW_PASSWORD });
 
     assert.ok(result.changedAt instanceof Date);
     assert.deepEqual(passwordWrites, [{ uid: user.firebaseUid, password: NEW_PASSWORD }]);
@@ -539,37 +682,67 @@ dbSuite('AUTH-06 reset code — confirm', dbOk, () => {
     assert.equal(String(audit.businessId), String(user.businessId));
 
     const challenge = await challengeFor(user.email);
-    assert.ok(challenge.usedAt, 'the code is spent');
+    assert.ok(challenge.usedAt, 'the challenge is spent');
     assert.ok(!JSON.stringify(audit).includes(code), 'the audit row never carries the code');
+    assert.ok(!JSON.stringify(audit).includes(resetToken), 'and never the authorization');
   });
 
-  it('cannot redeem the same code twice', async () => {
+  it('★ cannot spend the same authorization twice', async () => {
     const { user } = await makeFirebaseUser();
-    await requestPasswordResetCode({ email: user.email });
-    await awaitPendingMail();
-    const code = codeFromMessage(lastSentMessage());
-    await confirmPasswordResetCode({ email: user.email, code, newPassword: NEW_PASSWORD });
+    const { resetToken } = await requestAndVerify(user.email);
+    await confirmPasswordResetCode({ resetToken, newPassword: NEW_PASSWORD });
 
     const err = await captureError(() =>
-      confirmPasswordResetCode({ email: user.email, code, newPassword: `${NEW_PASSWORD}x` })
+      confirmPasswordResetCode({ resetToken, newPassword: `${NEW_PASSWORD}x` })
     );
-    assert.equal(err.code, INVALID_PASSWORD_RESET_CODE);
+    assert.equal(err.code, INVALID_PASSWORD_RESET_AUTHORIZATION);
+  });
+
+  it('refuses an expired authorization', async () => {
+    const { user } = await makeFirebaseUser();
+    const { resetToken } = await requestAndVerify(user.email);
+    const challenge = await challengeFor(user.email);
+    await PasswordResetChallenge.updateOne(
+      { _id: challenge._id },
+      { $set: { authorizationExpiresAt: new Date(Date.now() - 1000) } }
+    );
+
+    const err = await captureError(() =>
+      confirmPasswordResetCode({ resetToken, newPassword: NEW_PASSWORD })
+    );
+    assert.equal(err.code, INVALID_PASSWORD_RESET_AUTHORIZATION);
+  });
+
+  it('★ writes only the account the authorization belongs to', async () => {
+    // The service has no email, userId or businessId field, so the address in this body is inert —
+    // it cannot retarget the write. Asserted against a second, real account rather than by reading
+    // the argument list.
+    const victim = await makeFirebaseUser();
+    const other = await makeFirebaseUser();
+    const { resetToken } = await requestAndVerify(victim.user.email);
+    passwordWrites = [];
+
+    await confirmPasswordResetCode({
+      resetToken,
+      newPassword: NEW_PASSWORD,
+      // Deliberately passing keys the contract does not have.
+      email: other.user.email,
+      userId: String(other.user._id),
+      businessId: String(other.business._id),
+    });
+
+    assert.deepEqual(passwordWrites, [{ uid: victim.user.firebaseUid, password: NEW_PASSWORD }]);
+    assert.equal((await User.findById(other.user._id)).passwordChangedAt, null);
   });
 
   it('does not fail the reset when the refresh-token revocation fails', async () => {
     const { user } = await makeFirebaseUser();
-    await requestPasswordResetCode({ email: user.email });
-    await awaitPendingMail();
-    const code = codeFromMessage(lastSentMessage());
+    const { resetToken } = await requestAndVerify(user.email);
     setFirebaseTokenRevoker(async () => {
       throw new FirebaseUnavailableError('revoke-failed');
     });
     try {
-      const result = await confirmPasswordResetCode({
-        email: user.email,
-        code,
-        newPassword: NEW_PASSWORD,
-      });
+      const result = await confirmPasswordResetCode({ resetToken, newPassword: NEW_PASSWORD });
       assert.ok(result.changedAt, 'the password change already happened and must be reported');
       assert.ok((await User.findById(user._id)).passwordChangedAt);
     } finally {
@@ -580,17 +753,18 @@ dbSuite('AUTH-06 reset code — confirm', dbOk, () => {
     }
   });
 
-  it('leaves the code unspent when the credential write fails', async () => {
+  it('★ leaves the authorization usable when the credential write fails', async () => {
+    // Unlike the code, which was spent on verification, the authorization is NOT consumed by a
+    // failed write — so a transient Admin outage costs the person nothing and does not force a new
+    // email.
     const { user } = await makeFirebaseUser();
-    await requestPasswordResetCode({ email: user.email });
-    await awaitPendingMail();
-    const code = codeFromMessage(lastSentMessage());
+    const { resetToken } = await requestAndVerify(user.email);
     setFirebasePasswordUpdater(async () => {
       throw new FirebaseUnavailableError('admin-unavailable');
     });
     try {
       const err = await captureError(() =>
-        confirmPasswordResetCode({ email: user.email, code, newPassword: NEW_PASSWORD })
+        confirmPasswordResetCode({ resetToken, newPassword: NEW_PASSWORD })
       );
       assert.ok(err instanceof FirebaseUnavailableError);
       assert.equal((await challengeFor(user.email)).usedAt, null);
@@ -601,27 +775,18 @@ dbSuite('AUTH-06 reset code — confirm', dbOk, () => {
         return { uid };
       });
     }
+
+    await confirmPasswordResetCode({ resetToken, newPassword: NEW_PASSWORD });
+    assert.ok((await User.findById(user._id)).passwordChangedAt, 'the same authorization still works');
   });
 
   it('refuses before any database work when the pepper is unusable', async () => {
     const { user } = await makeFirebaseUser();
+    const { resetToken } = await requestAndVerify(user.email);
     const err = await withEnv({ EMAIL_VERIFICATION_CODE_PEPPER: undefined }, () =>
-      captureError(() =>
-        confirmPasswordResetCode({ email: user.email, code: '123456', newPassword: NEW_PASSWORD })
-      )
+      captureError(() => confirmPasswordResetCode({ resetToken, newPassword: NEW_PASSWORD }))
     );
     assert.equal(err.code, PASSWORD_RESET_CODE_NOT_CONFIGURED);
-  });
-
-  it('refuses a blank code without spending an attempt', async () => {
-    const { user } = await makeFirebaseUser();
-    await requestPasswordResetCode({ email: user.email });
-    await awaitPendingMail();
-    const err = await captureError(() =>
-      confirmPasswordResetCode({ email: user.email, code: '   ', newPassword: NEW_PASSWORD })
-    );
-    assert.equal(err.code, INVALID_PASSWORD_RESET_CODE);
-    assert.equal((await challengeFor(user.email)).attempts, 0);
   });
 });
 
@@ -684,7 +849,7 @@ dbSuite('AUTH-06 reset over HTTP', dbOk, () => {
     assert.equal(sentMessages().length, 1, 'one window, one email — the cooldown still holds');
   });
 
-  it('completes the reset over HTTP and refuses the code afterwards', async () => {
+  it('★ completes the two steps over HTTP, and neither the code nor the authorization replays', async () => {
     const { user } = await makeFirebaseUser();
     clearSentMessages();
     const requested = await api('POST', '/api/auth/password-reset/code', {
@@ -694,10 +859,31 @@ dbSuite('AUTH-06 reset over HTTP', dbOk, () => {
     await awaitPendingMail();
     const code = codeFromMessage(lastSentMessage());
 
+    // STEP ONE — the code buys an authorization, and nothing else changes.
+    const verified = await api('POST', '/api/auth/password-reset/verify', {
+      body: { email: user.email, code },
+    });
+    assert.equal(verified.status, 200);
+    assert.equal(verified.json.message, 'Code verified. Choose a new password.');
+    assert.match(verified.json.resetToken, /^[A-Za-z0-9_-]{43}$/);
+    assert.equal(verified.json.expiresInSeconds, PASSWORD_RESET_AUTHORIZATION_TTL_MINUTES * 60);
+    assert.equal(
+      (await User.findById(user._id)).passwordChangedAt,
+      null,
+      'verifying must not change the credential'
+    );
+
+    // Replaying the CODE is refused even though the authorization is still live.
+    const replayCode = await api('POST', '/api/auth/password-reset/verify', {
+      body: { email: user.email, code },
+    });
+    assert.equal(replayCode.status, 400);
+    assert.equal(replayCode.json.code, INVALID_PASSWORD_RESET_CODE);
+
+    // STEP TWO — the authorization buys the password, and never carries the code.
     const confirmed = await api('POST', '/api/auth/password-reset/confirm', {
       body: {
-        email: user.email,
-        code,
+        resetToken: verified.json.resetToken,
         newPassword: NEW_PASSWORD,
         confirmPassword: NEW_PASSWORD,
       },
@@ -705,27 +891,48 @@ dbSuite('AUTH-06 reset over HTTP', dbOk, () => {
     assert.equal(confirmed.status, 200);
     assert.equal(confirmed.json.message, 'Password changed. Please sign in again.');
 
-    const replay = await api('POST', '/api/auth/password-reset/confirm', {
+    // Replaying the AUTHORIZATION is refused once the password has changed.
+    const replayAuthorization = await api('POST', '/api/auth/password-reset/confirm', {
       body: {
-        email: user.email,
-        code,
+        resetToken: verified.json.resetToken,
         newPassword: `${NEW_PASSWORD}x`,
         confirmPassword: `${NEW_PASSWORD}x`,
       },
     });
-    assert.equal(replay.status, 400);
-    assert.equal(replay.json.code, INVALID_PASSWORD_RESET_CODE);
+    assert.equal(replayAuthorization.status, 400);
+    assert.equal(replayAuthorization.json.code, INVALID_PASSWORD_RESET_AUTHORIZATION);
   });
 
-  it('refuses a mismatched confirmation before any attempt is spent', async () => {
+  it('★ the confirm route cannot be reached with an address instead of an authorization', async () => {
+    // The shape every pre-split client used to send. It is refused, and no password is written —
+    // the guarantee that navigation alone cannot complete a reset.
     const { user } = await makeFirebaseUser();
     await api('POST', '/api/auth/password-reset/code', { body: { email: user.email } });
     await awaitPendingMail();
+    const code = codeFromMessage(lastSentMessage());
+    passwordWrites = [];
 
     const res = await api('POST', '/api/auth/password-reset/confirm', {
       body: {
         email: user.email,
-        code: '123456',
+        code,
+        newPassword: NEW_PASSWORD,
+        confirmPassword: NEW_PASSWORD,
+      },
+    });
+    assert.equal(res.status, 400);
+    assert.equal(res.json.code, 'VALIDATION_ERROR');
+    assert.ok(res.json.fields?.some((f) => f.field === 'resetToken'));
+    assert.equal(passwordWrites.length, 0);
+  });
+
+  it('refuses a mismatched confirmation before the authorization is spent', async () => {
+    const { user } = await makeFirebaseUser();
+    const { resetToken } = await requestAndVerify(user.email);
+
+    const res = await api('POST', '/api/auth/password-reset/confirm', {
+      body: {
+        resetToken,
         newPassword: NEW_PASSWORD,
         confirmPassword: 'different',
       },
@@ -733,7 +940,13 @@ dbSuite('AUTH-06 reset over HTTP', dbOk, () => {
     assert.equal(res.status, 400);
     assert.equal(res.json.code, 'VALIDATION_ERROR');
     assert.ok(res.json.fields?.some((f) => f.field === 'confirmPassword'));
-    assert.equal((await challengeFor(user.email)).attempts, 0);
+    assert.equal((await challengeFor(user.email)).usedAt, null, 'the authorization is still usable');
+
+    // …and it works on the next attempt, which is what "not spent" has to mean.
+    const retry = await api('POST', '/api/auth/password-reset/confirm', {
+      body: { resetToken, newPassword: NEW_PASSWORD, confirmPassword: NEW_PASSWORD },
+    });
+    assert.equal(retry.status, 200);
   });
 
   it('answers 503 when the code flow is not configured, without touching the account', async () => {
@@ -748,16 +961,40 @@ dbSuite('AUTH-06 reset over HTTP', dbOk, () => {
 
   it('never leaks account state in an error body', async () => {
     const { user } = await makeFirebaseUser();
-    const res = await api('POST', '/api/auth/password-reset/confirm', {
+
+    const verified = await api('POST', '/api/auth/password-reset/verify', {
+      body: { email: user.email, code: '000000' },
+    });
+    assert.equal(verified.status, 400);
+    assert.equal(verified.json.code, INVALID_PASSWORD_RESET_CODE);
+
+    const confirmed = await api('POST', '/api/auth/password-reset/confirm', {
       body: {
-        email: user.email,
-        code: '000000',
+        resetToken: 'not-an-authorization',
         newPassword: NEW_PASSWORD,
         confirmPassword: NEW_PASSWORD,
       },
     });
-    assert.equal(res.status, 400);
-    assert.equal(res.json.code, INVALID_PASSWORD_RESET_CODE);
-    assert.ok(!JSON.stringify(res.json).includes(PEPPER));
+    assert.equal(confirmed.status, 400);
+    assert.equal(confirmed.json.code, INVALID_PASSWORD_RESET_AUTHORIZATION);
+
+    for (const body of [verified.json, confirmed.json]) {
+      assert.ok(!JSON.stringify(body).includes(PEPPER));
+      assert.ok(!JSON.stringify(body).includes(user.email));
+    }
+  });
+
+  it('answers an unknown address with the same 400 as a wrong code', async () => {
+    // The verify route is reachable without a session, so "this address has no challenge" and
+    // "this code is wrong" are the same bytes.
+    const { user } = await makeFirebaseUser();
+    const known = await api('POST', '/api/auth/password-reset/verify', {
+      body: { email: user.email, code: '000000' },
+    });
+    const unknown = await api('POST', '/api/auth/password-reset/verify', {
+      body: { email: uniqueEmail('nobody'), code: '000000' },
+    });
+    assert.equal(known.status, 400);
+    assert.deepEqual(unknown.json, known.json);
   });
 });

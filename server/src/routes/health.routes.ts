@@ -1,5 +1,6 @@
 import { Router } from 'express';
 
+import env from '../config/env.ts';
 import { buildInfo } from '../config/deploymentReadiness.ts';
 import { getDatabaseState, isDatabaseReady } from '../config/db.ts';
 import { operationalCounters } from '../config/operationalCounters.ts';
@@ -43,6 +44,13 @@ import { operationalCounters } from '../config/operationalCounters.ts';
  * (§27CE's correction). A commit id is not a credential, not a host name, not a tenant and
  * not a configuration value: it identifies a build, and it is published **only** here.
  *
+ * WHY THE LEGACY ENDPOINT ALSO NAMES THE POSTURE. The commit id answers "which build is this?";
+ * the posture answers "which environment does it think it is?" — and those are different
+ * questions. A service deployed with `NODE_ENV=development` in its environment boots happily,
+ * validates nothing, and writes to the development database; from outside, it looks healthy. One
+ * word on the same endpoint that already identifies the build makes that state observable without
+ * reading the host's dashboard, and it is a posture name, never a value from the environment.
+ *
  * The narrow scope is deliberate. `/ready` stays a gate that reports readiness and nothing
  * else, `/live` stays dependency-free, and the deployment's *integration* state (which
  * optional services are configured) is deliberately NOT published: those states are already
@@ -71,12 +79,21 @@ function timestamp() {
  *        The OPS-2 response counters. Injectable so a suite can pin the payload
  *        shape without manufacturing traffic, and so the number it asserts on is
  *        the number the route published rather than one it counted itself.
+ * @param {() => string} [options.environment]
+ *        The posture this process serves in — `production`, `development` or
+ *        `test` (`config/env.ts` never yields anything else to a booted server).
+ *        Published on the legacy endpoint for the same reason as the commit id:
+ *        "is the deployed process actually in the posture I configured?" had no
+ *        answer from outside the host, and a deployment silently serving from
+ *        the development database is exactly the fault that question catches.
+ *        It is a posture name, never a value from the environment.
  */
 export function createHealthRouter({
   getState = getDatabaseState,
   isReady = isDatabaseReady,
   build = buildInfo,
   counters = operationalCounters,
+  environment = () => env.nodeEnv,
 } = {}) {
   const router = Router();
 
@@ -86,6 +103,7 @@ export function createHealthRouter({
     res.status(200).json({
       status: 'ok',
       db: getState(),
+      environment: environment(),
       commit,
       uptimeSeconds,
       counters: counters(),

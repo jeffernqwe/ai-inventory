@@ -18023,13 +18023,12 @@ Recorded rather than changed, because each is a documented decision:
   unset variable also skips the production configuration checks and selects the development
   database. That is a deployment decision, and the new boot warning now names it.
 
-# A host that names itself refuses a NODE_ENV it cannot name (2026-10-22)
+# A server must name the environment it serves (2026-10-22)
 
 **A deployment-safety follow-up to the error-detail fix above, not an application phase.** One
-classifier and one host predicate in `config/env.ts`, one report field and one note in
-`config/deploymentReadiness.ts`, one decision in `config/startup.ts`, and the suite that pins all
-three. No route, permission, role, session, schema, index, dependency, mobile or new environment
-variable.
+classifier and two predicates in `config/env.ts`, one boot decision in `config/startup.ts`, one
+published posture field on the legacy health endpoint, and the suites that pin them. No route,
+permission, role, session, schema, index, dependency, mobile or new environment variable.
 
 ## What was still wrong
 
@@ -18045,8 +18044,11 @@ hosted deployment a missing or misspelled value still meant all three of:
 - error detail was withheld, which hid the only visible symptom.
 
 A warning line in a log nobody is watching is not a control. The question this increment answers is
-narrow and checkable: *should a process that knows it is deployed be allowed to start when it
-cannot say which environment it is?* No.
+narrow and checkable: *should a server be allowed to start at all without saying which environment
+it serves?* No. The first attempt answered a smaller version — fatal only on a host that sets
+Render's markers, warning everywhere else — and that was rejected on review for the reason it is
+worth recording: the same mistake was then fatal on one platform and silent on every other, which
+makes the rule a property of the host rather than of the server.
 
 ## The change
 
@@ -18054,62 +18056,77 @@ cannot say which environment it is?* No.
   **`missing`** and **`unrecognised`**. The last two are kept apart deliberately, because an
   operator fixes them in different places: a variable nobody set is a deployment omission, a value
   somebody typed (`prod`, `Production`, `staging`) is a mistake with a visible cause.
-- **The readiness report names which one it is.** `integrationReport()` gains `nodeEnv`, and
-  `deploymentNotes()` says either *"NODE_ENV is NOT SET, so this host runs the DEVELOPMENT
-  posture…"* or *"NODE_ENV does not name one of development, test or production…"*, both ending in
-  the one-variable fix. The **value is never echoed**: a typo is an arbitrary string, and this
-  report goes into logs.
-- **`isDeployedHost(values)`** — `RENDER` or `RENDER_GIT_COMMIT` present and non-empty. The markers
-  are not secrets (`RENDER_GIT_COMMIT` is already the source of the build identity `/api/health`
-  publishes) and only their presence is read.
-- **`startServer` refuses on such a host** — one line naming the decision, `exit 1`, `return null`,
-  placed **after** the readiness report that explains it and **before** anything is connected or
-  served. Off a deployment the same fact stays a warning and the boot continues: a laptop without
-  `.env`, a CI boot, or a platform this code has never heard of gets the loud report, never an
-  unrequested fatal boot.
-- **One explanation, not two.** The old `nodeEnvWarning` line (and its `TEST_MODE` suppression) is
-  gone; the readiness note is the diagnostic and the gate is the decision. A boot that reports one
-  problem twice is how operators learn to skim.
-- **`.env.example`** now states what the variable decides and that a self-identifying host refuses
-  an unrecognised value.
+- **`startServer` refuses ANY process that cannot name its environment** — one line that says
+  which mistake it is (`NODE_ENV is not set` versus `does not name one of development, test,
+  production`), what the variable decides, and the one-variable fix; then `exit 1` and `return
+  null`, placed **first, before validation, connection or serving**. `production`, `development`
+  and `test` start normally. **`TEST_MODE` is the single exception**, and only because
+  `resolveDatabaseName` already pins such a process to `inventoryai_test_db` and throws when
+  `NODE_ENV=production` is set — it cannot reach real data.
+- **No platform marker is consulted.** The first version keyed the refusal on Render's `RENDER` /
+  `RENDER_GIT_COMMIT`; `isDeployedHost` and the `deployedHost` option were removed, so the rule is
+  a property of the server rather than of the host it happens to sit on.
+- **`env.nodeEnv` is the classified value.** It used to be the raw string, so `NODE_ENV="
+  production "` selected the production **database** while skipping the production **checks**. It
+  now trims and recognises once, and every consumer reads the result.
+- **The environment is not a readiness note.** `integrationReport()` no longer carries `nodeEnv`
+  and `deploymentNotes()` says nothing about it: every state in that list is legal (an optional
+  integration that degrades a feature), while an unnameable environment is a boot decision. The
+  old `nodeEnvWarning` line and its `TEST_MODE` suppression were deleted with the move, so one
+  problem is still explained once — by the refusal itself.
+- **`GET /api/health` publishes the resolved posture** as `environment`, beside the commit id and
+  for the same reason: "is the deployed process in the posture I configured?" was answerable only
+  from the host's dashboard. It is a posture name, never a value from the environment, and
+  `/ready` and `/live` are unchanged.
+- **`.env.example` and the README** state that a server must name one of the three postures, and
+  that `npm start` without a `.env` now refuses instead of guessing.
 
 ## Verified
 
-- **`phase-sec-debug-detail.test.mjs` — 22 cases, 0 failures** (was 12), and `DEP-1` updated to
-  state its environment: the truth table for the classifier (including `Production`, `prod`,
-  `staging`, empty and absent), the two note sentences and the silence for a recognised one, the
-  host predicate, and four real `startServer` boots — refused on `missing`, refused on `prod`,
-  **booted** off a deployment, and booted silently on `production`.
+- **`phase-sec-debug-detail.test.mjs` — 18 cases, 0 failures** (12 → 18): the classifier truth
+  table (including `Production`, `prod`, `staging`, empty, absent and a padded value),
+  `isRecognisedNodeEnv` / `isTestProcess`, and **five real `startServer` boots** — refused when
+  nothing named the environment, refused on a typo, **booted** on each of `production`,
+  `development` and `test`, and booted as a declared test process with no `NODE_ENV` at all. The
+  posture is injected into those boots, so the suite no longer depends on what the runner exports.
 - **The refusal happens before any work**: the boot case asserts no `listening` line and **no
   database connect** was reached.
-- **The control trips.** Making the gate unconditional (`if (envWarning)`) fails **2** cases — the
-  developer-machine case and the wiring guard — and the file was restored **byte-identically**
-  (md5 `7dd673b6…` before and after).
-- **Live, three boots of the real server:** with `RENDER=1 RENDER_GIT_COMMIT=abc1234 NODE_ENV=` the
-  process printed the readiness note, then `refusing to start… Nothing was connected or served.`
-  and exited **1**; with `NODE_ENV=prod` and no marker it printed the note **and served**
-  `GET /api/health/live` **200** (killed by the test timeout afterwards, not by the gate); and a
-  recognised environment produced no line at all.
-- **The production host is measured, not assumed.** `https://ai-inventory-l1mi.onrender.com`
-  answers `/api/health` with `commit: a0969f9…` and `POST /api/auth/login {}` with
+- **The control trips.** Replacing the gate with `if (false)` fails **3** cases — both refusals and
+  the wiring guard — and the file was restored **byte-identically** (md5 `763a4019…` before and
+  after).
+- **Live, four boots of the real server:** `NODE_ENV=` → `refusing to start: NODE_ENV is not set …
+  Nothing was connected or served.`, exit **1**; `NODE_ENV=prod` → the same refusal naming the
+  accepted values, exit **1**; `NODE_ENV=development` → the gate passes and the boot proceeds to
+  the database (blocked only by the deliberately unreachable URI); `TEST_MODE=unit` with no
+  `NODE_ENV` → `[server] environment=development listening on http://localhost:4324 …`.
+- **The deployed service is measured, not assumed.** `https://ai-inventory-l1mi.onrender.com`
+  answered `/api/health` with `commit: a0969f9…` and `POST /api/auth/login {}` with
   `400 VALIDATION_ERROR` and **no `stack`** — and at that deployed commit (`a0969f9`, before the
   error-detail fix) stacks were appended unless `NODE_ENV === 'production'` **exactly**. The live
   service therefore runs with `NODE_ENV=production`, so this gate is **inert there** and the next
   deploy cannot be refused by it. That is the one question a fatal boot gate has to answer before
-  it ships.
-- Server **`test:unit` 1249 tests / 1197 pass / 0 fail / 52 skipped**, `tsc`, `eslint` and the
-  module-graph check clean (479 files).
+  it ships, and after deployment the same endpoint states the posture outright in `environment`.
+- **`DEP-1`** keeps the readiness report about integrations, gains the health-posture case (the
+  field is published from the process, never a database name, and is 503-free), and passes its
+  environment into every `startServer` it calls so it is runner-independent too.
+- Server **`test:unit` 1246 tests / 1194 pass / 0 fail / 52 skipped**, `tsc`, `eslint` and the
+  module-graph checks clean (479 files).
 
 ## Still open, and said so
 
-- **The marker is Render's.** A deployment on another platform is treated as a developer's machine:
-  it gets the note and boots. Making that fatal everywhere would break laptops and CI to catch a
-  mistake those platforms' own dashboards already report, so the marker list is the deliberate
-  compromise — extend `isDeployedHost` when this project gains a second host.
-- **`env.nodeEnv` still defaults to `development`**, and `resolveDatabaseName` still resolves an
-  unset value to the development database. This increment refuses the boot where the mistake is
-  unambiguous; it does not change what the default means for a laptop, and no test database was
-  touched.
+- **`npm start` without a `.env` now refuses.** That is the cost of the rule and it is deliberate —
+  the guess it replaces is exactly what could point a deployment at the development database. The
+  message says what to set, and the documented setup (`docs/guides/1-run-on-your-laptop.md`) copies
+  `.env.example` first.
+- **`env.nodeEnv` still falls back to `development`** for processes that never call `startServer`
+  (seed, cleanup and measurement scripts), and `resolveDatabaseName` still resolves an unset value
+  to the development database. Those scripts are run deliberately by an operator against `.env`,
+  and the cleanup ones carry their own confirmations; no test database was touched.
+- **`TEST_MODE` is trusted as a declaration.** It is accepted at boot without `NODE_ENV`, which is
+  safe for data (the resolver pins the test database and refuses production) but does mean a host
+  with a stray `TEST_MODE` would serve from the test database. It would be visibly wrong on
+  `/api/health` (`environment: development`, and the readiness gate would report the test
+  database's state) — recorded rather than guarded, because guarding it would break the runner.
 - **Nothing was verified on a deployed host for the refusal itself** — deliberately: the proof that
   production cannot hit it is the measurement above, and manufacturing a refusal there would mean
   breaking the live service.

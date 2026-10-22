@@ -176,9 +176,9 @@ const errorHandler = (
   // which is true for an unset, empty or misspelled value — so `NODE_ENV=Production` (or no
   // NODE_ENV at all on a host that only sets its platform's own variable) published absolute local
   // file paths and internal module names to every caller who could provoke a 4xx. `isDebugNodeEnv`
-  // is fail-closed: an environment nobody thought about withholds the detail, and
-  // `nodeEnvWarning` says so at boot so a developer running without `.env` is not left guessing why
-  // the stack disappeared.
+  // is fail-closed: an environment nobody thought about withholds the detail — and since
+  // 2026-10-22 a server cannot boot without naming one of the three postures, so a developer is
+  // never left guessing why a stack disappeared (`config/startup.ts`).
   if (isDebugNodeEnv() && err.stack) {
     body.stack = err.stack;
   }

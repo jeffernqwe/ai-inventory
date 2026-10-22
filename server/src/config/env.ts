@@ -191,22 +191,23 @@ export function classifyNodeEnv(raw: string | undefined = process.env.NODE_ENV):
   return 'unrecognised';
 }
 
+/** Is this one of the three postures the server knows how to serve? */
+export function isRecognisedNodeEnv(kind: NodeEnvKind): kind is 'production' | 'development' | 'test' {
+  return kind === 'production' || kind === 'development' || kind === 'test';
+}
+
 /**
- * Is this process running on a host that states its own identity — i.e. is it a DEPLOYMENT?
+ * Is this a test process?
  *
- * Used only to decide whether a wrong `NODE_ENV` is a warning or a refusal (see
- * `startServer`). Render is this project's host and injects both markers; anything else that
- * does not set them is treated as a developer's machine, which is the safe direction: an
- * unknown platform gets the loud warning, never a boot the operator did not ask to be fatal.
- *
- * The markers are not secrets — `RENDER_GIT_COMMIT` is already the source of the build
- * identity `buildInfo()` publishes — and no value is read beyond "is it present".
+ * `TEST_MODE` is set by `scripts/run-tests.mjs` and is accepted at boot as a declaration in its
+ * own right — but it is NOT a way around naming an environment, because `resolveDatabaseName`
+ * pins a test process to `inventoryai_test_db` and refuses outright when `NODE_ENV=production`
+ * is also set. A process that only has `TEST_MODE` therefore cannot reach development or
+ * production data, which is why it is allowed to start without `NODE_ENV`.
  */
-export function isDeployedHost(values: Record<string, string | undefined> = process.env): boolean {
-  return ['RENDER', 'RENDER_GIT_COMMIT'].some((name) => {
-    const raw = values?.[name];
-    return typeof raw === 'string' && raw.trim() !== '';
-  });
+export function isTestProcess(values: Record<string, string | undefined> = process.env): boolean {
+  const raw = values?.TEST_MODE;
+  return typeof raw === 'string' && raw.trim() !== '';
 }
 
 /**
@@ -221,40 +222,25 @@ export function isDeployedHost(values: Record<string, string | undefined> = proc
  * hides the detail instead of publishing it.
  *
  * Deliberately narrower than "not production": a staging box running with `NODE_ENV=staging` also
- * gets no stacks, which is the correct default for anything that is not a developer's machine. A
- * developer who runs without `.env` sees no stack AND the warning `nodeEnvWarning` below produces,
- * so the reason is stated instead of guessed at.
+ * gets no stacks, which is the correct default for anything that is not a developer's machine —
+ * and since 2026-10-22 a server cannot boot in that state at all, so a developer is never left
+ * wondering why a stack disappeared (`startup.ts` refuses and says what to set).
  */
 export function isDebugNodeEnv(raw: string | undefined = process.env.NODE_ENV): boolean {
   const kind = classifyNodeEnv(raw);
   return kind === 'development' || kind === 'test';
 }
 
-/**
- * The boot warning for a NODE_ENV that is missing or unrecognised, or `null` when it is fine.
- *
- * The consequences are listed because they are neither obvious nor local: the production config
- * checks are skipped, the DEVELOPMENT database is selected, and debug detail is withheld only
- * because of the rule above. An operator who sees this line has a one-variable fix.
- */
-export function nodeEnvWarning(raw: string | undefined = process.env.NODE_ENV): string | null {
-  const kind = classifyNodeEnv(raw);
-  const consequence =
-    'this process is treated as DEVELOPMENT: production configuration checks are skipped, the development database is selected, and error stack traces are withheld from responses';
-
-  if (kind === 'missing') {
-    return `NODE_ENV is not set, so ${consequence}. Set NODE_ENV=production on a deployed host.`;
-  }
-  if (kind === 'unrecognised') {
-    // The value is NOT echoed: it is an operator's typo, and a report is not the place to
-    // repeat an arbitrary string back at whoever reads it.
-    return `NODE_ENV does not name one of ${KNOWN_NODE_ENVS.join(', ')}, so ${consequence}. Set NODE_ENV=production on a deployed host.`;
-  }
-  return null;
-}
-
 const env = {
-  nodeEnv: process.env.NODE_ENV || 'development',
+  // The CLASSIFIED value, not the raw one: a value with surrounding whitespace is recognised and
+  // must then select the posture it named. Reading the raw string here was the last way a
+  // recognised environment could still skip the production checks (`NODE_ENV=" production "`).
+  // Anything unrecognised stays on the development fallback — and a server cannot boot in that
+  // state at all (see `startServer`), so this branch only serves scripts and test processes.
+  nodeEnv: (() => {
+    const kind = classifyNodeEnv();
+    return isRecognisedNodeEnv(kind) ? kind : 'development';
+  })(),
   port: Number(process.env.PORT) || 4000,
   // MongoDB connection string. Never log or expose this value.
   mongodbUri: process.env.MONGODB_URI || '',

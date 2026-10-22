@@ -445,12 +445,13 @@ committed.
 - Copy `server/.env.example` to `server/.env` for local development.
 - `.env` files are git-ignored; `.env.example` contains variable **names only**.
 - **`NODE_ENV` decides the posture, so only three values are recognised** — `development`,
-  `test` and `production`. An unset or misspelled value (`prod`, `Production`, `staging`) selects
-  the development posture: production configuration checks are skipped, the development database
-  is selected, and error stack traces are withheld. On a host that identifies itself as a
-  deployment (Render sets `RENDER`/`RENDER_GIT_COMMIT`) such a value **refuses the boot** before
-  anything is connected or served; anywhere else the startup readiness report names the fault and
-  the server still starts.
+  `test` and `production` — and **a server must state one of them on every host**. An unset or
+  misspelled value (`prod`, `Production`, `staging`) would otherwise skip the production
+  configuration checks, select the development database and withhold stack traces, so it now
+  **refuses the boot** before anything is connected or served, naming which mistake it is and
+  what to set. Nothing about the hosting platform is consulted; `TEST_MODE` alone is accepted for
+  a test run only. `GET /api/health` publishes the posture the process actually resolved
+  (`environment`), beside the deployed commit id.
 - **AI provider (Phase 06):** set `AI_PROVIDER=openrouter` (an Anthropic-compatible gateway in
   front of many models) in `server/.env` and add `OPENROUTER_API_KEY` +
   `OPENROUTER_BASE_URL` + `AI_MODEL_OPENROUTER` (the model is required — OpenRouter has no

@@ -17,7 +17,13 @@
  */
 
 import app from '../app.ts';
-import env, { isDeployedHost, nodeEnvWarning } from './env.ts';
+import env, {
+  classifyNodeEnv,
+  isRecognisedNodeEnv,
+  isTestProcess,
+  KNOWN_NODE_ENVS,
+} from './env.ts';
+import type { NodeEnvKind } from './env.ts';
 import { connectDatabase, disconnectDatabase } from './db.ts';
 import { deploymentLine, deploymentNotes, integrationReport } from './deploymentReadiness.ts';
 import type { IntegrationReport } from './deploymentReadiness.ts';
@@ -37,6 +43,16 @@ import { healthWatchConfig, healthWatchEnabled, startAiHealthWatch } from '../se
 import type { HealthWatchHandle } from '../services/ai/healthWatch.ts';
 import { boundPortOf, verifyBoundPort } from './portGuard.ts';
 import type { PortProbeResult } from './portGuard.ts';
+
+/**
+ * What the live process says about itself, for the boot gate above.
+ *
+ * A named function rather than two reads in the body so the gate's input is one thing a caller
+ * can replace, and so `TEST_MODE` is judged in exactly one place.
+ */
+function defaultEnvironment(): { kind: NodeEnvKind; testProcess: boolean } {
+  return { kind: classifyNodeEnv(process.env.NODE_ENV), testProcess: isTestProcess() };
+}
 
 /**
  * Everything `startServer` reaches the outside world through, injectable so the
@@ -61,12 +77,13 @@ type StartServerOptions = {
   shutdownTimeoutMs?: number;
   probe?: (port: number) => Promise<PortProbeResult>;
   /**
-   * Does this host identify itself as a deployment? Defaults to `isDeployedHost()`.
+   * What `NODE_ENV` says, and whether this declares itself a test process.
    *
-   * Injectable so a suite can pin the two branches of the NODE_ENV gate without pretending to run
-   * on Render: `true` refuses to boot on a missing or unrecognised NODE_ENV, `false` warns.
+   * Defaults to the live process. Injectable so a suite can pin every posture — missing,
+   * mistyped, development, test — without rewriting the environment of a process it did not
+   * start, which is what made an earlier version of this suite depend on the runner.
    */
-  deployedHost?: boolean;
+  environment?: () => { kind: NodeEnvKind; testProcess: boolean };
   /**
    * AI-28 — the boot-time question "is the configured AI model still one the provider lists?"
    *
@@ -124,7 +141,7 @@ export async function startServer({
   logger = console,
   signalTarget = process,
   shutdownTimeoutMs = env.shutdownTimeoutMs,
-  deployedHost = isDeployedHost(),
+  environment = defaultEnvironment,
   probe,
   modelCheck,
   capabilities,
@@ -136,27 +153,40 @@ export async function startServer({
 } | null> {
   const exitFn = exit || ((code: number) => process.exit(code));
 
-  // A NODE_ENV that is missing or misspelled silently selects the development posture: production
-  // config checks are skipped, the development database is chosen, and error stack traces are
-  // withheld (see `isDebugNodeEnv`).
+  // A SERVER MUST STATE THE ENVIRONMENT IT SERVES, AND NOTHING INFERS IT.
   //
-  // THE DIAGNOSTIC IS THE READINESS NOTE, AND THE DECISION IS HERE. Off a deployment the report
-  // below already says which of the two faults it is (`deploymentNotes`: "NODE_ENV is NOT SET"
-  // versus "NODE_ENV does not name one of…"), so this gate deliberately adds no second line saying
-  // the same thing — a boot that reports one problem twice is how operators learn to skim.
+  // `NODE_ENV` decides three things at once: whether the production configuration checks run,
+  // which database is selected, and whether error detail is released. A value this process cannot
+  // name therefore does not fail at the thing it is wrong about — it boots happily into the
+  // development posture and serves real traffic out of the development database with the
+  // production checks switched off.
   //
-  // ON A HOST THAT IDENTIFIES ITSELF IT IS FATAL, and that is the half this gate exists for. The
-  // state is unambiguous there — the process is deployed, and its environment says it is a
-  // developer's machine — so booting would mean serving production traffic from the development
-  // database with the production checks switched off. Refusing is the safer answer, and it is the
-  // same posture the production validator already takes for a missing secret.
+  // So the refusal is host-independent and explicit: `production`, `development` or `test`, or a
+  // process that declares `TEST_MODE` (which pins the test database and refuses to run as
+  // production). Nothing about the platform is consulted — a deployment must not learn its
+  // environment from a marker that happens to be set, because that would make the same mistake
+  // fatal on one host and silent on another.
   //
-  // Everywhere else it stays a warning: a developer running without `.env`, or a CI boot, is
-  // exactly the case the lenient path exists for, and refusing there would break local work
-  // without protecting anything. Unknown hosting platforms land in that branch too — the marker is
-  // Render's, this project's host — so a platform this code has never heard of gets the loud report
-  // rather than an unrequested fatal boot.
-  const envWarning = nodeEnvWarning(process.env.NODE_ENV);
+  // The cost is deliberate: `npm start` without a `.env` now refuses with a one-variable fix
+  // instead of starting on a guess. That guess is the thing this gate exists to delete.
+  const stated = environment();
+  if (!isRecognisedNodeEnv(stated.kind) && !stated.testProcess) {
+    // The distinction is the diagnostic: a variable nobody set is fixed somewhere different from
+    // one somebody mistyped. The VALUE is never echoed — a typo is an arbitrary string and this
+    // line goes to logs.
+    const which =
+      stated.kind === 'missing'
+        ? 'NODE_ENV is not set'
+        : `NODE_ENV does not name one of ${KNOWN_NODE_ENVS.join(', ')}`;
+    logger.error(
+      `[config] refusing to start: ${which}, and a server must state the environment it serves — ` +
+        'NODE_ENV decides the production configuration checks, the database and the error detail ' +
+        'at once. Set NODE_ENV=production on a deployed service (development on a laptop); ' +
+        'TEST_MODE is accepted for a test run only. Nothing was connected or served.'
+    );
+    exitFn(1);
+    return null;
+  }
 
   // H7 — production fail-fast on invalid configuration.
   if (nodeEnv === 'production') {
@@ -181,20 +211,6 @@ export async function startServer({
   logger.log(deploymentLine(report));
   for (const note of deploymentNotes(report)) {
     logger.error(`[config] warning: ${note}`);
-  }
-
-  // The environment gate, placed after the report that explains it and before anything is
-  // connected or served — see the comment at `envWarning` above for why it is fatal only on a host
-  // that identifies itself.
-  if (envWarning && deployedHost) {
-    // The reason is the warning line above; this is the decision, not a second explanation of it.
-    logger.error(
-      '[config] refusing to start: this host identifies itself as a deployment, so an environment ' +
-        'it cannot name is a configuration error rather than a development convenience. Nothing was ' +
-        'connected or served.'
-    );
-    exitFn(1);
-    return null;
   }
 
   // H8 — connect before accepting traffic. Production treats a failed connect

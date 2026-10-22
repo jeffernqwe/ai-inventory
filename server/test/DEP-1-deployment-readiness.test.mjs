@@ -63,10 +63,6 @@ import { registerProvider, deregisterProvider } from '../src/services/mail/provi
  * unrelated variable (testEnv's own, for instance) is disturbed.
  */
 const MANAGED_ENV = [
-  // 2026-10-22: the report now carries what NODE_ENV says, so a fixture that claims to be a
-  // "full deployment" has to state its environment — and one that claims to be bare must not
-  // inherit the value this machine happens to have.
-  'NODE_ENV',
   'MAIL_PROVIDER',
   'MAIL_FROM',
   'BREVO_API_KEY',
@@ -123,7 +119,6 @@ after(() => deregisterProvider(SEAM_PROVIDER));
 
 /** The environment of a fully-configured deployment, as a patch. */
 const FULL = {
-  NODE_ENV: 'production',
   MAIL_PROVIDER: SEAM_PROVIDER,
   MAIL_FROM: 'no-reply@example.com',
   FIREBASE_SERVICE_ACCOUNT_JSON: SERVICE_ACCOUNT,
@@ -190,14 +185,11 @@ describe('DEP-1 the boot line', () => {
     });
   });
 
-  it('reports every integration off on a bare environment, and names the missing NODE_ENV', () => {
+  it('reports every integration off on a bare environment', () => {
     withEnv({}, () => {
       const live = integrationReport();
-      // The environment is reported too now, and a bare host has not stated one.
-      assert.deepEqual(live, report({ nodeEnv: 'missing' }), 'a bare deployment is the all-off report');
-      const notes = deploymentNotes(live);
-      assert.equal(notes.length, 1, 'exactly the environment note, and no integration note');
-      assert.match(notes[0], /NODE_ENV is NOT SET/);
+      assert.deepEqual(live, report(), 'a bare deployment is the all-off report');
+      assert.deepEqual(deploymentNotes(live), [], 'and it is not a degraded deployment');
     });
   });
 
@@ -452,6 +444,36 @@ describe('DEP-1 the health surface', () => {
     });
   });
 
+  it('names the posture on the legacy endpoint, from the process and from nothing else', async () => {
+    await withHealthApp(injected, async (port) => {
+      const health = await (await fetch(`http://127.0.0.1:${port}/api/health`)).json();
+
+      // One of the three names, never a raw environment value and never a database name.
+      assert.ok(
+        ['production', 'development', 'test'].includes(health.environment),
+        `unexpected posture ${JSON.stringify(health.environment)}`,
+      );
+      assert.equal(JSON.stringify(health).includes('inventoryai_'), false);
+    });
+
+    // And it is the INJECTED posture that is published, so the field cannot be hard-coded.
+    const app = express();
+    app.use('/api/health', createHealthRouter({
+      getState: () => 'connected',
+      isReady: () => true,
+      build: injected,
+      environment: () => 'production',
+    }));
+    const server = app.listen(0);
+    await new Promise((resolve) => server.once('listening', resolve));
+    try {
+      const body = await (await fetch(`http://127.0.0.1:${server.address().port}/api/health`)).json();
+      assert.equal(body.environment, 'production');
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
   it('keeps /ready a readiness gate and /live dependency-free', async () => {
     await withHealthApp(injected, async (port) => {
       const ready = await (await fetch(`http://127.0.0.1:${port}/api/health/ready`)).json();
@@ -497,6 +519,9 @@ describe('DEP-1 the boot wiring', () => {
         return true;
       },
       readiness,
+      // This suite is about the READINESS report, so the boot gate is satisfied explicitly rather
+      // than by whatever `NODE_ENV`/`TEST_MODE` the runner happens to export.
+      environment: () => ({ kind: 'development', testProcess: false }),
       exit: (code) => exits.push(code),
       logger: captureLogger(events),
       signalTarget,

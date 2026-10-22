@@ -18550,11 +18550,37 @@ the live host, not against the local one:
 | `GET /auth/reset` | 400 with *This reset link is not usable* |
 | `POST /api/auth/login` wrong password | 401 `INVALID_CREDENTIALS`, **no `stack` field** |
 
-**Not done in production:** a completed reset for a real account. That needs the owner's mailbox, and
-creating a throwaway user in the production database to receive a code is not something this change
-should do to prove itself. The production half that matters has been measured — the routes answer,
-refuse and revoke on the real host (§27EI's device run proves the credential write and the revocation
-against the same code) — and the mailbox half remains the owner's confirmation to give.
+### The real-inbox run (2026-10-22)
+
+The production journey was then driven **end to end with a real mailbox**, on the phone, against
+`https://ai-inventory-l1mi.onrender.com` (the app's `EXPO_PUBLIC_API_URL` was pointed at the live host
+and Metro restarted so the bundle carried it; it was restored to the local server afterwards).
+
+- **A controlled account, not the owner's.** A disposable inbox was created for this run
+  (`auth06probe…@maxxspace.com`) and the app registered it through **Create Account**. The
+  verification mail arrived in that inbox from Brevo within seconds, its six digits were typed into
+  the new code boxes, and the tenant was created. The account was then found in
+  **`inventoryai_prod_db`** and **absent from `inventoryai_dev_db`** — proof the phone was speaking to
+  production, not simply to a server that could have sent the same mail.
+- **Request.** *Forgot password* → address → 202 → *Enter your reset code*. The mail
+  **"Your Inventory AI password reset code"** arrived in the inbox; its code (`741450`) was typed into
+  the six boxes.
+- **Verify and set.** The code was accepted, the password step opened with the address in its
+  subtitle, `ProdNewPass5678` was typed twice, and the screen answered **Password changed**.
+- **Afterwards, measured:** the **new** password `ACCEPTED`; the **old** one
+  `REJECTED (INVALID_LOGIN_CREDENTIALS)`; a session issued **before** the reset answered
+  `GET /api/auth/me` → **401 `SESSION_INVALIDATED`**; and the account's `passwordChangedAt` was stamped
+  at the moment of the reset. Signing in on the phone with the new password reached the dashboard.
+- **Error hygiene on the live host.** A wrong code for a **known** address and the same wrong code for
+  an **unknown** one produced **byte-identical bodies** (`INVALID_PASSWORD_RESET_CODE`) in 195.7 ms and
+  196.6 ms; a wrong password answered 401 `INVALID_CREDENTIALS`; a junk bearer answered 401
+  `INVALID_TOKEN`. None carried `stack`, a path, a module name, a provider string or the address.
+- **Cleaned up.** The probe user, its single-member tenant, both challenge collections and the Firebase
+  identity were deleted, and the disposable inbox was deleted too. The only trace is this record.
+
+**What the owner might still do:** reset a real personal account once, if they want the experience
+confirmed on their own mailbox. The flow itself is no longer unverified in production — this run used
+production's own mail path, credential write and revocation.
 
 # 28. Phase Gate System
 

@@ -2319,8 +2319,16 @@ flag:
   password was refused (`INVALID_LOGIN_CREDENTIALS`), the new one was accepted and reached the
   dashboard, and a session issued **before** the reset answered `GET /api/auth/me` → **401
   `SESSION_INVALIDATED`**. The same run drove **Create Account's** email verification to a new
-  tenant. Codes were minted by a throwaway script because a probe address has no inbox; Brevo
-  delivery of this flow's code is the 2026-10-21 measurement. iOS remains unverified.
+  tenant. Codes were minted by a throwaway script because a probe address has no inbox.
+- **Completed in PRODUCTION with a real inbox (2026-10-22).** On a controlled account registered through
+  Create Account on a disposable mailbox (its verification mail arrived from Brevo, and the account was
+  confirmed present in `inventoryai_prod_db` and absent from the dev database), the reset mail arrived,
+  its code was accepted, the new password was set, and afterwards the **new** password worked, the
+  **old** one was refused (`INVALID_LOGIN_CREDENTIALS`), a session issued **before** the reset answered
+  **401 `SESSION_INVALIDATED`**, and `passwordChangedAt` was stamped. The refusal for a **known** address
+  and for an **unknown** one was **byte-identical**, with no stack, path, provider string or address in
+  any body. The probe account, tenant, challenges, Firebase identity and the disposable inbox were all
+  deleted afterwards. **iOS remains unverified.**
 
 ---
 

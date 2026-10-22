@@ -17898,7 +17898,20 @@ the common case is faster than the fixed wait it replaced.
      reads `5 row(s), e.g. "Search by name, SKU or barcode…"`. The data assertion was still finding
      chrome. The anchored pattern in run 1 is the fix, and the run is kept because a harness that
      counts its own search box as a product is exactly what the unit case now refuses.
-- **Unchanged elsewhere** — `eslint` and `tsc --noEmit` clean in `server/`.
+- **The shared runner still drives a write path** — the preflight that was rewritten is used by
+  every journey, so both write journeys were re-run afterwards against the disposable role fixture
+  tenant: `07-04-45-117Z-stock` **17/17** and `07-06-35-250Z-transfer` **21/21**, net-zero as
+  designed. Their reports also exposed a cosmetic defect that is now fixed: the step titles printed
+  the raw table markers (`open inventoryai://stock-in?productId={{product}}&lock=1`) rather than the
+  product that was moved, so `titleOf` now fills the placeholders — the report is the artifact a
+  later reader has, and it should name the product.
+- **One wrong pick, kept as a lesson in the guide** — the first `stock` attempt used a product id from
+  a **neighbouring business**. The app answered `Product not found` in the form and the movement step
+  failed (`expected 1 movement(s), saw 0`). That is tenant isolation working, not a defect; the guide
+  now says the id must belong to the signed-in tenant, because the failure otherwise reads like a
+  broken form.
+- **Unchanged elsewhere** — `eslint` and `tsc --noEmit` clean in `server/`; the full server suite
+  **1932 tests / 0 failures**.
 
 Artifacts: `docs/evidence/device-runs/` — the three runs above; the README there names which is which.
 

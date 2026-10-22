@@ -165,6 +165,13 @@ back, and each checks the app's own confirmation arithmetic (`33 → 38`, `33 �
 a hard-coded quantity — so running them on every build does not drift the tenant and the tenth run
 still means something. They are write journeys, hence `--allow-writes`.
 
+**The product must belong to the tenant you are signed in as.** A product id from any other business
+is refused by the app (`Product not found` in the form), and the journey then fails at its movement
+step with *"expected 1 movement(s), saw 0"*. That is tenant isolation doing its job, not a defect —
+measured on 2026-10-22 with a real product of the neighbouring business. Pick an id from the signed-in
+business (the `role-owner@example.invalid` fixture tenant is disposable and is the right place for a
+write journey).
+
 **A pass means data, not just screens.** The smoke walk's `expectData` steps wait for labels only the
 server's data can produce — a stock row's `33 available · 33 on hand`, a product row's `SKU … ·
 Barcode …` — and fail when the screen shows its error state instead. This was added on 2026-10-22

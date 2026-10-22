@@ -124,9 +124,16 @@ function chosenJourneys(args) {
   return JOURNEYS.filter((j) => j.id === 'smoke');
 }
 
-/** A step's title, for the report. Derived from the verb so it never drifts from the table. */
-function titleOf(step) {
-  const [[verb, value]] = Object.entries(step);
+/**
+ * A step's title, for the report. Derived from the verb so it never drifts from the table.
+ *
+ * Placeholders are FILLED, because the report is the artifact people read later: a kept run whose
+ * step reads `open inventoryai://stock-in?productId={{product}}&lock=1` does not say which product
+ * was moved. Measured on the 17/17 `stock` run of 2026-10-22, whose titles carried the raw markers.
+ */
+function titleOf(step, ctx) {
+  const [[verb, raw]] = Object.entries(step);
+  const value = typeof raw === 'string' && ctx ? fillTemplate(raw, templateVars(ctx)) : raw;
   if (verb === 'open') return `open ${value}`;
   if (verb === 'expect') return `expect "${value}"`;
   if (verb === 'expectGone') return `expect "${value}" to be gone`;
@@ -591,7 +598,7 @@ async function runJourney(journey, options) {
 
   const steps = [];
   for (const [index, step] of journey.steps.entries()) {
-    const title = titleOf(step);
+    const title = titleOf(step, ctx);
     const began = Date.now();
     let result;
     try {

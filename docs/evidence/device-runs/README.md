@@ -34,6 +34,13 @@ wrote as **the same code, 95 modules, 30 bars, 4 pt module**, and that PDF was p
 device's own Skia pipeline. The draft journey left a real draft order behind (`Draft PO-0002`) and
 dismissed its own confirmation.
 
+**Re-run after the data assertions (2026-10-22, same session):** `2026-10-22T07-04-45-117Z-stock`
+(**17/17**) and `2026-10-22T07-06-35-250Z-transfer` (**21/21**), against the disposable role fixture
+tenant — the preflight the data assertion lives in had just been rewritten, and these two prove the
+shared runner still drives a write path end to end. Their reports also show the step titles **filled**
+(`open inventoryai://stock-in?productId=6ad84fc9…&lock=1`) instead of the raw `{{product}}` markers the
+earlier runs carried.
+
 **The two stock journeys are net-zero on purpose.** `stock` moves 5 in and 5 out, `transfer` moves 1
 across and 1 back, and both check the app's own `from → to` line (measured: `33 → 38` then `38 → 33`;
 `33 → 32, 32 → 33`). A journey a person can run on every build must not quietly raise a product's

@@ -1,0 +1,134 @@
+{
+  "journey": "transfer",
+  "startedAt": "2026-10-22T07:06:35.250Z",
+  "device": "CPH1969 · Android 11 (API 30) · PV4DDMIZZLTCIVSK",
+  "steps": [
+    {
+      "title": "open inventoryai://transfer?productId=6ad84fc919af9d6a521273e8",
+      "status": "pass",
+      "detail": "inventoryai://transfer?productId=6ad84fc919af9d6a521273e8",
+      "durationMs": 1023
+    },
+    {
+      "title": "expect \"Transfer stock\"",
+      "status": "pass",
+      "detail": "seen after 2448ms",
+      "durationMs": 2448
+    },
+    {
+      "title": "tap \"Choose the source…\"",
+      "status": "pass",
+      "detail": "tapped Choose the source…, ▾ at 540,807",
+      "durationMs": 6197
+    },
+    {
+      "title": "tap \"Shop Front\"",
+      "status": "pass",
+      "detail": "tapped Shop Front at 540,1978",
+      "durationMs": 3801
+    },
+    {
+      "title": "tap \"Choose the destination…\"",
+      "status": "pass",
+      "detail": "tapped Choose the destination…, ▾ at 540,1371",
+      "durationMs": 15827
+    },
+    {
+      "title": "tap \"Main Warehouse\"",
+      "status": "pass",
+      "detail": "tapped Main Warehouse at 540,2132",
+      "durationMs": 3802
+    },
+    {
+      "title": "type into the focused field",
+      "status": "pass",
+      "detail": "\"Quantity\" now reads 1, keyboard closed",
+      "durationMs": 41607
+    },
+    {
+      "title": "tap \"Transfer stock\"",
+      "status": "pass",
+      "detail": "tapped Transfer stock at 540,2064",
+      "durationMs": 13905
+    },
+    {
+      "title": "check the movement arithmetic (-1, 1)",
+      "status": "pass",
+      "detail": "58 → 57, 58 → 59 (-1, 1)",
+      "durationMs": 2181
+    },
+    {
+      "title": "tap \"OK\"",
+      "status": "pass",
+      "detail": "tapped OK at 873,1356",
+      "durationMs": 4345
+    },
+    {
+      "title": "open inventoryai://transfer?productId=6ad84fc919af9d6a521273e8",
+      "status": "pass",
+      "detail": "inventoryai://transfer?productId=6ad84fc919af9d6a521273e8",
+      "durationMs": 1024
+    },
+    {
+      "title": "expect \"Transfer stock\"",
+      "status": "pass",
+      "detail": "seen after 2257ms",
+      "durationMs": 2257
+    },
+    {
+      "title": "tap \"Choose the source…\"",
+      "status": "pass",
+      "detail": "tapped Choose the source…, ▾ at 540,807",
+      "durationMs": 5999
+    },
+    {
+      "title": "tap \"Main Warehouse\"",
+      "status": "pass",
+      "detail": "tapped Main Warehouse at 540,2132",
+      "durationMs": 3829
+    },
+    {
+      "title": "tap \"Choose the destination…\"",
+      "status": "pass",
+      "detail": "tapped Choose the destination…, ▾ at 540,1371",
+      "durationMs": 15646
+    },
+    {
+      "title": "tap \"Shop Front\"",
+      "status": "pass",
+      "detail": "tapped Shop Front at 540,1978",
+      "durationMs": 3719
+    },
+    {
+      "title": "type into the focused field",
+      "status": "pass",
+      "detail": "\"Quantity\" now reads 1, keyboard closed",
+      "durationMs": 42980
+    },
+    {
+      "title": "tap \"Transfer stock\"",
+      "status": "pass",
+      "detail": "tapped Transfer stock at 540,2064",
+      "durationMs": 14555
+    },
+    {
+      "title": "check the movement arithmetic (-1, 1)",
+      "status": "pass",
+      "detail": "59 → 58, 57 → 58 (-1, 1)",
+      "durationMs": 2260
+    },
+    {
+      "title": "tap \"OK\"",
+      "status": "pass",
+      "detail": "tapped OK at 873,1356",
+      "durationMs": 4256
+    },
+    {
+      "title": "screenshot \"transfer-done\"",
+      "status": "pass",
+      "detail": "C:\\Users\\jeffe\\inventory-ai\\docs\\evidence\\device-runs\\2026-10-22T07-06-35-250Z-transfer\\transfer-done.png",
+      "durationMs": 768
+    }
+  ],
+  "notes": "evidence: C:\\Users\\jeffe\\inventory-ai\\docs\\evidence\\device-runs\\2026-10-22T07-06-35-250Z-transfer"
+}

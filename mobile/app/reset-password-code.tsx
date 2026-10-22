@@ -99,7 +99,7 @@ const createStyles = (colors: Palette) =>
 export default function ResetPasswordCodeScreen() {
   // The address comes from the request screen. A missing one is a broken route rather than a
   // failure: the person is sent back to ask for a code, which is the only thing that fixes it.
-  const params = useLocalSearchParams<{ email?: string }>();
+  const params = useLocalSearchParams<{ email?: string; sentAt?: string }>();
   const email = typeof params.email === 'string' ? params.email.trim() : '';
 
   const { colors } = useTheme();
@@ -111,9 +111,22 @@ export default function ResetPasswordCodeScreen() {
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [sending, setSending] = useState(false);
-  // IN MEMORY ONLY, deliberately: a cooldown describes the server's current window, and persisting
-  // it would keep the control disabled after the window has moved on.
-  const [cooldownUntil, setCooldownUntil] = useState<number | null>(null);
+  /**
+   * IN MEMORY ONLY, deliberately: a cooldown describes the server's current window, and persisting it
+   * would keep the control disabled after the window has moved on.
+   *
+   * IT STARTS FROM THE REQUEST THE PREVIOUS SCREEN MADE. The server enforces 60 seconds between sends
+   * and answers a second request with the same 202 and no send, so a Resend pressed inside that window
+   * used to report "code sent" about nothing. The `sentAt` the request screen passes is the start of
+   * that window, and the remainder is what this screen must honour — the same thing `verify-email.tsx`
+   * does with `verificationCodeIssuedAt`.
+   */
+  const [cooldownUntil, setCooldownUntil] = useState<number | null>(() => {
+    const sentAt = Number(params.sentAt);
+    if (!Number.isFinite(sentAt) || sentAt <= 0) return null;
+    const end = sentAt + RESEND_COOLDOWN_SECONDS * 1000;
+    return end > Date.now() ? end : null;
+  });
   const [now, setNow] = useState<number>(() => Date.now());
 
   // Ticks only while a cooldown is running.

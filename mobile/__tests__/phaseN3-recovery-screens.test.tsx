@@ -146,9 +146,14 @@ describe('AUTH-06 — Forgot Password sends ONE request and continues in the app
     await waitFor(() =>
       expect(mockedRouter.push).toHaveBeenCalledWith({
         pathname: '/reset-password-code',
-        params: { email: 'user@example.com' },
+        // The address, and WHEN it was accepted: the server's 60-second resend cooldown starts
+        // here, so the next screen can start its countdown instead of offering a Resend that the
+        // server would silently ignore.
+        params: { email: 'user@example.com', sentAt: expect.any(String) },
       })
     );
+    const { params } = mockedRouter.push.mock.calls[0][0] as { params: { sentAt: string } };
+    expect(Number(params.sentAt)).toBeGreaterThan(0);
     expect(view.queryByText(/Diagnostic \(dev only\)/)).toBeNull();
   });
 

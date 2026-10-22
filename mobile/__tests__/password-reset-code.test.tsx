@@ -265,6 +265,27 @@ describe('AUTH-06 — resending is possible, bounded, and never blocks the submi
     await waitFor(() => expect(mockedVerifyCode).toHaveBeenCalledTimes(1));
   });
 
+  it('★ starts that cooldown from the request the previous screen made', async () => {
+    // The server enforces 60 seconds between sends and answers a second one with the same 202 and
+    // NO send. Opening this screen with Resend enabled therefore offered a control that reported
+    // "code sent" about nothing; the request screen now passes when it sent, and the window is
+    // carried over instead of being re-invented here.
+    mockParams.sentAt = String(Date.now());
+
+    const view = await mount();
+
+    expect(view.getByRole('button', { name: /Resend code in/ })).toBeTruthy();
+    expect(mockedRequestCode).not.toHaveBeenCalled();
+  });
+
+  it('offers Resend at once when the request is already older than the window', async () => {
+    mockParams.sentAt = String(Date.now() - 120_000);
+
+    const view = await mount();
+
+    expect(view.getByRole('button', { name: RESEND })).toBeTruthy();
+  });
+
   it('honours the server’s Retry-After rather than inventing a number', async () => {
     // THE 429 A CLIENT CAN ACTUALLY RECEIVE IS THE ROUTE LIMITER'S, not a resend cooldown: a
     // cooldown refusal would only be reachable for an address with an account, which is the

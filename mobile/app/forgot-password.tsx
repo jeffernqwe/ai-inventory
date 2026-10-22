@@ -99,9 +99,20 @@ export default function ForgotPasswordScreen() {
     setDiagnostic(null);
     try {
       await requestPasswordResetCode(value);
-      // The code screen is the journey's next step, and it needs the address the person typed —
-      // the only thing this screen passes on, and never an account identifier.
-      router.push({ pathname: '/reset-password-code', params: { email: value } });
+      /**
+       * The code screen is the journey's next step, and it needs two things: the address the person
+       * typed — never an account identifier — and WHEN the request was accepted.
+       *
+       * The timestamp exists because the server enforces a 60-second resend cooldown and answers it
+       * with the same 202 and no send. Without the timestamp the next screen opened with Resend
+       * enabled, and a tap inside that minute said "code sent" about a send that never happened. The
+       * server cannot say "wait", because that would classify the address; this screen can, because
+       * it already knows when it sent.
+       */
+      router.push({
+        pathname: '/reset-password-code',
+        params: { email: value, sentAt: String(Date.now()) },
+      });
     } catch (err) {
       setDiagnostic(`server: ${(err as { code?: string | null } | null)?.code ?? '(no code)'}`);
       const fields = fieldMap(err);

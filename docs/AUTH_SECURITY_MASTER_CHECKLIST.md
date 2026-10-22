@@ -862,7 +862,7 @@ Chronological. **History is not rewritten.**
 | **Auth E2E verification (unnumbered)** | Android Google existing-account E2E + Render Firebase Admin config + CLI credential rotation + Firebase PII investigation | `[✓]` | Android E2E verified; docs-only | — |
 | **AUTH-01** | Firebase revocation checking (`checkRevoked: true`) + verification-failure classification | `[✓]` | `phaseAUTH01-firebase-verification.test.mjs` | `b3f1146` |
 | **AUTH-02** | 1-hour JWT, enforced issuer/audience, 14-day absolute session cap, `SESSION_EXPIRED` classification | `[✓]` | `phaseAUTH02-session-jwt.test.mjs` | `6a0f41b` |
-| **AUTH-03** | Inventory session renewal — server boundary + mobile client | `[✓]` | `phaseAUTH03-session-renewal.test.mjs`; `phaseAUTH03-*` mobile suites | `3085e3f`, `5da0692` |
+| **AUTH-03** | Inventory session renewal — server boundary + mobile client | `[✓]` | `phaseAUTH03-session-renewal.test.mjs`; `phaseAUTH03-*` mobile suites. **Fixed 2026-10-22:** `/renew` now authenticates with `requireAuthForRenewal` (only `exp` relaxed), because recovery presents the token it was refused — the old `requireAuth` mount made recovery impossible; see roadmap *"AUTH-03's recovery path never ran"* | `3085e3f`, `5da0692` |
 | **AUTH-04** | Custom 6-digit email-verification code (A…H; G passed live on Brevo 2026-10-04) | `[✓]` | §40; live acceptance reported there | `56a3f84` … `0972948` |
 | **CI quality gates** | `.github/workflows/ci.yml` — `server` + `mobile` jobs on every PR and on `main` | `[✓]` | first green run on PR #7 | `9f4c5c1`, `d415335` |
 | **ISS-02** | RNFirebase Auth PII log remediated (dependency-local `patch-package` patch + `postinstall --error-on-fail`, LF-pinned by `.gitattributes`, held by a guard suite) | `[✓]` | patch content + end-to-end reinstall + 8-case guard + mobile 48/652; **artifact-verified 2026-10-12** — the PII literal is **absent from the shipped dex** (0 vs 1 pre-patch, with controls) in build `436b2942` at `da9c401`; **and device-measured the same day** — zero occurrences in a full logcat capture on the OPPO CPH1969 running that exact build, with the `Auth` tag's neighbours proving liveness | PR #40 · roadmap §27AZ · **§27BA** |
@@ -1947,7 +1947,7 @@ reconciliation.** §29–§41 are not rewritten**; §29 gained rows, and §30/§
 | --- | --- | --- | --- |
 | **AUTH-01** — revocation checking + verification-failure classification | `[✓]` SHIPPED | `phaseAUTH01-firebase-verification.test.mjs` | `b3f1146` |
 | **AUTH-02** — 1-hour JWT, enforced `iss`/`aud`, 14-day absolute cap | `[✓]` SHIPPED | `phaseAUTH02-session-jwt.test.mjs` | `6a0f41b` |
-| **AUTH-03** — inventory session renewal (server + mobile) | `[✓]` SHIPPED | `phaseAUTH03-session-renewal.test.mjs`; two `phaseAUTH03-*` mobile suites | `3085e3f`, `5da0692` |
+| **AUTH-03** — inventory session renewal (server + mobile) | `[✓]` SHIPPED; **recovery path fixed 2026-10-22** | `phaseAUTH03-session-renewal.test.mjs`; two `phaseAUTH03-*` mobile suites | `3085e3f`, `5da0692` |
 | **AUTH-04** — custom 6-digit email verification (A…H) | `[✓]` SHIPPED; **G passed live** | §40 live acceptance (Brevo, 2026-10-04) | `56a3f84` … `0972948` |
 | **CI quality gate** | `[✓]` SHIPPED and green | `.github/workflows/ci.yml`; PR #7 both jobs green | `9f4c5c1`, `d415335` |
 | **Integration** | `[✓]` MERGED | PR #7 → `3e5d2aa` (base `6e2252f`, merged head `d415335`) | — |

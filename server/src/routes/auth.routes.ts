@@ -8,7 +8,7 @@ import {
 } from '../controllers/passwordResetCode.controller.ts';
 import { firebaseExchange, firebaseRegister, firebaseLink, credentialsChanged, renew } from '../controllers/firebaseAuth.controller.ts';
 import { emailVerificationRequest, emailVerificationConfirm } from '../controllers/emailVerification.controller.ts';
-import requireAuth from '../middlewares/authenticate.ts';
+import requireAuth, { requireAuthForRenewal } from '../middlewares/authenticate.ts';
 import {
   createLoginAccountLimiter,
   createLoginIpLimiter,
@@ -169,13 +169,23 @@ export function createAuthRouter({ limits }: AuthRouterOptions = {}) {
   // AUTH-03: session renewal. AUTHENTICATED — no permission, because a user
   // manages nothing but their own session, and both the account (`req.user.id`) and
   // the session (`req.auth.jti`) come from the token that authenticated the
-  // request, never from the body. Middleware order is requireAuth → limiter →
+  // request, never from the body. Middleware order is authentication → limiter →
   // controller: the limiter sits immediately before the handler that spends a
   // Firebase `checkRevoked` verification, matching `ai.routes.ts`'s
   // `requireAuth, requirePermission, aiRateLimiter, controller` ordering, so an
   // unauthenticated caller is refused before consuming any budget. The ID token
   // travels in the POST body, so it cannot reach the access log or a Referer.
-  router.post('/renew', requireAuth, createSessionRenewLimiter(limits), renew);
+  //
+  // AUTH-03 FIX (2026-10-22) — THIS ROUTE USES `requireAuthForRenewal`, NOT
+  // `requireAuth`. The client calls it in exactly two situations: before a request
+  // when the token is near expiry (still valid), and AFTER a `SESSION_EXPIRED`
+  // refusal, with the token that was just refused. Under plain `requireAuth` the
+  // second case could never succeed — the same middleware refused the expired
+  // token before renewal saw it — so a live session whose ~1h token had expired
+  // demanded a fresh sign-in. Only `exp` is relaxed; signature, issuer, audience,
+  // `jti`, account status, the password-change rule and session liveness are all
+  // still enforced, and the handler itself re-verifies the Firebase identity.
+  router.post('/renew', requireAuthForRenewal, createSessionRenewLimiter(limits), renew);
 
   // Phase 32H: identity linking. AUTHENTICATED, and the authentication IS the
   // operation's ownership proof (design §14A.4) rather than a convenience — the

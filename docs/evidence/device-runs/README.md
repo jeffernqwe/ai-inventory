@@ -23,6 +23,8 @@ disposable dataset, which is why a write journey is allowed to run here).
 | `2026-10-21T17-41-33-320Z-stock` | a picker's **label** was tapped instead of its control | **3/4, FAIL** |
 | `2026-10-21T17-52-36-243Z-stock` | the app held a session the server no longer accepted | **3/4, FAIL** |
 | `2026-10-22T05-09-51-488Z-smoke` | the **Expo dev launcher** was in front, not the app | **1/2, FAIL** |
+| `2026-10-22T05-53-11-769Z-smoke` | renewal refused the expired token; **every data request was 401** while the screens rendered | **17/17, but not a pass in fact** |
+| `2026-10-22T06-06-32-285Z-smoke` | the **same phone state** after the AUTH-03 fix: renewals 200, data served, **no sign-in** | **17/17 pass** |
 
 The label journey read `2000053300018` off the product screen, decoded the PDF the Share action
 wrote as **the same code, 95 modules, 30 bars, 4 pt module**, and that PDF was produced by the
@@ -36,6 +38,14 @@ quantity each time, and asserting a **delta** rather than an absolute number is 
 steps still mean something on the tenth run. The two runs above were executed **a day apart** and
 reported the **same numbers**, which is that claim measured rather than assumed. They are write journeys, so they need
 `--product=<id> --source=<location> [--destination=<location>] --allow-writes`.
+
+**A smoke pass is not proof of a signed-in app.** `05-53-11` reports 17/17 while the server was refusing
+every data request with `401 SESSION_EXPIRED` — the journey asserts each screen's headings, and those
+render regardless. That run is kept because it is the evidence for the AUTH-03 fix recorded in the
+roadmap (*"AUTH-03's recovery path never ran"*): the phone held a live 14-day session, renewal was
+refused because the route sat behind `requireAuth`, and the next run (`06-06-32`, with the fixed
+server and **no sign-in in between**) renewed three times and served the dashboard. Improving the
+smoke journey to assert data, not only chrome, is recorded as open work.
 
 **The kept failure is the useful one.** `16-45-04` reported *"contains no decodable EAN-13"* on a
 label that was completely correct: the harness read the PDF with `adb shell cat`, whose

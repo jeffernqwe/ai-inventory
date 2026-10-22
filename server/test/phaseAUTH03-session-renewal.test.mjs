@@ -211,13 +211,66 @@ unitSuite('AUTH-03 — renewal structure and guards (no database)', () => {
     );
   });
 
-  it('★ the route is requireAuth → limiter → controller', () => {
+  it('★ the route is renewal-authentication → limiter → controller', () => {
     const line = routesSrc.split('\n').find((l) => l.includes("'/renew'"));
     assert.ok(line, 'the /renew route is mounted');
     assert.ok(
-      /requireAuth,\s*createSessionRenewLimiter\(limits\),\s*renew/.test(line),
+      /requireAuthForRenewal,\s*createSessionRenewLimiter\(limits\),\s*renew/.test(line),
       `unexpected /renew middleware order: ${line}`
     );
+  });
+
+  /**
+   * THE DEFECT THIS PINS (found and fixed 2026-10-22).
+   *
+   * `/renew` used to be behind plain `requireAuth`. The client calls renewal in two
+   * situations — proactively, while the token is still valid, and as RECOVERY, with the
+   * token that was just refused `SESSION_EXPIRED`. The second call was refused by the
+   * same middleware before the handler ran, so recovery could never succeed and a live
+   * 14-day session whose ~1h token had expired demanded a fresh sign-in. That was
+   * measured on a phone, not inferred.
+   */
+  it('★ /renew relaxes EXPIRY only, and no other route may use that middleware', () => {
+    const renewalRoutes = routesSrc
+      .split('\n')
+      .filter((line) => /router\.(get|post|patch|put|delete)\(/.test(line))
+      .filter((line) => line.includes('requireAuthForRenewal'));
+
+    assert.equal(renewalRoutes.length, 1, 'the expiry-relaxing middleware is mounted once');
+    assert.ok(renewalRoutes[0].includes("'/renew'"), 'it is the /renew route');
+    assert.ok(
+      !/requireAuth,\s*createSessionRenewLimiter/.test(renewalRoutes[0]),
+      'plain requireAuth would refuse the token renewal exists to replace'
+    );
+
+    // A source guard that cannot fail is decoration: putting plain `requireAuth` back on
+    // the route (the defect) must trip the assertion that rejects it.
+    const revertedRoute = renewalRoutes[0].replace('requireAuthForRenewal', 'requireAuth');
+    assert.ok(
+      /requireAuth,\s*createSessionRenewLimiter/.test(revertedRoute),
+      'control: the reverted middleware is what the assertion above refuses'
+    );
+
+    const body = middlewareSrc.slice(
+      middlewareSrc.indexOf('async function authenticate('),
+      middlewareSrc.indexOf('export default requireAuth;'),
+    );
+    // The one relaxation, stated positively…
+    assert.match(
+      body,
+      /options\.allowExpired \? verifyAccessTokenIgnoringExpiry\(token\) : verifyAccessToken\(token\)/,
+      'expiry is the only thing relaxed, and only when asked for'
+    );
+    // …and the checks that must survive it, named so a refactor cannot drop one quietly.
+    for (const check of [
+      "typeof jti !== 'string'",
+      'findActiveSessionByJti(jti)',
+      'passwordChangedAt',
+      "user.status !== 'ACTIVE'",
+      'assertActiveBusiness(user.businessId)',
+    ]) {
+      assert.ok(body.includes(check), `the shared body still enforces ${check}`);
+    }
   });
 
   it('★ no custom refresh token or new durable auth state is introduced', () => {
@@ -473,6 +526,74 @@ dbSuite('AUTH-03 — session renewal over HTTP', dbOk, () => {
   // -------------------------------------------------------------------------
   // The refusals
   // -------------------------------------------------------------------------
+
+  // -------------------------------------------------------------------------
+  // THE RECOVERY CASE (fixed 2026-10-22)
+  // -------------------------------------------------------------------------
+
+  /**
+   * The client's second chance, exactly as `lib/client.ts` makes it: after a request is
+   * refused `SESSION_EXPIRED`, renewal is called WITH THE EXPIRED TOKEN, once. Until
+   * this fix the route sat behind plain `requireAuth` and answered the same refusal, so
+   * the retry could never succeed and an idle app demanded a sign-in.
+   */
+  it('6a. ★★ an EXPIRED token for a LIVE session renews: the client\'s recovery path works', async () => {
+    const user = await makeUser({ firebaseUid: uid('recover') });
+    // exp is 90 seconds in the PAST — a token `requireAuth` would refuse.
+    const { token, jti, session } = await sessionFor(user, { ttlSeconds: -90 });
+    const capBefore = session.expiresAt.toISOString();
+    setFakeFirebaseToken({ uid: user.firebaseUid, email: user.email, email_verified: true });
+
+    const res = await renew(token);
+
+    assert.equal(res.status, 200, JSON.stringify(res.json));
+    const claims = decodeAccessToken(res.json.token);
+    assert.equal(claims.jti, jti, 'the same session is named by the new token');
+    assert.equal(claims.sub, String(user._id));
+    assert.ok((claims.exp ?? 0) * 1000 > Date.now(), 'the new token is in the future');
+
+    const after = await Session.findById(session._id);
+    assert.equal(after.expiresAt.toISOString(), capBefore, 'the 14-day cap did not move');
+    assert.equal(after.revokedAt, null);
+    assert.equal(await Session.countDocuments({ userId: user._id }), 1, 'no session was created');
+  });
+
+  it('6b. ★ expired-but-live is NOT a general amnesty: every other rule still refuses', async () => {
+    // (i) a REVOKED session, named by an expired token, is terminal.
+    const revokedUser = await makeUser({ firebaseUid: uid('revoked') });
+    const revoked = await sessionFor(revokedUser, { ttlSeconds: -90 });
+    await Session.updateOne({ _id: revoked.session._id }, { revokedAt: new Date() });
+    setFakeFirebaseToken({ uid: revokedUser.firebaseUid, email: revokedUser.email, email_verified: true });
+    const revokedRes = await renew(revoked.token);
+    assert.equal(revokedRes.status, 401);
+    assert.equal(revokedRes.json.code, 'SESSION_REVOKED', 'session liveness is still required');
+
+    // (ii) a token with a BAD SIGNATURE is not "expired" — only expiry was relaxed.
+    const forgedUser = await makeUser({ firebaseUid: uid('forged') });
+    const forged = await sessionFor(forgedUser, { ttlSeconds: -90 });
+    const forgedToken = jwt.sign({ sub: String(forgedUser._id), jti: forged.jti }, 'not-the-secret', {
+      algorithm: 'HS256',
+      expiresIn: -90,
+      issuer: env.jwtIssuer,
+      audience: env.jwtAudience,
+    });
+    setFakeFirebaseToken({ uid: forgedUser.firebaseUid, email: forgedUser.email, email_verified: true });
+    const forgedRes = await renew(forgedToken);
+    assert.equal(forgedRes.status, 401);
+    assert.equal(forgedRes.json.code, 'INVALID_TOKEN');
+
+    // (iii) the password-change rule still invalidates a token issued before the change.
+    const changedUser = await makeUser({ firebaseUid: uid('changed') });
+    const changed = await sessionFor(changedUser, { ttlSeconds: -90 });
+    await User.updateOne(
+      { _id: changedUser._id },
+      { passwordChangedAt: new Date(Date.now() + 60_000) }
+    );
+    setFakeFirebaseToken({ uid: changedUser.firebaseUid, email: changedUser.email, email_verified: true });
+    const changedRes = await renew(changed.token);
+    assert.equal(changedRes.status, 401);
+    assert.equal(changedRes.json.code, 'SESSION_INVALIDATED');
+  });
 
   it('7. ★ a session past its 14-day cap cannot renew (structural enforcement)', async () => {
     const user = await makeUser({ firebaseUid: uid('capped') });

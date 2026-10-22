@@ -241,6 +241,22 @@ function readRetryAfter(res: Response): number | null {
 export const SESSION_EXPIRED_CODE = 'SESSION_EXPIRED';
 
 /**
+ * What a screen says when the token could not be refreshed RIGHT NOW.
+ *
+ * The server's `SESSION_EXPIRED` sentence — "Session expired — please sign in again" — is true
+ * about the TOKEN and false about the SESSION: AUTH-03 deliberately preserves a live session when
+ * renewal fails transiently, retries on the next request after its own backoff, and never signs
+ * the user out for this. The server cannot know which case the client is in, so the client — which
+ * does — replaces the sentence while keeping the CODE, so nothing about classification moves:
+ * `SESSION_EXPIRED` stays recoverable and is still never reported as session loss.
+ *
+ * Measured on a phone on 2026-10-21: a transient renewal failure showed the sign-in instruction on
+ * a 14-day session that was still alive, and the only way past it looked like signing in again.
+ */
+export const SESSION_REFRESH_FAILED_MESSAGE =
+  'Could not refresh your sign-in. Check your connection and try again.';
+
+/**
  * True when a refused authenticated request can be recovered by renewal.
  *
  * Classification is by APPLICATION ERROR CODE, never by HTTP status: a 401 alone
@@ -532,6 +548,10 @@ async function apiFetchAttempt<T = unknown>(
         true,
       );
     }
+
+    // Recovery could not complete now, and the session is preserved on purpose. Replace the
+    // server's expiry sentence with what actually happened; the code is untouched.
+    if (isRecoverableAuthError(error)) error.message = SESSION_REFRESH_FAILED_MESSAGE;
   }
 
   // N-4 — WHY ONE REQUEST CAN OPT OUT OF THIS REPORT.

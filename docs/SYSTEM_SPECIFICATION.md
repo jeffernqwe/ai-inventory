@@ -1553,13 +1553,28 @@ POST /api/auth/renew   200 on success; requires BOTH credentials
 ```
 
 Renewal requires the current Inventory AI access token **and** a fresh Firebase ID token. The route
-is **authenticated** — `requireAuth` is the first handler — so the account comes from `req.user.id`
+is **authenticated** — `requireAuthForRenewal` verifies the token first, including one whose `exp`
+has already passed (fixed 2026-10-22; see below) — so the account comes from `req.user.id`
 and the session from `req.auth.jti`, both taken from the token that authenticated the request; the
 body carries only `{ idToken }`. A client can therefore never name another user, another business or
 another session. The route is **per-IP rate-limited** (default 120 per 15 minutes, configurable via
 `AUTH_SESSION_RENEW_RATE_LIMIT_WINDOW_MS` / `AUTH_SESSION_RENEW_RATE_LIMIT_MAX`), answers
 `429 SESSION_RENEW_RATE_LIMITED` with a `Retry-After` header, and treats that 429 as **transient** —
 it neither ends the session nor loops. No audit row is written per renewal.
+
+**The token being replaced may already be expired** (fixed 2026-10-22). Renewal is the client's
+recovery path as well as its proactive one: when a request is refused `SESSION_EXPIRED`, the client
+calls `POST /api/auth/renew` with **the token that was just refused** and retries exactly once. That
+can only work if the route accepts an expired token that still names a **live** session, so it
+authenticates with `requireAuthForRenewal` rather than `requireAuth`. Exactly one thing is relaxed —
+`exp`: the signature, algorithm, issuer and audience are still verified, the `jti` is still required,
+the account must still exist and be `ACTIVE`, the password-change rule still applies, and the named
+session must still be live (revoked, capped or unknown → `401 SESSION_REVOKED`; a token issued before
+a password change → `401 SESSION_INVALIDATED`). Nothing about data access changes: the route
+authorizes no read and no write, it verifies a fresh Firebase identity with `checkRevoked`, and it
+mints a token for the session it was given. Before the fix the route sat behind `requireAuth`, so the
+recovery call was refused by the same middleware that refused the request — measured on a phone as a
+forced sign-in on a live 14-day session.
 
 Renewal re-issues a token for the **same `jti`**: it never creates a session row and never mints a
 new `jti`; it **never extends the session's `expiresAt`**, so the 14-day absolute cap is untouched

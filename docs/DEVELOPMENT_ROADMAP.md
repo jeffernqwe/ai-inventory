@@ -6388,6 +6388,11 @@ session renewal (AUTH-03)", 24 files, +2,322/−67) and **`5da0692`** ("fix: pre
 from re-entering the renewal hooks", 2 files, +76/−3). The behaviour is specified in
 `docs/SYSTEM_SPECIFICATION.md` **§"Session Renewal (AUTH-03)"**.
 
+> **Corrected 2026-10-22:** the route's first handler is now **`requireAuthForRenewal`**, not
+> `requireAuth`, because the client's recovery call presents the token that was just refused — which
+> `requireAuth` refuses. Only `exp` is relaxed; every other check is unchanged. See *"AUTH-03's
+> recovery path never ran"* above.
+
 ## What shipped — the server boundary
 
 - **`POST /api/auth/renew`**, **authenticated**: `requireAuth` is the first handler, so the account is
@@ -17723,9 +17728,9 @@ harness — `the Expo dev launcher is in front; starting the bundle…`, **smoke
 - **iOS**: no macOS on this host. Nothing in this entry is iOS evidence, and Phase 30B stays open.
 - **Paper and the camera**: the PDF decode rules out clipped bars but is not a scan of paper, and a
   barcode in the room stays a manual item.
-- **The mid-session sign-out above**: observed once, not reproduced, cause unknown. A user who is
-  asked to sign in again an hour into a shift would call that a defect, so it is listed as one to
-  chase — with the evidence that exists (a live, unrevoked server session) rather than a guessed fix.
+- **The mid-session sign-out above**: observed once and, later the same day, **diagnosed and fixed** —
+  `POST /api/auth/renew` refused the expired token it exists to replace, so recovery could never run.
+  See *"AUTH-03's recovery path never ran"* below for the reproduction, the fix and the device evidence.
 
 Artifacts: `docs/evidence/device-runs/` — the passing `stock` and `transfer` runs, the 2026-10-22
 smoke that followed the launcher recovery, and **three kept failures** (the tapped label, the expired
@@ -17737,6 +17742,90 @@ exists.
 container, boot smoke, lint, both module-graph checks), `secret-guard` and `attribution-guard` all
 **succeeded**. The commit that records this line in the roadmap is documentation only, so the run is
 named at the code commit rather than at the head that carries the note.
+
+# AUTH-03's recovery path never ran — renewal refused the token it was meant to replace (2026-10-22)
+
+**A defect fix inside AUTH-03, not an application phase.** One server middleware variant, one route
+binding, one route count re-classified, one client-side sentence, and the tests that pin all four. No
+new route, permission, role, schema, index, dependency, environment variable or API shape; the client
+already called the route the way it now works.
+
+## What was wrong, and how it was found
+
+The device pass on 2026-10-21 ended with a phone that held a **live 14-day session** and was told
+*"Session expired — please sign in again"*. The server's own record for that account showed the
+session created **16:30:31, never revoked, expiring 2026-11-04** — so the session had not ended. What
+had ended was the ~1-hour access token.
+
+AUTH-03 says a live session survives that: `lib/client.ts` calls renewal **after** a `SESSION_EXPIRED`
+refusal, with **the token that was just refused**, and retries once. But `/api/auth/renew` sat behind
+plain `requireAuth`, whose first act is to refuse an expired token — with `SESSION_EXPIRED`, the same
+code that triggered the recovery. **The recovery call could never succeed.** Proactive renewal hid it
+in normal use (it runs at the 10-minute horizon, while the token is still valid), so the hole only
+showed whenever the app was idle, asleep or offline long enough for the token to expire — exactly
+the situation a shift worker hits.
+
+Measured, not inferred. With `JWT_EXPIRES_IN=90s` and a fresh sign-in on the OPPO CPH1969, the phone's
+token expired during a pause, and the next run produced **8 `POST /api/auth/renew` 401s** and a **401
+on every data route** (`/api/dashboard`, `/api/products`, `/api/inventory`, …) while the screens still
+rendered — the run reported **17/17** because the smoke journey asserts each screen's chrome, not its
+data. (That is a limitation of the smoke journey, recorded below, not of the fix.) The same short-TTL
+setup also proved the *other* half works: while the token was valid, **116 renewals answered 200**,
+so the renewal plumbing itself was never the problem.
+
+## The fix
+
+`requireAuthForRenewal` — the same authentication body as `requireAuth`, with **one** relaxation:
+`exp`. Signature, algorithm, issuer and audience are still verified, the `jti` is still required, the
+account must exist and be `ACTIVE`, the business must be active, the password-change rule still
+applies, and the named session must still be live. `/api/auth/renew` is the **only** route mounted
+with it, and a source guard fails if `requireAuthForRenewal` appears on any other route — or if plain
+`requireAuth` is put back on this one.
+
+Why relaxing expiry here is safe: the route grants no data access. It verifies a **fresh Firebase ID
+token** (`checkRevoked: true`), requires the verified uid to equal the account's `firebaseUid`, and
+returns a token for the **same** `jti` — no session row, no new `jti`, no change to `expiresAt`. A
+stolen expired JWT alone mints nothing; with the Firebase token the holder could already have opened
+a session at the public exchange, and renewal is the **stricter** of the two because the session it
+names must still be alive (so sign-out-everywhere still kills it).
+
+## Verified
+
+- **Unit / source guards** — `phaseAUTH03-session-renewal.test.mjs`: `/renew` is authenticated by the
+  renewal variant, that variant is mounted once, no other route uses it, only `exp` is relaxed, and
+  every surviving check is named. A must-trip control re-runs the same assertion with `requireAuth`
+  put back. `phase23-authorization-contract.test.mjs` now accepts **two** authentication middlewares
+  and still classifies any unknown first handler as PUBLIC; `/renew` stays `AUTHENTICATED` in the
+  route tier, so §2.6's totals do not move.
+- **DB behaviour** — case 6a: an **expired** token on a **live** session renews, same `jti`, same
+  session `_id`, cap unmoved, no new row. Case 6b: expired-but-revoked → `401 SESSION_REVOKED`; expired
+  with a bad signature → `401 INVALID_TOKEN`; expired but issued before a password change →
+  `401 SESSION_INVALIDATED`. The amnesty is expiry only, and the suite proves it three ways.
+- **On the phone, without signing in** — the phone still held the expired token and the live session
+  from the experiment above. With the fixed server running, the next run produced **3 renewals 200**
+  and `/api/dashboard` **304** (authenticated, unchanged), and the smoke journey passed **17/17**
+  again — this time on data. No sign-in was performed between the failing run and the passing one.
+- **Full server suite** — `npm test`: **1921 tests, 1921 pass, 0 fail** (full mode, real MongoDB).
+- **Mobile** — `npx jest`: **80 suites / 979 tests / 0 failures**, `tsc` clean; the new copy case is in
+  `phaseAUTH03-client-renewal.test.ts` (15 cases in that suite).
+
+Artifacts: `docs/evidence/device-runs/2026-10-22T05-53-11-769Z-smoke` (the failure: 17/17 by the
+journey's own count, 401 on every data route) and `.../2026-10-22T06-06-32-285Z-smoke` (the recovery,
+same phone, no sign-in).
+
+## Still open, and said so
+
+- ~~**The copy after a genuinely transient renewal failure is misleading.**~~ **Fixed in the same
+  change.** When recovery cannot complete now, `lib/client.ts` keeps the CODE and replaces the
+  sentence with *"Could not refresh your sign-in. Check your connection and try again."* — so the
+  classification (recoverable, never session loss) is untouched while the screen stops telling a
+  member on a live 14-day session to sign in again. The suite asserts both halves: the message no
+  longer matches `/expired/i`, and the code is still `SESSION_EXPIRED`.
+- **The smoke journey proves chrome, not data.** Its 17 assertions are screen headings; a run whose
+  every request is refused 401 still passes. The preflight (`Session expired` / login detection) is
+  what catches that state today, and it did not catch it during the 2026-10-22 reproduction — the
+  banner had not rendered when the preflight looked. A data assertion on one list screen is the fix;
+  it is recorded here rather than bolted on with the auth change.
 
 # 28. Phase Gate System
 

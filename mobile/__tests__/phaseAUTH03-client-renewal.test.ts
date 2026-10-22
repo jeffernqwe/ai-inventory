@@ -18,6 +18,8 @@
 
 import {
   ApiError,
+  SESSION_EXPIRED_CODE,
+  SESSION_REFRESH_FAILED_MESSAGE,
   apiFetch,
   isRecoverableAuthError,
   setSessionLostHandler,
@@ -112,6 +114,28 @@ describe('AUTH-03 — recovery and exactly-one retry', () => {
 
     await expect(apiFetch('/api/x', { token: 't' })).rejects.toBeInstanceOf(ApiError);
     expect(lost).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The COPY fix (2026-10-22). A failed refresh keeps the session alive and retries later, so
+   * repeating the server's "Session expired — please sign in again" would send the member to
+   * re-authenticate for nothing — measured on a phone, on a live 14-day session. The CODE must
+   * not move with it: screens classify on `SESSION_EXPIRED` and the recovery rule depends on it.
+   */
+  it('says the sign-in could not be refreshed, and does not claim the session ended', async () => {
+    setSessionRecoveryHandler(async () => null);
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(401, {
+        code: SESSION_EXPIRED_CODE,
+        error: 'Session expired — please sign in again',
+      }),
+    );
+
+    await expect(apiFetch('/api/x', { token: 't' })).rejects.toMatchObject({
+      code: SESSION_EXPIRED_CODE,
+      message: SESSION_REFRESH_FAILED_MESSAGE,
+    });
+    expect(SESSION_REFRESH_FAILED_MESSAGE).not.toMatch(/expired/i);
   });
 });
 

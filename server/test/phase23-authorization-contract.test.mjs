@@ -83,7 +83,7 @@ import {
   walkSourceFiles,
 } from './sourceFiles.mjs';
 import { PERMISSIONS, ROLES, ROLE_PERMISSIONS, ROLE_VALUES } from '../src/constants/roles.ts';
-import requireAuth from '../src/middlewares/authenticate.ts';
+import requireAuth, { requireAuthForRenewal } from '../src/middlewares/authenticate.ts';
 
 // ---------------------------------------------------------------------------
 // Paths — every one resolved from this file, never from cwd.
@@ -302,14 +302,29 @@ const AUTHENTICATED_ROUTES = [
  */
 const ROLE_GATED_ROUTES = [];
 
+/**
+ * The middlewares that establish an authenticated request.
+ *
+ * There are two, and the second exists for exactly one route: `/api/auth/renew` must
+ * accept the token it is replacing, which the client presents AFTER a `SESSION_EXPIRED`
+ * refusal (AUTH-03 fix, 2026-10-22 — under plain `requireAuth` recovery could never
+ * succeed). It verifies the same signature, issuer, audience, `jti`, live session, account
+ * status and password-change rule; only `exp` is relaxed. It is still AUTHENTICATION, so
+ * classifying it as PUBLIC would be a false alarm — but the list is closed: any OTHER
+ * first handler is PUBLIC and must be declared, which is what keeps a new gate from
+ * riding in unnoticed.
+ */
+const AUTH_MIDDLEWARES = [requireAuth, requireAuthForRenewal];
+
 /** Classify one route from its real handler chain and its source declaration. */
-function classifyRoute({ handlers, declaration }, authFn = requireAuth) {
+function classifyRoute({ handlers, declaration }) {
   if (!handlers.length) return { kind: 'MALFORMED', why: 'route has no handlers' };
-  if (handlers[0] !== authFn) return { kind: CLASS.PUBLIC, why: 'no requireAuth' };
+  const auth = AUTH_MIDDLEWARES.includes(handlers[0]) ? handlers[0] : null;
+  if (!auth) return { kind: CLASS.PUBLIC, why: 'no authentication middleware' };
   if (handlers.length === 2) return { kind: CLASS.AUTHENTICATED, why: 'requireAuth + controller only' };
 
   const gate = handlers[1];
-  if (gate === authFn) return { kind: 'MALFORMED', why: 'requireAuth applied twice' };
+  if (gate === auth) return { kind: 'MALFORMED', why: 'authentication applied twice' };
   if (gate.length !== 3) {
     return { kind: 'MALFORMED', why: 'second handler is not a (req, res, next) middleware' };
   }
@@ -654,6 +669,30 @@ unitSuite('Phase 23 — authorization contract completion', () => {
           `declare it as a public/authenticated/role-gated exemption with a reason: ${unclassified.join(' | ')}`
       );
       assert.deepEqual(misdeclared, [], misdeclared.join(' | '));
+    });
+
+    it('★ the expiry-relaxing renewal authentication is used by /renew and nowhere else', () => {
+      const renewalAuthenticated = ROUTES.filter(
+        (r) => Array.isArray(r.handlers) && r.handlers[0] === requireAuthForRenewal
+      ).map((r) => r.route);
+
+      assert.deepEqual(
+        renewalAuthenticated,
+        ['POST /api/auth/renew'],
+        'only renewal may accept an expired token, and it must be classified as AUTHENTICATED'
+      );
+      assert.equal(
+        classifyRoute(BY_ROUTE.get('POST /api/auth/renew')).kind,
+        CLASS.AUTHENTICATED,
+        'renewal is authentication, not a public route'
+      );
+      // Control: the list of accepted authentication middlewares did not become "anything",
+      // so an unknown first handler is still PUBLIC and must be declared.
+      const foreign = classifyRoute({
+        handlers: [(req, res, next) => next(), () => {}],
+        declaration: "router.post('/sneaky', mysteryGate, c.post)",
+      });
+      assert.equal(foreign.kind, CLASS.PUBLIC, 'control: an unknown first handler is still PUBLIC');
     });
 
     it('declares no exemption that has stopped being true', () => {

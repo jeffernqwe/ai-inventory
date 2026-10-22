@@ -124,7 +124,41 @@ async function expiredTokenRejection(token: string): Promise<ApiError> {
   return new ApiError(401, SESSION_EXPIRED_MESSAGE, SESSION_EXPIRED_CODE);
 }
 
-export async function requireAuth(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+/**
+ * AUTH-03 FIX (2026-10-22) — the renewal route's authentication.
+ *
+ * WHY THIS EXISTS. `POST /api/auth/renew` is the client's SECOND chance: when a request
+ * is refused with `SESSION_EXPIRED`, `lib/client.ts` calls this route with the very token
+ * that was just refused and retries once. Behind plain `requireAuth` that call was
+ * answered `SESSION_EXPIRED` again — the same middleware refused the expired token
+ * before the renewal handler could look at it — so recovery could never succeed. The
+ * consequence was measured on a phone on 2026-10-21: a live 14-day session whose ~1h
+ * access token had expired was told "Session expired — please sign in again", and the
+ * only way on was a fresh sign-in.
+ *
+ * WHAT IS RELAXED, AND WHAT IS NOT. Exactly one thing: `exp`. The signature, algorithm,
+ * issuer and audience are still verified (by `verifyAccessTokenIgnoringExpiry`), so a
+ * forged or foreign token is refused as INVALID_TOKEN; the `jti` is still required; the
+ * user must still exist and be ACTIVE; the password-change rule still applies; and the
+ * named session must still be live. Every one of those rejections is the same code and
+ * the same status `requireAuth` gives — only expiry stops being fatal.
+ *
+ * WHY IT IS SAFE TO RELAX IT HERE. This middleware is used by ONE route, which grants no
+ * data access: it verifies a FRESH Firebase identity (AUTH-01, `checkRevoked: true`),
+ * requires the verified uid to equal the account's `firebaseUid`, and returns a token for
+ * the SAME session — the `jti` is passed through unchanged, the 14-day cap is untouched,
+ * and no row is created. A stolen expired JWT is therefore not enough: without the
+ * Firebase ID token for that account it can mint nothing, and with that token the holder
+ * could have opened a session at the public exchange anyway. Renewal is the STRICTER of
+ * the two routes for this reason — it cannot outlive or replace the session it names, so
+ * sign-out-everywhere still kills it.
+ */
+async function authenticate(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction,
+  options: { allowExpired: boolean },
+) {
   try {
     const header = req.headers.authorization || '';
     const [scheme, token] = header.split(' ');
@@ -134,7 +168,8 @@ export async function requireAuth(req: AuthenticatedRequest, res: Response, next
 
     let payload;
     try {
-      payload = verifyAccessToken(token);
+      // The one relaxation this middleware can make; see `authenticate`'s caller below.
+      payload = options.allowExpired ? verifyAccessTokenIgnoringExpiry(token) : verifyAccessToken(token);
     } catch (err) {
       // AUTH-02: ask about EXPIRY FIRST. `TokenExpiredError` extends
       // `JsonWebTokenError`, so a generic check would swallow it — and an
@@ -224,6 +259,25 @@ export async function requireAuth(req: AuthenticatedRequest, res: Response, next
   } catch (err) {
     return next(err);
   }
+}
+
+/** Ordinary authentication: an expired token is a refusal, as it must be. */
+export async function requireAuth(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+  return authenticate(req, res, next, { allowExpired: false });
+}
+
+/**
+ * Renewal authentication: the token being REPLACED may already have expired, which is the
+ * only case in which the client calls it (see the block above). Not exported from the
+ * middleware barrel and not used by any other route — a source guard in
+ * `phaseAUTH03-session-renewal.test.mjs` fails if it is mounted anywhere but `/renew`.
+ */
+export async function requireAuthForRenewal(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction,
+) {
+  return authenticate(req, res, next, { allowExpired: true });
 }
 
 export default requireAuth;

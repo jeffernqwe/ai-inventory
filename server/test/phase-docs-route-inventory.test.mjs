@@ -123,7 +123,11 @@ function classifyDeclaration(declaration) {
   // nothing and classified all 72 routes as public. `requirePermission` IS invoked
   // (`requirePermission(PERMISSIONS.X)`), but it is matched by name all the same, so one rule covers
   // every gate and there is no second form to keep in step.
-  if (!/\brequireAuth\b/.test(declaration)) return 'public';
+  // AUTH-03 fix (2026-10-22): `/renew` authenticates with `requireAuthForRenewal`, a
+  // variant that relaxes ONLY token expiry so the client can replace the token it was
+  // just refused. It is authentication, not a public route — a tier count is a statement
+  // about who may call a route, not about which middleware spelling was used.
+  if (!/\brequireAuth\b|\brequireAuthForRenewal\b/.test(declaration)) return 'public';
   if (/\brequireRole\b/.test(declaration)) return 'roleGated';
   if (/\brequirePermission\b/.test(declaration)) return 'gated';
   return 'authenticated';

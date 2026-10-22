@@ -37,10 +37,16 @@ import {
   escapeInputText,
   exitCodeFor,
   fieldBelow,
+  fillTemplate,
   findNodes,
   findTapTarget,
+  looksAtDevLauncher,
+  looksLikePicker,
+  looksSessionExpired,
   looksSignedOut,
+  parseMovements,
   summariseRun,
+  unfilledPlaceholders,
   validateJourneys,
 } from './lib.mjs';
 import { JOURNEYS, WRITE_JOURNEYS } from './journeys.mjs';
@@ -80,6 +86,12 @@ function parseArgs(argv) {
         break;
       case 'product':
         args.product = value;
+        break;
+      case 'source':
+        args.source = value;
+        break;
+      case 'destination':
+        args.destination = value;
         break;
       case 'out':
         args.out = value;
@@ -124,6 +136,7 @@ function titleOf(step) {
   if (verb === 'shot') return `screenshot "${value}"`;
   if (verb === 'readCode') return 'read the barcode off the screen';
   if (verb === 'decodeLabel') return 'decode the printed PDF';
+  if (verb === 'movement') return `check the movement arithmetic (${value?.deltas?.join(', ')})`;
   return verb;
 }
 
@@ -135,16 +148,35 @@ function visibleLabels(screen, limit = 10) {
     .join(' | ');
 }
 
+/** The run's flags, as template values. */
+function templateVars(ctx) {
+  return { product: ctx.product, source: ctx.source, destination: ctx.destination };
+}
+
+/**
+ * Fill a step's placeholders, or say which flag is missing.
+ *
+ * A missing flag is BLOCKED rather than failed: the app was never asked the question, so calling it
+ * wrong would be the harness inventing a defect.
+ */
+function resolveStepText(value, ctx) {
+  const filled = fillTemplate(String(value), templateVars(ctx));
+  const missing = unfilledPlaceholders(filled);
+  if (missing.length) {
+    return { missing: `needs ${missing.map((name) => `--${name}=…`).join(' and ')}` };
+  }
+  return { text: filled };
+}
+
 async function runStep(step, ctx) {
   const [[verb, value]] = Object.entries(step);
   const adbArgs = { adbPath: ctx.adbPath, serial: ctx.serial };
 
   switch (verb) {
     case 'open': {
-      const route = String(value).replace('{{product}}', ctx.product ?? '');
-      if (route.includes('{{product}}') ) {
-        return { status: 'blocked', detail: 'needs --product=<id> for a product with an EAN-13 barcode' };
-      }
+      const filled = resolveStepText(value, ctx);
+      if (filled.missing) return { status: 'blocked', detail: `open ${value} ${filled.missing}` };
+      const route = filled.text;
       device.openRoute(route, adbArgs);
       await sleep(900);
       return { status: 'pass', detail: route };
@@ -152,7 +184,9 @@ async function runStep(step, ctx) {
 
     case 'expect':
     case 'expectGone': {
-      const want = String(value);
+      const resolved = resolveStepText(value, ctx);
+      if (resolved.missing) return { status: 'blocked', detail: `${verb} ${value} ${resolved.missing}` };
+      const want = resolved.text;
       const deadline = Date.now() + ctx.timeoutMs;
       let last = null;
       while (Date.now() < deadline) {
@@ -181,29 +215,52 @@ async function runStep(step, ctx) {
       // "Create draft order" only because the keyboard had pushed it off the screen, so a tap
       // scrolls down and looks again before it calls the control absent. Bounded, and said out
       // loud in the report, so a genuinely missing control still fails.
+      const resolved = resolveStepText(value, ctx);
+      if (resolved.missing) return { status: 'blocked', detail: `tap ${value} ${resolved.missing}` };
+      const wanted = resolved.text;
       let screen = await device.readScreen(adbArgs);
-      let target = findTapTarget(screen.nodes, String(value));
+      let target = findTapTarget(screen.nodes, wanted);
       let scrolled = 0;
       while (!target && scrolled < 2) {
         device.swipe(540, 1700, 540, 900, adbArgs);
         await sleep(700);
         screen = await device.readScreen(adbArgs);
-        target = findTapTarget(screen.nodes, String(value));
+        target = findTapTarget(screen.nodes, wanted);
         scrolled += 1;
       }
       if (!target) {
-        return { status: 'fail', detail: `no control labelled "${value}"; screen showed: ${visibleLabels(screen)}` };
+        return { status: 'fail', detail: `no control labelled "${wanted}"; screen showed: ${visibleLabels(screen)}` };
       }
       device.tap(target.center.x, target.center.y, adbArgs);
       await sleep(700);
+
+      // A picker whose options are still loading is DISABLED, so a tap on it does nothing and the
+      // next step fails with "no such row" — which reads like a missing option. Tapping again is
+      // safe (opening a picker twice submits nothing), so repeat until its sheet appears.
+      let retries = 0;
+      if (looksLikePicker(wanted)) {
+        while (retries < 3) {
+          const after = await device.readScreen(adbArgs);
+          if (findNodes(after.nodes, 'Done', { exact: true }).length) break;
+          retries += 1;
+          device.tap(target.center.x, target.center.y, adbArgs);
+          await sleep(900);
+        }
+      }
+
       return {
         status: 'pass',
-        detail: `tapped ${target.label} at ${target.center.x},${target.center.y}${scrolled ? ` after ${scrolled} scroll` : ''}`,
+        detail:
+          `tapped ${target.label} at ${target.center.x},${target.center.y}` +
+          `${scrolled ? ` after ${scrolled} scroll` : ''}` +
+          `${retries ? ` (re-tapped ${retries}× while the picker loaded)` : ''}`,
       };
     }
 
     case 'tapFirst': {
-      const heading = String(value);
+      const resolved = resolveStepText(value, ctx);
+      if (resolved.missing) return { status: 'blocked', detail: `tapFirst ${value} ${resolved.missing}` };
+      const heading = resolved.text;
       const screen = await device.readScreen(adbArgs);
       const anchor = findTapTarget(screen.nodes, heading, { exact: true }) ?? findTapTarget(screen.nodes, heading);
       if (!anchor) {
@@ -223,8 +280,14 @@ async function runStep(step, ctx) {
     }
 
     case 'type': {
-      const spec = typeof value === 'string' ? { value } : value;
+      // Copied: `into` is resolved below and the journey table is shared data, not run state.
+      const spec = typeof value === 'string' ? { value } : { ...value };
       let field = null;
+      if (spec.into) {
+        const resolved = resolveStepText(spec.into, ctx);
+        if (resolved.missing) return { status: 'blocked', detail: `type into ${spec.into} ${resolved.missing}` };
+        spec.into = resolved.text;
+      }
 
       if (spec.into) {
         // The label is looked for until the screen settles, then after one scroll: closing a
@@ -382,6 +445,51 @@ async function runStep(step, ctx) {
       };
     }
 
+    case 'movement': {
+      // The app's own confirmation, read back: `from → to` with the difference it claims. A journey
+      // that typed "5" and saw "Done." proves only that a dialog appeared; this proves the number
+      // moved by 5 — and does it without hard-coding a starting quantity, so the second run of the
+      // same journey still means something.
+      const expected = value.deltas;
+      const deadline = Date.now() + Math.max(ctx.timeoutMs, 20_000);
+      let parsed = [];
+      let last = null;
+
+      while (Date.now() < deadline) {
+        try {
+          const screen = await device.readScreen(adbArgs);
+          last = screen;
+          parsed = parseMovements(screen.nodes.map((node) => node.label).join('\n'));
+          if (parsed.length >= expected.length) break;
+        } catch {
+          // An unreadable screen is not evidence either way; keep trying.
+        }
+        await sleep(500);
+      }
+
+      if (parsed.length !== expected.length) {
+        return {
+          status: 'fail',
+          detail: `expected ${expected.length} movement(s), saw ${parsed.length}; screen showed: ${
+            last ? visibleLabels(last) : 'nothing readable'
+          }`,
+        };
+      }
+
+      const actual = parsed.map((move) => move.diff);
+      if (actual.join(',') !== expected.join(',')) {
+        return {
+          status: 'fail',
+          detail: `the app says ${parsed.map((move) => `${move.from} → ${move.to}`).join(', but ')} — expected deltas of ${expected.join(', ')}`,
+        };
+      }
+
+      return {
+        status: 'pass',
+        detail: parsed.map((move) => `${move.from} → ${move.to}`).join(', ') + ` (${actual.join(', ')})`,
+      };
+    }
+
     default:
       return { status: 'fail', detail: `the runner has no implementation for "${verb}"` };
   }
@@ -416,6 +524,8 @@ async function runJourney(journey, options) {
     serial: options.serial,
     adbPath: options.adbPath,
     product: options.product,
+    source: options.source,
+    destination: options.destination,
     timeoutMs: options.timeoutMs,
     pdfBaseline: [],
   };
@@ -489,6 +599,23 @@ async function runJourney(journey, options) {
   writeFileSync(join(outDir, 'report.json'), `${JSON.stringify(run, null, 2)}\n`);
   writeFileSync(join(outDir, 'report.md'), summariseRun(run));
   return { run, outDir, exitCode: exitCodeFor(steps) };
+}
+
+/**
+ * Does the app's own list screen report a rejected session?
+ *
+ * The dashboard can render from cached state while every list is failing, so the check looks at a
+ * screen that actually asks the server and prints the answer.
+ */
+async function appRejectsSession(args) {
+  try {
+    device.openRoute('inventoryai://inventory', { adbPath: args.adbPath, serial: args.serial });
+    await sleep(2500);
+    const screen = await device.readScreen({ adbPath: args.adbPath, serial: args.serial });
+    return looksSessionExpired(screen.nodes);
+  } catch {
+    return false;
+  }
 }
 
 function selfTest() {
@@ -591,6 +718,43 @@ async function main() {
     await sleep(1500);
     let screen = await device.readScreen({ adbPath: args.adbPath, serial: args.serial });
 
+    // A cold-started development build opens the Expo dev launcher, not the app, and the route deep
+    // link above cannot reach an app that is not running — so the harness starts the bundle the way
+    // tapping the server entry does. If the launcher is STILL there, nothing about the app has been
+    // observed: that is a blocked run with something to do about it, never an app defect.
+    if (looksAtDevLauncher(screen.nodes)) {
+      console.log('the Expo dev launcher is in front; starting the bundle…');
+      device.openDevClient({ adbPath: args.adbPath, serial: args.serial });
+
+      // The bundle loads over the tunnel, so the first reads can fail or still show the launcher.
+      // Look for a bounded while instead of blocking on a screen that is merely still loading —
+      // but never wait forever.
+      let settled = false;
+      for (let attempt = 0; attempt < 14 && !settled; attempt += 1) {
+        await sleep(2500);
+        try {
+          screen = await device.readScreen({ adbPath: args.adbPath, serial: args.serial });
+          settled = !looksAtDevLauncher(screen.nodes);
+        } catch {
+          settled = false;
+        }
+      }
+
+      if (!settled) {
+        console.error(
+          '✖ cannot check: the Expo dev launcher is showing and the app did not start.\n' +
+            '  Start Metro (npx expo start --dev-client), select the dev server in the launcher,\n' +
+            '  then re-run. Nothing was judged about the app.',
+        );
+        process.exit(2);
+      }
+
+      // The bundle came up on whatever route it was left on; start the preflight from the dashboard.
+      device.openRoute('inventoryai://dashboard', { adbPath: args.adbPath, serial: args.serial });
+      await sleep(1500);
+      screen = await device.readScreen({ adbPath: args.adbPath, serial: args.serial });
+    }
+
     // A confirmation left open by an earlier journey (or by a person) covers the first screen and
     // every assertion after it. Clearing it here is not a workaround for an app defect: the dialog
     // is the app's own "order created" notice, and this driver is the one who left it.
@@ -609,6 +773,18 @@ async function main() {
       console.error(
         '✖ cannot check: the app is on its login screen, so it has no session.\n' +
           '  Sign in on the phone (the harness does not hold credentials), then re-run.',
+      );
+      process.exit(2);
+    }
+
+    // A stored session the server no longer accepts is not a signed-out app: it stays on the main
+    // screens and every list comes back empty, which would otherwise fail steps for the wrong
+    // reason. Check the screen the harness itself navigates to first, then the one that says it.
+    const expiredHere = looksSessionExpired(screen.nodes);
+    if (expiredHere || (await appRejectsSession(args))) {
+      console.error(
+        '✖ cannot check: the app holds a session the server no longer accepts ("Session expired").\n' +
+          '  Sign in on the phone again, then re-run — every picker is empty until you do.',
       );
       process.exit(2);
     }

@@ -1,0 +1,20 @@
+{
+  "journey": "smoke",
+  "startedAt": "2026-10-22T05:09:51.488Z",
+  "device": "CPH1969 · Android 11 (API 30) · PV4DDMIZZLTCIVSK",
+  "steps": [
+    {
+      "title": "open inventoryai://dashboard",
+      "status": "pass",
+      "detail": "inventoryai://dashboard",
+      "durationMs": 1012
+    },
+    {
+      "title": "expect \"Overview\"",
+      "status": "fail",
+      "detail": "expected \"Overview\" within 15000ms; screen showed: App Icon | Inventory AI | Development Build | User | DEVELOPMENT SERVERS | INFO | Start a local development server with: | npx expo start | Then, select the local server when it appears here. | http://",
+      "durationMs": 18040
+    }
+  ],
+  "notes": "evidence: C:\\Users\\jeffe\\inventory-ai\\docs\\evidence\\device-runs\\2026-10-22T05-09-51-488Z-smoke"
+}

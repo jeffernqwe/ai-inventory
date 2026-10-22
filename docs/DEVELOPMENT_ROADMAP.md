@@ -17548,7 +17548,7 @@ Until then the device evidence above is Android-only and says so.
 
 **Not an application phase.** No route, permission, role, schema, index, dependency, environment,
 EAS or mobile change, and no server code was touched. It adds `scripts/device/` (a harness),
-`server/test/device-harness.test.mjs` (27 cases) and `docs/evidence/device-runs/`.
+`server/test/device-harness.test.mjs` (27 cases then; **44** since the two write journeys below) and `docs/evidence/device-runs/`.
 
 ## The problem it answers
 
@@ -17566,9 +17566,10 @@ missing PDF are all **2**, never a pass: the first real run reported a perfectly
 failure because the phone had lost its session overnight, and that is exactly the inversion the exit
 codes exist to prevent.
 
-Three journeys: **`smoke`** (every main screen opens and names itself — read-only), **`label`**
-(reads the 13-digit code off the screen, taps *Share PDF*, decodes the PDF the phone wrote and fails
-if they disagree) and **`draft`** (creates one draft purchase order; opt-in behind `--allow-writes`).
+Three journeys to begin with — **`smoke`** (every main screen opens and names itself — read-only),
+**`label`** (reads the 13-digit code off the screen, taps *Share PDF*, decodes the PDF the phone wrote
+and fails if they disagree) and **`draft`** (creates one draft purchase order; opt-in behind
+`--allow-writes`) — and **five since the same day**: `stock` and `transfer` are added just below.
 
 ## Measured on the phone, 2026-10-21
 
@@ -17635,6 +17636,101 @@ with one word.
 
 Artifacts: `docs/evidence/device-runs/` (three passing runs, plus the first failing `label` run kept
 deliberately, because it is the record of the harness blaming the app for its own bug).
+
+# Five journeys, not three — the device pass learned to write stock and transfer (2026-10-21/22)
+
+**Not an application phase.** It adds two journeys to `scripts/device/journeys.mjs`, fixes four
+harness defects that running them exposed, and turns two **lost preconditions** into a blocked run
+instead of a failed screen. `server/test/device-harness.test.mjs` grows from 27 to **44 cases**. No
+route, permission, role, schema, index, dependency, environment, EAS or mobile change, and no server
+production code was touched.
+
+## The two new write journeys, and why they are net-zero
+
+`stock` moves **5 units in and 5 out** at one location; `transfer` moves **1 unit across and 1 back**.
+Both are deliberately equal and opposite, for one reason: a journey a person may run on every build
+must leave the tenant where it found it. A pass count that also silently raises a product's quantity
+every run stops meaning anything on the second run — and the next journey's numbers would be measured
+against a moving baseline.
+
+What they assert is stronger than "a button worked": the app's own confirmation states the arithmetic
+(`Done. <product> at <location>: 33 → 38`), and the harness reads that line back and checks the
+**delta**, not the absolute number. So no starting quantity is hard-coded and the tenth run is as
+meaningful as the first. `stock` needs `--product=<id>` and `--source=<location name>`; `transfer`
+needs `--destination=<other location name>` as well, and both are gated behind `--allow-writes` like
+`draft`.
+
+## Measured on the phone
+
+OPPO CPH1969 · Android 11 (API 30), SDK 58 development build over the USB tunnels against the local
+server, signed in as `role-owner@example.invalid` on the disposable four-role fixture:
+
+| journey | result | what the app said |
+|---|---|---|
+| `stock` | **17/17 pass** | `33 → 38 (5)` after Stock In, `38 → 33 (-5)` after Stock Out |
+| `transfer` | **21/21 pass** | `33 → 32, 32 → 33 (-1, 1)` for each direction |
+
+Both had already been exercised by hand in §27EH; what is new is that the same pass is now a table of
+steps another person can run, with the arithmetic asserted rather than eyeballed.
+
+**Run again the next day** on the same fixture (2026-10-22): `stock` **17/17** and `transfer` **21/21**,
+with **identical numbers** — `33 → 38 → 33` and `33 → 32, 32 → 33`. The net-zero property is measured
+across two runs a day apart, not asserted from the steps' symmetry.
+
+## Four defects the new journeys found — all in the harness
+
+1. **`adb shell` ate the query string.** `openRoute` passed the URL unquoted, so adb joined the
+   arguments into one command string and the phone's shell split
+   `inventoryai://stock-in?productId=…&lock=1` at the `&`: the form arrived **unlocked and blank**.
+   Fixed with `quoteForDeviceShell`, which quotes the whole URL for the device shell (and escapes the
+   one character that needs it).
+2. **The tap landed on the label, not the control.** A selector field renders its placeholder as a
+   `Text` node inside a `Pressable` whose own label carries a chevron (`Choose a location…, ▾`). Tapping
+   the text node reported success and opened nothing. `findTapTarget` now prefers a **clickable node
+   containing the words** when no exact match is clickable — which is also what keeps a heading from
+   being tapped in place of the button beside it.
+3. **A picker tapped before its options load is silently swallowed.** The trigger is disabled while
+   the list is fetched, so the tap does nothing and the next step fails on a screen that never
+   changed. The tap is now repeated, bounded, **only for a picker placeholder** — a retry rule that is
+   safe precisely because re-tapping an already-open picker cannot submit anything twice.
+4. **The picker predicate never matched the word it was looking for.** The regex was `cho(os|se)`,
+   which spells neither "choose" nor "select". Caught by the must-pass control in the unit test, not
+   by reading it.
+
+## Two preconditions that used to read as app defects
+
+**A session the server rejects.** Mid-session on 2026-10-21 the phone kept its stored token while the
+server stopped accepting it: every picker came up empty and four steps failed on a form that was fine.
+The harness preflight now looks for the app's own `Session expired` banner on a screen that actually
+asks the server, and exits **2** — *could not check* — with the instruction to sign in again. Nothing
+is judged about the app. (The server's own record for that account shows the phone's session created
+**16:30:31, never revoked, expiring 2026-11-04**, so the session did not end at the server — the
+client's **access token** had expired and its renewal did not complete. Why is **not** diagnosed
+here; it is recorded as an open AUTH-03 observation rather than explained away.)
+
+**The Expo dev launcher in front.** After Metro was restarted on 2026-10-22, the dev client came back
+on its launcher screen (`Development Build` / `DEVELOPMENT SERVERS`), and a route deep link cannot
+reach an app that is not running. The run reported `expect "Overview"` as a **failure** — a defect
+that did not exist. The harness now recognises the launcher, starts the bundle through
+`expo-dev-client`'s own link (`inventoryai://expo-development-client/?url=…`, the same action as
+tapping the server entry), waits a bounded while for the bundle to load, and re-opens the dashboard.
+If the launcher is **still** there it exits 2 and names the fix. Verified end to end: force-stop, then
+`am start -n com.inventoryai.app/.MainActivity` (which lands on `DevLauncherActivity`), then the
+harness — `the Expo dev launcher is in front; starting the bundle…`, **smoke 17/17, exit 0**.
+
+## Still open, and said so
+
+- **iOS**: no macOS on this host. Nothing in this entry is iOS evidence, and Phase 30B stays open.
+- **Paper and the camera**: the PDF decode rules out clipped bars but is not a scan of paper, and a
+  barcode in the room stays a manual item.
+- **The mid-session sign-out above**: observed once, not reproduced, cause unknown. A user who is
+  asked to sign in again an hour into a shift would call that a defect, so it is listed as one to
+  chase — with the evidence that exists (a live, unrevoked server session) rather than a guessed fix.
+
+Artifacts: `docs/evidence/device-runs/` — the passing `stock` and `transfer` runs, the 2026-10-22
+smoke that followed the launcher recovery, and **three kept failures** (the tapped label, the expired
+session, the dev launcher), because the record of the harness blaming the app is the reason each rule
+exists.
 
 # 28. Phase Gate System
 

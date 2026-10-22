@@ -29,6 +29,7 @@ export const STEP_VERBS = Object.freeze([
   'shot', // screenshot into the run folder
   'readCode', // remember the 13-digit EAN-13 shown on this screen
   'decodeLabel', // pull the PDF the print action just wrote and decode it
+  'movement', // check the app's own "from → to" confirmation arithmetic
 ]);
 
 /** Elements a node's visible label may come from. The app uses both. */
@@ -114,13 +115,71 @@ export function findNodes(nodes, text, { exact = false } = {}) {
 }
 
 /**
- * The node a tap should land on, or null. Prefers a clickable node with the same label, and never
- * returns one whose box is inverted — tapping a made-up centre is how a quantity got corrupted.
+ * The node a tap should land on, or null. Never returns one whose box is inverted — tapping a
+ * made-up centre is how a quantity got corrupted.
+ *
+ * A selector field is the reason this is not just "the first match": its visible words live in a
+ * Text node (`Choose a location…`) INSIDE the Pressable that actually opens the sheet, and that
+ * Pressable's own label carries the same words plus a chevron (`Choose a location…, ▾`). Taking the
+ * text node made a tap that reported success and opened nothing. So when no exact match is
+ * clickable, a clickable node CONTAINING the words wins — unless `exact` was asked for, which means
+ * the caller wants the heading itself.
  */
 export function findTapTarget(nodes, text, options = {}) {
-  const hits = findNodes(nodes, text, options).filter((node) => !node.brokenBounds);
+  const wanted = String(text ?? '');
+  const hits = findNodes(nodes, wanted, options).filter((node) => !node.brokenBounds);
   if (!hits.length) return null;
-  return hits.find((node) => node.clickable) ?? hits[0];
+
+  const clickableHit = hits.find((node) => node.clickable);
+  if (clickableHit) return clickableHit;
+  if (options.exact) return hits[0];
+
+  const container = (nodes ?? []).find(
+    (node) => !node.brokenBounds && node.clickable && wanted !== '' && node.label.includes(wanted),
+  );
+  return container ?? hits[0];
+}
+
+/**
+ * The "from → to" pairs in the app's movement confirmation, with their differences.
+ *
+ * Stock In, Stock Out and Transfer all answer with a dialog that states the arithmetic:
+ * `Done. <product> at <location>: 33 → 38`. Reading it back is the only way a journey can assert a
+ * DELTA without knowing the starting quantity — the alternative is a journey that hard-codes 0 → 5
+ * and silently stops meaning anything the second time it runs.
+ *
+ * The label before the colon is required on purpose. A bare `33 → 38` (or any other text with an
+ * arrow in it) is not a movement, and a parser that accepted it would happily pass a screen that was
+ * showing something else entirely.
+ */
+export function parseMovements(text) {
+  const body = typeof text === 'string' ? text : '';
+  const moves = [];
+
+  for (const match of body.matchAll(/[^:\n]+?:\s*(\d[\d,]*)\s*\u2192\s*(\d[\d,]*)/g)) {
+    const from = Number(match[1].replace(/,/g, ''));
+    const to = Number(match[2].replace(/,/g, ''));
+    if (!Number.isFinite(from) || !Number.isFinite(to)) continue;
+    moves.push({ from, to, diff: to - from });
+  }
+
+  return moves;
+}
+
+/**
+ * Replace `{{name}}` with a value from the run's flags. An unknown name is LEFT ALONE rather than
+ * blanked: a blank would read as "tap nothing" and fail later for the wrong reason, while the marker
+ * lets the runner say which flag is missing.
+ */
+export function fillTemplate(text, vars = {}) {
+  return String(text ?? '').replace(/\{\{(\w+)\}\}/g, (whole, name) =>
+    typeof vars[name] === 'string' && vars[name] !== '' ? vars[name] : whole,
+  );
+}
+
+/** The placeholder names a journey step still needs, so a missing flag is reported before a run. */
+export function unfilledPlaceholders(text) {
+  return [...String(text ?? '').matchAll(/\{\{(\w+)\}\}/g)].map((match) => match[1]);
 }
 
 /**
@@ -160,6 +219,37 @@ export function fieldBelow(nodes, label) {
  * `expect "Overview"` as a failure — an app defect that was not there — when the phone had simply
  * lost its session overnight.
  */
+/**
+ * Is the app signed in locally but rejected by the server?
+ *
+ * A dev client keeps its stored session after the server stops accepting it, so the app does not
+ * return to Login: screens render their chrome and quietly come up empty. Measured on 2026-10-21 —
+ * every picker on Stock In and Transfer was disabled because the reference lists had failed, and the
+ * only evidence was the Inventory screen's "Session expired" banner, one screen away. A run in that
+ * state must be BLOCKED, not failed.
+ */
+export function looksSessionExpired(nodes) {
+  return (nodes ?? []).some((node) => /session expired/i.test(node.label));
+}
+
+/**
+ * Is the Expo dev launcher in front instead of the app?
+ *
+ * Measured on 2026-10-21: after Metro was restarted, the dev client came back on its launcher screen
+ * ("Development Build" / "DEVELOPMENT SERVERS" / "npx expo start"), and a deep link could not route
+ * into an app that was not running. The run reported `expect "Overview"` as a FAILURE — an app defect
+ * that did not exist. The launcher is a precondition the harness CAN fix by starting the app, so it
+ * is recognised here and started in `run.mjs` before any journey step is judged.
+ */
+export function looksAtDevLauncher(nodes) {
+  const labels = (nodes ?? []).map((node) => node.label);
+  const launcherChrome = labels.includes('Development Build');
+  const serverHint =
+    labels.some((label) => /DEVELOPMENT SERVERS/i.test(label)) ||
+    labels.some((label) => /npx expo start/i.test(label));
+  return launcherChrome && serverHint;
+}
+
 export function looksSignedOut(nodes) {
   const labels = (nodes ?? []).map((node) => node.label);
   const hasSignIn = labels.some((label) => label === 'Sign In' || label === 'Sign in');
@@ -189,6 +279,32 @@ export function isBlankDump(xml) {
 export function isUnstableDump(xml) {
   if (isBlankDump(xml)) return true;
   return parseDump(xml).nodes.some((node) => node.brokenBounds);
+}
+
+/**
+ * Quote a value for the DEVICE shell.
+ *
+ * `adb shell <args…>` does not pass an argv to the phone: adb joins the arguments into one command
+ * string and the phone's shell parses it again. A deep link carrying a query string therefore loses
+ * everything from the first `&` — measured on `inventoryai://stock-in?productId=…&lock=1`, which
+ * arrived as a bare `stock-in` and left the form unlocked and blank. Quoting the whole URL for the
+ * device shell is the fix; a single quote inside it is the one case that needs escaping.
+ */
+export function quoteForDeviceShell(value) {
+  return `'${String(value ?? '').replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * Is this label a picker's placeholder? (`Choose a location…`, `Choose a supplier`.)
+ *
+ * Used only to decide whether a tap that changed nothing is worth repeating: a picker whose options
+ * are still loading is DISABLED, so the tap is swallowed and nothing changes on screen. Tapping an
+ * already-open picker's trigger again cannot submit anything twice, which is what makes the retry
+ * safe here and unsafe for buttons generally.
+ */
+export function looksLikePicker(label) {
+  const text = String(label ?? '').trim();
+  return /^(choose|select)\b/i.test(text) || /…$|\.\.\.$/.test(text);
 }
 
 /**
@@ -312,6 +428,16 @@ export function validateJourneys(journeys) {
       if (verb === 'wait' && !(typeof value === 'number' && value >= 0)) {
         problems.push(`${at}: wait needs a number of milliseconds`);
       }
+      if (verb === 'movement') {
+        const deltas = value !== null && typeof value === 'object' ? value.deltas : null;
+        const valid =
+          Array.isArray(deltas) &&
+          deltas.length > 0 &&
+          deltas.every((n) => Number.isInteger(n)) &&
+          Object.keys(value).every((key) => key === 'deltas');
+        if (!valid) problems.push(`${at}: movement needs { deltas: [...] } of whole numbers`);
+      }
+
       if (verb === 'type') {
         // Either bare text ("type into the focused field") or a target: `{ value, into }`.
         const isText = typeof value === 'string' && value.trim() !== '';

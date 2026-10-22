@@ -155,7 +155,15 @@ node scripts/device/run.mjs --self-test                 # the harness's own cont
 node scripts/device/run.mjs                             # the read-only walk over every main screen
 node scripts/device/run.mjs --all --product=<id>        # the walk + print a label and decode its PDF
 node scripts/device/run.mjs --journey=draft --allow-writes   # create a draft purchase order
+node scripts/device/run.mjs --journey=stock --product=<id> --source="Shop Front" --allow-writes
+node scripts/device/run.mjs --journey=transfer --product=<id> \
+  --source="Shop Front" --destination="Main Warehouse" --allow-writes
 ```
+
+The two stock journeys are **net-zero**: `stock` moves 5 in and 5 out, `transfer` moves 1 across and 1
+back, and each checks the app's own confirmation arithmetic (`33 → 38`, `33 → 32, 32 → 33`) instead of
+a hard-coded quantity — so running them on every build does not drift the tenant and the tenth run
+still means something. They are write journeys, hence `--allow-writes`.
 
 It drives the app by **route** (`inventoryai://dashboard`) and by the **label a person reads**, not by
 coordinates, so the same journey works on a different screen size. Each run writes `report.md`,
@@ -974,6 +982,8 @@ not replace.
 | `node scripts/verify-label-barcode.mjs --pdf=… --expect=…` | does a **printed** label PDF decode as that EAN-13? | ✅ reads only |
 | `node scripts/device/run.mjs` | walks every main screen on a **connected phone** and writes a report with screenshots | ⚠️ needs the phone + tunnels |
 | `node scripts/device/run.mjs --journey=draft --allow-writes` | creates one draft purchase order on the phone | ❌ **writes** to the tenant |
+| `node scripts/device/run.mjs --journey=stock --allow-writes` | stock 5 in, 5 out, checking the arithmetic (net zero) | ❌ **writes** to the tenant |
+| `node scripts/device/run.mjs --journey=transfer --allow-writes` | transfer 1 unit across and back (net zero) | ❌ **writes** to the tenant |
 
 ---
 

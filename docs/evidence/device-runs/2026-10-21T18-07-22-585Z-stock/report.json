@@ -1,0 +1,110 @@
+{
+  "journey": "stock",
+  "startedAt": "2026-10-21T18:07:22.585Z",
+  "device": "CPH1969 · Android 11 (API 30) · PV4DDMIZZLTCIVSK",
+  "steps": [
+    {
+      "title": "open inventoryai://stock-in?productId={{product}}&lock=1",
+      "status": "pass",
+      "detail": "inventoryai://stock-in?productId=6ad84fc919af9d6a521274ae&lock=1",
+      "durationMs": 1005
+    },
+    {
+      "title": "expect \"Add stock\"",
+      "status": "pass",
+      "detail": "seen after 2128ms",
+      "durationMs": 2128
+    },
+    {
+      "title": "tap \"Choose a location…\"",
+      "status": "pass",
+      "detail": "tapped Choose a location…, ▾ at 540,832",
+      "durationMs": 6054
+    },
+    {
+      "title": "tap \"{{source}}\"",
+      "status": "pass",
+      "detail": "tapped Shop Front at 540,1978",
+      "durationMs": 3813
+    },
+    {
+      "title": "type into the focused field",
+      "status": "pass",
+      "detail": "\"Quantity\" now reads 5, keyboard closed",
+      "durationMs": 23093
+    },
+    {
+      "title": "tap \"Add stock\"",
+      "status": "pass",
+      "detail": "tapped Add stock at 540,1849",
+      "durationMs": 4275
+    },
+    {
+      "title": "check the movement arithmetic (5)",
+      "status": "pass",
+      "detail": "33 → 38 (5)",
+      "durationMs": 2448
+    },
+    {
+      "title": "tap \"OK\"",
+      "status": "pass",
+      "detail": "tapped OK at 873,1303",
+      "durationMs": 4170
+    },
+    {
+      "title": "open inventoryai://stock-out?productId={{product}}&lock=1",
+      "status": "pass",
+      "detail": "inventoryai://stock-out?productId=6ad84fc919af9d6a521274ae&lock=1",
+      "durationMs": 1002
+    },
+    {
+      "title": "expect \"Remove stock\"",
+      "status": "pass",
+      "detail": "seen after 2209ms",
+      "durationMs": 2209
+    },
+    {
+      "title": "tap \"Choose a location…\"",
+      "status": "pass",
+      "detail": "tapped Choose a location…, ▾ at 540,832",
+      "durationMs": 6028
+    },
+    {
+      "title": "tap \"{{source}}\"",
+      "status": "pass",
+      "detail": "tapped Shop Front at 540,1978",
+      "durationMs": 3691
+    },
+    {
+      "title": "type into the focused field",
+      "status": "pass",
+      "detail": "\"Quantity\" now reads 5, keyboard closed",
+      "durationMs": 31878
+    },
+    {
+      "title": "tap \"Remove stock\"",
+      "status": "pass",
+      "detail": "tapped Remove stock at 540,2064",
+      "durationMs": 4571
+    },
+    {
+      "title": "check the movement arithmetic (-5)",
+      "status": "pass",
+      "detail": "38 → 33 (-5)",
+      "durationMs": 2369
+    },
+    {
+      "title": "tap \"OK\"",
+      "status": "pass",
+      "detail": "tapped OK at 873,1303",
+      "durationMs": 3744
+    },
+    {
+      "title": "screenshot \"stock-done\"",
+      "status": "pass",
+      "detail": "C:\\Users\\jeffe\\inventory-ai\\docs\\evidence\\device-runs\\2026-10-21T18-07-22-585Z-stock\\stock-done.png",
+      "durationMs": 613
+    }
+  ],
+  "notes": "evidence: C:\\Users\\jeffe\\inventory-ai\\docs\\evidence\\device-runs\\2026-10-21T18-07-22-585Z-stock"
+}

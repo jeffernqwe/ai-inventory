@@ -1,0 +1,32 @@
+{
+  "journey": "stock",
+  "startedAt": "2026-10-21T17:52:36.243Z",
+  "device": "CPH1969 · Android 11 (API 30) · PV4DDMIZZLTCIVSK",
+  "steps": [
+    {
+      "title": "open inventoryai://stock-in?productId={{product}}&lock=1",
+      "status": "pass",
+      "detail": "inventoryai://stock-in?productId=6ad84fc919af9d6a521274ae&lock=1",
+      "durationMs": 1011
+    },
+    {
+      "title": "expect \"Add stock\"",
+      "status": "pass",
+      "detail": "seen after 2204ms",
+      "durationMs": 2204
+    },
+    {
+      "title": "tap \"Choose a location…\"",
+      "status": "pass",
+      "detail": "tapped Choose a location…, ▾ at 540,832 (re-tapped 3× while the picker loaded)",
+      "durationMs": 16292
+    },
+    {
+      "title": "tap \"{{source}}\"",
+      "status": "fail",
+      "detail": "no control labelled \"Shop Front\"; screen showed: Navigate up | Stock In | Product | Location * | Choose a location…, ▾ | Choose a location… | ▾ | Quantity * | How many are you adding? | Must be a whole number of 1 or more.",
+      "durationMs": 10622
+    }
+  ],
+  "notes": "evidence: C:\\Users\\jeffe\\inventory-ai\\docs\\evidence\\device-runs\\2026-10-21T17-52-36-243Z-stock"
+}

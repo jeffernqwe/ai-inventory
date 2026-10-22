@@ -21,7 +21,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { isBlankDump, isUnstableDump, parseDump } from './lib.mjs';
+import { isBlankDump, isUnstableDump, parseDump, quoteForDeviceShell } from './lib.mjs';
 
 const PACKAGE = 'com.inventoryai.app';
 const KEYCODES = { BACK: '4', ENTER: '66', HOME: '3', TAB: '61', DEL: '67', ESCAPE: '111' };
@@ -166,11 +166,35 @@ export function swipe(x1, y1, x2, y2, { adbPath = 'adb', serial, durationMs = 30
   );
 }
 
-/** Open one of the app's routes by deep link. */
+/**
+ * Open one of the app's routes by deep link.
+ *
+ * The URL is quoted for the device shell because `adb shell` re-parses what it is given: without the
+ * quotes the phone's shell treats `&` as a job separator, so every parameter after it was dropped
+ * and a deep link with a query string arrived as a bare route.
+ */
 export function openRoute(route, { adbPath = 'adb', serial } = {}) {
   const url = route.startsWith('inventoryai://') ? route : `inventoryai://${route}`;
   adb(
-    [...['-s', serial], 'shell', 'am', 'start', '-a', 'android.intent.action.VIEW', '-d', url],
+    [...['-s', serial], 'shell', 'am', 'start', '-a', 'android.intent.action.VIEW', '-d', quoteForDeviceShell(url)],
+    { adbPath },
+  );
+}
+
+/**
+ * Start the app ON a development server, the way tapping it in the dev launcher does.
+ *
+ * A cold-started development build opens the **Expo dev launcher** ("Development Build" /
+ * "DEVELOPMENT SERVERS"), not the app: `am start -n com.inventoryai.app/.MainActivity` lands on
+ * `DevLauncherActivity`, and a route deep link cannot reach an app that is not running. Measured on
+ * 2026-10-22 — a smoke run reported `expect "Overview"` as a failure while the launcher was in front.
+ * `expo-dev-client`'s own link starts the bundle from a named server, which is the same action a
+ * person takes by tapping the entry; that is what this issues.
+ */
+export function openDevClient({ adbPath = 'adb', serial, devServerUrl = 'http://localhost:8081' } = {}) {
+  const url = `inventoryai://expo-development-client/?url=${encodeURIComponent(devServerUrl)}`;
+  adb(
+    [...['-s', serial], 'shell', 'am', 'start', '-a', 'android.intent.action.VIEW', '-d', quoteForDeviceShell(url)],
     { adbPath },
   );
 }

@@ -1,0 +1,110 @@
+{
+  "journey": "smoke",
+  "startedAt": "2026-10-22T05:17:17.031Z",
+  "device": "CPH1969 · Android 11 (API 30) · PV4DDMIZZLTCIVSK",
+  "steps": [
+    {
+      "title": "open inventoryai://dashboard",
+      "status": "pass",
+      "detail": "inventoryai://dashboard",
+      "durationMs": 1010
+    },
+    {
+      "title": "expect \"Overview\"",
+      "status": "pass",
+      "detail": "seen after 3673ms",
+      "durationMs": 3673
+    },
+    {
+      "title": "open inventoryai://inventory",
+      "status": "pass",
+      "detail": "inventoryai://inventory",
+      "durationMs": 1022
+    },
+    {
+      "title": "expect \"Inventory\"",
+      "status": "pass",
+      "detail": "seen after 2753ms",
+      "durationMs": 2753
+    },
+    {
+      "title": "open inventoryai://products",
+      "status": "pass",
+      "detail": "inventoryai://products",
+      "durationMs": 1008
+    },
+    {
+      "title": "expect \"Products\"",
+      "status": "pass",
+      "detail": "seen after 2679ms",
+      "durationMs": 2679
+    },
+    {
+      "title": "open inventoryai://purchase-orders",
+      "status": "pass",
+      "detail": "inventoryai://purchase-orders",
+      "durationMs": 1009
+    },
+    {
+      "title": "expect \"Purchase Orders\"",
+      "status": "pass",
+      "detail": "seen after 2831ms",
+      "durationMs": 2831
+    },
+    {
+      "title": "open inventoryai://suppliers",
+      "status": "pass",
+      "detail": "inventoryai://suppliers",
+      "durationMs": 1021
+    },
+    {
+      "title": "expect \"Suppliers\"",
+      "status": "pass",
+      "detail": "seen after 2302ms",
+      "durationMs": 2302
+    },
+    {
+      "title": "open inventoryai://restock",
+      "status": "pass",
+      "detail": "inventoryai://restock",
+      "durationMs": 1011
+    },
+    {
+      "title": "expect \"Restock\"",
+      "status": "pass",
+      "detail": "seen after 2780ms",
+      "durationMs": 2780
+    },
+    {
+      "title": "open inventoryai://ai",
+      "status": "pass",
+      "detail": "inventoryai://ai",
+      "durationMs": 1021
+    },
+    {
+      "title": "expect \"AI Assistant\"",
+      "status": "pass",
+      "detail": "seen after 2285ms",
+      "durationMs": 2285
+    },
+    {
+      "title": "open inventoryai://audit",
+      "status": "pass",
+      "detail": "inventoryai://audit",
+      "durationMs": 1018
+    },
+    {
+      "title": "expect \"Audit\"",
+      "status": "pass",
+      "detail": "seen after 3335ms",
+      "durationMs": 3335
+    },
+    {
+      "title": "screenshot \"smoke-final\"",
+      "status": "pass",
+      "detail": "C:\\Users\\jeffe\\inventory-ai\\docs\\evidence\\device-runs\\2026-10-22T05-17-17-031Z-smoke\\smoke-final.png",
+      "durationMs": 759
+    }
+  ],
+  "notes": "evidence: C:\\Users\\jeffe\\inventory-ai\\docs\\evidence\\device-runs\\2026-10-22T05-17-17-031Z-smoke"
+}

@@ -20,13 +20,20 @@ import {
   escapeInputText,
   exitCodeFor,
   fieldBelow,
+  fillTemplate,
   findNodes,
   findTapTarget,
   isBlankDump,
   isUnstableDump,
+  looksAtDevLauncher,
+  looksLikePicker,
+  looksSessionExpired,
   looksSignedOut,
   parseDump,
+  parseMovements,
+  quoteForDeviceShell,
   summariseRun,
+  unfilledPlaceholders,
   validateJourneys,
 } from '../../scripts/device/lib.mjs';
 import { JOURNEYS } from '../../scripts/device/journeys.mjs';
@@ -96,6 +103,61 @@ const FORM = `<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
   <node index="4" text="Add a note" class="android.widget.EditText" clickable="true" bounds="[0,2472][1080,2568]" />
 </hierarchy>`;
 
+describe('a stock movement is checked against the app\'s own arithmetic', () => {
+  it('reads one movement and its difference', () => {
+    const [move] = parseMovements('Done. Everyday Battery at Shop Front: 33 → 38');
+    assert.equal(move.from, 33);
+    assert.equal(move.to, 38);
+    assert.equal(move.diff, 5);
+  });
+
+  it('reads both legs of a transfer, in the order the app prints them', () => {
+    const moves = parseMovements(
+      'Done. Battery moved from Shop Front to Main Warehouse.\nShop Front: 1,033 → 1,032\nMain Warehouse: 32 → 33',
+    );
+    assert.equal(moves.length, 2);
+    assert.deepEqual(moves.map((m) => m.diff), [-1, 1]);
+    assert.equal(moves[0].from, 1033);
+  });
+
+  it('finds nothing in text that is not a movement (controls)', () => {
+    assert.deepEqual(parseMovements('Done. 5 items added'), []);
+    assert.deepEqual(parseMovements('33 → 38'), []);
+    assert.deepEqual(parseMovements(''), []);
+    assert.deepEqual(parseMovements(null), []);
+  });
+
+  it('accepts only a whole-number delta list on the movement verb', () => {
+    const ok = validateJourneys([
+      { id: 'a', summary: 's', steps: [{ movement: { deltas: [5] } }] },
+      { id: 'b', summary: 's', steps: [{ movement: { deltas: [-1, 1] } }] },
+    ]);
+    assert.deepEqual(ok, []);
+
+    const bad = validateJourneys([
+      { id: 'c', summary: 's', steps: [{ movement: { deltas: [] } }] },
+      { id: 'd', summary: 's', steps: [{ movement: { deltas: [1.5] } }] },
+      { id: 'e', summary: 's', steps: [{ movement: 5 }] },
+    ]);
+    assert.equal(bad.length, 3, bad.join('; '));
+    assert.ok(bad.every((p) => /movement/.test(p)), bad.join('; '));
+  });
+});
+
+describe('journey placeholders are filled from the run\'s flags', () => {
+  it('substitutes a named value', () => {
+    assert.equal(fillTemplate('{{source}}', { source: 'Shop Front' }), 'Shop Front');
+  });
+
+  it('leaves an unknown placeholder visible instead of blanking it', () => {
+    // A blank would read as "tap nothing" and become a mysterious failure later; leaving the
+    // marker lets the runner report exactly which flag is missing.
+    assert.equal(fillTemplate('{{destination}}', {}), '{{destination}}');
+    assert.deepEqual(unfilledPlaceholders('go to {{destination}}'), ['destination']);
+    assert.deepEqual(unfilledPlaceholders('Shop Front'), []);
+  });
+});
+
 describe('a form field is found by its label, not by whatever has focus', () => {
   const nodes = parseDump(FORM).nodes;
 
@@ -142,6 +204,64 @@ const UNSTABLE = `<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
   <node index="1" text="Create draft order" class="android.widget.Button" clickable="true" bounds="[48,1863][1032,1443]" />
 </hierarchy>`;
 
+/**
+ * A selector field, as the app actually renders it: the visible words are a Text node INSIDE the
+ * Pressable that opens the sheet, and the Pressable's own label carries the same words plus a
+ * chevron. Tapping the text node reports success and opens nothing.
+ */
+const SELECTOR = `<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
+<hierarchy rotation="0">
+  <node index="0" text="Location *" class="android.widget.TextView" clickable="false" bounds="[48,666][1032,720]" />
+  <node index="1" text="Choose a location…, ▾" class="android.widget.Button" clickable="true" bounds="[48,738][1032,876]">
+    <node index="0" text="Choose a location…" class="android.widget.TextView" clickable="false" bounds="[76,742][420,871]" />
+    <node index="1" text="▾" class="android.widget.TextView" clickable="false" bounds="[950,774][1010,839]" />
+  </node>
+</hierarchy>`;
+
+describe('a deep link survives the device shell', () => {
+  it('quotes the whole URL, so its query string is not split at the ampersand', () => {
+    const url = 'inventoryai://stock-in?productId=abc&lock=1';
+    const quoted = quoteForDeviceShell(url);
+    assert.equal(quoted, `'${url}'`);
+    // The control: the unquoted form is what the phone's shell splits, and the second half of the
+    // query never reaches the app.
+    assert.notEqual(url, quoted);
+    assert.ok(quoted.startsWith("'") && quoted.endsWith("'"));
+  });
+
+  it('escapes a quote inside the value rather than ending the string early', () => {
+    assert.equal(quoteForDeviceShell("it's"), String.raw`'it'\''s'`);
+  });
+
+  it('recognises the labels that open a picker (controls included)', () => {
+    assert.equal(looksLikePicker('Choose a location…'), true);
+    assert.equal(looksLikePicker('Choose a supplier'), true);
+    assert.equal(looksLikePicker('Add stock'), false);
+    assert.equal(looksLikePicker(''), false);
+  });
+});
+
+describe('a selector field is tapped on the control, not on its words', () => {
+  const nodes = parseDump(SELECTOR).nodes;
+
+  it('prefers the clickable container that carries the words plus a chevron', () => {
+    const target = findTapTarget(nodes, 'Choose a location…');
+    assert.ok(target, 'the selector was not found at all');
+    assert.equal(target.clickable, true);
+    assert.equal(target.bounds.y1, 738);
+  });
+
+  it('still returns a plain label when nothing clickable contains it (control)', () => {
+    const target = findTapTarget(nodes, 'Location *');
+    assert.equal(target.clickable, false);
+    assert.equal(target.bounds.y1, 666);
+  });
+
+  it('honours an exact request, which is about the heading itself', () => {
+    assert.equal(findTapTarget(nodes, 'Choose a location…', { exact: true }).clickable, false);
+  });
+});
+
 describe('a dump taken mid-scroll is read for its words, never for its geometry', () => {
   const nodes = parseDump(UNSTABLE).nodes;
 
@@ -162,6 +282,26 @@ describe('a dump taken mid-scroll is read for its words, never for its geometry'
     assert.equal(isUnstableDump(DUMP), false);
     // A blank dump is served by the existing rule, not this one.
     assert.equal(isUnstableDump('<hierarchy rotation="0"></hierarchy>'), true);
+  });
+});
+
+describe('a session the server rejects is not a signed-out app', () => {
+  it('is recognised by the app\'s own banner', () => {
+    const nodes = parseDump(
+      `<hierarchy rotation="0"><node text="Inventory" class="android.widget.TextView" clickable="false" bounds="[0,0][10,10]" />` +
+        `<node text="Something went wrong" class="android.widget.TextView" clickable="false" bounds="[0,20][10,30]" />` +
+        `<node text="Session expired — please sign in again" class="android.widget.TextView" clickable="false" bounds="[0,40][10,50]" /></hierarchy>`,
+    ).nodes;
+
+    assert.equal(looksSessionExpired(nodes), true);
+  });
+
+  it('is not the login screen, and an ordinary error is not this one (controls)', () => {
+    assert.equal(looksSessionExpired(parseDump(DUMP).nodes), false);
+    const other = parseDump(
+      `<hierarchy rotation="0"><node text="Couldn't load products" class="android.widget.TextView" clickable="false" bounds="[0,0][10,10]" /></hierarchy>`,
+    ).nodes;
+    assert.equal(looksSessionExpired(other), false);
   });
 });
 
@@ -192,6 +332,51 @@ describe('a signed-out app is a blocked run, not a failed one', () => {
     ).nodes;
 
     assert.equal(looksSignedOut(dashboard), false);
+  });
+});
+
+describe('the Expo dev launcher is not the app', () => {
+  // The real labels from the 2026-10-22 run that reported `expect "Overview"` as a FAILURE while
+  // the dev launcher was in front: Metro had been restarted, the dev client came back on its
+  // launcher screen, and a deep link cannot route into an app that is not running.
+  const launcher = parseDump(
+    `<hierarchy rotation="0">
+      <node text="Inventory AI" class="android.widget.TextView" clickable="false" bounds="[0,0][10,10]" />
+      <node text="Development Build" class="android.widget.TextView" clickable="false" bounds="[0,20][10,30]" />
+      <node text="DEVELOPMENT SERVERS" class="android.widget.TextView" clickable="false" bounds="[0,40][10,50]" />
+      <node text="Start a local development server with:" class="android.widget.TextView" clickable="false" bounds="[0,60][10,70]" />
+      <node text="npx expo start" class="android.widget.TextView" clickable="false" bounds="[0,80][10,90]" />
+    </hierarchy>`,
+  ).nodes;
+
+  it('is recognised, so the runner starts the app instead of failing a screen', () => {
+    assert.equal(looksAtDevLauncher(launcher), true);
+  });
+
+  it('does not mistake the app for the launcher (controls)', () => {
+    assert.equal(looksAtDevLauncher(parseDump(DUMP).nodes), false);
+    // One launcher word alone is not enough — an app screen is allowed to say "Development Build".
+    const oneWord = parseDump(
+      `<hierarchy rotation="0"><node text="Development Build" class="android.widget.TextView" clickable="false" bounds="[0,0][10,10]" /></hierarchy>`,
+    ).nodes;
+    assert.equal(looksAtDevLauncher(oneWord), false);
+    assert.equal(looksAtDevLauncher([]), false);
+  });
+
+  it('the runner starts the app, and blocks rather than judging it if that fails', () => {
+    const runner = readFileSync(new URL('../../scripts/device/run.mjs', import.meta.url), 'utf8');
+    const adb = readFileSync(new URL('../../scripts/device/adb.mjs', import.meta.url), 'utf8');
+
+    assert.match(runner, /looksAtDevLauncher\(screen\.nodes\)/);
+    assert.match(runner, /device\.openDevClient\(/);
+    // The launcher is left by expo-dev-client's own link to a named server — not by `am start -n`
+    // (measured: that lands back on DevLauncherActivity) and not by a tap at coordinates.
+    assert.match(adb, /export function openDevClient\(/);
+    assert.match(adb, /inventoryai:\/\/expo-development-client\/\?url=/);
+    // The still-on-the-launcher path exits 2 BEFORE any journey, so nothing is judged about the app.
+    const block = runner.slice(runner.indexOf('looksAtDevLauncher(screen.nodes)'), runner.indexOf('let worst'));
+    assert.match(block, /cannot check/);
+    assert.match(block, /process\.exit\(2\)/);
   });
 });
 

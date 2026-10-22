@@ -85,7 +85,79 @@ const draft = {
   ],
 };
 
-export const JOURNEYS = Object.freeze([smoke, label, draft]);
+/**
+ * Stock in and back out, and the arithmetic checked in between.
+ *
+ * The two legs are deliberately equal and opposite: a journey a person may run many times must leave
+ * the tenant where it found it, or every run silently changes the numbers under the next one. What
+ * it proves is not "a button worked" but the app's own `from → to` line moving by the amount typed,
+ * read back from the dialog — which needs no starting quantity and therefore still means something
+ * on the tenth run.
+ *
+ * Needs `--product=<id>`, `--source=<location name>`.
+ */
+const stock = {
+  id: 'stock',
+  summary: 'Move 5 in and 5 out at one location, checking the app\'s own arithmetic (writes, net zero).',
+  steps: [
+    { open: 'inventoryai://stock-in?productId={{product}}&lock=1' },
+    { expect: 'Add stock' },
+    { tap: 'Choose a location…' },
+    { tap: '{{source}}' },
+    { type: { value: '5', into: 'Quantity' } },
+    { tap: 'Add stock' },
+    { movement: { deltas: [5] } },
+    { tap: 'OK' },
+    { open: 'inventoryai://stock-out?productId={{product}}&lock=1' },
+    { expect: 'Remove stock' },
+    { tap: 'Choose a location…' },
+    { tap: '{{source}}' },
+    { type: { value: '5', into: 'Quantity' } },
+    { tap: 'Remove stock' },
+    { movement: { deltas: [-5] } },
+    { tap: 'OK' },
+    { shot: 'stock-done' },
+  ],
+};
+
+/**
+ * One unit across and one unit back, so the pair of locations ends where it started.
+ *
+ * The transfer dialog states BOTH legs, source first, which is why the expected deltas are
+ * `[-1, 1]` for each direction — the order is the app's, and a journey that expected the two in the
+ * other order would be asserting a layout rather than the numbers.
+ *
+ * Needs `--product=<id>`, `--source=<location name>`, `--destination=<other location name>`.
+ */
+const transfer = {
+  id: 'transfer',
+  summary: 'Move 1 unit to another location and back, checking both legs (writes, net zero).',
+  steps: [
+    { open: 'inventoryai://transfer?productId={{product}}' },
+    { expect: 'Transfer stock' },
+    { tap: 'Choose the source…' },
+    { tap: '{{source}}' },
+    { tap: 'Choose the destination…' },
+    { tap: '{{destination}}' },
+    { type: { value: '1', into: 'Quantity' } },
+    { tap: 'Transfer stock' },
+    { movement: { deltas: [-1, 1] } },
+    { tap: 'OK' },
+    { open: 'inventoryai://transfer?productId={{product}}' },
+    { expect: 'Transfer stock' },
+    { tap: 'Choose the source…' },
+    { tap: '{{destination}}' },
+    { tap: 'Choose the destination…' },
+    { tap: '{{source}}' },
+    { type: { value: '1', into: 'Quantity' } },
+    { tap: 'Transfer stock' },
+    { movement: { deltas: [-1, 1] } },
+    { tap: 'OK' },
+    { shot: 'transfer-done' },
+  ],
+};
+
+export const JOURNEYS = Object.freeze([smoke, label, draft, stock, transfer]);
 
 /** Journeys that write to the tenant, and are therefore never part of `--all`. */
-export const WRITE_JOURNEYS = Object.freeze(['draft']);
+export const WRITE_JOURNEYS = Object.freeze(['draft', 'stock', 'transfer']);

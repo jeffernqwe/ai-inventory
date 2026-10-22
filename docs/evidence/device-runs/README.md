@@ -14,12 +14,28 @@ disposable dataset, which is why a write journey is allowed to run here).
 | `2026-10-21T17-02-36-863Z-smoke` | every main screen opens and names itself | **17/17 pass** |
 | `2026-10-21T17-03-08-653Z-label` | print → the PDF the app wrote → decode its barcode | **7/7 pass** |
 | `2026-10-21T17-03-31-725Z-draft` | create a draft purchase order from the phone | **14/14 pass** |
+| `2026-10-21T18-07-22-585Z-stock` | stock 5 in and 5 out, arithmetic read from the app | **17/17 pass** |
+| `2026-10-21T18-09-45-957Z-transfer` | transfer 1 across and 1 back, both legs | **21/21 pass** |
+| `2026-10-22T05-17-17-031Z-smoke` | the launcher recovery: the harness started the bundle itself | **17/17 pass** |
+| `2026-10-22T05-21-08-672Z-stock` | the same stock pass **a day later** — same numbers | **17/17 pass** |
+| `2026-10-22T05-22-52-514Z-transfer` | the same transfer pass **a day later** — same numbers | **21/21 pass** |
 | `2026-10-21T16-45-04-846Z-label` | the **first** label run — kept as a defect record | **4/5, FAIL** |
+| `2026-10-21T17-41-33-320Z-stock` | a picker's **label** was tapped instead of its control | **3/4, FAIL** |
+| `2026-10-21T17-52-36-243Z-stock` | the app held a session the server no longer accepted | **3/4, FAIL** |
+| `2026-10-22T05-09-51-488Z-smoke` | the **Expo dev launcher** was in front, not the app | **1/2, FAIL** |
 
 The label journey read `2000053300018` off the product screen, decoded the PDF the Share action
 wrote as **the same code, 95 modules, 30 bars, 4 pt module**, and that PDF was produced by the
 device's own Skia pipeline. The draft journey left a real draft order behind (`Draft PO-0002`) and
 dismissed its own confirmation.
+
+**The two stock journeys are net-zero on purpose.** `stock` moves 5 in and 5 out, `transfer` moves 1
+across and 1 back, and both check the app's own `from → to` line (measured: `33 → 38` then `38 → 33`;
+`33 → 32, 32 → 33`). A journey a person can run on every build must not quietly raise a product's
+quantity each time, and asserting a **delta** rather than an absolute number is what lets the same
+steps still mean something on the tenth run. The two runs above were executed **a day apart** and
+reported the **same numbers**, which is that claim measured rather than assumed. They are write journeys, so they need
+`--product=<id> --source=<location> [--destination=<location>] --allow-writes`.
 
 **The kept failure is the useful one.** `16-45-04` reported *"contains no decodable EAN-13"* on a
 label that was completely correct: the harness read the PDF with `adb shell cat`, whose
@@ -42,6 +58,9 @@ scanned the pack with the app, and the app opened the record for that product.
 node scripts/device/run.mjs --list
 node scripts/device/run.mjs --all --product=<product id>   # read-only: smoke + label
 node scripts/device/run.mjs --journey=draft --allow-writes # writes to the tenant
+node scripts/device/run.mjs --journey=stock --product=<id> --source="Shop Front" --allow-writes
+node scripts/device/run.mjs --journey=transfer --product=<id> --source="Shop Front" \
+  --destination="Main Warehouse" --allow-writes
 ```
 
 Exit codes follow the repository's convention: **0** every step passed, **1** a step failed (the app

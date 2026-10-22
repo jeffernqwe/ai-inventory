@@ -636,6 +636,8 @@ receiving mailbox files the code as spam. Neither is a code defect.
 | The app reports a network error while the backend is healthy | The `adb reverse` tunnels were lost — they do not survive an adb server restart or a replug | Re-run both `adb reverse` commands; confirm with `adb -s $serial reverse --list` |
 | A route the source clearly contains answers **404** — from the phone, or from the deployed host | **The server you are pointed at predates the route.** A long-lived `npm start` never reloads, so a process from yesterday serves yesterday's routes; an uncommitted change is the same fault one step further out | `curl` the route **from the laptop** first: `404` means restart the backend (`npm run dev` watches; `npm start` does not) or deploy. Only a `200`/`400` there makes the phone the suspect |
 | *"Cannot reach the sign-in service"* while the API is reachable | Firebase Auth goes over the phone's **internet**, not the USB tunnel | Reconnect the phone's data/Wi-Fi |
+| `scripts/device/run.mjs` reports the **Expo dev launcher** (`Development Build` / `DEVELOPMENT SERVERS`) | A cold-started development build opens the launcher, and a route deep link cannot reach an app that is not running | The harness starts the bundle itself through `expo-dev-client`'s link; if it still reports **could not check**, start Metro and select the server in the launcher, then re-run |
+| `scripts/device/run.mjs` reports **"Session expired"** | The app holds a token the server no longer accepts — every picker is empty while the screens still render | Sign in on the phone again; the run is **exit 2 (could not check)**, not an app defect |
 
 ---
 

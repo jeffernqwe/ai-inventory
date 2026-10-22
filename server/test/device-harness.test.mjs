@@ -27,6 +27,7 @@ import {
   isBlankDump,
   isUnstableDump,
   judgeDataRows,
+  judgeSettled,
   looksAtDevLauncher,
   looksLikePicker,
   looksSessionExpired,
@@ -545,6 +546,23 @@ describe('a list screen must show data, not just its own heading', () => {
     assert.deepEqual(rowsMatching(withRows, 'available'), []);
   });
 
+  it('judges a screen that may legitimately be empty by whether it errored', () => {
+    // The other five smoke screens (purchase orders, suppliers, restock, assistant, audit) have no
+    // guaranteed rows, so they are covered by "finished loading without an error" instead.
+    const clean = parseDump(listDump('Purchase Orders', 'No purchase orders yet')).nodes;
+    const failed = parseDump(
+      listDump('Purchase Orders', 'Unable to load. Check your connection and try again.', 'Try again'),
+    ).nodes;
+    const refused = parseDump(listDump('Suppliers', 'Session expired — please sign in again')).nodes;
+    const loading = parseDump(listDump('Restock', 'Loading…')).nodes;
+
+    assert.equal(judgeSettled(clean).verdict, 'clean');
+    assert.equal(judgeSettled(failed).verdict, 'error');
+    assert.equal(judgeSettled(refused).verdict, 'error');
+    // Out of time is not a verdict: the runner reports it as BLOCKED, never as a pass.
+    assert.equal(judgeSettled(loading).verdict, 'loading');
+  });
+
   it('does not count the search box as a product row (must trip)', () => {
     // Measured on the first run that used the products pattern: `Search by name, SKU or barcode…`
     // contains "SKU ", so an unanchored pattern found a row on a screen with no rows and reported
@@ -606,6 +624,20 @@ describe('the declared journeys are well formed', () => {
     // preflight also waits for — a deliberate single definition.
     assert.ok(data.some((step) => step.expectData.match === INVENTORY_ROW));
     assert.ok(data.some((step) => step.expectData.match === PRODUCT_ROW));
+
+    // The screens that may be empty are covered by "did it finish loading without an error" —
+    // deleting those steps would leave five of the seven screens asserting only their heading.
+    const clean = smoke.steps.filter((s) => typeof s.expectClean === 'string');
+    assert.ok(clean.length >= 5, 'the smoke journey must check every remaining screen for an error state');
+  });
+
+  it('rejects an expectClean step that does not name its screen', () => {
+    const problems = validateJourneys([
+      { id: 'a', summary: 'x', steps: [{ expectClean: '' }] },
+      { id: 'b', summary: 'x', steps: [{ expectClean: true }] },
+    ]);
+
+    assert.equal(problems.filter((p) => /expectClean/.test(p)).length, 2, problems.join('; '));
   });
 
   it('rejects malformed expectData steps', () => {

@@ -1,0 +1,152 @@
+{
+  "journey": "smoke",
+  "startedAt": "2026-10-22T07:29:33.692Z",
+  "device": "CPH1969 · Android 11 (API 30) · PV4DDMIZZLTCIVSK",
+  "steps": [
+    {
+      "title": "open inventoryai://dashboard",
+      "status": "pass",
+      "detail": "inventoryai://dashboard",
+      "durationMs": 1009
+    },
+    {
+      "title": "expect \"Overview\"",
+      "status": "pass",
+      "detail": "seen after 3177ms",
+      "durationMs": 3177
+    },
+    {
+      "title": "open inventoryai://inventory",
+      "status": "pass",
+      "detail": "inventoryai://inventory",
+      "durationMs": 1012
+    },
+    {
+      "title": "expect \"Inventory\"",
+      "status": "pass",
+      "detail": "seen after 2622ms",
+      "durationMs": 2622
+    },
+    {
+      "title": "expect stock rows on screen",
+      "status": "pass",
+      "detail": "6 row(s), e.g. \", Classic Cable 10004, Shop Front, 58 available · 58 on hand\"",
+      "durationMs": 2300
+    },
+    {
+      "title": "open inventoryai://products",
+      "status": "pass",
+      "detail": "inventoryai://products",
+      "durationMs": 1010
+    },
+    {
+      "title": "expect \"Products\"",
+      "status": "pass",
+      "detail": "seen after 2467ms",
+      "durationMs": 2467
+    },
+    {
+      "title": "expect product rows on screen",
+      "status": "pass",
+      "detail": "2 row(s), e.g. \"SKU ROLESKU-202 · Household · Barcode 2000053300018\"",
+      "durationMs": 2275
+    },
+    {
+      "title": "open inventoryai://purchase-orders",
+      "status": "pass",
+      "detail": "inventoryai://purchase-orders",
+      "durationMs": 1011
+    },
+    {
+      "title": "expect \"Purchase Orders\"",
+      "status": "pass",
+      "detail": "seen after 2607ms",
+      "durationMs": 2607
+    },
+    {
+      "title": "expect Purchase Orders to load without an error",
+      "status": "pass",
+      "detail": "settled without an error state",
+      "durationMs": 2302
+    },
+    {
+      "title": "open inventoryai://suppliers",
+      "status": "pass",
+      "detail": "inventoryai://suppliers",
+      "durationMs": 1021
+    },
+    {
+      "title": "expect \"Suppliers\"",
+      "status": "pass",
+      "detail": "seen after 2204ms",
+      "durationMs": 2204
+    },
+    {
+      "title": "expect Suppliers to load without an error",
+      "status": "pass",
+      "detail": "settled without an error state",
+      "durationMs": 2358
+    },
+    {
+      "title": "open inventoryai://restock",
+      "status": "pass",
+      "detail": "inventoryai://restock",
+      "durationMs": 1015
+    },
+    {
+      "title": "expect \"Restock\"",
+      "status": "pass",
+      "detail": "seen after 2500ms",
+      "durationMs": 2500
+    },
+    {
+      "title": "expect Restock to load without an error",
+      "status": "pass",
+      "detail": "settled without an error state",
+      "durationMs": 2347
+    },
+    {
+      "title": "open inventoryai://ai",
+      "status": "pass",
+      "detail": "inventoryai://ai",
+      "durationMs": 1024
+    },
+    {
+      "title": "expect \"AI Assistant\"",
+      "status": "pass",
+      "detail": "seen after 2407ms",
+      "durationMs": 2407
+    },
+    {
+      "title": "expect AI Assistant to load without an error",
+      "status": "pass",
+      "detail": "settled without an error state",
+      "durationMs": 2290
+    },
+    {
+      "title": "open inventoryai://audit",
+      "status": "pass",
+      "detail": "inventoryai://audit",
+      "durationMs": 1010
+    },
+    {
+      "title": "expect \"Audit\"",
+      "status": "pass",
+      "detail": "seen after 3218ms",
+      "durationMs": 3218
+    },
+    {
+      "title": "expect Audit to load without an error",
+      "status": "pass",
+      "detail": "settled without an error state",
+      "durationMs": 2312
+    },
+    {
+      "title": "screenshot \"smoke-final\"",
+      "status": "pass",
+      "detail": "C:\\Users\\jeffe\\inventory-ai\\docs\\evidence\\device-runs\\2026-10-22T07-29-33-692Z-smoke\\smoke-final.png",
+      "durationMs": 813
+    }
+  ],
+  "notes": "evidence: C:\\Users\\jeffe\\inventory-ai\\docs\\evidence\\device-runs\\2026-10-22T07-29-33-692Z-smoke"
+}

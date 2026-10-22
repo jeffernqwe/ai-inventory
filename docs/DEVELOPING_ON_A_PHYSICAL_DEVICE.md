@@ -811,7 +811,10 @@ was added after a run reported **17/17 on a phone where every request was refuse
 renders over an empty list exactly as well as over a full one. If a run stops at
 `expect stock rows on screen` with *"the screen is showing its error state"*, the app could not reach
 the API — check `curl http://localhost:4000/api/health` and the `tcp:4000` tunnel before blaming the
-app. An **empty** tenant blocks the step (`exit 2`) instead of passing it.
+app. An **empty** tenant blocks the step (`exit 2`) instead of passing it. The screens that may
+legitimately be empty — purchase orders, suppliers, restock, the assistant, the audit trail — are
+checked by `expectClean`, which fails only if the screen **stopped on an error** and reports a screen
+that never finished loading as **exit 2**.
 
 The traps above are encoded in it, because each one cost a run: **`exec-out` for binaries** (`adb shell
 cat` rewrote a PDF's newlines and a good label was reported undecodable), **distrust inverted dump

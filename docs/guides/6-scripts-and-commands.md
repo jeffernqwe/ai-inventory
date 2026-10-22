@@ -181,6 +181,12 @@ with *"the screen is showing its error state"*, the app could not reach the API 
 `curl http://localhost:4000/api/health` and the `tcp:4000` tunnel first. An **empty** tenant blocks
 that step (`exit 2`, *"nothing to prove"*) rather than passing it.
 
+The five screens that may legitimately be **empty** (purchase orders, suppliers, restock, the
+assistant, the audit trail) are covered by `expectClean` instead: it waits for the screen to stop
+loading and fails if it stopped on the app's error state, so a refusal is caught everywhere without
+needing rows to exist. A screen that never finishes loading is **exit 2** — out of time is not a
+verdict. The smoke walk is **24 steps** in total.
+
 It drives the app by **route** (`inventoryai://dashboard`) and by the **label a person reads**, not by
 coordinates, so the same journey works on a different screen size. Each run writes `report.md`,
 `report.json` and screenshots into `docs/evidence/device-runs/<timestamp>-<journey>/`, and prints one

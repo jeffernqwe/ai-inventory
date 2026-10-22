@@ -17863,8 +17863,14 @@ reason the AUTH-03 defect was found at all — but in the reproduction it **look
   - `describeListState` reads the app's own state copy (`Something went wrong` / `Try again`, the
     list shells' `Nothing here yet` / `Nothing to show`, `Loading…`). A copy change fails the run
     loudly rather than passing it.
-- **The smoke journey now carries two of them** — 19 steps instead of 17: the inventory screen's own
-  arithmetic line (`1,281 available · 1,294 on hand`) and a product row's meta (`SKU … · Barcode …`).
+- **The smoke journey now carries two of them** — the inventory screen's own arithmetic line
+  (`1,281 available · 1,294 on hand`) and a product row's meta (`SKU … · Barcode …`).
+- **`expectClean` covers the screens that may legitimately be empty.** Purchase orders, suppliers,
+  restock, the assistant and the audit trail have no guaranteed rows, so "prove data" would block on
+  a fresh tenant — but their heading renders over a failed request too. `judgeSettled(nodes)` waits
+  for the screen to stop loading and **fails** if it stopped on the app's error state; a screen still
+  loading at the deadline is **BLOCKED** (exit 2), because out of time is not a verdict. The smoke
+  journey is **24 steps** now: 7 screens, 2 data assertions and 5 "loaded without an error" checks.
 - **The patterns are anchored, because the first attempt was wrong.** `PRODUCT_ROW` began as
   `/(SKU |Barcode \d)/` and matched the screen's own search box — `Search by name, SKU or barcode…` —
   so it counted a "row" on a list with no rows and reported chrome as evidence (run `06-41-07`,
@@ -17877,8 +17883,8 @@ the common case is faster than the fixed wait it replaced.
 
 ## Verified
 
-- **Unit** — `server/test/device-harness.test.mjs`: **55 cases, 0 failures** (44 → 55; 8 for the data
-  judgement, 3 for the journey table). Every verdict is paired with the state it must reject: error
+- **Unit** — `server/test/device-harness.test.mjs`: **57 cases, 0 failures** (44 → 57; 9 for the data
+  judgement, 4 for the "finished loading" judgement and the journey table). Every verdict is paired with the state it must reject: error
   fails, empty blocks, loading is not empty, chrome-only is `absent`, a session refusal **outranks
   stale rows**, a non-RegExp pattern matches nothing, and the placeholder-only product screen counts
   zero rows. `validateJourneys` refuses a malformed `expectData` five ways, and a journey table with
@@ -17898,6 +17904,14 @@ the common case is faster than the fixed wait it replaced.
      reads `5 row(s), e.g. "Search by name, SKU or barcode…"`. The data assertion was still finding
      chrome. The anchored pattern in run 1 is the fix, and the run is kept because a harness that
      counts its own search box as a product is exactly what the unit case now refuses.
+- **The five "may be empty" screens were proven to fail when they should** — not by a unit case
+  alone. The API was moved to `:4001` and a pass-through proxy took `:4000`, refusing **only**
+  `/api/purchase-orders` with `500`; everything else was served normally. The result
+  (`2026-10-22T07-17-43-928Z-smoke`, **10/11, exit 1**) is exactly the defect the old journey could
+  not see: `expect "Purchase Orders"` **passed** — the heading rendered over a refused list — the two
+  data steps passed on the screens that were fine, and `expect Purchase Orders to load without an
+  error` failed with `the screen is showing its error state ("Something went wrong")`. The proxy and
+  the second server were then removed and the run repeated clean (**`07-29-33-692Z-smoke`, 24/24**).
 - **The shared runner still drives a write path** — the preflight that was rewritten is used by
   every journey, so both write journeys were re-run afterwards against the disposable role fixture
   tenant: `07-04-45-117Z-stock` **17/17** and `07-06-35-250Z-transfer` **21/21**, net-zero as
@@ -17920,10 +17934,17 @@ Artifacts: `docs/evidence/device-runs/` — the three runs above; the README the
 - **The products must-trip is by unit case, not on hardware.** An error state was proven on the phone
   (inventory, with the API stopped); producing an *empty* product list on this tenant would mean
   archiving its products, so the placeholder case is held by the suite instead.
-- **Two list screens carry the claim; the other five still assert only their heading.** Purchase
-  orders, suppliers, restock, the assistant and the audit trail can each be legitimately empty on a
-  fresh tenant, which would block rather than prove; the failure mode being hunted is app-wide, and
-  two screens catch it. Extending the pattern to the fetch-driven screens would be the next step up.
+- ~~**The other five screens assert only their heading.**~~ **Closed in the same change** by
+  `expectClean`: every one of the seven smoke screens now fails if it ends up in the app's error
+  state, and two of them additionally fail if their list has no rows. What remains unproven is the
+  *data* half on the five — which is deliberate, since an empty purchase-order or supplier list is a
+  normal state for a new business.
+- **`expectClean` cannot tell a failed assistant turn from a successful one.** The assistant renders
+  its refusals as a chat bubble (`Cannot reach the server…` / the quota sentence), not as the list
+  shells' error state, so the step proves the screen loaded but says nothing about a turn. Turns are
+  covered by their own suites and the quota/refusal copy by `AI6`'s mobile test; a device assertion
+  for a *successful* turn would spend the shared free-model allowance on every run, which is why it
+  is not part of smoke.
 - **The two write journeys (`stock`, `transfer`) still check numbers, not lists** — they were already
   proving a server round trip through the app's own `from → to` line, so they never had this gap.
 

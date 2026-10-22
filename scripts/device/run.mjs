@@ -42,6 +42,7 @@ import {
   findNodes,
   findTapTarget,
   judgeDataRows,
+  judgeSettled,
   looksAtDevLauncher,
   looksLikePicker,
   looksSessionExpired,
@@ -148,6 +149,7 @@ function titleOf(step, ctx) {
   if (verb === 'decodeLabel') return 'decode the printed PDF';
   if (verb === 'movement') return `check the movement arithmetic (${value?.deltas?.join(', ')})`;
   if (verb === 'expectData') return `expect ${value?.what ?? 'rows'} on screen`;
+  if (verb === 'expectClean') return `expect ${value} to load without an error`;
   return verb;
 }
 
@@ -499,6 +501,36 @@ async function runStep(step, ctx) {
         status: 'pass',
         detail: parsed.map((move) => `${move.from} → ${move.to}`).join(', ') + ` (${actual.join(', ')})`,
       };
+    }
+
+    case 'expectClean': {
+      // The screens that may be empty. Loading is not an answer, and an error is a defect: this
+      // exists because a heading renders over a failed request just as well as over a good one.
+      const screenName = String(value);
+      const began = Date.now();
+      const deadline = began + Math.max(ctx.timeoutMs, 12_000);
+
+      for (;;) {
+        let judgement = null;
+        try {
+          judgement = judgeSettled((await device.readScreen(adbArgs)).nodes);
+        } catch {
+          // An unreadable screen is not evidence either way; keep trying until the deadline.
+        }
+
+        if (judgement?.verdict === 'clean') return { status: 'pass', detail: judgement.detail };
+        if (judgement?.verdict === 'error') {
+          return { status: 'fail', detail: `${screenName} did not load: ${judgement.detail}` };
+        }
+        if (Date.now() >= deadline) {
+          // Out of time rather than observed wrong: the run says it could not check.
+          return {
+            status: 'blocked',
+            detail: `${screenName} was still loading after ${Math.round((Date.now() - began) / 1000)}s — nothing was judged`,
+          };
+        }
+        await sleep(700);
+      }
     }
 
     case 'expectData': {

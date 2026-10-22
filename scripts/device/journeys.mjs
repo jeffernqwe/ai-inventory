@@ -40,6 +40,11 @@ export const PRODUCT_ROW = /^(SKU \S|Barcode \d)/;
  * each one waits for a label the client cannot invent — a stock row's `available · on hand`
  * arithmetic, a product row's SKU or barcode — and fails if the screen lands in its error state
  * first. An empty tenant blocks the step instead (`nothing to prove`), never passes it.
+ *
+ * The other five screens are covered by `expectClean` instead, because they may legitimately be
+ * EMPTY on a fresh tenant (no purchase orders, no suppliers, no restock candidates, no audit yet):
+ * it waits for the screen to stop loading and fails if it stopped on the app's error state, so a
+ * refusal is caught on every screen without needing data to exist.
  */
 const smoke = {
   id: 'smoke',
@@ -55,14 +60,19 @@ const smoke = {
     { expectData: { what: 'product rows', match: PRODUCT_ROW } },
     { open: 'inventoryai://purchase-orders' },
     { expect: 'Purchase Orders' },
+    { expectClean: 'Purchase Orders' },
     { open: 'inventoryai://suppliers' },
     { expect: 'Suppliers' },
+    { expectClean: 'Suppliers' },
     { open: 'inventoryai://restock' },
     { expect: 'Restock' },
+    { expectClean: 'Restock' },
     { open: 'inventoryai://ai' },
     { expect: 'AI Assistant' },
+    { expectClean: 'AI Assistant' },
     { open: 'inventoryai://audit' },
     { expect: 'Audit' },
+    { expectClean: 'Audit' },
     { shot: 'smoke-final' },
   ],
 };

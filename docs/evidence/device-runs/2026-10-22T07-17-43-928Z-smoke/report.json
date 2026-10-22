@@ -1,0 +1,74 @@
+{
+  "journey": "smoke",
+  "startedAt": "2026-10-22T07:17:43.928Z",
+  "device": "CPH1969 · Android 11 (API 30) · PV4DDMIZZLTCIVSK",
+  "steps": [
+    {
+      "title": "open inventoryai://dashboard",
+      "status": "pass",
+      "detail": "inventoryai://dashboard",
+      "durationMs": 994
+    },
+    {
+      "title": "expect \"Overview\"",
+      "status": "pass",
+      "detail": "seen after 3329ms",
+      "durationMs": 3329
+    },
+    {
+      "title": "open inventoryai://inventory",
+      "status": "pass",
+      "detail": "inventoryai://inventory",
+      "durationMs": 991
+    },
+    {
+      "title": "expect \"Inventory\"",
+      "status": "pass",
+      "detail": "seen after 2678ms",
+      "durationMs": 2678
+    },
+    {
+      "title": "expect stock rows on screen",
+      "status": "pass",
+      "detail": "6 row(s), e.g. \", Classic Cable 10004, Shop Front, 58 available · 58 on hand\"",
+      "durationMs": 2207
+    },
+    {
+      "title": "open inventoryai://products",
+      "status": "pass",
+      "detail": "inventoryai://products",
+      "durationMs": 1011
+    },
+    {
+      "title": "expect \"Products\"",
+      "status": "pass",
+      "detail": "seen after 2663ms",
+      "durationMs": 2663
+    },
+    {
+      "title": "expect product rows on screen",
+      "status": "pass",
+      "detail": "2 row(s), e.g. \"SKU ROLESKU-202 · Household · Barcode 2000053300018\"",
+      "durationMs": 2231
+    },
+    {
+      "title": "open inventoryai://purchase-orders",
+      "status": "pass",
+      "detail": "inventoryai://purchase-orders",
+      "durationMs": 1006
+    },
+    {
+      "title": "expect \"Purchase Orders\"",
+      "status": "pass",
+      "detail": "seen after 2089ms",
+      "durationMs": 2089
+    },
+    {
+      "title": "expect Purchase Orders to load without an error",
+      "status": "fail",
+      "detail": "Purchase Orders did not load: the screen is showing its error state (\"Something went wrong\")",
+      "durationMs": 2115
+    }
+  ],
+  "notes": "evidence: C:\\Users\\jeffe\\inventory-ai\\docs\\evidence\\device-runs\\2026-10-22T07-17-43-928Z-smoke"
+}

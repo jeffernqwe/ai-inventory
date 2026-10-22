@@ -31,6 +31,7 @@ export const STEP_VERBS = Object.freeze([
   'decodeLabel', // pull the PDF the print action just wrote and decode it
   'movement', // check the app's own "from → to" confirmation arithmetic
   'expectData', // wait for rows that could only come from the server
+  'expectClean', // wait until the screen is not loading, and fail if it is showing an error
 ]);
 
 /** Elements a node's visible label may come from. The app uses both. */
@@ -297,6 +298,30 @@ export function judgeDataRows(nodes, spec = {}) {
 }
 
 /**
+ * Has this screen finished loading, and did it do so without an error?
+ *
+ * `expectData` proves a list has rows, which needs a tenant that has some. This is the cheap
+ * assertion for the screens that may legitimately be EMPTY — purchase orders, suppliers, restock,
+ * the assistant, the audit trail — where the question is not "are there rows" but "did this screen
+ * end up in the app's error state?". A heading renders over a failed request too, so without it five
+ * of the seven smoke screens would pass whatever the server said.
+ *
+ * The two answers are kept apart on purpose: an error is a FAIL (observed), while a screen that
+ * never stops loading is a BLOCK (the harness ran out of time; nothing was observed), and `run.mjs`
+ * maps them to exit 1 and exit 2 accordingly.
+ */
+export function judgeSettled(nodes) {
+  const state = describeListState(nodes);
+  if (state.state === 'error') {
+    return { verdict: 'error', detail: `the screen is showing its error state ("${state.evidence}")` };
+  }
+  if (state.state === 'loading') {
+    return { verdict: 'loading', detail: `still loading ("${state.evidence}")` };
+  }
+  return { verdict: 'clean', detail: 'settled without an error state' };
+}
+
+/**
  * Is the app showing its login screen?
  *
  * A signed-out session is a PRECONDITION the harness cannot fix, so it must be reported as "could
@@ -537,6 +562,10 @@ export function validateJourneys(journeys) {
       }
       if (verb === 'scroll' && value !== 'down' && value !== 'up') {
         problems.push(`${at}: scroll must be "down" or "up"`);
+      }
+
+      if (verb === 'expectClean' && (typeof value !== 'string' || !value.trim())) {
+        problems.push(`${at}: expectClean needs the screen's name`);
       }
 
       if (verb === 'expectData') {

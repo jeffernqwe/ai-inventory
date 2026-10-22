@@ -28,6 +28,8 @@ disposable dataset, which is why a write journey is allowed to run here).
 | `2026-10-22T06-46-06-372Z-smoke` | the smoke journey **asserting data** (19 steps): 6 stock rows, 2 product rows named off the screen | **19/19 pass** |
 | `2026-10-22T06-42-53-368Z-smoke` | the same journey with the **API deliberately stopped** — the must-trip control | **4/5, exit 1** |
 | `2026-10-22T06-41-07-892Z-smoke` | the first data pass — kept because its products pattern matched the **search box** | **19/19, but one assertion was chrome** |
+| `2026-10-22T07-29-33-692Z-smoke` | the final walk: **24 steps** — 7 screens, 2 data assertions, 5 "loaded without an error" | **24/24 pass** |
+| `2026-10-22T07-17-43-928Z-smoke` | only `/api/purchase-orders` refused (a proxy on `:4000`): the **heading passed**, the new check failed | **10/11, exit 1** |
 
 The label journey read `2000053300018` off the product screen, decoded the PDF the Share action
 wrote as **the same code, 95 modules, 30 bars, 4 pt module**, and that PDF was produced by the
@@ -70,6 +72,16 @@ first. Three runs, in this order, with no sign-in between any of them:
 
 The last row is why the patterns are **anchored**: a data check that can match the screen's own search
 placeholder would restore the green report without restoring the evidence.
+
+**The five screens that may legitimately be empty are checked a different way.** Purchase orders,
+suppliers, restock, the assistant and the audit trail have no guaranteed rows, so `expectClean` waits
+for each to **stop loading** and fails if it stopped on the app's error state; still loading at the
+deadline is **exit 2**. That was proven on the phone rather than argued: the API was moved to `:4001`
+and a pass-through proxy took `:4000`, refusing **only** `/api/purchase-orders` with `500`.
+`07-17-43` is the result — `expect "Purchase Orders"` **passed** (the heading rendered over the
+refused list), the two data steps passed on the screens that were healthy, and
+`expect Purchase Orders to load without an error` failed with *"the screen is showing its error
+state"*. The proxy was then removed and `07-29-33` is the clean **24/24** that followed.
 
 **An empty tenant blocks, it does not pass.** A screen showing `Nothing to show` yields **exit 2**
 ("nothing to prove"), so a disposable tenant with no stock is never recorded as data having loaded.

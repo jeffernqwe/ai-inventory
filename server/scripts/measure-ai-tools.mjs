@@ -32,6 +32,7 @@ import Product from '../src/models/product.model.ts';
 import User from '../src/models/user.model.ts';
 import { aiConfig } from '../src/services/ai/aiConfig.ts';
 import { AI_TOOLS, executeTool } from '../src/services/ai/tools.ts';
+import { SeedSafetyError, assertReadableTarget } from './perf/lib.mjs';
 
 function argValue(flag) {
   const prefix = `${flag}=`;
@@ -107,6 +108,16 @@ async function main() {
     fail('--iterations must be between 1 and 200.');
   }
 
+  // WHICH database, decided before a connection exists — a measurement against the wrong
+  // data is not merely useless, it is a number a decision could be made on.
+  try {
+    assertReadableTarget(env, 'perf:measure');
+  } catch (err) {
+    if (!(err instanceof SeedSafetyError)) throw err;
+    fail(err.message);
+  }
+  console.log(`[measure] database   : ${env.mongodbDbName} (environment ${env.nodeEnv})`);
+
   await mongoose.connect(env.mongodbUri, { dbName: env.mongodbDbName });
 
   const business = await Business.findById(businessId).select('name').lean();
@@ -132,7 +143,7 @@ async function main() {
 
   const cfg = aiConfig();
   console.log(`[measure] label      : ${label}`);
-  console.log(`[measure] database   : ${env.mongodbDbName}`);
+  console.log(`[measure] tenant     : ${business.name}`);
   console.log(`[measure] business   : ${business.name}`);
   console.log(`[measure] size       : ${productCount} products, ${inventoryCount} inventory rows, ${transactionCount} transactions`);
   console.log(`[measure] iterations : ${iterations} per tool   (zero model calls)`);

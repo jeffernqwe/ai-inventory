@@ -73,6 +73,7 @@ import { createSessionForToken, newSessionId } from '../src/services/session.ser
 // disagreeing about the same day's budget.
 import { DEFAULT_BASE_URL, allowanceLine, readProviderUsage, shortfall } from './ai-usage.mjs';
 import { factPresent } from './perf/factCheck.mjs';
+import { SeedSafetyError, assertReadableTarget } from './perf/lib.mjs';
 
 function argValue(flag) {
   const hit = process.argv.find((a) => a.startsWith(`${flag}=`));
@@ -90,6 +91,17 @@ async function main() {
   // rather than naming one developer's machine, so the probe works anywhere.
   const out = argValue('--out') ?? path.join(os.tmpdir(), 'ai-turns.json');
   if (!businessId) throw new Error('--business=<id> is required');
+
+  // This run WRITES conversation rows and spends the shared free-model allowance, so the
+  // database is decided before a connection exists and before a single turn is authorised.
+  try {
+    assertReadableTarget(env, 'perf:turns');
+  } catch (err) {
+    if (!(err instanceof SeedSafetyError)) throw err;
+    console.error(`[turns] ${err.message}`);
+    process.exit(1);
+  }
+  console.log(`[turns] database     : ${env.mongodbDbName} (environment ${env.nodeEnv})`);
 
   await mongoose.connect(env.mongodbUri, { dbName: env.mongodbDbName });
   const business = await Business.findById(businessId).select('name status').lean();

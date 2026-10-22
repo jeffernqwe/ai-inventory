@@ -856,9 +856,17 @@ CLEANUP_CONFIRM=cleanup:test-mongodb npm run cleanup:test-mongodb -- --yes
 
 **Two guards worth knowing, because they can look like the tool is broken.** The cleanup commands
 refuse to run unless:
-- the environment is **explicitly** `development` — unset or blank is refused on purpose, because
-  "I could not tell where this would delete" is treated as "refuse", not "probably fine"; and
+- the environment is **named and non-production** — `NODE_ENV` must be one of the three the server
+  recognises, and anything else (`prod`, `Production`, `staging`, unset, blank) is refused as
+  **ambiguous**, because "I could not tell where this would delete" is treated as "refuse", not
+  "probably fine". This is the same classifier the server boots on, so a seeder cannot accept an
+  environment the server would reject (2026-10-22); and
 - the confirmation phrase matches the command exactly.
+
+Measured tools (`perf:measure`, `perf:turns`) check the same two things they can: a recognised
+non-production environment **and** a resolved database that is the development or test one, printed
+before the first query. They need no confirmation phrase — measuring is not destructive — but a run
+that cannot say which database it read is not a measurement.
 
 **Why `cleanup:test-firebase` is the dangerous one.** Delete a login while its database record still
 exists and that address can **never sign in again** — and the app will not let you register it afresh
@@ -1019,6 +1027,7 @@ meet:
 | *`set SEED_CONFIRM=<phrase> to proceed`* | The seed guard wants you to prove which command you meant | Put `SEED_CONFIRM=<phrase>` in front of the command, exactly as shown above. **Each seeder has its own phrase** — `seed-demo-account`, `seed-accounts`, `seed-perf-ai` — so pasting the wrong one does not work |
 | *`no Firebase identity exists for … and DEMO_ACCOUNT_PASSWORD is not set`* | That address has no login yet, and the seeder will not invent one silently | Either register that address in the app first (**recommended**), or set `DEMO_ACCOUNT_PASSWORD` in front of the command to create it |
 | *`set CLEANUP_CONFIRM=…`* / *`NODE_ENV is not set`* | The cleanup guard would not delete without an explicit environment | Set the phrase; if the environment is missing, `server/.env` — which normally sets it — is the thing being talked about |
+| *`… so the environment is ambiguous`* | `NODE_ENV` is missing or is a value the project does not recognise (`prod`, `Production`, `staging`) | Set it to `development` for these tools (or `test`). It is the same refusal the server makes at boot, and the value you typed is deliberately not repeated in the message |
 | *`the resolved database is "…", not the development database`* | You are pointed at the wrong database — most likely the test one | Do not override the guard. Check `server/.env`; a seeder is deliberately only allowed near the development database |
 | *`NOT VERIFIED (exit 2)`* from `verify:demo` | The database could not be reached, or the account does not exist | This is **not** a data problem. Check the internet and re-run |
 | *`is inside the repository`* from `backup:db` | You pointed `BACKUP_DIR` at a folder inside the project | Pick a folder outside it. This one is deliberate: a dump is real data and must not be committable |

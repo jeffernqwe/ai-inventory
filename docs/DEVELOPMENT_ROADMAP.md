@@ -18157,6 +18157,75 @@ One caveat about what this does **not** show: the probe bodies were checked for 
 stack takes, not every response the application can produce. The suites cover the rest, and the
 refusal path itself was exercised locally rather than by breaking the live service.
 
+# The scripts that write and delete now ask the same environment question as the server (2026-10-22)
+
+**A follow-up to the environment work above, in the tooling rather than the server.** One shared guard
+in `scripts/perf/lib.mjs`, one call added to each of the two measurement scripts, and an 11-case
+suite. No route, permission, schema, dependency, mobile or environment variable change.
+
+## What was still wrong
+
+The server refuses to boot without naming its environment. The scripts that **write and delete data**
+answered the same question with `process.env.NODE_ENV === 'production'`, which says "safe" to an
+unset value, to `Production`, and to `prod`. That last one is the interesting failure: `prod` is not
+recognised anywhere, so `resolveDatabaseName` resolved it to **`inventoryai_dev_db`** — the guard then
+passed both checks and the seeder wrote to the development database while the operator believed the
+guard had considered the question. The target check ("must be exactly the development database")
+prevented the catastrophic case, but the environment half of the guard was answering a question it
+could not actually answer.
+
+Two measurement tools had **no environment guard at all**. `perf:turns` writes conversation rows and
+spends the shared free-model allowance, so "which database did that go to?" has to be answerable
+before it starts, not from the output afterwards.
+
+## The change
+
+- **One classifier, the server's.** `assertSafeTarget` (the guard every seeder and its cleanup already
+  called) now asks `classifyNodeEnv`, exactly as `startServer` does: `production` refuses because
+  these tools never touch it, a recognised non-production value proceeds to the database check, and
+  anything else — `missing`, `unrecognised`, including `prod`, `Production`, `staging` — refuses as
+  **ambiguous** because it cannot prove which posture it would write under. The mistyped value is
+  never echoed.
+- **The existing target check is unchanged and still the stronger one**: no URI, a database that is
+  not exactly `inventoryai_dev_db`, or a missing confirmation phrase all refuse *before* a connection
+  exists.
+- **`assertReadableTarget`** is the measurement half: a recognised non-production environment, a URI,
+  and a resolved database that is the development or test one — printed before the first query. No
+  confirmation phrase, because measuring is not destructive.
+- **Both measurement tools call it**: `perf:measure` and `perf:turns`, before `mongoose.connect`.
+
+## Verified
+
+- **11 cases** in `script-environment-guards.test.mjs`, run directly with no runner variables: the
+  accept path, production by name, the six ambiguous spellings, the wrong-database check (production,
+  test and a stranger's name), the missing URI and phrase, and the reader guard against production
+  posture, an unnamed environment and the production database **by name** under a development
+  posture.
+- **Source guards, because the failure mode is a script that never calls one**: all nine seeders and
+  cleanups must call a target guard (the demo tenant's own `assertDemoTarget` counts — it requires
+  the database to be named on the command line), both measurement tools must call
+  `assertReadableTarget`, and **no script may compare `NODE_ENV` to `"production"` itself** — the old
+  rule cannot grow back in a tenth file.
+- **Measured on the real commands:** `cleanup:perf` with `NODE_ENV=` and with `NODE_ENV=prod` both
+  refused as ambiguous and named the fix; `seed:perf` in development without its phrase still
+  refused at the phrase; `perf:measure` with `NODE_ENV=production` refused before any connection;
+  `perf:turns` in development printed `database : inventoryai_dev_db (environment development)` and
+  then failed only because the tenant did not exist.
+- Server `test:unit` **1257 tests / 1205 pass / 0 fail / 52 skipped**, `tsc`, `eslint` and the
+  module-graph checks clean.
+
+## Still open, and said so
+
+- **The demo tenant seeder is deliberately allowed on production** — it exists to populate the
+  production build's preview tenant, and its own guard requires `--database=<name>` to equal the
+  resolved database and refuses the test database. That exception is a documented decision, not an
+  oversight.
+- **Credentials are still the operator's `.env`.** These guards decide whether a command may proceed
+  and where; they do not choose the cluster or the account.
+- `ai-usage` and `verify-demo-data` remain read-only with no guard; they print what they read, and
+  adding one would be a different judgement (a production reading is sometimes exactly what an
+  operator wants).
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

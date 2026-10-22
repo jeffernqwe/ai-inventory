@@ -18363,14 +18363,54 @@ The deployment was then measured from outside, read-only, at the new build:
 | `GET /api/health/ready` / `/live` | **200** / **200** |
 | `POST /api/auth/renew` (no token) | **401** `AUTH_REQUIRED` — the AUTH-03 route is mounted on the deployed build and refuses an unauthenticated caller |
 
-**What this deployment does NOT do, and the limit is structural:** the fix is **mobile** code. No
-`preview` or `production`-profile app build exists (the phone runs a `development` build served by
-Metro), so **no installed app carries it yet**, and "the production renewal flow was verified end to
-end" would be a claim about software nobody is running — it is therefore **not** claimed. The client
-behaviour is device-measured against the same client code and a real server, and the production API
-is verified to mount the route; an end-to-end production check needs a production-profile build from
-EAS, installed on a device, signed in against the production API — Phase 30B's remaining item, with
-iOS still blocked on a macOS host.
+**What this deployment does NOT do:** it runs only the server half, which is unchanged. The fix is
+**mobile** code, so "the production renewal flow was verified" is a claim about an app build — and
+there was none. That is what the next section closed.
+
+## Production renewal, verified on the phone (2026-10-22, later the same day)
+
+A `preview` build of the fixed app was made and installed, then signed in against the **production**
+API. Nothing about the host was changed to make this possible.
+
+| | |
+| --- | --- |
+| build | EAS `6ee0c10f-076c-4bb6-b9d2-3aa8253a6aa0`, profile **`preview`**, Android APK, artifact `bddomc_RAg…apk` (111 MB) |
+| API base | `EXPO_PUBLIC_API_URL=https://ai-inventory-l1mi.onrender.com`, already declared by the `preview` profile in `eas.json` — no override was added |
+| install | `adb install -r` over the development build on the OPPO CPH1969 (same EAS keystore, `versionName 1.0.0`) |
+| sign-in | **11:46:45Z**, Firebase exchange → `403 REGISTRATION_REQUIRED` (the identity had no MongoDB user on production) → the registration screen → workspace **`joffy royal kludge`**, role OWNER, empty tenant |
+
+The previous development build's token was signed by the **local** server's secret; the preview app
+refused it at boot and showed Login — an invalid session handled securely, observed on the production
+API rather than in a suite. Then, without ever re-entering credentials:
+
+| when (UTC) | what was done | what was seen |
+| --- | --- | --- |
+| **12:37:02** (T+50 m, token inside the 10-minute proactive window) | `am force-stop` then relaunch | session restored; dashboard, tenant name, 0/0/0 tiles — no Login screen |
+| **12:48:32** (T+62 m, **past** the 1-hour access token) | `am force-stop` then relaunch | session restored again; dashboard served, `All caught up` |
+| **12:49:40** | open the audit trail | **one** `Signed in` row, at 11:46:45, and nothing else — no second authentication, and the app holds no credentials to replay |
+
+A cold start at T+62 m cannot present the token minted at sign-in under the documented `JWT_EXPIRES_IN=1h`,
+so the request was authenticated with a **renewed** token; the app also has no stored password, so a
+silent re-login is not available to it. That is the end-to-end production check: the deployed API
+minted a replacement token for the same session, and the installed preview build used it.
+
+**The one assumption, stated rather than hidden:** the host's `JWT_EXPIRES_IN` is not readable from
+outside, and the conclusion rests on the documented 1-hour default (the same value `env.ts` falls back
+to, and no record of an override exists). A host value above 62 minutes would make this observation
+inconclusive rather than wrong. What is measured without any assumption: the production API accepted
+the restored session 62 minutes after sign-in, from an app that could not have re-authenticated.
+
+**Two things this leaves behind.** The verification created an empty production tenant,
+**`joffy royal kludge`** (one user, one business, no products, no locations) — additive, and removable
+with the existing cleanup path if the owner does not want it. And the preview APK **replaced the
+development build** on the phone: the device harness needs a debuggable build, so `node
+scripts/device/run.mjs` will report BLOCKED until a `development` build (or `expo run:android`) is
+installed again.
+
+**Still open:** iOS (no macOS host), and the 14-day cap on a live session — the server suite pins it
+(**case 6** near-cap renewal, cap unmoved, `28/28` passing in `phaseAUTH03-session-renewal.test.mjs`;
+**case 7** a session past the cap is refused `SESSION_REVOKED`, i.e. terminal, so the client signs out
+instead of recovering forever), but no live session was driven to its cap.
 
 # 28. Phase Gate System
 

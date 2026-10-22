@@ -28,8 +28,18 @@ import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
+import express from 'express';
+
 import { createApp } from '../src/app.ts';
-import { isDebugNodeEnv, KNOWN_NODE_ENVS, nodeEnvWarning } from '../src/config/env.ts';
+import {
+  classifyNodeEnv,
+  isDebugNodeEnv,
+  isDeployedHost,
+  KNOWN_NODE_ENVS,
+  nodeEnvWarning,
+} from '../src/config/env.ts';
+import { deploymentNotes } from '../src/config/deploymentReadiness.ts';
+import { startServer } from '../src/config/startup.ts';
 
 /** The 4xx this suite provokes: the login validator, which answers before any database work. */
 async function loginValidationError(baseUrl) {
@@ -81,11 +91,49 @@ describe('debug detail is released only to an explicitly development process (20
     assert.deepEqual([...KNOWN_NODE_ENVS], ['development', 'test', 'production']);
   });
 
+  it('separates a variable nobody set from one somebody mistyped', () => {
+    // The distinction is the diagnostic: an operator fixes them in different places, and a report
+    // that said only "invalid" would send them to the wrong one.
+    // NB: the no-argument form reads `process.env` — an explicit `undefined` is the default
+    // parameter firing, not "unset" — so the absent case is proved by removing the variable.
+    const saved = process.env.NODE_ENV;
+    delete process.env.NODE_ENV;
+    try {
+      assert.equal(classifyNodeEnv(), 'missing');
+    } finally {
+      if (saved !== undefined) process.env.NODE_ENV = saved;
+    }
+    assert.equal(classifyNodeEnv(''), 'missing');
+    assert.equal(classifyNodeEnv('   '), 'missing');
+
+    assert.equal(classifyNodeEnv('prod'), 'unrecognised');
+    assert.equal(classifyNodeEnv('Production'), 'unrecognised');
+    assert.equal(classifyNodeEnv('staging'), 'unrecognised');
+
+    assert.equal(classifyNodeEnv('production'), 'production');
+    assert.equal(classifyNodeEnv('development'), 'development');
+    assert.equal(classifyNodeEnv('test'), 'test');
+    assert.equal(classifyNodeEnv(' production '), 'production');
+  });
+
+  it('never repeats a mistyped value back into a report', () => {
+    const typo = 'prod-db-please-fix';
+    assert.equal(nodeEnvWarning(typo).includes(typo), false);
+  });
+
+  it('recognises a host that identifies itself, and nothing else', () => {
+    assert.equal(isDeployedHost({ RENDER: 'true' }), true);
+    assert.equal(isDeployedHost({ RENDER_GIT_COMMIT: 'abc1234' }), true);
+    assert.equal(isDeployedHost({ RENDER: '' }), false);
+    assert.equal(isDeployedHost({ HOME: '/root' }), false);
+    assert.equal(isDeployedHost({}), false);
+  });
+
   it('warns when the value is missing or unrecognised, and stays quiet when it is right', () => {
     // An empty value is what an unset variable looks like once it has been through `.env`.
     assert.match(nodeEnvWarning(''), /NODE_ENV is not set/);
-    assert.match(nodeEnvWarning('Production'), /is not one of/);
-    assert.match(nodeEnvWarning('staging'), /is not one of/);
+    assert.match(nodeEnvWarning('Production'), /does not name one of/);
+    assert.match(nodeEnvWarning('staging'), /does not name one of/);
     // The consequences are named, because they are neither local nor obvious.
     assert.match(nodeEnvWarning('prod'), /treats? as DEVELOPMENT|treated as DEVELOPMENT/i);
     assert.match(nodeEnvWarning('prod'), /production configuration checks/i);
@@ -171,6 +219,146 @@ describe('debug detail is released only to an explicitly development process (20
  * when the environment is the reason. Read from source, because a response cannot reveal which rule
  * produced its shape.
  */
+/**
+ * The environment as a READINESS fact, and the boot decision that follows from it.
+ *
+ * Task-level reasoning: a host that identifies itself and cannot name its environment is
+ * refusing to serve production traffic out of the development database with the production
+ * checks switched off, so the boot is refused. A developer's machine (or a CI boot, or a
+ * platform this code has never heard of) gets the same fact as a warning and keeps working.
+ */
+const report = (nodeEnv) => ({
+  mail: true,
+  mailProvider: 'brevo',
+  firebase: true,
+  emailVerification: true,
+  ai: true,
+  aiProvider: 'openrouter',
+  ...(nodeEnv === 'absent' ? {} : { nodeEnv }),
+});
+
+describe('the deployment readiness report names the environment fault', () => {
+  it('says NOT SET when nothing set it, and does not call it invalid', () => {
+    const notes = deploymentNotes(report('missing'));
+
+    assert.equal(notes.length, 1, notes.join('; '));
+    assert.match(notes[0], /NODE_ENV is NOT SET/);
+    assert.match(notes[0], /development database is selected/);
+    assert.match(notes[0], /Set NODE_ENV=production/);
+    // The distinction the request asked for: a missing variable is not a typo.
+    assert.doesNotMatch(notes[0], /does not name one of/);
+  });
+
+  it('says UNRECOGNISED when a value is wrong, and never repeats it', () => {
+    const notes = deploymentNotes(report('unrecognised'));
+
+    assert.equal(notes.length, 1, notes.join('; '));
+    assert.match(notes[0], /does not name one of development, test or production/);
+    assert.doesNotMatch(notes[0], /is NOT SET/);
+  });
+
+  it('stays silent for a recognised environment (control)', () => {
+    for (const kind of ['production', 'development', 'test']) {
+      assert.deepEqual(deploymentNotes(report(kind)), [], kind);
+    }
+    // And for a report that never asked the question, which is every hand-built report in the
+    // suites that predate this field.
+    assert.deepEqual(deploymentNotes(report('absent')), []);
+  });
+});
+
+describe('a host that identifies itself refuses a NODE_ENV it cannot name', () => {
+  const signalTarget = { on: () => {}, listeners: () => [] };
+
+  async function boot({ deployedHost, events = [] }) {
+    const exits = [];
+    const result = await startServer({
+      nodeEnv: 'development',
+      appInstance: express(),
+      port: 0,
+      validator: () => [],
+      connectFn: async () => {
+        events.push({ channel: 'event', message: 'db-connect' });
+        return true;
+      },
+      // The report reflects the environment under test, because the environment diagnostic is
+      // the report's job off a deployment — the boot deliberately adds no second line.
+      readiness: () => report(classifyNodeEnv()),
+      exit: (code) => exits.push(code),
+      logger: {
+        log: (message) => events.push({ channel: 'log', message }),
+        error: (message) => events.push({ channel: 'error', message }),
+      },
+      signalTarget,
+      deployedHost,
+      modelCheck: null,
+      capabilities: null,
+      healthWatch: null,
+    });
+    return { result, exits, events };
+  }
+
+  const close = (server) =>
+    server ? new Promise((resolve) => (typeof server.close === 'function' ? server.close(resolve) : resolve())) : null;
+
+  /** Boot, then close whatever started BEFORE asserting: a failed assertion must not leave a
+   *  listening server behind, which is how this suite hung once and held the run open. */
+  async function bootAndClose(options) {
+    const booted = await boot(options);
+    await close(booted.result?.server);
+    return { ...booted, messages: booted.events.map((e) => e.message).join('\n') };
+  }
+
+  it('refuses to boot on a missing NODE_ENV, before connecting to anything', async () => {
+    await withNodeEnv(undefined, async () => {
+      const { result, exits, events, messages } = await bootAndClose({ deployedHost: true });
+
+      assert.deepEqual(exits, [1]);
+      assert.equal(result, null);
+      // One explanation (the readiness note) and one decision (the refusal).
+      assert.match(messages, /NODE_ENV is NOT SET/);
+      assert.match(messages, /refusing to start/);
+      assert.match(messages, /Nothing was connected or served/);
+      // The refusal happens before the database is touched, which is what makes it safe.
+      assert.equal(events.some((e) => /listening on/.test(e.message)), false);
+      assert.equal(events.some((e) => e.message === 'db-connect'), false, 'nothing was connected');
+    });
+  });
+
+  it('refuses to boot on a mistyped NODE_ENV too', async () => {
+    await withNodeEnv('prod', async () => {
+      const { result, exits, messages } = await bootAndClose({ deployedHost: true });
+
+      assert.deepEqual(exits, [1]);
+      assert.equal(result, null);
+      assert.match(messages, /refusing to start/);
+      assert.match(messages, /does not name one of/);
+    });
+  });
+
+  it('only WARNS off a deployment — a developer machine must keep working (control)', async () => {
+    await withNodeEnv('prod', async () => {
+      const { result, exits, messages } = await bootAndClose({ deployedHost: false });
+
+      assert.deepEqual(exits, []);
+      assert.ok(result, 'the server must still start off a deployment');
+      // The readiness note is the diagnostic off a deployment; there is no second line saying it.
+      assert.match(messages, /NODE_ENV does not name one of/);
+      assert.equal(/refusing to start/.test(messages), false);
+    });
+  });
+
+  it('boots normally when the environment is recognised (control)', async () => {
+    await withNodeEnv('production', async () => {
+      const { result, exits, messages } = await bootAndClose({ deployedHost: true });
+
+      assert.deepEqual(exits, []);
+      assert.ok(result);
+      assert.equal(/NODE_ENV/.test(messages), false, 'nothing to say about a correct environment');
+    });
+  });
+});
+
 describe('the fail-closed rule is the one wired in', () => {
   const handlerSource = readFileSync(new URL('../src/middlewares/errorHandler.ts', import.meta.url), 'utf8');
   const startupSource = readFileSync(new URL('../src/config/startup.ts', import.meta.url), 'utf8');
@@ -184,10 +372,11 @@ describe('the fail-closed rule is the one wired in', () => {
     assert.match(handlerSource, /isDebugNodeEnv\(\)/);
   });
 
-  it('the server announces an environment that selects the development posture', () => {
+  it('the server refuses a NODE_ENV it cannot name on a self-identifying host', () => {
     assert.match(startupSource, /nodeEnvWarning\(process\.env\.NODE_ENV\)/);
-    // Test runs leave NODE_ENV unset by design, so the line must be silent there or it means nothing.
-    assert.match(startupSource, /!process\.env\.TEST_MODE/);
+    assert.match(startupSource, /envWarning && deployedHost/);
+    // And the report is what speaks off a deployment, rather than a second line repeating it.
+    assert.equal(/warning: \$\{envWarning\}/.test(startupSource), false);
   });
 
   it('the helper is the single definition, not a copy of the rule (control)', () => {

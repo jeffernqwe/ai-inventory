@@ -63,6 +63,10 @@ import { registerProvider, deregisterProvider } from '../src/services/mail/provi
  * unrelated variable (testEnv's own, for instance) is disturbed.
  */
 const MANAGED_ENV = [
+  // 2026-10-22: the report now carries what NODE_ENV says, so a fixture that claims to be a
+  // "full deployment" has to state its environment — and one that claims to be bare must not
+  // inherit the value this machine happens to have.
+  'NODE_ENV',
   'MAIL_PROVIDER',
   'MAIL_FROM',
   'BREVO_API_KEY',
@@ -119,6 +123,7 @@ after(() => deregisterProvider(SEAM_PROVIDER));
 
 /** The environment of a fully-configured deployment, as a patch. */
 const FULL = {
+  NODE_ENV: 'production',
   MAIL_PROVIDER: SEAM_PROVIDER,
   MAIL_FROM: 'no-reply@example.com',
   FIREBASE_SERVICE_ACCOUNT_JSON: SERVICE_ACCOUNT,
@@ -185,11 +190,14 @@ describe('DEP-1 the boot line', () => {
     });
   });
 
-  it('reports every integration off on a bare environment', () => {
+  it('reports every integration off on a bare environment, and names the missing NODE_ENV', () => {
     withEnv({}, () => {
       const live = integrationReport();
-      assert.deepEqual(live, report(), 'a bare deployment is the all-off report');
-      assert.deepEqual(deploymentNotes(live), [], 'and it is not a degraded deployment');
+      // The environment is reported too now, and a bare host has not stated one.
+      assert.deepEqual(live, report({ nodeEnv: 'missing' }), 'a bare deployment is the all-off report');
+      const notes = deploymentNotes(live);
+      assert.equal(notes.length, 1, 'exactly the environment note, and no integration note');
+      assert.match(notes[0], /NODE_ENV is NOT SET/);
     });
   });
 

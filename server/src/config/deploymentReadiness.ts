@@ -48,6 +48,8 @@
  * deliberate rather than an oversight.
  */
 
+import { classifyNodeEnv } from './env.ts';
+import type { NodeEnvKind } from './env.ts';
 import { isEmailVerificationConfigured, EMAIL_VERIFICATION_CODE_PEPPER_ENV } from './emailVerification.ts';
 import { isFirebaseConfigured } from './firebase.ts';
 import { isMailConfigured, mailProviderName } from '../services/mail/index.ts';
@@ -66,6 +68,14 @@ export interface IntegrationReport {
   ai: boolean;
   /** The configured provider name, or `''` when the assistant is off. */
   aiProvider: string;
+  /**
+   * What `NODE_ENV` says, including `missing` and `unrecognised`.
+   *
+   * Optional so every hand-built report in the existing suites keeps compiling: an absent
+   * field means "not asked", and `deploymentNotes` says nothing about it rather than
+   * inventing a state.
+   */
+  nodeEnv?: NodeEnvKind;
 }
 
 /** What a caller may be told about the running build. */
@@ -110,6 +120,9 @@ export function integrationReport(): IntegrationReport {
     emailVerification: isEmailVerificationConfigured(),
     ai: Boolean(process.env.AI_PROVIDER && process.env.AI_PROVIDER.trim()),
     aiProvider: (process.env.AI_PROVIDER || '').trim(),
+    // Read through the one classifier, so this line can never disagree with the rule that
+    // decides whether stacks are published or whether the boot refuses.
+    nodeEnv: classifyNodeEnv(),
   };
 }
 
@@ -153,6 +166,32 @@ export function deploymentNotes(report: IntegrationReport): string[] {
         'registration (POST /api/auth/email-verification/request answers 503 ' +
         'EMAIL_VERIFICATION_NOT_CONFIGURED) and POST /api/auth/forgot-password answers 503 ' +
         'MAIL_NOT_CONFIGURED. Set MAIL_PROVIDER=brevo, MAIL_FROM and BREVO_API_KEY on this host.',
+    );
+  }
+
+  // The environment itself, and the reason it is a note rather than a boot failure here.
+  //
+  // An unrecognised or absent NODE_ENV is the quietest configuration fault this server can
+  // have: nothing errors, and the process simply behaves as development — skipping the
+  // production checks, selecting the DEVELOPMENT database and withholding stacks. A host that
+  // identifies itself refuses to boot instead (see `startServer`), because there the state is
+  // unambiguous. Everywhere else this line is the signal, and it names which of the two
+  // mistakes was made, since a variable nobody set is fixed in a different place from one
+  // somebody mistyped.
+  //
+  // The value is never echoed: a typo is an arbitrary string and this report goes into logs.
+  const environmentConsequence =
+    'this host runs the DEVELOPMENT posture: production configuration checks are skipped, the ' +
+    'development database is selected, and error stack traces are withheld';
+
+  if (report.nodeEnv === 'missing') {
+    notes.push(
+      `NODE_ENV is NOT SET, so ${environmentConsequence}. Set NODE_ENV=production on the deployed service.`
+    );
+  } else if (report.nodeEnv === 'unrecognised') {
+    notes.push(
+      'NODE_ENV does not name one of development, test or production, so ' +
+        `${environmentConsequence}. Set NODE_ENV=production on the deployed service.`
     );
   }
 

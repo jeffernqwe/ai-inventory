@@ -17,7 +17,7 @@
  */
 
 import app from '../app.ts';
-import env, { nodeEnvWarning } from './env.ts';
+import env, { isDeployedHost, nodeEnvWarning } from './env.ts';
 import { connectDatabase, disconnectDatabase } from './db.ts';
 import { deploymentLine, deploymentNotes, integrationReport } from './deploymentReadiness.ts';
 import type { IntegrationReport } from './deploymentReadiness.ts';
@@ -60,6 +60,13 @@ type StartServerOptions = {
   signalTarget?: SignalTarget;
   shutdownTimeoutMs?: number;
   probe?: (port: number) => Promise<PortProbeResult>;
+  /**
+   * Does this host identify itself as a deployment? Defaults to `isDeployedHost()`.
+   *
+   * Injectable so a suite can pin the two branches of the NODE_ENV gate without pretending to run
+   * on Render: `true` refuses to boot on a missing or unrecognised NODE_ENV, `false` warns.
+   */
+  deployedHost?: boolean;
   /**
    * AI-28 — the boot-time question "is the configured AI model still one the provider lists?"
    *
@@ -117,6 +124,7 @@ export async function startServer({
   logger = console,
   signalTarget = process,
   shutdownTimeoutMs = env.shutdownTimeoutMs,
+  deployedHost = isDeployedHost(),
   probe,
   modelCheck,
   capabilities,
@@ -130,14 +138,25 @@ export async function startServer({
 
   // A NODE_ENV that is missing or misspelled silently selects the development posture: production
   // config checks are skipped, the development database is chosen, and error stack traces are
-  // withheld (see `isDebugNodeEnv`). Said out loud once, before anything else is attempted, because
-  // the failure it prevents lives on a host — and never fatal, since refusing to boot over a
-  // variable would take a working deployment down on its next restart.
+  // withheld (see `isDebugNodeEnv`).
   //
-  // Silent under TEST_MODE: the suite leaves NODE_ENV unset by design (see `databaseNameInputs`),
-  // so the line would fire on every test boot and mean nothing.
+  // THE DIAGNOSTIC IS THE READINESS NOTE, AND THE DECISION IS HERE. Off a deployment the report
+  // below already says which of the two faults it is (`deploymentNotes`: "NODE_ENV is NOT SET"
+  // versus "NODE_ENV does not name one of…"), so this gate deliberately adds no second line saying
+  // the same thing — a boot that reports one problem twice is how operators learn to skim.
+  //
+  // ON A HOST THAT IDENTIFIES ITSELF IT IS FATAL, and that is the half this gate exists for. The
+  // state is unambiguous there — the process is deployed, and its environment says it is a
+  // developer's machine — so booting would mean serving production traffic from the development
+  // database with the production checks switched off. Refusing is the safer answer, and it is the
+  // same posture the production validator already takes for a missing secret.
+  //
+  // Everywhere else it stays a warning: a developer running without `.env`, or a CI boot, is
+  // exactly the case the lenient path exists for, and refusing there would break local work
+  // without protecting anything. Unknown hosting platforms land in that branch too — the marker is
+  // Render's, this project's host — so a platform this code has never heard of gets the loud report
+  // rather than an unrequested fatal boot.
   const envWarning = nodeEnvWarning(process.env.NODE_ENV);
-  if (envWarning && !process.env.TEST_MODE) logger.error(`[config] warning: ${envWarning}`);
 
   // H7 — production fail-fast on invalid configuration.
   if (nodeEnv === 'production') {
@@ -162,6 +181,20 @@ export async function startServer({
   logger.log(deploymentLine(report));
   for (const note of deploymentNotes(report)) {
     logger.error(`[config] warning: ${note}`);
+  }
+
+  // The environment gate, placed after the report that explains it and before anything is
+  // connected or served — see the comment at `envWarning` above for why it is fatal only on a host
+  // that identifies itself.
+  if (envWarning && deployedHost) {
+    // The reason is the warning line above; this is the decision, not a second explanation of it.
+    logger.error(
+      '[config] refusing to start: this host identifies itself as a deployment, so an environment ' +
+        'it cannot name is a configuration error rather than a development convenience. Nothing was ' +
+        'connected or served.'
+    );
+    exitFn(1);
+    return null;
   }
 
   // H8 — connect before accepting traffic. Production treats a failed connect

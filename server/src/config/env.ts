@@ -173,6 +173,43 @@ export function databaseNameInputs(): DatabaseNameInputs {
 export const KNOWN_NODE_ENVS: readonly string[] = ['development', 'test', 'production'];
 
 /**
+ * What `NODE_ENV` actually says, including the two ways it can say nothing.
+ *
+ * `missing` and `unrecognised` are deliberately separate answers rather than one "invalid":
+ * a variable nobody set on a host is a deployment omission, while a value somebody typed
+ * (`prod`, `Production`, `staging`) is a mistake with a visible cause, and an operator fixes
+ * them by looking in different places. The value itself is never echoed into a report — the
+ * classification is the diagnostic, and a mistyped variable could be any string at all.
+ */
+export type NodeEnvKind = 'production' | 'development' | 'test' | 'missing' | 'unrecognised';
+
+/** The classification above, as a pure function of the raw value. */
+export function classifyNodeEnv(raw: string | undefined = process.env.NODE_ENV): NodeEnvKind {
+  const value = typeof raw === 'string' ? raw.trim() : '';
+  if (!value) return 'missing';
+  if (value === 'production' || value === 'development' || value === 'test') return value;
+  return 'unrecognised';
+}
+
+/**
+ * Is this process running on a host that states its own identity — i.e. is it a DEPLOYMENT?
+ *
+ * Used only to decide whether a wrong `NODE_ENV` is a warning or a refusal (see
+ * `startServer`). Render is this project's host and injects both markers; anything else that
+ * does not set them is treated as a developer's machine, which is the safe direction: an
+ * unknown platform gets the loud warning, never a boot the operator did not ask to be fatal.
+ *
+ * The markers are not secrets — `RENDER_GIT_COMMIT` is already the source of the build
+ * identity `buildInfo()` publishes — and no value is read beyond "is it present".
+ */
+export function isDeployedHost(values: Record<string, string | undefined> = process.env): boolean {
+  return ['RENDER', 'RENDER_GIT_COMMIT'].some((name) => {
+    const raw = values?.[name];
+    return typeof raw === 'string' && raw.trim() !== '';
+  });
+}
+
+/**
  * May this process include DEBUG DETAIL (an error stack trace) in a response?
  *
  * ★ FAIL-CLOSED, AND THAT IS THE WHOLE POINT. The previous rule was `NODE_ENV !== 'production'`,
@@ -189,7 +226,8 @@ export const KNOWN_NODE_ENVS: readonly string[] = ['development', 'test', 'produ
  * so the reason is stated instead of guessed at.
  */
 export function isDebugNodeEnv(raw: string | undefined = process.env.NODE_ENV): boolean {
-  return raw === 'development' || raw === 'test';
+  const kind = classifyNodeEnv(raw);
+  return kind === 'development' || kind === 'test';
 }
 
 /**
@@ -200,13 +238,17 @@ export function isDebugNodeEnv(raw: string | undefined = process.env.NODE_ENV): 
  * because of the rule above. An operator who sees this line has a one-variable fix.
  */
 export function nodeEnvWarning(raw: string | undefined = process.env.NODE_ENV): string | null {
-  const value = typeof raw === 'string' ? raw.trim() : '';
+  const kind = classifyNodeEnv(raw);
   const consequence =
     'this process is treated as DEVELOPMENT: production configuration checks are skipped, the development database is selected, and error stack traces are withheld from responses';
 
-  if (!value) return `NODE_ENV is not set, so ${consequence}. Set NODE_ENV=production on a deployed host.`;
-  if (!KNOWN_NODE_ENVS.includes(value)) {
-    return `NODE_ENV="${value}" is not one of ${KNOWN_NODE_ENVS.join(', ')}, so ${consequence}. Set NODE_ENV=production on a deployed host.`;
+  if (kind === 'missing') {
+    return `NODE_ENV is not set, so ${consequence}. Set NODE_ENV=production on a deployed host.`;
+  }
+  if (kind === 'unrecognised') {
+    // The value is NOT echoed: it is an operator's typo, and a report is not the place to
+    // repeat an arbitrary string back at whoever reads it.
+    return `NODE_ENV does not name one of ${KNOWN_NODE_ENVS.join(', ')}, so ${consequence}. Set NODE_ENV=production on a deployed host.`;
   }
   return null;
 }

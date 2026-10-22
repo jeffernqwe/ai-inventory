@@ -2361,6 +2361,29 @@ it is a disclosure nobody chose.
 
 ---
 
+## 51. A HOST THAT NAMES ITSELF REFUSES A `NODE_ENV` IT CANNOT NAME (2026-10-22)
+
+**The deployment half of §50, recorded separately because it changes what the server will start
+with, not what a response contains.** One classifier and one host predicate in `config/env.ts`, one
+report field and one note in `config/deploymentReadiness.ts`, one decision in `config/startup.ts`.
+No route, permission, role, session, schema, index, dependency, mobile or new environment variable.
+Full engineering record: roadmap, *"A host that names itself refuses a NODE_ENV it cannot name"*.
+
+| Field | Value |
+| --- | --- |
+| **The residual §50 left open** | §50 made an unknown `NODE_ENV` harmless to **read**. The process still **booted**: on a deployment that meant `validateProductionConfig` was skipped, and `resolveDatabaseName` selected **`inventoryai_dev_db`** — real traffic into a developer's database, with the only visible symptom being the stacks §50 had just withheld. A warning line nobody reads is not a control |
+| **What counts as deployed** | `isDeployedHost()` — `RENDER` or `RENDER_GIT_COMMIT` present and non-empty. Only presence is read, and neither is a secret: `RENDER_GIT_COMMIT` already feeds the build identity `/api/health` publishes. A platform this code has never heard of is deliberately **not** fatal — it gets the note and boots |
+| **The refusal** | On such a host a **missing** or **unrecognised** value logs one decision line, `exit 1` and returns before `connectFn` — so nothing is connected or served. It sits **after** the readiness report, which is the explanation, and conformance is one variable: `NODE_ENV=production` |
+| **Why the two faults are named apart** | `classifyNodeEnv()` answers `missing` and `unrecognised` separately, and `deploymentNotes()` says *"NODE_ENV is NOT SET"* or *"does not name one of development, test or production"*. An operator fixes a variable nobody set in a different place from one somebody mistyped. The **value is never echoed** — a typo is an arbitrary string and the report goes to logs |
+| **What a developer machine keeps** | No `.env`, a CI boot or an unknown host: the same note, and the server starts. Refusing there would break local work without protecting anything, which is why the marker — not the environment itself — decides |
+| **No second voice** | The old `nodeEnvWarning` boot line and its `TEST_MODE` suppression were removed with the change: the readiness note is the diagnostic and the gate is the decision. `server/.env.example` and the README state the rule |
+| **Verified** | **22 cases** in `phase-sec-debug-detail.test.mjs` (from 12) — classifier truth table, both note sentences, the host predicate, and four real `startServer` boots (refused on missing, refused on a typo, booted off a deployment, booted silently on `production`), the refusal asserted to precede any connect or listen. **Control trips:** an unconditional gate fails **2** cases; the file was restored byte-identically |
+| **Measured live** | Three real boots: `RENDER=1 … NODE_ENV=` → note, refusal, **exit 1**, nothing served; `NODE_ENV=prod` without a marker → note **and** `GET /api/health/live` **200**; `NODE_ENV=development` → no environment line at all |
+| **The production question, answered before shipping** | The live host `https://ai-inventory-l1mi.onrender.com` publishes `commit: a0969f9…` and answers `POST /api/auth/login {}` with `400 VALIDATION_ERROR` and **no `stack`**. At that deployed commit stacks were appended unless `NODE_ENV === 'production'` **exactly**, so the service runs as `production` and this gate is **inert** there — the next deploy cannot be refused by it |
+| **Still open** | The marker list is Render's, so a second host would need `isDeployedHost` extended; `env.nodeEnv` still defaults to `development` for a laptop; and no deployed host was made to refuse on purpose (that proof is the measurement above) |
+
+---
+
 > **MAINTENANCE.** This is a living navigation document. On any authentication/security change:
 > reconcile against evidence, update only evidence-supported statuses, record newly completed and
 > remaining work, preserve unresolved decisions and deferred items, update external-verification

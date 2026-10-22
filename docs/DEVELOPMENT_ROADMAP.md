@@ -18534,6 +18534,28 @@ the OS autofill suggestion itself (the declaration is asserted in tests; the chi
 
 Mobile **82 suites / 1010 tests / 0 failures**; `tsc` and `eslint` clean.
 
+## Production (2026-10-22)
+
+Commit `6e47ad2` was pushed to `main`, Render rebuilt, and `GET /api/health` then reported
+`environment: production`, `db: connected`, `commit: 6e47ad2`. The deployed surface was checked against
+the live host, not against the local one:
+
+| Call | Answer |
+| --- | --- |
+| `POST /api/auth/password-reset/verify` `{}` | 400 `VALIDATION_ERROR` naming `email` and `code` (the route exists and validates) |
+| `POST …/verify` unknown address + `123456` | 400 `INVALID_PASSWORD_RESET_CODE` in 265 ms — the generic refusal, not a lookup oracle |
+| `POST …/confirm` with the **old** `{ email, code, newPassword }` shape | 400 `VALIDATION_ERROR`, `resetToken is required` — the two-in-one path is gone, not merely deprecated |
+| `POST …/confirm` junk authorization | 400 `INVALID_PASSWORD_RESET_AUTHORIZATION` |
+| `POST …/code` unknown address | **202 in 182 ms**, the one sentence |
+| `GET /auth/reset` | 400 with *This reset link is not usable* |
+| `POST /api/auth/login` wrong password | 401 `INVALID_CREDENTIALS`, **no `stack` field** |
+
+**Not done in production:** a completed reset for a real account. That needs the owner's mailbox, and
+creating a throwaway user in the production database to receive a code is not something this change
+should do to prove itself. The production half that matters has been measured — the routes answer,
+refuse and revoke on the real host (§27EI's device run proves the credential write and the revocation
+against the same code) — and the mailbox half remains the owner's confirmation to give.
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

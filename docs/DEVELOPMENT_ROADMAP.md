@@ -17809,6 +17809,9 @@ names must still be alive (so sign-out-everywhere still kills it).
 - **Mobile** — `npx jest`: **80 suites / 979 tests / 0 failures**, `tsc` clean; the new copy case is in
   `phaseAUTH03-client-renewal.test.ts` (15 cases in that suite).
 
+- **CI** — workflow `ci` run **`39734333329`**, dispatched on `chore/expo-sdk-58` at head
+  **`dc8f7c8`**: `mobile`, `server`, `secret-guard` and `attribution-guard` all **succeeded**.
+
 Artifacts: `docs/evidence/device-runs/2026-10-22T05-53-11-769Z-smoke` (the failure: 17/17 by the
 journey's own count, 401 on every data route) and `.../2026-10-22T06-06-32-285Z-smoke` (the recovery,
 same phone, no sign-in).

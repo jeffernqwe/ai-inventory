@@ -18345,6 +18345,33 @@ three kept failures around it — `2026-10-22T10-23-26-286Z-smoke` (the renewal 
 `.../10-38-19-863Z-smoke` and `.../10-39-55-775Z-smoke` (the product-row matcher, twice, before it was
 fixed).
 
+## Deployed (2026-10-22)
+
+Committed as **`1a1f323`** and checked before it was promoted: the full local suite at that exact tree
+in **full mode against the real database** — **1965 tests / 1965 pass / 0 fail / 0 skipped** — plus
+mobile `tsc`, `jest` (80/987), `check-build-env`, ESLint, and the server's `typecheck`, `lint`,
+`check:extensions` and `check:specifiers`. CI was then run on the branch and passed **before** `main`
+moved: workflow `ci` run **`39767128077`** on `fix/auth03-renewal-pacing`, all four jobs (`mobile`,
+`server`, `secret-guard`, `attribution-guard`) **success**. `main` was fast-forwarded to the same SHA
+and pushed, and its own run **`39768045062`** is **success** as well.
+
+The deployment was then measured from outside, read-only, at the new build:
+
+| Probe | Answer |
+| --- | --- |
+| `GET /api/health` | **200** `{"status":"ok","db":"connected","environment":"production","commit":"1a1f32342252d0…"}` — the deployed commit, its posture, and **0** `5xx` among 75 responses since boot |
+| `GET /api/health/ready` / `/live` | **200** / **200** |
+| `POST /api/auth/renew` (no token) | **401** `AUTH_REQUIRED` — the AUTH-03 route is mounted on the deployed build and refuses an unauthenticated caller |
+
+**What this deployment does NOT do, and the limit is structural:** the fix is **mobile** code. No
+`preview` or `production`-profile app build exists (the phone runs a `development` build served by
+Metro), so **no installed app carries it yet**, and "the production renewal flow was verified end to
+end" would be a claim about software nobody is running — it is therefore **not** claimed. The client
+behaviour is device-measured against the same client code and a real server, and the production API
+is verified to mount the route; an end-to-end production check needs a production-profile build from
+EAS, installed on a device, signed in against the production API — Phase 30B's remaining item, with
+iOS still blocked on a macOS host.
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

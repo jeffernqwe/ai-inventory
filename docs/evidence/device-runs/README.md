@@ -30,6 +30,11 @@ disposable dataset, which is why a write journey is allowed to run here).
 | `2026-10-22T06-41-07-892Z-smoke` | the first data pass — kept because its products pattern matched the **search box** | **19/19, but one assertion was chrome** |
 | `2026-10-22T07-29-33-692Z-smoke` | the final walk: **24 steps** — 7 screens, 2 data assertions, 5 "loaded without an error" | **24/24 pass** |
 | `2026-10-22T07-17-43-928Z-smoke` | only `/api/purchase-orders` refused (a proxy on `:4000`): the **heading passed**, the new check failed | **10/11, exit 1** |
+| `2026-10-22T10-23-26-286Z-smoke` | the AUTH-03 renewal **storm** (121 renewals / 122 dashboard loads in three minutes, one per request) — and the products pattern refusing a row that was on the screen | **7/8, exit 1** |
+| `2026-10-22T10-38-19-863Z-smoke` | after the renewal fix: the same product-row failure, on a screen whose screenshot held two rows | **7/8, exit 1** — a harness defect |
+| `2026-10-22T10-39-55-775Z-smoke` | the same, reproduced on a second run | **7/8, exit 1** |
+| `2026-10-22T10-42-16-406Z-smoke` | the matcher widened: **24/24**, and its log window is 22 requests / **1 renewal** / 3 dashboard loads / 0 `429` / 0 `401` | **24/24 pass** |
+| `2026-10-22T10-50-18-556Z-smoke` | the same walk after the stale-token recovery rule: **24/24**, no renewal and no `401` logged for it | **24/24 pass** |
 
 The label journey read `2000053300018` off the product screen, decoded the PDF the Share action
 wrote as **the same code, 95 modules, 30 bars, 4 pt module**, and that PDF was produced by the
@@ -85,6 +90,25 @@ state"*. The proxy was then removed and `07-29-33` is the clean **24/24** that f
 
 **An empty tenant blocks, it does not pass.** A screen showing `Nothing to show` yields **exit 2**
 ("nothing to prove"), so a disposable tenant with no stock is never recorded as data having loaded.
+
+**AUTH-03's renewal storm, and the harness's own wrong verdict the same morning (2026-10-22).** The four
+runs above were made with the local server on `JWT_EXPIRES_IN=90s` so renewal could be watched, and
+the log of `10-23-26` shows what the client was doing: a renewal per request, each one handing the
+screens a new token and each new token re-running a `[token]`-keyed load, until the server's
+120/15-minute limiter answered `429`. That is fixed in the client (`isProactiveRenewalDue`: schedule
+from the **token's** `exp`, never from the session cap renewal cannot move, paced to one per 60 s) —
+see roadmap *"AUTH-03's proactive renewal ran once per request"* — and `10-42-16` is the same phone,
+same 90-second server, same journey, with **one** renewal and **three** dashboard loads across the
+whole walk.
+
+**And the two runs between them are a harness bug, kept as evidence.** `10-38-19` and `10-39-55` both
+report `expected product rows, but nothing matches` while the screenshot of that screen shows two
+rows: `PRODUCT_ROW` was anchored to the START of the meta line, which is `SKU … · …` only when the
+product has a SKU. This tenant's products carry a category and no SKU, so the line reads
+`Hardware · Barcode 2000053337540` and the pattern saw nothing. The fix keeps the anchoring's reason
+(the search box reads "Search by name, SKU or barcode…") and accepts the separator form:
+`^(SKU \S|Barcode \d)|· Barcode \d`. A harness that reports a correct screen as a failure is the same
+class of defect as the one that once reported 17/17 on a phone with every request refused.
 
 **The kept failure is the useful one.** `16-45-04` reported *"contains no decodable EAN-13"* on a
 label that was completely correct: the harness read the PDF with `adb shell cat`, whose

@@ -1592,8 +1592,18 @@ only, and `middlewares/authenticate.ts` is unmodified.
 
 Login, exchange and renewal all report the client's **authentication horizon**: `tokenExpiresAt`
 (the exact `exp` of the token just issued) and `sessionExpiresAt` (the existing session's absolute
-cap). The client renews when `min(tokenExpiresAt, sessionExpiresAt)` — the earlier boundary wins —
-falls inside a 10-minute proactive window, and when the app returns to the foreground.
+cap). The horizon the app **displays** is `min(tokenExpiresAt, sessionExpiresAt)` — the earlier
+boundary wins — but that is not what schedules a renewal, because renewal never moves the cap. The
+client renews **proactively** only when the **token's own `exp`** is inside a 10-minute window and
+the token, not the cap, is the boundary about to be crossed; when the cap is the earlier of the two
+nothing is renewed, since the session ends there regardless. Renewals are also **paced**: at most
+one per 60 seconds, unless the current token is within 20 seconds of expiry (which is never paced
+away). The app also renews on a return to the foreground when the same rule says a renewal is due.
+Without the two qualifications the last ten minutes of every session — and any deployment whose
+`JWT_EXPIRES_IN` is shorter than the window — renewed on **every request**, and each renewal handed
+the screens a new token, so every screen whose load effect depends on the token reloaded: measured
+on the phone on 2026-10-22 at **121 renewals and 122 `/api/dashboard` requests in three minutes**,
+ending only when the server's own 120/15-minute renewal limiter refused the 121st.
 
 Renewal is **single-flight**, and staleness is handled by an **authentication epoch**: a response
 belonging to an epoch that has since ended (a sign-out, a fresh sign-in) is discarded rather than

@@ -276,8 +276,19 @@ export function isRecoverableAuthError(error: ApiError): boolean {
  * now (transient). Single-flight and the auth epoch live in `lib/auth.tsx`, which
  * registers this; the transport only decides WHEN to ask and how many times to
  * retry (exactly once).
+ *
+ * `supersededToken` is the token THE REFUSED REQUEST WAS SENT WITH. It matters
+ * because a screen can have several requests in flight: the first one refused
+ * renews, and the others were already carrying the old token when that happened.
+ * Without this argument each of them renewed again — measured on the phone on
+ * 2026-10-22: one dashboard load after an idle gap produced THREE renewals, two of
+ * them minted for requests whose token had already been replaced. The provider uses
+ * it to answer "your token is stale, use the current one" instead of renewing.
  */
-export type SessionRecoveryHandler = (error: ApiError) => Promise<string | null>;
+export type SessionRecoveryHandler = (
+  error: ApiError,
+  supersededToken?: string | null,
+) => Promise<string | null>;
 
 let sessionRecoveryHandler: SessionRecoveryHandler | null = null;
 
@@ -533,7 +544,7 @@ async function apiFetchAttempt<T = unknown>(
   ) {
     let refreshed: string | null = null;
     try {
-      refreshed = await sessionRecoveryHandler(error);
+      refreshed = await sessionRecoveryHandler(error, effectiveToken);
     } catch {
       refreshed = null;
     }

@@ -20,7 +20,7 @@ import type { ReactNode } from 'react';
 import { AppState } from 'react-native';
 
 import { ApiError } from '../lib/client';
-import { AuthProvider, isSessionError, useSession } from '../lib/auth';
+import { AuthProvider, isProactiveRenewalDue, isSessionError, useSession } from '../lib/auth';
 
 // ---------------------------------------------------------------------------
 // The mock seam (declared first; the factories reference these lazily)
@@ -44,7 +44,7 @@ jest.mock('../lib/config', () => ({
 const mockHandlers: {
   lost: ((err: unknown) => void) | null;
   renewal: ((token: string) => Promise<string | null>) | null;
-  recovery: ((err: unknown) => Promise<string | null>) | null;
+  recovery: ((err: unknown, supersededToken?: string | null) => Promise<string | null>) | null;
 } = { lost: null, renewal: null, recovery: null };
 
 jest.mock('../lib/client', () => ({
@@ -408,5 +408,158 @@ describe('AUTH-03 — the effective horizon is min(tokenExpiresAt, sessionExpire
     expect(horizon).not.toBeNull();
     // The cap wins even though the token lives an hour longer.
     expect(horizon).toBeLessThan(Date.now() + 3 * 60_000);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A renewal that cannot help is not repeated
+// ---------------------------------------------------------------------------
+//
+// MEASURED ON THE PHONE, 2026-10-22 (90-second access tokens, the local server the
+// device was pointed at): 121 renewals and 122 `/api/dashboard` requests in three
+// minutes — one renewal per request, each one handing the app a new token, and a
+// screen whose load effect depends on that token re-running forever. The server's
+// 120/15-minute renewal limiter ended the storm and the client then sat DEGRADED.
+//
+// Two causes, both fixed here:
+//   1. renewal was considered due inside the 10-minute window even when the SESSION
+//      CAP, not the token, was the boundary about to be crossed. Renewal cannot move
+//      the cap, so it bought nothing and was asked for anyway — for the last ten
+//      minutes of every session, not just under a short token lifetime.
+//   2. nothing paced it: a token minted a second ago was immediately "due" again.
+//      A token shorter than the window therefore renewed on EVERY request.
+
+describe('AUTH-03 — proactive renewal is not repeated when it cannot help', () => {
+  it('does NOT mint a second token immediately after a renewal (short token lifetime)', async () => {
+    const view = await mountSignedIn(nearExpiryToken());
+    mockRenew.mockResolvedValue({
+      token: makeJwt(Math.floor(Date.now() / 1000) + 90), // still inside the 10-min window
+      tokenExpiresAt: new Date(Date.now() + 90_000).toISOString(),
+      sessionExpiresAt: new Date(Date.now() + 14 * 86400_000).toISOString(),
+      user: USER,
+    });
+
+    await act(async () => {
+      await mockHandlers.renewal!(view.result.current.token!);
+    });
+    expect(mockRenew).toHaveBeenCalledTimes(1);
+
+    // The renewed token is still inside the window — but it was JUST minted, so a
+    // second request must not mint another one. This is the loop the device showed.
+    await act(async () => {
+      await mockHandlers.renewal!(view.result.current.token!);
+    });
+    expect(mockRenew).toHaveBeenCalledTimes(1);
+  });
+
+  it('does NOT renew when the SESSION CAP is what expires, not the token', async () => {
+    const view = await mountSignedIn(nearExpiryToken());
+    mockRenew.mockResolvedValue({
+      token: 'renewed-near-cap',
+      tokenExpiresAt: new Date(Date.now() + 3600_000).toISOString(),
+      sessionExpiresAt: new Date(Date.now() + 2 * 60_000).toISOString(),
+      user: USER,
+    });
+
+    await act(async () => {
+      await mockHandlers.renewal!(view.result.current.token!);
+    });
+    expect(mockRenew).toHaveBeenCalledTimes(1);
+
+    // The horizon is inside the window (the cap is two minutes away) but the cap is
+    // the earlier boundary: renewal never moves it, so asking again would only spend
+    // the rate-limit budget and hand the screens a token they do not need.
+    await act(async () => {
+      await mockHandlers.renewal!(view.result.current.token!);
+    });
+    expect(mockRenew).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('AUTH-03 — a refusal for a token that was already replaced', () => {
+  it('retries with the CURRENT token instead of minting another one', async () => {
+    const view = await mountSignedIn(nearExpiryToken());
+    expect(typeof mockHandlers.recovery).toBe('function');
+
+    // A first request is refused and renews, as it must.
+    mockRenew.mockResolvedValue({
+      token: 'renewed-token',
+      tokenExpiresAt: new Date(Date.now() + 3600_000).toISOString(),
+      sessionExpiresAt: new Date(Date.now() + 14 * 86400_000).toISOString(),
+      user: USER,
+    });
+    let first: string | null = null;
+    await act(async () => {
+      first = await mockHandlers.recovery!(new ApiError(401, 'SESSION_EXPIRED', 'expired'), view.result.current.token);
+    });
+    expect(mockRenew).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(view.result.current.token).toBe('renewed-token'));
+    expect(first).toBe('renewed-token');
+
+    // A sibling request that was ALREADY in flight is refused with the token the
+    // first one replaced. It must be handed the current token — measured on the
+    // phone as three renewals for one dashboard load after an idle gap.
+    let second: string | null = null;
+    await act(async () => {
+      second = await mockHandlers.recovery!(
+        new ApiError(401, 'SESSION_EXPIRED', 'expired'),
+        'the-token-it-was-sent-with',
+      );
+    });
+    expect(mockRenew).toHaveBeenCalledTimes(1);
+    expect(second).toBe('renewed-token');
+  });
+});
+
+describe('AUTH-03 — the proactive renewal rule', () => {
+  const NOW = 1_700_000_000_000;
+  const window = 10 * 60_000;
+
+  it('is due only inside the window', () => {
+    expect(
+      isProactiveRenewalDue({ now: NOW, tokenExpiresAt: NOW + window + 1, sessionExpiresAt: null, lastRenewedAt: null }),
+    ).toBe(false);
+    expect(
+      isProactiveRenewalDue({ now: NOW, tokenExpiresAt: NOW + window, sessionExpiresAt: null, lastRenewedAt: null }),
+    ).toBe(true);
+  });
+
+  it('is NOT due when the cap is the earlier boundary, even inside the window', () => {
+    expect(
+      isProactiveRenewalDue({
+        now: NOW,
+        tokenExpiresAt: NOW + 3600_000,
+        sessionExpiresAt: NOW + 60_000,
+        lastRenewedAt: null,
+      }),
+    ).toBe(false);
+  });
+
+  it('is NOT due again within the minimum interval while the token is not urgent', () => {
+    expect(
+      isProactiveRenewalDue({
+        now: NOW,
+        tokenExpiresAt: NOW + 8 * 60_000,
+        sessionExpiresAt: null,
+        lastRenewedAt: NOW - 5_000,
+      }),
+    ).toBe(false);
+  });
+
+  it('IS due right after a renewal when the token is about to expire', () => {
+    expect(
+      isProactiveRenewalDue({
+        now: NOW,
+        tokenExpiresAt: NOW + 5_000,
+        sessionExpiresAt: null,
+        lastRenewedAt: NOW - 5_000,
+      }),
+    ).toBe(true);
+  });
+
+  it('is not due when the token expiry is unknown', () => {
+    expect(
+      isProactiveRenewalDue({ now: NOW, tokenExpiresAt: null, sessionExpiresAt: null, lastRenewedAt: null }),
+    ).toBe(false);
   });
 });

@@ -89,6 +89,9 @@ describe('AUTH-03 — recovery and exactly-one retry', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(authHeaderOf(0)).toBe('Bearer old-token');
     expect(authHeaderOf(1)).toBe('Bearer new-token');
+    // The handler is told WHICH token was refused, so a request whose token has
+    // already been replaced can be retried without minting another one.
+    expect(recovery).toHaveBeenCalledWith(expect.any(ApiError), 'old-token');
   });
 
   it('does NOT recover twice: a second SESSION_EXPIRED on the retry is thrown', async () => {

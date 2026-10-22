@@ -1,0 +1,56 @@
+{
+  "journey": "smoke",
+  "startedAt": "2026-10-22T10:39:55.775Z",
+  "device": "CPH1969 · Android 11 (API 30) · PV4DDMIZZLTCIVSK",
+  "steps": [
+    {
+      "title": "open inventoryai://dashboard",
+      "status": "pass",
+      "detail": "inventoryai://dashboard",
+      "durationMs": 1006
+    },
+    {
+      "title": "expect \"Overview\"",
+      "status": "pass",
+      "detail": "seen after 3472ms",
+      "durationMs": 3472
+    },
+    {
+      "title": "open inventoryai://inventory",
+      "status": "pass",
+      "detail": "inventoryai://inventory",
+      "durationMs": 1013
+    },
+    {
+      "title": "expect \"Inventory\"",
+      "status": "pass",
+      "detail": "seen after 2376ms",
+      "durationMs": 2376
+    },
+    {
+      "title": "expect stock rows on screen",
+      "status": "pass",
+      "detail": "5 row(s), e.g. \", Cleancare Multi-Purpose Wipes 80 Series, Main Warehouse, 6 available · 6 on hand, Low\"",
+      "durationMs": 2309
+    },
+    {
+      "title": "open inventoryai://products",
+      "status": "pass",
+      "detail": "inventoryai://products",
+      "durationMs": 1018
+    },
+    {
+      "title": "expect \"Products\"",
+      "status": "pass",
+      "detail": "seen after 2439ms",
+      "durationMs": 2439
+    },
+    {
+      "title": "expect product rows on screen",
+      "status": "fail",
+      "detail": "expected product rows, but nothing matches, and the screen is in no state the harness knows; screen showed: Navigate up | Products | r, Scan a barcode | r | Scan a barcode |  | Search by name, SKU or barcode… | All | All | Active",
+      "durationMs": 17287
+    }
+  ],
+  "notes": "evidence: C:\\Users\\jeffe\\inventory-ai\\docs\\evidence\\device-runs\\2026-10-22T10-39-55-775Z-smoke"
+}

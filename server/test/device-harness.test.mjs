@@ -578,6 +578,29 @@ describe('a list screen must show data, not just its own heading', () => {
     assert.equal(judgeDataRows(placeholderOnly, { match: PRODUCT_ROW }).verdict, 'absent');
     assert.equal(rowsMatching(realRows, PRODUCT_ROW).length, 1);
   });
+
+  it('counts a product row whose meta starts with its category (must trip)', () => {
+    // 2026-10-22, on the phone: the products screen showed two rows and the harness reported
+    // `expected product rows, but nothing matches`, because the meta line is built from the parts
+    // a product HAS (`SKU · Category · Barcode`) and this tenant's products have a category and no
+    // SKU — so it reads `Hardware · Barcode 2000053337540`. Every one of these is a row the screen
+    // really prints; the placeholder is not.
+    const shapes = [
+      'SKU SEEDSKU-0 · Barcode 2000053337540',
+      'Hardware · Barcode 2000053337540',
+      'Barcode 2000053337540',
+      'SKU SEEDSKU-0',
+      'Hardware · SKU SEEDSKU-0 · Barcode 2000053337540',
+    ];
+    for (const label of shapes) {
+      assert.equal(PRODUCT_ROW.test(label), true, `should count as a row: ${label}`);
+    }
+
+    // Still not the search box, nor a meta line that lost its barcode digits.
+    assert.equal(PRODUCT_ROW.test('Search by name, SKU or barcode…'), false);
+    assert.equal(PRODUCT_ROW.test('Hardware · Barcode'), false);
+    assert.equal(PRODUCT_ROW.test('All categories'), false);
+  });
 });
 
 describe('the declared journeys are well formed', () => {

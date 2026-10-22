@@ -18226,6 +18226,125 @@ before it starts, not from the output afterwards.
   adding one would be a different judgement (a production reading is sometimes exactly what an
   operator wants).
 
+# AUTH-03's proactive renewal ran once per request — and asked to extend a session it could not move (2026-10-22)
+
+**A defect fix inside AUTH-03, not an application phase.** One exported rule and two constants in
+`mobile/lib/auth.tsx`, its call site, five new unit cases, two provider cases, and the one harness
+pattern that reported a correct screen as a failure. No route, permission, role, schema, index,
+dependency, environment variable, API shape or server change.
+
+## What was wrong, and how it was found
+
+The device runs in the entries above were made against a local server started with
+`JWT_EXPIRES_IN=90s`, so a renewal could be watched. What they showed was not one renewal per token
+expiry but **one renewal per request**: in three minutes, **121 `POST /api/auth/renew` calls and 122
+`GET /api/dashboard` calls**, both in lockstep, ending only when the server's own 120/15-minute
+renewal limiter answered the 121st with `429 SESSION_RENEW_RATE_LIMITED` and the client went
+`degraded` with its whole budget spent.
+
+Two independent causes, and the second is the one that is not just a test-configuration artifact:
+
+1. **The renewal trigger used the wrong boundary.** The trigger asked whether
+   `min(tokenExpiresAt, sessionExpiresAt)` was inside the 10-minute window. That minimum is the right
+   thing to *display* ("your session ends at the cap") and the wrong thing to *renew on*: AUTH-03's
+   own rule is that renewal never moves `expiresAt`, so when the cap is the earlier boundary the
+   renewal buys nothing. For the last ten minutes of **every** session in **production**, the app
+   asked for a new token on every single request.
+2. **Nothing paced it.** A token minted a second earlier was immediately "due" again, because
+   `Date.now()` had moved — so with a token lifetime shorter than the window (90 s here) every
+   request minted a new token.
+
+Each successful renewal calls `setToken`, and every screen's load effect depends on that token
+(`dashboard.tsx` `[token, signOut, canSeePos]` → `[load]`), so each new token re-ran the load — which
+issued a request, which renewed, which re-ran the load. That is the loop. It is self-sustaining
+without a single tap.
+
+## The fix
+
+`isProactiveRenewalDue({ now, tokenExpiresAt, sessionExpiresAt, lastRenewedAt })` — a pure, exported
+function, so the two subtleties are testable instead of buried in a callback:
+
+- the **token's** `exp` must be inside the 10-minute window (`null` unknown ⇒ no proactive renewal;
+  recovery on a real `SESSION_EXPIRED` still works, so the app stays correct);
+- **not** when `sessionExpiresAt <= tokenExpiresAt` — the cap is the hard boundary and renewal
+  cannot move it;
+- **not** within `RENEWAL_MIN_INTERVAL_MS` (60 s) of the last successful renewal, unless the token is
+  inside `RENEWAL_URGENT_MS` (20 s) of expiry, which is never paced away.
+
+`lastRenewedAtRef` is stamped inside `performRenewal` — not in `renewIfDue` — so a **recovery**
+(a request refused with `SESSION_EXPIRED`) counts as a renewal too, and the next proactive trigger
+sees the token it minted as fresh. `clearSession` resets it, so a new sign-in is not paced by the
+previous session's stamp. The 429/`Retry-After` backoff is untouched and still wins over everything.
+
+**And a refusal for a token that has already been replaced no longer mints another one.** A screen
+makes several requests in parallel, so after a renewal the rest of that load is still carrying the
+old token: each refusal used to call recovery, and recovery renewed — measured on the phone as
+**three renewals for ONE dashboard load** after an idle gap. `SessionRecoveryHandler` now receives
+the token the refused request was sent with, and the provider answers `tokenRef.current` when that
+token is no longer the current one, so the transport's existing single retry is the whole remedy.
+The classification is untouched: a refusal for the CURRENT token still renews, and a terminal code
+never reaches the hook.
+
+## Verified
+
+- **Unit (mobile)** — the `proactive renewal rule` cases: due only inside the window; **not** due
+  when the cap is the earlier boundary even though the horizon is well inside it; not due again
+  within the interval while the token has life left; **due** right after a renewal when the token is
+  about to expire (20 s); not due when the expiry is unknown.
+- **Provider (mobile)** — two cases that reproduce the device observation: a renewal answers with a
+  token that is still inside the window and a second trigger **does not call the server again**; a
+  renewal answers with the cap two minutes away and a token an hour away and a second trigger **does
+  not call the server again**. Both failed before the change.
+- **Transport (mobile)** — the recovery hook is asserted to receive the refused request's token
+  (`recovery` called with `(ApiError, 'old-token')`), which is what makes the stale-token rule possible.
+- **Provider (mobile)** — a sibling request refused with `the-token-it-was-sent-with` is handed the
+  CURRENT token and **`api.renew` is not called again**.
+- **Mobile** — `npx jest`: **80 suites / 987 tests / 0 failures**; `npx tsc --noEmit` clean.
+- **On the phone, with the same 90-second server** — the app was reloaded with the new bundle and
+  signed in at 10:34:25. Over the following eight minutes of use — including a full 24-step smoke
+  journey — there were **6 renewals and 9 dashboard loads** in total, against **121 and 122 in three
+  minutes** before; the smoke window alone was **22 requests, 1 renewal, 3 dashboard loads, zero 429s
+  and zero 401s**, and the session stayed signed in throughout (`Audit Log`, i.e. still inside the
+  app, at 10:43). Paced renewal is what a 90-second token should look like.
+
+## The harness found a second defect in itself, and it was a wrong verdict about the app
+
+With renewal fixed, the same smoke journey failed at `product rows` — `expected product rows, but
+nothing matches` — on a screen the screenshot showed holding two rows. `PRODUCT_ROW` was anchored to
+the **start** of the label (`^(SKU \S|Barcode \d)`), which was correct for the tenant measured when it
+was written (`SKU SEEDSKU-0 · Barcode 2000053337540`) and wrong for one whose products carry a
+category and no SKU: `products/index.tsx` builds the meta from the parts a product HAS, so the line
+reads `Hardware · Barcode 2000053337540` and starts with the category. The anchor existed for a real
+reason — the screen's own search box reads "Search by name, SKU or barcode…" — so the fix keeps the
+protection and adds the separator form: `^(SKU \S|Barcode \d)|· Barcode \d`. The placeholder still
+matches nothing, a `Barcode` part still has to carry digits, and five real shapes are asserted
+against it (`SKU` only, `Barcode` only, `Category · Barcode`, and the full line), plus three that
+must not match. `device-harness.test.mjs`: **58 cases / 0 failures**.
+
+The smoke journey then passed **24/24, exit 0** on the same phone, which is the first time this
+harness has run all 24 steps green on a tenant whose products carry categories — and again after the
+stale-token rule (run `10-50-18`, `24/24`, with no new renewal or `401` in the server log for it).
+
+## Still open, and said so
+
+- **A renewal still re-runs the focused screen's load once.** That is expected and left alone: a new
+  token is a new identity for `[token]`-keyed effects, so a screen reloads once per renewal (at most
+  once a minute, and once an hour in production). Removing it would mean changing how a dozen screens
+  hold their credential, which is a different change with its own risk; the loop — the reason this
+  entry exists — is gone.
+- **The reload was the observation, not a contrived one.** Any deployment that sets a short
+  `JWT_EXPIRES_IN` now behaves correctly instead of hammering itself; nothing here changes the
+  production default (1 h).
+- **Not re-observed:** a renewal in the last ten minutes of a real 14-day session. The cap case is
+  proven by the unit and provider cases; manufacturing a live session whose cap is minutes away
+  would mean writing a session row, which no test on a real database here does deliberately.
+- **iOS** remains unverified, as everywhere else on this host.
+
+Artifacts: `docs/evidence/device-runs/2026-10-22T10-42-16-406Z-smoke` (24/24, paced renewal) and the
+three kept failures around it — `2026-10-22T10-23-26-286Z-smoke` (the renewal storm),
+`.../10-38-19-863Z-smoke` and `.../10-39-55-775Z-smoke` (the product-row matcher, twice, before it was
+fixed).
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

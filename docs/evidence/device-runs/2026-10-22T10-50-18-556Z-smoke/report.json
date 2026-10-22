@@ -1,0 +1,152 @@
+{
+  "journey": "smoke",
+  "startedAt": "2026-10-22T10:50:18.556Z",
+  "device": "CPH1969 · Android 11 (API 30) · PV4DDMIZZLTCIVSK",
+  "steps": [
+    {
+      "title": "open inventoryai://dashboard",
+      "status": "pass",
+      "detail": "inventoryai://dashboard",
+      "durationMs": 1007
+    },
+    {
+      "title": "expect \"Overview\"",
+      "status": "pass",
+      "detail": "seen after 2715ms",
+      "durationMs": 2715
+    },
+    {
+      "title": "open inventoryai://inventory",
+      "status": "pass",
+      "detail": "inventoryai://inventory",
+      "durationMs": 1031
+    },
+    {
+      "title": "expect \"Inventory\"",
+      "status": "pass",
+      "detail": "seen after 3145ms",
+      "durationMs": 3145
+    },
+    {
+      "title": "expect stock rows on screen",
+      "status": "pass",
+      "detail": "5 row(s), e.g. \", Cleancare Multi-Purpose Wipes 80 Series, Main Warehouse, 6 available · 6 on hand, Low\"",
+      "durationMs": 2325
+    },
+    {
+      "title": "open inventoryai://products",
+      "status": "pass",
+      "detail": "inventoryai://products",
+      "durationMs": 1014
+    },
+    {
+      "title": "expect \"Products\"",
+      "status": "pass",
+      "detail": "seen after 2641ms",
+      "durationMs": 2641
+    },
+    {
+      "title": "expect product rows on screen",
+      "status": "pass",
+      "detail": "2 row(s), e.g. \", Cleancare Multi-Purpose Wipes 80 Series, Hardware · Barcode 2000053337540, Active\"",
+      "durationMs": 2319
+    },
+    {
+      "title": "open inventoryai://purchase-orders",
+      "status": "pass",
+      "detail": "inventoryai://purchase-orders",
+      "durationMs": 1014
+    },
+    {
+      "title": "expect \"Purchase Orders\"",
+      "status": "pass",
+      "detail": "seen after 2783ms",
+      "durationMs": 2783
+    },
+    {
+      "title": "expect Purchase Orders to load without an error",
+      "status": "pass",
+      "detail": "settled without an error state",
+      "durationMs": 2267
+    },
+    {
+      "title": "open inventoryai://suppliers",
+      "status": "pass",
+      "detail": "inventoryai://suppliers",
+      "durationMs": 1012
+    },
+    {
+      "title": "expect \"Suppliers\"",
+      "status": "pass",
+      "detail": "seen after 3079ms",
+      "durationMs": 3079
+    },
+    {
+      "title": "expect Suppliers to load without an error",
+      "status": "pass",
+      "detail": "settled without an error state",
+      "durationMs": 2282
+    },
+    {
+      "title": "open inventoryai://restock",
+      "status": "pass",
+      "detail": "inventoryai://restock",
+      "durationMs": 1013
+    },
+    {
+      "title": "expect \"Restock\"",
+      "status": "pass",
+      "detail": "seen after 3302ms",
+      "durationMs": 3302
+    },
+    {
+      "title": "expect Restock to load without an error",
+      "status": "pass",
+      "detail": "settled without an error state",
+      "durationMs": 2316
+    },
+    {
+      "title": "open inventoryai://ai",
+      "status": "pass",
+      "detail": "inventoryai://ai",
+      "durationMs": 1003
+    },
+    {
+      "title": "expect \"AI Assistant\"",
+      "status": "pass",
+      "detail": "seen after 2427ms",
+      "durationMs": 2427
+    },
+    {
+      "title": "expect AI Assistant to load without an error",
+      "status": "pass",
+      "detail": "settled without an error state",
+      "durationMs": 2242
+    },
+    {
+      "title": "open inventoryai://audit",
+      "status": "pass",
+      "detail": "inventoryai://audit",
+      "durationMs": 1020
+    },
+    {
+      "title": "expect \"Audit\"",
+      "status": "pass",
+      "detail": "seen after 3387ms",
+      "durationMs": 3387
+    },
+    {
+      "title": "expect Audit to load without an error",
+      "status": "pass",
+      "detail": "settled without an error state",
+      "durationMs": 2326
+    },
+    {
+      "title": "screenshot \"smoke-final\"",
+      "status": "pass",
+      "detail": "C:\\Users\\jeffe\\inventory-ai\\docs\\evidence\\device-runs\\2026-10-22T10-50-18-556Z-smoke\\smoke-final.png",
+      "durationMs": 715
+    }
+  ],
+  "notes": "evidence: C:\\Users\\jeffe\\inventory-ai\\docs\\evidence\\device-runs\\2026-10-22T10-50-18-556Z-smoke"
+}

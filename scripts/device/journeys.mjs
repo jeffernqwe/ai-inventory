@@ -23,12 +23,23 @@
 export const INVENTORY_ROW = /\d[\d,]* available \u00b7 \d[\d,]* on hand/;
 
 /**
- * A product row's meta line, as the products screen prints it (`SKU SEEDSKU-0 · Barcode
- * 2000053337540`). ANCHORED on purpose: the screen's own search box reads "Search by name, SKU or
- * barcode…", so an unanchored `SKU ` matched the placeholder and counted a row on an empty list —
- * measured on the first run that used it (`6 row(s)` including chrome). A row starts with its meta.
+ * A product row's meta line, as the products screen prints it.
+ *
+ * The screen builds the line from the parts a product has — `SKU x · Category · Barcode b`, only
+ * the present ones (`products/index.tsx` `productMeta`) — so a product with no SKU reads
+ * `Hardware · Barcode 2000053337540` and the meta begins with its CATEGORY, not with `SKU`.
+ *
+ * ANCHORED on purpose, but not anchored to the START of the label: the screen's own search box
+ * reads "Search by name, SKU or barcode…", so an unanchored `SKU ` matched the placeholder and
+ * counted a row on an empty list — measured on the first run that used it (`6 row(s)` including
+ * chrome). It is the separator (`· `) or the start of the label that starts a part, and the
+ * `Barcode` part carries digits the placeholder does not.
+ *
+ * 2026-10-22: the start-only version reported `expected product rows, but nothing matches` on a
+ * screen showing two rows, because the tenant's products have a category and no SKU — a wrong
+ * verdict about a correct app. Hence the third alternative.
  */
-export const PRODUCT_ROW = /^(SKU \S|Barcode \d)/;
+export const PRODUCT_ROW = /^(SKU \S|Barcode \d)|\u00b7 Barcode \d/;
 
 /**
  * The read-only walk: every main screen opens and names itself, and the two list screens that must

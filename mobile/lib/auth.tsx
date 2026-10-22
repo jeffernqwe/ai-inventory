@@ -671,11 +671,74 @@ export function isSessionError(err: unknown): boolean {
   return !code && (err.status === 401 || err.status === 403);
 }
 
-/** AUTH-03 — proactive renewal fires when the horizon is inside this window. */
+/** AUTH-03 — proactive renewal fires when the TOKEN is inside this window. */
 const PROACTIVE_RENEWAL_THRESHOLD_MS = 10 * 60 * 1000;
 
 /** AUTH-03 — fallback in-memory backoff when a failure stated no Retry-After. */
 const RENEWAL_COOLDOWN_MS = 60 * 1000;
+
+/**
+ * AUTH-03 — the SHORTEST gap between two successful proactive renewals.
+ *
+ * A token minted a moment ago is not due again the moment it is used, so the client
+ * will not ask for a new one more than once a minute. Without this, a token whose
+ * lifetime is shorter than the ten-minute window renewed on EVERY request: measured
+ * on the phone on 2026-10-22 with 90-second tokens — 121 renewals in three minutes,
+ * one per request, until the server's own 120/15-minute limiter stopped it and the
+ * app sat DEGRADED. The server's limiter is the backstop; this is the fix.
+ */
+const RENEWAL_MIN_INTERVAL_MS = 60 * 1000;
+
+/** AUTH-03 — inside this much remaining life, a renewal is never paced away. */
+const RENEWAL_URGENT_MS = 20 * 1000;
+
+/**
+ * AUTH-03 — is a PROACTIVE renewal worth asking for right now?
+ *
+ * Kept as a pure function because the rule is subtle in two ways that a `Date.now()`
+ * comparison buried in a callback hides:
+ *
+ * 1. **The SESSION CAP is not a reason to renew.** The horizon the app displays is
+ *    `min(tokenExpiresAt, sessionExpiresAt)`, which is right for telling the user how
+ *    long they have. It is WRONG as a renewal trigger: when the cap is the earlier
+ *    boundary, the session ends there whatever the token says, so a renewal buys
+ *    nothing and asking for one on every request for the last ten minutes of a
+ *    session is pure cost. (AUTH-03's own comment already says "renewal never moves
+ *    the cap" — the trigger simply did not honour it.)
+ * 2. **A fresh token is not due.** The window is ten minutes and a token lives an
+ *    hour, so normally this is automatic; it is not when the lifetime is short.
+ *
+ * `null` means unknown. An unknown token expiry simply disables proactive renewal —
+ * recovery on a real `SESSION_EXPIRED` still works, so the app remains correct.
+ */
+export function isProactiveRenewalDue(params: {
+  now: number;
+  tokenExpiresAt: number | null;
+  sessionExpiresAt: number | null;
+  lastRenewedAt: number | null;
+}): boolean {
+  const { now, tokenExpiresAt, sessionExpiresAt, lastRenewedAt } = params;
+  if (typeof tokenExpiresAt !== 'number' || !Number.isFinite(tokenExpiresAt)) return false;
+  // The cap is the hard boundary and renewal never moves it.
+  if (
+    typeof sessionExpiresAt === 'number' &&
+    Number.isFinite(sessionExpiresAt) &&
+    sessionExpiresAt <= tokenExpiresAt
+  ) {
+    return false;
+  }
+  const remaining = tokenExpiresAt - now;
+  if (remaining > PROACTIVE_RENEWAL_THRESHOLD_MS) return false;
+  if (
+    typeof lastRenewedAt === 'number' &&
+    Number.isFinite(lastRenewedAt) &&
+    now - lastRenewedAt < RENEWAL_MIN_INTERVAL_MS &&
+    remaining > RENEWAL_URGENT_MS
+  ) {
+    return false;
+  }
+  return true;
+}
 
 /**
  * AUTH-03 — the client's effective authentication horizon in ms, or `null`.
@@ -1091,6 +1154,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // client's horizon and to decide when proactive renewal is due.
   const tokenExpiresAtRef = useRef<number | null>(null);
   const sessionExpiresAtRef = useRef<number | null>(null);
+  // AUTH-03 — when the last proactive renewal SUCCEEDED, so a freshly minted token
+  // is not asked for again (see `isProactiveRenewalDue`).
+  const lastRenewedAtRef = useRef<number | null>(null);
   // AUTH-03 — the in-memory renewal backoff. A transient failure (or a 429 with a
   // Retry-After) suppresses further renewal attempts until the deadline, so a
   // Firebase/network outage cannot turn into a hammering loop.
@@ -1231,6 +1297,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     epochRef.current += 1;
     renewalPromiseRef.current = null;
     renewalCooldownUntilRef.current = 0;
+    lastRenewedAtRef.current = null;
     await applySession(null, null, { bumpEpoch: false });
   }, [applySession]);
 
@@ -1366,6 +1433,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           bumpEpoch: false,
         });
         renewalCooldownUntilRef.current = 0;
+        // Paced here rather than in `renewIfDue` so a RECOVERY (a refused request)
+        // counts too: it also mints a token, and the next proactive trigger must see
+        // that one as fresh.
+        lastRenewedAtRef.current = Date.now();
         return session.token as string;
       } catch (err) {
         if (isSessionError(err)) {
@@ -1406,9 +1477,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (requestToken: string): Promise<string | null> => {
       if (requestToken !== tokenRef.current) return null;
       if (Date.now() < renewalCooldownUntilRef.current) return null;
-      const horizon = minHorizonMs(tokenExpiresAtRef.current, sessionExpiresAtRef.current);
-      if (horizon === null) return null;
-      if (horizon - Date.now() > PROACTIVE_RENEWAL_THRESHOLD_MS) return null;
+      const due = isProactiveRenewalDue({
+        now: Date.now(),
+        tokenExpiresAt: tokenExpiresAtRef.current,
+        sessionExpiresAt: sessionExpiresAtRef.current,
+        lastRenewedAt: lastRenewedAtRef.current,
+      });
+      if (!due) return null;
       setAuthPhase('renewing');
       const renewed = await performRenewal();
       return renewed ?? tokenRef.current;
@@ -1420,7 +1495,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // (proactive renewal) and AFTER a recoverable refusal (recovery + one retry).
   useEffect(() => {
     setSessionRenewalHandler((tok) => renewIfDue(tok));
-    setSessionRecoveryHandler(async () => {
+    setSessionRecoveryHandler(async (error, supersededToken) => {
+      // A request refused with a token that has ALREADY been replaced needs no new
+      // token — the current one is the answer, and retrying with it is the retry.
+      // Without this, a screen with several requests in flight renews once per
+      // refused one (measured: three renewals for one dashboard load after an idle
+      // gap). `error` is unused here on purpose: the classification that got us
+      // here is the transport's, and a terminal error never reaches this hook.
+      void error;
+      const current = tokenRef.current;
+      if (supersededToken && current && supersededToken !== current) return current;
       setAuthPhase('renewing');
       return performRenewal();
     });

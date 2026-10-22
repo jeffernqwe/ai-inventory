@@ -17732,6 +17732,12 @@ smoke that followed the launcher recovery, and **three kept failures** (the tapp
 session, the dev launcher), because the record of the harness blaming the app is the reason each rule
 exists.
 
+**CI is green at the commit that added them.** Workflow `ci` run **`39728306119`**, dispatched on
+`chore/expo-sdk-58` at head **`b9612ad`**: `mobile`, `server` (full suite against a real Mongo
+container, boot smoke, lint, both module-graph checks), `secret-guard` and `attribution-guard` all
+**succeeded**. The commit that records this line in the roadmap is documentation only, so the run is
+named at the code commit rather than at the head that carries the note.
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

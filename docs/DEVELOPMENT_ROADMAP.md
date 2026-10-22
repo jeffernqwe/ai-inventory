@@ -17824,11 +17824,95 @@ same phone, no sign-in).
   classification (recoverable, never session loss) is untouched while the screen stops telling a
   member on a live 14-day session to sign in again. The suite asserts both halves: the message no
   longer matches `/expired/i`, and the code is still `SESSION_EXPIRED`.
-- **The smoke journey proves chrome, not data.** Its 17 assertions are screen headings; a run whose
-  every request is refused 401 still passes. The preflight (`Session expired` / login detection) is
-  what catches that state today, and it did not catch it during the 2026-10-22 reproduction — the
-  banner had not rendered when the preflight looked. A data assertion on one list screen is the fix;
-  it is recorded here rather than bolted on with the auth change.
+- ~~**The smoke journey proves chrome, not data.**~~ **Fixed in the next entry** (*"The smoke journey
+  asserted chrome; now it asserts data"*, below): `expectData` steps wait for a row only the server's
+  data can produce, the preflight waits for the list to settle instead of reading once, and the run
+  was made to fail on purpose with the API stopped (`exit 1`) before being made to pass again.
+
+# The smoke journey asserted chrome; now it asserts data (2026-10-22)
+
+**A harness fix, not an application phase** — it follows directly from the AUTH-03 repair above, which
+is what exposed it. Two pure judgements, one step type, one preflight wait and the tests that pin
+them. No route, permission, schema, index, dependency, environment variable, EAS or mobile change: the
+app is untouched, and nothing about the harness's exit-code convention moved.
+
+## What was wrong
+
+The smoke journey's assertions were screen **headings** — `Overview`, `Inventory`, `Products`. A
+heading is chrome: the app renders "Inventory" over 200 rows exactly as happily as it renders it over
+a list whose every request was refused `401`. That is not a theoretical gap. Run
+`2026-10-22T05-53-11-769Z-smoke` reported **17/17 pass** on a phone where every data route answered
+`401 SESSION_EXPIRED` and nothing had loaded. The green report did not make the defect; it made the
+defect *invisible*, which is the worse of the two.
+
+The preflight (`Session expired` / login detection) did catch that state in general, and was the
+reason the AUTH-03 defect was found at all — but in the reproduction it **looked too early**: it slept
+2.5 s once and read the inventory screen before the banner had rendered, so it let the run proceed.
+
+## The fix
+
+- **`expectData`** (`scripts/device/lib.mjs`, `journeys.mjs`, `run.mjs`) — a step that waits for a
+  label the client cannot invent and fails if the screen lands in a state that means it did not load:
+  - `judgeDataRows(nodes, { match, what, min })` returns **`rows`** (pass), **`error`** (fail),
+    **`empty`** (BLOCKED — this tenant has none, so data was never proven either way),
+    **`pending`**/`absent` (fail once the deadline passes).
+  - The order is the part that can go wrong, so it is explicit: a **`Session expired`** refusal
+    outranks rows, because the app keeps its last page in memory and stale rows would otherwise read
+    as data; rows come next; and loading is checked *before* empty so "still loading" is never
+    mistaken for "nothing to show".
+  - `describeListState` reads the app's own state copy (`Something went wrong` / `Try again`, the
+    list shells' `Nothing here yet` / `Nothing to show`, `Loading…`). A copy change fails the run
+    loudly rather than passing it.
+- **The smoke journey now carries two of them** — 19 steps instead of 17: the inventory screen's own
+  arithmetic line (`1,281 available · 1,294 on hand`) and a product row's meta (`SKU … · Barcode …`).
+- **The patterns are anchored, because the first attempt was wrong.** `PRODUCT_ROW` began as
+  `/(SKU |Barcode \d)/` and matched the screen's own search box — `Search by name, SKU or barcode…` —
+  so it counted a "row" on a list with no rows and reported chrome as evidence (run `06-41-07`,
+  kept). It is now `^(SKU \S|Barcode \d)`, and a unit case holds a placeholder-only screen to zero.
+- **The preflight waits for the list to settle** (`appRejectsSession`, up to 10 s) instead of sleeping
+  2.5 s and reading once. It ends as soon as the screen reports rows, an empty state or an error, so
+the common case is faster than the fixed wait it replaced.
+- **One definition of "the inventory list has data"** — `INVENTORY_ROW` is exported from the journey
+  table and used by the preflight, so the two places cannot drift apart.
+
+## Verified
+
+- **Unit** — `server/test/device-harness.test.mjs`: **55 cases, 0 failures** (44 → 55; 8 for the data
+  judgement, 3 for the journey table). Every verdict is paired with the state it must reject: error
+  fails, empty blocks, loading is not empty, chrome-only is `absent`, a session refusal **outranks
+  stale rows**, a non-RegExp pattern matches nothing, and the placeholder-only product screen counts
+  zero rows. `validateJourneys` refuses a malformed `expectData` five ways, and a journey table with
+  its data assertions deleted fails.
+- **On the phone, three runs, in this order** — OPPO CPH1969, Android 11 (API 30), SDK 58 development
+  build over the USB tunnels, against the local server, no sign-in between any of them:
+  1. `2026-10-22T06-46-06-372Z-smoke` — **19/19 pass, exit 0**. The detail lines are the evidence:
+     `6 row(s), e.g. "… Shop Front, 33 available · 33 on hand …"` and
+     `2 row(s), e.g. "SKU ROLESKU-202 · Household · Barcode 2000053300018"`.
+  2. `2026-10-22T06-42-53-368Z-smoke` — the **must-trip control**, with the API deliberately stopped
+     (`pid 20652`): **4/5, exit 1**, `expected stock rows, but the screen is showing its error state
+     ("Something went wrong")`. The step that could not previously fail is the one that failed, and
+     it named the state instead of the symptom. The server was then restarted, and the app — **still
+     signed in, no sign-in, no reload** — went straight back to data, which is also a small second
+     proof of the AUTH-03 fix above.
+  3. `2026-10-22T06-41-07-892Z-smoke` — kept as a defect record: 19/19 pass, but its products detail
+     reads `5 row(s), e.g. "Search by name, SKU or barcode…"`. The data assertion was still finding
+     chrome. The anchored pattern in run 1 is the fix, and the run is kept because a harness that
+     counts its own search box as a product is exactly what the unit case now refuses.
+- **Unchanged elsewhere** — `eslint` and `tsc --noEmit` clean in `server/`.
+
+Artifacts: `docs/evidence/device-runs/` — the three runs above; the README there names which is which.
+
+## Still open, and said so
+
+- **The products must-trip is by unit case, not on hardware.** An error state was proven on the phone
+  (inventory, with the API stopped); producing an *empty* product list on this tenant would mean
+  archiving its products, so the placeholder case is held by the suite instead.
+- **Two list screens carry the claim; the other five still assert only their heading.** Purchase
+  orders, suppliers, restock, the assistant and the audit trail can each be legitimately empty on a
+  fresh tenant, which would block rather than prove; the failure mode being hunted is app-wide, and
+  two screens catch it. Extending the pattern to the fetch-driven screens would be the next step up.
+- **The two write journeys (`stock`, `transfer`) still check numbers, not lists** — they were already
+  proving a server round trip through the app's own `from → to` line, so they never had this gap.
 
 # 28. Phase Gate System
 

@@ -15,18 +15,44 @@
  * person would read.
  */
 
-/** The read-only walk: every main screen opens and names itself. No writes, so it is safe to run
- *  against any tenant at any time. */
+/**
+ * A stock row's arithmetic line, as the inventory screen prints it (`1,281 available · 1,294 on
+ * hand`). Exported because the runner's preflight waits for THIS shape too — one definition, so
+ * "the list has data" cannot mean two different things in two places.
+ */
+export const INVENTORY_ROW = /\d[\d,]* available \u00b7 \d[\d,]* on hand/;
+
+/**
+ * A product row's meta line, as the products screen prints it (`SKU SEEDSKU-0 · Barcode
+ * 2000053337540`). ANCHORED on purpose: the screen's own search box reads "Search by name, SKU or
+ * barcode…", so an unanchored `SKU ` matched the placeholder and counted a row on an empty list —
+ * measured on the first run that used it (`6 row(s)` including chrome). A row starts with its meta.
+ */
+export const PRODUCT_ROW = /^(SKU \S|Barcode \d)/;
+
+/**
+ * The read-only walk: every main screen opens and names itself, and the two list screens that must
+ * hold data are checked for rows.
+ *
+ * WHY ROWS AND NOT ONLY HEADINGS. A heading is chrome: "Inventory" renders just as well over an
+ * empty or refused list. On 2026-10-22 a run whose every request was refused `401` reported 17/17,
+ * because all 17 assertions were headings. The `expectData` steps below are the half that can fail:
+ * each one waits for a label the client cannot invent — a stock row's `available · on hand`
+ * arithmetic, a product row's SKU or barcode — and fails if the screen lands in its error state
+ * first. An empty tenant blocks the step instead (`nothing to prove`), never passes it.
+ */
 const smoke = {
   id: 'smoke',
-  summary: 'Every main screen opens and renders its own heading (read-only).',
+  summary: 'Every main screen opens and names itself, and two list screens are checked for data (read-only).',
   steps: [
     { open: 'inventoryai://dashboard' },
     { expect: 'Overview' },
     { open: 'inventoryai://inventory' },
     { expect: 'Inventory' },
+    { expectData: { what: 'stock rows', match: INVENTORY_ROW } },
     { open: 'inventoryai://products' },
     { expect: 'Products' },
+    { expectData: { what: 'product rows', match: PRODUCT_ROW } },
     { open: 'inventoryai://purchase-orders' },
     { expect: 'Purchase Orders' },
     { open: 'inventoryai://suppliers' },

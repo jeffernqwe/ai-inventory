@@ -25,6 +25,9 @@ disposable dataset, which is why a write journey is allowed to run here).
 | `2026-10-22T05-09-51-488Z-smoke` | the **Expo dev launcher** was in front, not the app | **1/2, FAIL** |
 | `2026-10-22T05-53-11-769Z-smoke` | renewal refused the expired token; **every data request was 401** while the screens rendered | **17/17, but not a pass in fact** |
 | `2026-10-22T06-06-32-285Z-smoke` | the **same phone state** after the AUTH-03 fix: renewals 200, data served, **no sign-in** | **17/17 pass** |
+| `2026-10-22T06-46-06-372Z-smoke` | the smoke journey **asserting data** (19 steps): 6 stock rows, 2 product rows named off the screen | **19/19 pass** |
+| `2026-10-22T06-42-53-368Z-smoke` | the same journey with the **API deliberately stopped** — the must-trip control | **4/5, exit 1** |
+| `2026-10-22T06-41-07-892Z-smoke` | the first data pass — kept because its products pattern matched the **search box** | **19/19, but one assertion was chrome** |
 
 The label journey read `2000053300018` off the product screen, decoded the PDF the Share action
 wrote as **the same code, 95 modules, 30 bars, 4 pt module**, and that PDF was produced by the
@@ -39,13 +42,30 @@ steps still mean something on the tenth run. The two runs above were executed **
 reported the **same numbers**, which is that claim measured rather than assumed. They are write journeys, so they need
 `--product=<id> --source=<location> [--destination=<location>] --allow-writes`.
 
-**A smoke pass is not proof of a signed-in app.** `05-53-11` reports 17/17 while the server was refusing
-every data request with `401 SESSION_EXPIRED` — the journey asserts each screen's headings, and those
-render regardless. That run is kept because it is the evidence for the AUTH-03 fix recorded in the
-roadmap (*"AUTH-03's recovery path never ran"*): the phone held a live 14-day session, renewal was
-refused because the route sat behind `requireAuth`, and the next run (`06-06-32`, with the fixed
-server and **no sign-in in between**) renewed three times and served the dashboard. Improving the
-smoke journey to assert data, not only chrome, is recorded as open work.
+**A smoke pass is not proof of a signed-in app — the 2026-10-22 runs are how that changed.**
+`05-53-11` reports 17/17 while the server was refusing every data request with `401 SESSION_EXPIRED`,
+because the journey asserted each screen's **headings**, and a heading renders over an empty list as
+well as a full one. That run is kept as the evidence for the AUTH-03 fix (*"AUTH-03's recovery path
+never ran"*): the phone held a live 14-day session, renewal was refused because the route sat behind
+`requireAuth`, and the next run (`06-06-32`, with the fixed server and **no sign-in in between**)
+renewed three times and served the dashboard.
+
+**The journey now asserts data, and was made to fail on purpose to prove it.** Each `expectData` step
+waits for a label only the server's data can produce — a stock row's `33 available · 33 on hand`
+arithmetic, a product row's `SKU … · Barcode …` — and fails if the screen lands in its error state
+first. Three runs, in this order, with no sign-in between any of them:
+
+| run | what it shows | result |
+|---|---|---|
+| `06-46-06` | the assertion passing on real rows: `6 row(s), e.g. "… Shop Front, 33 available · 33 on hand …"`, `2 row(s), e.g. "SKU ROLESKU-202 · Household · Barcode 2000053300018"` | **19/19 pass** |
+| `06-42-53` | the same journey with the API stopped: `expected stock rows, but the screen is showing its error state ("Something went wrong")` | **exit 1** — the control |
+| `06-41-07` | the first attempt, whose products pattern matched `Search by name, SKU or barcode…` — the search box, not a row | **19/19, one assertion was chrome** — kept as a defect record |
+
+The last row is why the patterns are **anchored**: a data check that can match the screen's own search
+placeholder would restore the green report without restoring the evidence.
+
+**An empty tenant blocks, it does not pass.** A screen showing `Nothing to show` yields **exit 2**
+("nothing to prove"), so a disposable tenant with no stock is never recorded as data having loaded.
 
 **The kept failure is the useful one.** `16-45-04` reported *"contains no decodable EAN-13"* on a
 label that was completely correct: the harness read the PDF with `adb shell cat`, whose

@@ -34,22 +34,25 @@ import { join, resolve } from 'node:path';
 import * as device from './adb.mjs';
 import { DeviceUnavailable } from './adb.mjs';
 import {
+  describeListState,
   escapeInputText,
   exitCodeFor,
   fieldBelow,
   fillTemplate,
   findNodes,
   findTapTarget,
+  judgeDataRows,
   looksAtDevLauncher,
   looksLikePicker,
   looksSessionExpired,
   looksSignedOut,
   parseMovements,
+  rowsMatching,
   summariseRun,
   unfilledPlaceholders,
   validateJourneys,
 } from './lib.mjs';
-import { JOURNEYS, WRITE_JOURNEYS } from './journeys.mjs';
+import { INVENTORY_ROW, JOURNEYS, WRITE_JOURNEYS } from './journeys.mjs';
 
 // Imported, not re-implemented: the device journey and the CI check must read the same bars the
 // same way, or "it decodes on the phone" would mean something different from "it decodes in CI".
@@ -137,6 +140,7 @@ function titleOf(step) {
   if (verb === 'readCode') return 'read the barcode off the screen';
   if (verb === 'decodeLabel') return 'decode the printed PDF';
   if (verb === 'movement') return `check the movement arithmetic (${value?.deltas?.join(', ')})`;
+  if (verb === 'expectData') return `expect ${value?.what ?? 'rows'} on screen`;
   return verb;
 }
 
@@ -490,6 +494,50 @@ async function runStep(step, ctx) {
       };
     }
 
+    case 'expectData': {
+      // The assertion headings cannot make: wait for a label only the SERVER's data can produce.
+      // A screen whose requests were all refused still renders its heading, its search box and its
+      // chips — it just lands in the error state below them, which is what this fails on.
+      const what = String(value?.what ?? 'rows');
+      const deadline = Date.now() + Math.max(ctx.timeoutMs, 15_000);
+      let last = null;
+
+      for (;;) {
+        let judgement = null;
+        try {
+          const screen = await device.readScreen(adbArgs);
+          last = screen;
+          judgement = judgeDataRows(screen.nodes, value);
+        } catch {
+          // An unreadable screen is not evidence either way; keep trying until the deadline.
+        }
+
+        if (judgement?.verdict === 'rows') return { status: 'pass', detail: judgement.detail };
+        // A refusal is worth failing on at once — waiting cannot turn a `401` into rows, and the
+        // report names the state that was actually seen.
+        if (judgement?.verdict === 'error') {
+          return { status: 'fail', detail: `expected ${what}, but ${judgement.detail}` };
+        }
+        if (Date.now() >= deadline) {
+          if (!judgement) return { status: 'blocked', detail: `could not read the screen to check ${what}` };
+          // An empty tenant is a precondition, not a defect: nothing was proven either way.
+          if (judgement.verdict === 'empty') {
+            return {
+              status: 'blocked',
+              detail: `no ${what} to prove — ${judgement.detail}; this tenant has none, so data was never checked`,
+            };
+          }
+          return {
+            status: 'fail',
+            detail: `expected ${what}, but ${judgement.detail}; screen showed: ${
+              last ? visibleLabels(last) : 'nothing readable'
+            }`,
+          };
+        }
+        await sleep(700);
+      }
+    }
+
     default:
       return { status: 'fail', detail: `the runner has no implementation for "${verb}"` };
   }
@@ -606,13 +654,38 @@ async function runJourney(journey, options) {
  *
  * The dashboard can render from cached state while every list is failing, so the check looks at a
  * screen that actually asks the server and prints the answer.
+ *
+ * It WAITS FOR THE SCREEN TO SETTLE rather than sleeping a fixed 2.5s and reading once. Measured
+ * on 2026-10-22: the reproduction run's preflight read the inventory screen before its banner had
+ * rendered, saw neither banner nor data, and let a run where every request was refused `401`
+ * proceed — the check existed and looked too early. The loop ends as soon as the screen reports
+ * rows, an empty state or an error, so the common case is faster than the old fixed wait.
  */
 async function appRejectsSession(args) {
   try {
     device.openRoute('inventoryai://inventory', { adbPath: args.adbPath, serial: args.serial });
-    await sleep(2500);
-    const screen = await device.readScreen({ adbPath: args.adbPath, serial: args.serial });
-    return looksSessionExpired(screen.nodes);
+    const deadline = Date.now() + 10_000;
+
+    for (;;) {
+      await sleep(700);
+      let nodes;
+      try {
+        nodes = (await device.readScreen({ adbPath: args.adbPath, serial: args.serial })).nodes;
+      } catch {
+        nodes = null;
+      }
+
+      if (nodes) {
+        if (looksSessionExpired(nodes)) return true;
+        // Rows, an empty list or an ordinary error all mean the screen has finished answering:
+        // none of them is "the app still holds a session the server refuses".
+        if (rowsMatching(nodes, INVENTORY_ROW).length) return false;
+        const state = describeListState(nodes).state;
+        if (state === 'empty' || state === 'error') return false;
+      }
+
+      if (Date.now() >= deadline) return false;
+    }
   } catch {
     return false;
   }

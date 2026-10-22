@@ -30,6 +30,7 @@ export const STEP_VERBS = Object.freeze([
   'readCode', // remember the 13-digit EAN-13 shown on this screen
   'decodeLabel', // pull the PDF the print action just wrote and decode it
   'movement', // check the app's own "from → to" confirmation arithmetic
+  'expectData', // wait for rows that could only come from the server
 ]);
 
 /** Elements a node's visible label may come from. The app uses both. */
@@ -209,6 +210,90 @@ export function fieldBelow(nodes, label) {
       .filter((node) => node.bounds.y1 >= anchor.bounds.y2 - 4)
       .sort((a, b) => a.bounds.y1 - b.bounds.y1)[0] ?? null
   );
+}
+
+/**
+ * The app's own words for the states a list screen can be in other than "showing rows".
+ *
+ * WHY THIS EXISTS. Until 2026-10-22 the smoke journey asserted screen HEADINGS, and a heading is
+ * chrome: the app renders "Inventory" whether its list holds 200 rows or arrived empty because
+ * every request was refused 401. The run that reproduced the expired-token defect therefore
+ * reported 17/17 while nothing on the phone had loaded. These patterns are the missing half — the
+ * labels the app prints INSTEAD of rows — so a journey can tell "no data shown" from "data shown".
+ *
+ * They are matched against the app's fixed copy, not its data. `ErrorState` always offers a retry
+ * button and the list shells name their empty state, so this is a reading of the UI the app
+ * actually has, and a copy change that breaks it fails the run loudly rather than passing.
+ */
+const ERROR_COPY = [/^Something went wrong$/i, /^Unable to load/i, /^Could(n't| not) load/i, /^Try again$/i];
+const EMPTY_COPY = [/^Nothing (here yet|to show)\b/i];
+const LOADING_COPY = [/^Loading\b/i];
+
+/**
+ * What a list screen is showing, judged from the app's own state copy.
+ *
+ * `session` is separated from `error` on purpose: "Session expired" is not one more failure to
+ * report, it is the whole app being refused, and it outranks everything else on the screen —
+ * including rows, which can be left over from an earlier load and would otherwise read as data.
+ */
+export function describeListState(nodes) {
+  const labels = (nodes ?? []).map((node) => node.label);
+  const find = (patterns) => labels.find((label) => patterns.some((re) => re.test(label))) ?? null;
+
+  const session = labels.find((label) => /session expired/i.test(label)) ?? null;
+  if (session) return { state: 'error', session: true, evidence: session };
+
+  const failed = find(ERROR_COPY);
+  if (failed) return { state: 'error', session: false, evidence: failed };
+
+  const empty = find(EMPTY_COPY);
+  if (empty) return { state: 'empty', session: false, evidence: empty };
+
+  const loading = find(LOADING_COPY);
+  if (loading) return { state: 'loading', session: false, evidence: loading };
+
+  return { state: 'unknown', session: false, evidence: null };
+}
+
+/** The labels on screen that match `match`, which is how rows are counted. */
+export function rowsMatching(nodes, match) {
+  if (!(match instanceof RegExp)) return [];
+  return (nodes ?? []).map((node) => node.label).filter((label) => match.test(label));
+}
+
+/**
+ * The verdict on "is this screen showing data?", for one journey step.
+ *
+ * The order matters and is the part that can go wrong: a **session** refusal is returned as an
+ * error even when rows are present, because rows can be stale; rows are next, because they are the
+ * fact being asserted; and only then the other states, so "still loading" is never mistaken for
+ * "nothing to show".
+ *
+ * The four verdicts map onto the run's conventions in `run.mjs`: `rows` passes, `error` fails (the
+ * app was observed not to load), `empty` is BLOCKED (this tenant has no rows, so data was never
+ * proven either way), and `pending`/`absent` fail once the deadline passes.
+ */
+export function judgeDataRows(nodes, spec = {}) {
+  const rows = rowsMatching(nodes, spec?.match);
+  const min = Number.isInteger(spec?.min) && spec.min > 0 ? spec.min : 1;
+  const list = describeListState(nodes);
+
+  if (list.session) {
+    return { verdict: 'error', rows, detail: `the app says "${list.evidence}"` };
+  }
+  if (rows.length >= min) {
+    return { verdict: 'rows', rows, detail: `${rows.length} row(s), e.g. "${rows[0]}"` };
+  }
+  if (list.state === 'error') {
+    return { verdict: 'error', rows, detail: `the screen is showing its error state ("${list.evidence}")` };
+  }
+  if (list.state === 'loading') {
+    return { verdict: 'pending', rows, detail: `still loading ("${list.evidence}")` };
+  }
+  if (list.state === 'empty') {
+    return { verdict: 'empty', rows, detail: `the screen is showing its empty state ("${list.evidence}")` };
+  }
+  return { verdict: 'absent', rows, detail: 'nothing matches, and the screen is in no state the harness knows' };
 }
 
 /**
@@ -452,6 +537,22 @@ export function validateJourneys(journeys) {
       }
       if (verb === 'scroll' && value !== 'down' && value !== 'up') {
         problems.push(`${at}: scroll must be "down" or "up"`);
+      }
+
+      if (verb === 'expectData') {
+        // Tested with `instanceof`, not trusted: a string here would make `rowsMatching` count
+        // nothing, and the step would then wait for rows that can never be recognised.
+        const spec = value !== null && typeof value === 'object' ? value : null;
+        const valid =
+          spec !== null &&
+          spec.match instanceof RegExp &&
+          typeof spec.what === 'string' &&
+          spec.what.trim() !== '' &&
+          (spec.min === undefined || (Number.isInteger(spec.min) && spec.min > 0)) &&
+          Object.keys(spec).every((key) => key === 'match' || key === 'what' || key === 'min');
+        if (!valid) {
+          problems.push(`${at}: expectData needs { match: /regex/, what: 'rows' } (min optional)`);
+        }
       }
     });
   }

@@ -165,6 +165,15 @@ back, and each checks the app's own confirmation arithmetic (`33 → 38`, `33 �
 a hard-coded quantity — so running them on every build does not drift the tenant and the tenth run
 still means something. They are write journeys, hence `--allow-writes`.
 
+**A pass means data, not just screens.** The smoke walk's `expectData` steps wait for labels only the
+server's data can produce — a stock row's `33 available · 33 on hand`, a product row's `SKU … ·
+Barcode …` — and fail when the screen shows its error state instead. This was added on 2026-10-22
+after a run reported **17/17 on a phone where every request was refused `401`**: every assertion was
+a heading, and a heading renders over an empty list. If a run stops at `expect stock rows on screen`
+with *"the screen is showing its error state"*, the app could not reach the API — check
+`curl http://localhost:4000/api/health` and the `tcp:4000` tunnel first. An **empty** tenant blocks
+that step (`exit 2`, *"nothing to prove"*) rather than passing it.
+
 It drives the app by **route** (`inventoryai://dashboard`) and by the **label a person reads**, not by
 coordinates, so the same journey works on a different screen size. Each run writes `report.md`,
 `report.json` and screenshots into `docs/evidence/device-runs/<timestamp>-<journey>/`, and prints one

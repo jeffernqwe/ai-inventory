@@ -1,0 +1,38 @@
+{
+  "journey": "smoke",
+  "startedAt": "2026-10-22T06:42:53.368Z",
+  "device": "CPH1969 · Android 11 (API 30) · PV4DDMIZZLTCIVSK",
+  "steps": [
+    {
+      "title": "open inventoryai://dashboard",
+      "status": "pass",
+      "detail": "inventoryai://dashboard",
+      "durationMs": 1012
+    },
+    {
+      "title": "expect \"Overview\"",
+      "status": "pass",
+      "detail": "seen after 4318ms",
+      "durationMs": 4318
+    },
+    {
+      "title": "open inventoryai://inventory",
+      "status": "pass",
+      "detail": "inventoryai://inventory",
+      "durationMs": 1003
+    },
+    {
+      "title": "expect \"Inventory\"",
+      "status": "pass",
+      "detail": "seen after 5762ms",
+      "durationMs": 5762
+    },
+    {
+      "title": "expect stock rows on screen",
+      "status": "fail",
+      "detail": "expected stock rows, but the screen is showing its error state (\"Something went wrong\")",
+      "durationMs": 2241
+    }
+  ],
+  "notes": "evidence: C:\\Users\\jeffe\\inventory-ai\\docs\\evidence\\device-runs\\2026-10-22T06-42-53-368Z-smoke"
+}

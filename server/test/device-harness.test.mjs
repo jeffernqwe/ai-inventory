@@ -17,6 +17,7 @@ import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 
 import {
+  describeListState,
   escapeInputText,
   exitCodeFor,
   fieldBelow,
@@ -25,6 +26,7 @@ import {
   findTapTarget,
   isBlankDump,
   isUnstableDump,
+  judgeDataRows,
   looksAtDevLauncher,
   looksLikePicker,
   looksSessionExpired,
@@ -32,11 +34,12 @@ import {
   parseDump,
   parseMovements,
   quoteForDeviceShell,
+  rowsMatching,
   summariseRun,
   unfilledPlaceholders,
   validateJourneys,
 } from '../../scripts/device/lib.mjs';
-import { JOURNEYS } from '../../scripts/device/journeys.mjs';
+import { INVENTORY_ROW, JOURNEYS, PRODUCT_ROW } from '../../scripts/device/journeys.mjs';
 
 // A slice of a real `uiautomator dump` from the app (the shape matters: attributes are one long
 // line per node and a node's label may be `text` or `content-desc`).
@@ -446,6 +449,119 @@ describe('the run report cannot claim more than happened', () => {
   });
 });
 
+/**
+ * A screen that shows no data is not a screen that passed.
+ *
+ * The 2026-10-22 reproduction reported 17/17 on an app where every request was refused `401`: all
+ * 17 assertions were screen headings, and a heading renders above an empty list just as well as
+ * above a full one. These cases are the assertion that closes that hole — and each one is paired
+ * with the state it must REJECT, because a data check that cannot miss would restore the green
+ * report without restoring the evidence.
+ */
+const listDump = (...labels) =>
+  `<hierarchy rotation="0">${labels
+    .map(
+      (label, index) =>
+        `<node text="${label}" class="android.widget.TextView" clickable="false" bounds="[0,${index * 20}][10,${index * 20 + 10}]" />`,
+    )
+    .join('')}</hierarchy>`;
+
+describe('a list screen must show data, not just its own heading', () => {
+  const withRows = parseDump(
+    listDump(
+      'Inventory',
+      'Low stock',
+      'Out of stock',
+      'Widget',
+      'Shop Front · 3 available · 5 on hand',
+      'Gadget',
+      'Shop Front · 1,281 available · 1,294 on hand',
+    ),
+  ).nodes;
+
+  it('passes on rows the client cannot invent', () => {
+    const verdict = judgeDataRows(withRows, { what: 'stock rows', match: INVENTORY_ROW });
+
+    assert.equal(verdict.verdict, 'rows');
+    assert.equal(verdict.rows.length, 2);
+  });
+
+  it('counts rows against `min` rather than passing on any match', () => {
+    const two = judgeDataRows(withRows, { match: INVENTORY_ROW, min: 2 });
+    const three = judgeDataRows(withRows, { match: INVENTORY_ROW, min: 3 });
+
+    assert.equal(two.verdict, 'rows');
+    assert.equal(three.verdict, 'absent');
+  });
+
+  it('fails a screen showing its error state (the refused-session defect)', () => {
+    const refused = parseDump(
+      listDump('Inventory', 'Something went wrong', 'Session expired — please sign in again', 'Try again'),
+    ).nodes;
+    const verdict = judgeDataRows(refused, { match: INVENTORY_ROW });
+
+    assert.equal(verdict.verdict, 'error');
+    assert.match(verdict.detail, /Session expired/);
+  });
+
+  it('lets a session refusal outrank stale rows left from an earlier load (must trip)', () => {
+    // The app keeps its last page in memory, so an error can arrive with rows still on screen.
+    // Counting rows first would report data on a screen the server has already refused.
+    const stale = parseDump(
+      listDump('Inventory', 'Shop Front · 3 available · 5 on hand', 'Session expired — please sign in again'),
+    ).nodes;
+    const verdict = judgeDataRows(stale, { match: INVENTORY_ROW });
+
+    assert.equal(verdict.verdict, 'error');
+    assert.equal(verdict.rows.length, 1);
+  });
+
+  it('blocks an empty tenant instead of passing it, and never calls it data', () => {
+    const empty = parseDump(
+      listDump('Inventory', 'Nothing to show', 'No stock records yet — stock in a product at a location to create one.'),
+    ).nodes;
+
+    assert.equal(judgeDataRows(empty, { match: INVENTORY_ROW }).verdict, 'empty');
+    assert.equal(describeListState(empty).state, 'empty');
+  });
+
+  it('does not mistake a loading screen for an empty one', () => {
+    const loading = parseDump(listDump('Inventory', 'Loading inventory…')).nodes;
+
+    assert.equal(judgeDataRows(loading, { match: INVENTORY_ROW }).verdict, 'pending');
+  });
+
+  it('reports nothing matched when the screen is merely chrome (control)', () => {
+    // The exact screen the reproduction run judged "passed": heading, search, chips, no rows.
+    const chrome = parseDump(
+      listDump('Inventory', 'Scan', 'Purchase Orders', 'Search by product name, SKU or barcode…', 'Low stock'),
+    ).nodes;
+
+    assert.equal(judgeDataRows(chrome, { match: INVENTORY_ROW }).verdict, 'absent');
+    assert.deepEqual(rowsMatching(chrome, INVENTORY_ROW), []);
+  });
+
+  it('ignores a pattern that is not a regular expression (control)', () => {
+    assert.deepEqual(rowsMatching(withRows, 'available'), []);
+  });
+
+  it('does not count the search box as a product row (must trip)', () => {
+    // Measured on the first run that used the products pattern: `Search by name, SKU or barcode…`
+    // contains "SKU ", so an unanchored pattern found a row on a screen with no rows and reported
+    // chrome as evidence. The placeholder is exactly what a broken list still renders.
+    const placeholderOnly = parseDump(
+      listDump('Products', 'Search by name, SKU or barcode…', 'New product', 'Scan a barcode'),
+    ).nodes;
+    const realRows = parseDump(
+      listDump('Products', 'Search by name, SKU or barcode…', 'SKU SEEDSKU-0 · Barcode 2000053337540'),
+    ).nodes;
+
+    assert.deepEqual(rowsMatching(placeholderOnly, PRODUCT_ROW), []);
+    assert.equal(judgeDataRows(placeholderOnly, { match: PRODUCT_ROW }).verdict, 'absent');
+    assert.equal(rowsMatching(realRows, PRODUCT_ROW).length, 1);
+  });
+});
+
 describe('the declared journeys are well formed', () => {
   it('accepts its own table', () => {
     assert.deepEqual(validateJourneys(JOURNEYS), []);
@@ -473,6 +589,38 @@ describe('the declared journeys are well formed', () => {
     assert.ok(expects.length >= 5, 'the smoke journey must assert at least five screens');
     // Read-only means no writes: no typing, no create/receive verbs.
     assert.equal(smoke.steps.some((s) => s.type || s.tapFirst), false);
+  });
+
+  it('proves data on the smoke journey, so a refused app cannot pass it', () => {
+    // Deleting the data assertions must fail this test: 17 headings were not enough evidence on
+    // 2026-10-22, and a version of the journey without them reports a green run over no data.
+    const smoke = JOURNEYS.find((j) => j.id === 'smoke');
+    const data = smoke.steps.filter((s) => s.expectData);
+
+    assert.ok(data.length >= 2, 'the smoke journey must assert data on at least two list screens');
+    for (const step of data) {
+      assert.ok(step.expectData.match instanceof RegExp, 'an expectData step needs a RegExp match');
+      assert.equal(typeof step.expectData.what, 'string');
+    }
+    // One of them is the inventory screen's own arithmetic line, which is the shape the runner's
+    // preflight also waits for — a deliberate single definition.
+    assert.ok(data.some((step) => step.expectData.match === INVENTORY_ROW));
+    assert.ok(data.some((step) => step.expectData.match === PRODUCT_ROW));
+  });
+
+  it('rejects malformed expectData steps', () => {
+    const problems = validateJourneys([
+      { id: 'a', summary: 'x', steps: [{ expectData: {} }] },
+      { id: 'b', summary: 'x', steps: [{ expectData: { match: 'SKU', what: 'rows' } }] },
+      { id: 'c', summary: 'x', steps: [{ expectData: { match: /SKU/, what: '' } }] },
+      { id: 'd', summary: 'x', steps: [{ expectData: { match: /SKU/, what: 'rows', min: 0 } }] },
+      { id: 'e', summary: 'x', steps: [{ expectData: { match: /SKU/, what: 'rows', rowsel: 1 } }] },
+    ]);
+
+    for (const id of ['a', 'b', 'c', 'd', 'e']) {
+      assert.ok(problems.some((p) => p.startsWith(`${id}[0]`)), `${id} was accepted: ${problems.join('; ')}`);
+    }
+    assert.deepEqual(validateJourneys([{ id: 'ok', summary: 'x', steps: [{ expectData: { match: /SKU/, what: 'rows' } }] }]), []);
   });
 });
 

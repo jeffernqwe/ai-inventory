@@ -804,6 +804,15 @@ rather than **1** when a precondition is missing — a signed-out session, no de
 fresh PDF. Evidence from the run that produced it is in
 [docs/evidence/device-runs](docs/evidence/device-runs/README.md).
 
+**A passing run means data, not just screens (2026-10-22).** The smoke journey's `expectData` steps
+wait for a label only the server can supply — a stock row's `33 available · 33 on hand` line, a
+product row's `SKU … · Barcode …` meta — and fail if the screen shows its error state instead. That
+was added after a run reported **17/17 on a phone where every request was refused `401`**: a heading
+renders over an empty list exactly as well as over a full one. If a run stops at
+`expect stock rows on screen` with *"the screen is showing its error state"*, the app could not reach
+the API — check `curl http://localhost:4000/api/health` and the `tcp:4000` tunnel before blaming the
+app. An **empty** tenant blocks the step (`exit 2`) instead of passing it.
+
 The traps above are encoded in it, because each one cost a run: **`exec-out` for binaries** (`adb shell
 cat` rewrote a PDF's newlines and a good label was reported undecodable), **distrust inverted dump
 boxes** (a mid-scroll dump put "Create draft order" at y=1653, inside the quantity field), **close the

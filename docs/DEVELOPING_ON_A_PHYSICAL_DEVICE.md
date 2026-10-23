@@ -574,6 +574,13 @@ Two reading traps worth knowing:
   the app was signed in and sitting on the dashboard — the server log (`firebase/exchange 200`,
   `dashboard 304`) is what caught it. Delete `/sdcard/w.xml` *and* your local copy before every
   dump, and treat a 0-byte read as a failure rather than as a screen.
+- **Both six-digit screens make that failure the normal case.** They repaint once a second for the
+  code's countdown, and `uiautomator dump` then answers **`ERROR: could not get idle state`** instead
+  of a tree — so on exactly the screens a sign-in test needs to read, every dump is stale. Measured
+  2026-10-24: the dump insisted on the Create Account form while the phone showed *Verify your
+  email*. Read the **screenshot** for those two screens, tap the code row using the coordinates in
+  the frame you just took (the reset screen's row sits ~130 px higher than the verify screen's), and
+  use the server log for what actually happened.
 
 ### 7f. Failure → log line → cause → fix
 

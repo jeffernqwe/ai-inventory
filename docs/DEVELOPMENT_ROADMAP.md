@@ -19167,7 +19167,7 @@ was **not** driven — it needs a live code and the probe address has no inbox �
 suites; the verify-email screen's identical path was not reached on the device either. Evidence and
 the run's limits: `docs/evidence/device-runs/2026-10-23-auth-polish/README.md`. iOS unverified.
 
-**Device-measured 2026-10-24 — the success half, and what is still open.** The run above could only
+**Device-measured 2026-10-24 — the success half.** The run above could only
 type a *wrong* code, because nothing can read a probe address's inbox. This one had the app make the
 request (its own Forgot password screen, so the real route minted the code) and then read the mailed
 digits back out of the stored keyed digest with the server's own `hashResetCode` and pepper, so the
@@ -19178,15 +19178,32 @@ auth.probe.…@example.com* — a step reached this way twice in the run (frames
 *5m 6s*; the password step reported *28 characters —
 within the limit.* while it was typed and put *Confirm password is required* **under the empty
 confirmation** without submitting; and the credential that code authorized then signed in **on the
-phone** and rendered the tenant's dashboard. Two limits stay recorded rather than papered over: the
-password step's own button was **not** carried to *Password changed* on the device (the confirmation
-was applied through the route pair afterwards; the button itself was device-measured on 2026-10-22,
-§27EI, and is suite-backed), and the **verify-email** screen's identical auto-verify was still not
-reached — it needs an unverified identity carried through Create Account's verification screen, and
-remains suite-backed (`phase16-verify-email-screen.test.tsx`). Evidence, the cleanup re-count (0
-users, 0 businesses, 0 sessions, 0 audit rows, 0 challenges) and two harness notes (typed text goes
-to whatever has focus; the dev build lost Metro and needed a reload):
-`docs/evidence/device-runs/2026-10-24-auth-auto-verify/README.md`. iOS unverified.
+phone** and rendered the tenant's dashboard. Two limits stayed recorded rather than papered over:
+the password step's own button was **not** carried to *Password changed* in that pass (the
+confirmation was applied through the route pair afterwards), and the **verify-email** screen's
+identical auto-verify was still not reached. Evidence, the cleanup re-count (0 users, 0 businesses,
+0 sessions, 0 audit rows, 0 challenges) and two harness notes (typed text goes to whatever has
+focus; the dev build lost Metro and needed a reload):
+`docs/evidence/device-runs/2026-10-24-auth-auto-verify/README.md`.
+
+**Both of those were then closed on the device the same day, in one pass, from the app's own
+screens.** Create Account was filled and submitted on the phone, which created the Firebase
+identity and asked for the code (`POST /api/auth/email-verification/request` **200**); the six mailed
+digits typed into the boxes, **with no press of Verify**, produced `confirm` **200** →
+`firebase/register` **201** → `firebase/exchange` **200**, and the new tenant's dashboard — so the
+registration ordering gate and the auto-verify success path are both measured end to end. The same
+account was then signed out and reset from Forgot password: the app requested the code (**202**),
+the digits opened the password step with no press (`verify` **200**), both fields were filled (the
+rule reading *13 characters — within the limit.*), and **Set new password was pressed on the phone**
+→ `password-reset/confirm` **200** → *Password changed*. The **old** password was then refused by the
+app itself (*Invalid email or password*) and the **new** one signed in to the same tenant
+(`exchange` **200**) — no credential write was performed by hand in this run. Still not proven: a
+pre-reset session being revoked on the device (the account was signed out first; suite-backed and
+device-measured 2026-10-22, §27EI), mail arriving in a real inbox (the digits came from the stored
+digests), and a production build. Evidence, the request-by-request table and three harness traps
+(`uiautomator dump` failing silently onto the previous screen's file while a countdown repaints; typed
+text going to whatever holds focus; the two code rows sitting at different heights):
+`docs/evidence/device-runs/2026-10-24-auth-end-to-end/README.md`. iOS unverified.
 
 **Still open** (recommended, not started): a per-user session cap, a new-device sign-in email, and
 invitation-based onboarding as the prerequisite for retiring legacy password login.

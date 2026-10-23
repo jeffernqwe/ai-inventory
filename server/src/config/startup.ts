@@ -39,7 +39,12 @@ import { checkModelCatalogue } from '../services/ai/modelCheck.ts';
 import type { CatalogueResult } from '../services/ai/modelCheck.ts';
 import { refreshModelCapabilities, declaresToolSupport } from '../services/ai/modelCapabilities.ts';
 import { aiConfig } from '../services/ai/aiConfig.ts';
-import { healthWatchConfig, healthWatchEnabled, startAiHealthWatch } from '../services/ai/healthWatch.ts';
+import {
+  healthWatchConfig,
+  healthWatchEnabled,
+  refreshModelHealthGate,
+  startAiHealthWatch,
+} from '../services/ai/healthWatch.ts';
 import type { HealthWatchHandle } from '../services/ai/healthWatch.ts';
 import { boundPortOf, verifyBoundPort } from './portGuard.ts';
 import type { PortProbeResult } from './portGuard.ts';
@@ -109,6 +114,14 @@ type StartServerOptions = {
    */
   capabilities?: (() => Promise<unknown>) | null;
   /**
+   * AI-35 — the boot read that holds provider-reported-unavailable models out of selection.
+   *
+   * Same contract as `capabilities`: unawaited, non-fatal, free (endpoint GETs, no completion),
+   * and `null` means "do not read", which is the `NODE_ENV=test` default so a suite never contacts
+   * a provider. The watchdog repeats this reading on its schedule.
+   */
+  healthGate?: (() => Promise<unknown>) | null;
+  /**
    * AI-34 — the scheduled model-health watchdog.
    *
    * `undefined` decides from `healthWatchEnabled(nodeEnv)` (production on, development/test
@@ -153,6 +166,7 @@ export async function startServer({
   probe,
   modelCheck,
   capabilities,
+  healthGate,
   healthWatch,
 }: StartServerOptions = {}): Promise<{
   server: ShutdownServer;
@@ -365,10 +379,48 @@ export async function startServer({
     });
   }
 
+  // AI-35 — and the health reading that decides which models a turn may start on.
+  //
+  // A cold process used to try the configured model first even when the provider was publishing
+  // that model's endpoint as down: up to five refused requests (a tenth of a free tier's daily
+  // allowance) before AI-30's cooldown opened, all inside a member's turn. This read is free — a
+  // `GET`, no completion — so it runs at boot like the catalogue check, and the watchdog replaces
+  // it every cycle. It can never stop the server, and it never marks a model on a failed reading.
+  const resolvedHealthGate =
+    healthGate === undefined
+      ? nodeEnv === 'test'
+        ? null
+        : () => refreshModelHealthGate({ ttlMs: aiConfig().modelHealthTtlMs })
+      : healthGate;
+  if (resolvedHealthGate) {
+    void (async () => {
+      await resolvedHealthGate();
+    })().catch(() => {
+      // A reading that cannot run must never be the reason a server is down.
+    });
+  }
+
   // AI-34 — the scheduled model-health watchdog. Fired only after the process is up, and only
   // when a model is actually configured: a deployment without AI must not contact a provider on a
   // timer. It is unattended, so a failure to start is logged and the server keeps serving.
   const ai = aiConfig();
+
+  // AI-39 — the configuration is stated ONCE, in the boot log, in the words the turn loop will
+  // act on. Two silences made this necessary: a list longer than the five-model cap was truncated
+  // without a word (so a pasted candidate looked configured and was never tried), and the
+  // effective order existed only in `.env` and in a source file. Neither line is a refusal —
+  // configuration problems never stop a server — and neither contacts a provider.
+  if (ai.openrouterModel) {
+    logger.log(`[ai] chain order: ${[ai.openrouterModel, ...ai.fallbackModels].join(' -> ')}`);
+  }
+  if (ai.fallbackModelsIgnored.length > 0) {
+    logger.error(
+      `[config] warning: AI_FALLBACK_MODELS_OPENROUTER lists more than ${ai.fallbackModels.length}` +
+        ` model(s); only the first ${ai.fallbackModels.length} are used, so these are ignored: ` +
+        ai.fallbackModelsIgnored.join(', '),
+    );
+  }
+
   const wantsHealthWatch =
     healthWatch === undefined
       ? healthWatchEnabled(nodeEnv) && ai.provider === 'openrouter' && Boolean(ai.openrouterModel)

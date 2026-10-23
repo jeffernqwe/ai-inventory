@@ -27,6 +27,8 @@
  * made a spent output budget look like one too (AI-10).
  */
 
+import type { QuotaInfo } from './quota.ts';
+
 export const AI_NOT_CONFIGURED = 'AI_NOT_CONFIGURED';
 export const AI_UNAVAILABLE = 'AI_UNAVAILABLE';
 export const AI_QUOTA_EXCEEDED = 'AI_QUOTA_EXCEEDED';
@@ -162,20 +164,32 @@ export function isModelAvailabilityFailure(err: unknown): boolean {
  * a moment"*, which is false twice over: nothing upstream is unavailable, and
  * retrying in a moment cannot help while a daily allowance is spent.
  *
- * Raised from exactly one place — a 429 in providers/http.ts. Every other non-2xx
- * stays an AiProviderError on purpose: a 5xx really is an outage, and
- * reclassifying one as a limit would tell a member to wait for something that is
- * broken. The converse direction matters just as much: a rate limit is NOT
- * retried by the turn loop, because AI-2's rule is that a provider refusal is
- * never answered by paying for it twice while the cause is hidden.
+ * Raised in two places, both of which mean the same thing: a 429/402 in providers/http.ts, and
+ * AI-36's turn-level fail-fast when a refusal already reported ZERO remaining. Every other
+ * non-2xx stays an AiProviderError on purpose: a 5xx really is an outage, and reclassifying one
+ * as a limit would tell a member to wait for something that is broken. The converse direction
+ * matters just as much: a rate limit is NOT retried by the turn loop, because AI-2's rule is that
+ * a provider refusal is never answered by paying for it twice while the cause is hidden.
  */
 export class AiQuotaExceeded extends Error {
   declare code: string;
 
-  constructor(message = 'The AI assistant has reached its usage limit. Please try again later.') {
+  /**
+   * AI-36 — what the response said about the allowance, when the refusal carried headers.
+   *
+   * Absent for a 429 whose headers published nothing, and for a refusal this application
+   * synthesised. It exists so the turn loop can record the reading and, only when it says ZERO,
+   * stop spending requests to rediscover an exhausted account.
+   */
+  quota?: QuotaInfo;
+
+  constructor(message = 'The AI assistant has reached its usage limit. Please try again later.', quota?: QuotaInfo) {
     super(message);
     this.name = 'AiQuotaExceeded';
     this.code = AI_QUOTA_EXCEEDED;
+    if (quota && (typeof quota.remaining === 'number' || typeof quota.limit === 'number')) {
+      this.quota = quota;
+    }
   }
 }
 

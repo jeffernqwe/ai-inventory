@@ -45,6 +45,22 @@ interface SendErrorLike {
 const TIMEOUT_CODES = ['NETWORK_TIMEOUT', 'AI_TIMEOUT'];
 
 /**
+ * AI-40 — when may a failed STREAM be retried through the ordinary route?
+ *
+ * Only when the failure says something about the TRANSPORT, never when it says something about
+ * the turn. A quota refusal, a rate limit, an unconfigured server or an ended session are all
+ * real answers, and asking again would either spend a second request to be refused identically
+ * or hide the one thing the member needs to know. `status === 0` and the three "this server has
+ * no such route / does not stream" statuses are the safe set: the same turn over JSON is a
+ * different code path that may well work.
+ */
+export function streamFallbackAllowed(err: unknown): boolean {
+  const status = (err as { status?: number } | null | undefined)?.status;
+  if (status === 0) return true;
+  return status === 404 || status === 405 || status === 501;
+}
+
+/**
  * Maps a failed send onto a friendly, secret-free client message. The server
  * may answer 503 (AI not configured), 504 (turn deadline), 502 (provider down),
  * 429 `AI_RATE_LIMITED` (this member is sending too fast) or 429
@@ -405,6 +421,15 @@ export default function AiChat({ conversationId = null }: AiChatProps) {
   const [input, setInput] = useState('');
   const [sendError, setSendError] = useState<string | null>(null);
   /**
+   * AI-40 — the answer as it is being written.
+   *
+   * Held apart from `rows` on purpose: it is not a stored message, it has no id and no
+   * timestamp, and on completion it is REPLACED by the stored message (whose content may differ,
+   * because the server rewrites status constants and trims a cut-off unit). Mixing it into the
+   * list would make "this is durable" and "this is arriving" the same kind of row.
+   */
+  const [streamingText, setStreamingText] = useState('');
+  /**
    * AI-9 — a turn the member stopped. Kept apart from `sendError` on purpose: a stop
    * is not a failure, has no sentence to show, and must survive long enough to be read
    * (the turn it belongs to is gone the moment it is aborted, so the note IS the
@@ -482,6 +507,7 @@ export default function AiChat({ conversationId = null }: AiChatProps) {
     setInput('');
     setSendError(null);
     setStopped(false);
+    setStreamingText('');
     // AI-24 — the member's own message gets a time, so the question and the answer can be
     // read as two clock times a member can subtract by eye.
     //
@@ -503,13 +529,37 @@ export default function AiChat({ conversationId = null }: AiChatProps) {
     const controller = new AbortController();
     stopRef.current = controller;
     setSending(true);
+    // AI-40 — what this turn has already shown. It gates two decisions below: a stream that
+    // fails after text was delivered must NOT be retried (the member would read the answer
+    // twice), and a failure with nothing shown may be retried over the ordinary route.
+    let streamed = '';
+    const onDelta = (text: string): void => {
+      streamed += text;
+      setStreamingText(streamed);
+    };
     try {
-      const res = await aiApi.chat(
-        token as string,
-        { conversationId: convId, message },
-        { signal: controller.signal },
-      );
+      let res;
+      try {
+        res = await aiApi.chatStream(
+          token as string,
+          { conversationId: convId, message },
+          { signal: controller.signal, onDelta },
+        );
+      } catch (streamErr) {
+        // A stop or an ended session is final on both paths; so is any failure that arrived
+        // after text — see `streamFallbackAllowed` for the ones that are not.
+        if (isStoppedSend(streamErr) || isSessionError(streamErr) || streamed) throw streamErr;
+        if (!streamFallbackAllowed(streamErr)) throw streamErr;
+        res = await aiApi.chat(
+          token as string,
+          { conversationId: convId, message },
+          { signal: controller.signal },
+        );
+      }
       if (!convId) setConvId(res?.conversation?.id ?? null);
+      // The stored message is the authority: it may have been rewritten (status constants) or
+      // trimmed (a cut-off unit), so the live text is discarded rather than kept beside it.
+      setStreamingText('');
       const reply = res?.assistantMessage;
       if (!reply?.content) throw new Error('The assistant returned no answer.');
       // AI-8 — mapped through `toRow`, the same function a reloaded thread uses, so the
@@ -557,8 +607,14 @@ export default function AiChat({ conversationId = null }: AiChatProps) {
       // does not have to be retyped. Before this, every failed send left its bubble behind
       // and a retry stacked another — seen on the device as four identical questions after a
       // run of database 503s (2026-10-19).
-      setRows((prev) => prev.filter((row) => row.key !== pendingKey));
-      setInput(message);
+      //
+      // AI-40 — the exception is a stream that broke AFTER showing text: that text was read by
+      // the member, so the question stays on screen beside it. The turn is still not stored, and
+      // the sentence below says what went wrong.
+      if (!streamed) {
+        setRows((prev) => prev.filter((row) => row.key !== pendingKey));
+        setInput(message);
+      }
       setSendError(sendErrorMessage(err));
     } finally {
       stopRef.current = null;
@@ -580,6 +636,18 @@ export default function AiChat({ conversationId = null }: AiChatProps) {
     stopRef.current?.abort();
   }
 
+  /**
+   * AI-40 — the rows as the screen draws them: the stored thread, plus the answer arriving.
+   *
+   * A separate list rather than a row in state, so the streaming text can be replaced wholesale
+   * on completion and can never be mistaken for something the server stored. It is always the
+   * LAST row, which is also where the member is looking.
+   */
+  const displayRows = useMemo<ChatRow[]>(() => {
+    if (!streamingText) return rows;
+    return [...rows, { key: 'streaming-answer', role: 'assistant', content: streamingText }];
+  }, [rows, streamingText]);
+
   if (loading && rows.length === 0) {
     return <CenterLoader label="Loading conversation…" />;
   }
@@ -592,11 +660,15 @@ export default function AiChat({ conversationId = null }: AiChatProps) {
       <FlatList
         ref={listRef}
         style={styles.flex}
-        data={rows}
+        data={displayRows}
         keyExtractor={(item) => item.key}
         renderItem={({ item }) => <MessageBubble item={item} />}
         ListEmptyComponent={<Welcome onAsk={send} />}
-        ListFooterComponent={sending ? <ThinkingRow /> : stopped ? <StoppedRow /> : undefined}
+        ListFooterComponent={
+          // AI-40 — the thinking row is for the wait BEFORE any text; once words are arriving
+          // there is nothing left to indicate.
+          sending && !streamingText ? <ThinkingRow /> : stopped ? <StoppedRow /> : undefined
+        }
         contentContainerStyle={styles.listContent}
         onContentSizeChange={scrollToEnd}
         keyboardShouldPersistTaps="handled"

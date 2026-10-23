@@ -51,6 +51,10 @@
 import { MAX_FALLBACK_MODELS } from './aiConfig.ts';
 import { readModelHealth } from './modelCheck.ts';
 import type { EndpointHealth, ModelHealthResult } from './modelCheck.ts';
+import { applyHealthVerdicts, DEFAULT_HEALTH_MARK_TTL_MS } from './modelHealthGate.ts';
+import { activeModel, promotedModel, resetModelSelection } from './modelSelection.ts';
+import { isModelCooling } from './modelBreaker.ts';
+import { quotaSnapshot } from './quota.ts';
 import { isMailConfigured, sendOperationalAlertEmail } from '../mail/index.ts';
 
 export type ModelRole = 'primary' | 'fallback';
@@ -76,6 +80,15 @@ export const DEFAULT_THRESHOLDS: WatchThresholds = {
 
 /** How many consecutive unreadable checks before "the check cannot run" is alerted. */
 export const DEFAULT_UNKNOWN_ALERT_AFTER = 2;
+
+/**
+ * AI-37 — how many CONSECUTIVE healthy readings of the configured model end a promotion.
+ *
+ * Two, not one: a single sample can land between two failures, and returning on it would churn
+ * the active model exactly as eagerly as AI-31 refuses to. Two consecutive readings at the
+ * watchdog's cadence is a recovery an hour-long outage cannot fake.
+ */
+export const DEFAULT_PRIMARY_RECOVERY_CHECKS = 2;
 
 /** The shipped schedule: every 30 minutes, first check one minute after boot. */
 export const DEFAULT_INTERVAL_MS = 30 * 60 * 1000;
@@ -129,6 +142,21 @@ export interface HealthWatcherOptions {
   /** The clock, for a deterministic alert timestamp. Accepts a Date or epoch milliseconds. */
   now?: () => Date | number;
   fetchImpl?: typeof fetch;
+  /**
+   * AI-35 — how long an `unavailable` reading holds a model out of selection. Defaults to one
+   * watchdog interval plus a minute, so the next reading (not the clock) is what releases it.
+   */
+  healthTtlMs?: number;
+  /**
+   * AI-37 — how many CONSECUTIVE healthy readings of the configured primary are needed before the
+   * deployment returns to it after a promotion. Two: one reading is a sample, two is a recovery.
+   */
+  primaryRecoveryChecks?: number;
+  /**
+   * AI-37 — the act of returning to the configured model. Injectable so a suite can observe it
+   * without touching process-wide state; returns true only when it actually changed something.
+   */
+  returnToPrimary?: () => boolean;
 }
 
 export interface HealthWatcher {
@@ -551,6 +579,18 @@ export function createHealthWatcher(options: HealthWatcherOptions = {}): HealthW
       readModelHealth({ model, env, ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}) }));
   const sendAlert = options.sendAlert ?? defaultSendAlert;
   const state = new Map<string, StateEntry>();
+  const recoveryChecks = Math.max(1, options.primaryRecoveryChecks ?? DEFAULT_PRIMARY_RECOVERY_CHECKS);
+  // AI-37 — the act of returning to the configured model. The default is deliberately the real
+  // one: a promotion that is no longer justified is dropped, and nothing is written to `.env`.
+  const returnToPrimary =
+    options.returnToPrimary ??
+    (() => {
+      if (!promotedModel()) return false;
+      resetModelSelection();
+      return true;
+    });
+  // Consecutive healthy readings of the CONFIGURED model, per watcher instance.
+  let primaryOkStreak = 0;
 
   return {
     async run(): Promise<WatchRunResult> {
@@ -581,29 +621,29 @@ export function createHealthWatcher(options: HealthWatcherOptions = {}): HealthW
         };
       }
 
-      const verdicts: ModelVerdict[] = [];
-      for (const entry of models) {
-        let result: ModelHealthResult;
-        try {
-          result = await readHealth({ model: entry.model });
-          if (!result || typeof result !== 'object') {
-            result = {
-              status: 'unreachable',
-              model: entry.model,
-              message: 'the health check returned no result',
-              endpoints: [],
-            };
-          }
-        } catch {
-          result = {
-            status: 'unreachable',
-            model: entry.model,
-            message: 'the health check threw before it could report a result',
-            endpoints: [],
-          };
-        }
-        verdicts.push(
-          classifyModelHealth({ model: entry.model, role: entry.role, health: result, thresholds }),
+      const verdicts = await collectVerdicts(models, readHealth, thresholds);
+
+      // AI-35 — the same reading that alerts also decides which models the NEXT turn may start
+      // on. It is applied here rather than only at boot so a model that breaks (or recovers)
+      // while the process is serving is reflected in selection at the next check.
+      applyHealthVerdicts(verdicts, {
+        primary: models[0]?.model,
+        ttlMs: options.healthTtlMs ?? DEFAULT_HEALTH_MARK_TTL_MS,
+      });
+
+      // AI-37 — the other half of failing over: coming back. A promotion is sticky while the
+      // promoted model serves, which is what keeps the active model stable; without this it was
+      // *only* a restart that ended one. The configured model returning to healthy twice in a
+      // row is the evidence that ends it now.
+      const configuredPrimary = models[0]?.model ?? null;
+      const primaryVerdict = configuredPrimary
+        ? verdicts.find((verdict) => verdict.model === configuredPrimary)
+        : undefined;
+      primaryOkStreak = primaryVerdict?.level === 'ok' ? primaryOkStreak + 1 : 0;
+      if (configuredPrimary && primaryOkStreak >= recoveryChecks && returnToPrimary()) {
+        logger.error(
+          `[ai:watchdog] the configured model is healthy again (${primaryOkStreak} consecutive` +
+            ` check(s)) — returning to it: ${configuredPrimary}`,
         );
       }
 
@@ -614,9 +654,25 @@ export function createHealthWatcher(options: HealthWatcherOptions = {}): HealthW
         unavailable: verdicts.filter((verdict) => verdict.level === 'unavailable').length,
         unknown: verdicts.filter((verdict) => verdict.level === 'unknown').length,
       };
+      // AI-39 — the LIVE state, beside the readings it came from: which model a new turn would
+      // start on (a promotion is a runtime fact), the configured choice, the ids in cooldown, and
+      // the last allowance reading. Without this, "is production on its preferred model right
+      // now?" could only be answered by grepping for a promotion that may be hours old.
+      const cooling = models
+        .filter((entry) => isModelCooling(entry.model))
+        .map((entry) => entry.model);
+      const configuredLabel = models[0]?.model ?? 'none';
+      const active = activeModel(configuredLabel === 'none' ? null : configuredLabel) ?? 'none';
+      const allowance = quotaSnapshot();
+      const quotaText = !allowance
+        ? 'unknown'
+        : `${allowance.remaining === null ? 'unknown' : allowance.remaining}` +
+          (allowance.limit === null ? '' : `/${allowance.limit}`);
       logger.log(
         `[ai:watchdog] checked ${verdicts.length} model(s): ${counts.ok} ok, ` +
           `${counts.degraded} degraded, ${counts.unavailable} unavailable, ${counts.unknown} unknown` +
+          `; active=${active} (configured=${configuredLabel})` +
+          ` cooling=${cooling.join(',') || 'none'} quota=${quotaText}` +
           (changes.length > 0 ? `; ${changes.length} change(s)` : ''),
       );
 
@@ -636,6 +692,98 @@ export function createHealthWatcher(options: HealthWatcherOptions = {}): HealthW
       return { verdicts, changes, alert, delivered };
     },
   };
+}
+
+/**
+ * AI-35 — read every configured model's endpoint health ONCE and apply it to selection.
+ *
+ * This is the boot half of the feature: `startServer` fires it unawaited (like the catalogue and
+ * capability reads), so a cold process starts a turn on a model that is serving instead of paying
+ * for a model the provider already publishes as broken. It sends no completion, so it spends no
+ * request from the free tier's allowance.
+ *
+ * It NEVER throws and never refuses service: a failed reading is `unreachable`, which marks
+ * nothing. With no OpenRouter deployment it does not contact a provider at all.
+ */
+export interface HealthGateRefreshOptions {
+  env?: Record<string, string | undefined>;
+  readHealth?: (input: { model: string }) => Promise<ModelHealthResult>;
+  ttlMs?: number;
+  now?: number;
+  logger?: Logger;
+}
+
+export interface HealthGateRefreshResult {
+  status: 'ok' | 'skipped' | 'not_applicable';
+  blocked: string[];
+  cleared: string[];
+  released: string[];
+}
+
+/** Read one verdict per configured model. Shared by the watchdog and the boot refresh. */
+async function collectVerdicts(
+  models: Array<{ model: string; role: ModelRole }>,
+  readHealth: (input: { model: string }) => Promise<ModelHealthResult>,
+  thresholds: WatchThresholds,
+): Promise<ModelVerdict[]> {
+  const verdicts: ModelVerdict[] = [];
+  for (const entry of models) {
+    let result: ModelHealthResult;
+    try {
+      result = await readHealth({ model: entry.model });
+      if (!result || typeof result !== 'object') {
+        result = {
+          status: 'unreachable',
+          model: entry.model,
+          message: 'the health check returned no result',
+          endpoints: [],
+        };
+      }
+    } catch {
+      result = {
+        status: 'unreachable',
+        model: entry.model,
+        message: 'the health check threw before it could report a result',
+        endpoints: [],
+      };
+    }
+    verdicts.push(classifyModelHealth({ model: entry.model, role: entry.role, health: result, thresholds }));
+  }
+  return verdicts;
+}
+
+export async function refreshModelHealthGate(
+  options: HealthGateRefreshOptions = {},
+): Promise<HealthGateRefreshResult> {
+  const env = options.env ?? process.env;
+  const empty: HealthGateRefreshResult = { status: 'skipped', blocked: [], cleared: [], released: [] };
+  if ((env.AI_PROVIDER || '').trim().toLowerCase() !== 'openrouter') {
+    return { ...empty, status: 'not_applicable' };
+  }
+  const models = configuredModels(env);
+  if (models.length === 0) return empty;
+
+  const readHealth =
+    options.readHealth ?? (({ model }: { model: string }) => readModelHealth({ model, env }));
+  const verdicts = await collectVerdicts(models, readHealth, watchThresholds(env));
+  const outcome = applyHealthVerdicts(verdicts, {
+    primary: models[0]?.model,
+    ttlMs: options.ttlMs ?? DEFAULT_HEALTH_MARK_TTL_MS,
+    now: options.now ?? Date.now(),
+  });
+
+  if (outcome.blocked.length > 0 || outcome.cleared.length > 0) {
+    const logger = options.logger ?? console;
+    logger.log(
+      `[ai:health] model selection: unavailable=${outcome.blocked.join(',') || 'none'}` +
+        ` recovered=${outcome.cleared.join(',') || 'none'}` +
+        (outcome.released.length > 0
+          ? ` (released the configured primary so the assistant still has one attempt: ${outcome.released.join(', ')})`
+          : ''),
+    );
+  }
+
+  return { status: 'ok', blocked: outcome.blocked, cleared: outcome.cleared, released: outcome.released };
 }
 
 /** One check with no remembered state. Used by `npm run ai:health` and by a one-off test. */
@@ -714,6 +862,7 @@ export default {
   DEFAULT_INTERVAL_MS,
   DEFAULT_INITIAL_DELAY_MS,
   DEFAULT_UNKNOWN_ALERT_AFTER,
+  DEFAULT_PRIMARY_RECOVERY_CHECKS,
   watchThresholds,
   healthWatchConfig,
   healthWatchEnabled,
@@ -721,6 +870,7 @@ export default {
   classifyModelHealth,
   buildHealthAlert,
   createHealthWatcher,
+  refreshModelHealthGate,
   runAiHealthWatch,
   startAiHealthWatch,
 };

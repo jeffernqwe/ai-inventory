@@ -320,6 +320,29 @@ export function setSessionRenewalHandler(
 }
 
 /**
+ * AUTH-03 — the token a request should actually carry, renewing it proactively when due.
+ *
+ * Exported for AI-40: the streamed chat request does not travel through `apiFetch` (a streaming
+ * body cannot be consumed by the JSON client), so without this it would be the one request in
+ * the app that lets a nearly-expired token reach the server and come back 401 — signing the
+ * member out for a session that renewal would have saved. One rule, one place, both callers.
+ */
+export async function resolveRequestToken(
+  token: string | null,
+  { temporarySession = false }: { temporarySession?: boolean } = {},
+): Promise<string | null> {
+  if (!token || temporarySession || !sessionRenewalHandler) return token;
+  try {
+    const refreshed = await sessionRenewalHandler(token);
+    return refreshed || token;
+  } catch {
+    // Renewal is best-effort; the request proceeds on the existing token and its own response
+    // decides what happens next (exactly as it always has).
+    return token;
+  }
+}
+
+/**
  * DEP-2 — when the server last answered anything, in this app run.
  *
  * IN MEMORY ONLY, DELIBERATELY. This is not an authentication fact, a session fact
@@ -424,15 +447,7 @@ async function apiFetchAttempt<T = unknown>(
 
   // AUTH-03 — proactive renewal, immediately before the request leaves. The
   // provider decides whether the token is near expiry; a failure is non-fatal.
-  if (!isRetry && effectiveToken && !temporarySession && sessionRenewalHandler) {
-    try {
-      const refreshed = await sessionRenewalHandler(effectiveToken);
-      if (refreshed) effectiveToken = refreshed;
-    } catch {
-      // Renewal is best-effort here; the request proceeds on the existing token
-      // and its own response decides what happens next.
-    }
-  }
+  if (!isRetry) effectiveToken = await resolveRequestToken(effectiveToken, { temporarySession });
 
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (body !== undefined) headers['Content-Type'] = 'application/json';

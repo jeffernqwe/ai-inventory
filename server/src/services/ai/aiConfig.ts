@@ -15,6 +15,12 @@ function positiveInt(raw: string | undefined, fallback: number) {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
+/** Like `positiveInt`, but 0 is a meaningful value (0 = disabled). */
+function nonNegativeInt(raw: string | undefined, fallback: number) {
+  const n = Number.parseInt(raw ?? '', 10);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
+}
+
 /**
  * AI-29 — the most candidates one turn may ever attempt.
  *
@@ -24,21 +30,32 @@ function positiveInt(raw: string | undefined, fallback: number) {
  */
 export const MAX_FALLBACK_MODELS = 5;
 
-/** `a, b ,,a` -> ['a', 'b'] — trimmed, empty-free, deduplicated in first-seen order. */
-function parseModelList(raw: string | undefined): string[] {
+/**
+ * `a, b ,,a` -> five models, with anything past the cap RETURNED rather than dropped silently.
+ *
+ * AI-39 — the cap used to truncate with no message, so a pasted sixth id looked configured and
+ * was never used. The ignored ids are reported separately (they are not deduplicated duplicates:
+ * a repeat is harmless, a truncated candidate is a configuration mistake worth a warning).
+ */
+function parseModelList(raw: string | undefined): { models: string[]; ignored: string[] } {
   const seen = new Set<string>();
-  const out: string[] = [];
+  const models: string[] = [];
+  const ignored: string[] = [];
   for (const part of String(raw ?? '').split(',')) {
     const id = part.trim();
     if (!id || seen.has(id)) continue;
     seen.add(id);
-    out.push(id);
-    if (out.length === MAX_FALLBACK_MODELS) break;
+    if (models.length >= MAX_FALLBACK_MODELS) {
+      ignored.push(id);
+      continue;
+    }
+    models.push(id);
   }
-  return out;
+  return { models, ignored };
 }
 
 export function aiConfig() {
+  const fallbacks = parseModelList(process.env.AI_FALLBACK_MODELS_OPENROUTER);
   return {
     // Provider + keys (keys are read here but never returned/logged).
     provider: (process.env.AI_PROVIDER || '').trim().toLowerCase(),
@@ -61,7 +78,9 @@ export function aiConfig() {
     // duplicates collapsed (paying for the same model twice is not a second attempt) and
     // capped, so a pasted catalogue cannot turn one turn into an unbounded sweep. The
     // service removes the primary and any candidate the catalogue says cannot call tools.
-    fallbackModels: parseModelList(process.env.AI_FALLBACK_MODELS_OPENROUTER),
+    fallbackModels: fallbacks.models,
+    /** AI-39 — candidates past the five-model cap, named so a boot warning can point at them. */
+    fallbackModelsIgnored: fallbacks.ignored,
 
     // AI-31 — how many consecutive model-specific failures make a model temporarily
     // unhealthy, and how long it is then left out of selection. Both are operator-owned
@@ -70,6 +89,22 @@ export function aiConfig() {
     // not a positive integer falls back to the default rather than disabling the breaker.
     modelFailureThreshold: positiveInt(process.env.AI_MODEL_FAILURE_THRESHOLD, 5),
     modelCooldownMs: positiveInt(process.env.AI_MODEL_COOLDOWN_MS, 30000),
+    // AI-35 — how long the provider's OWN health reading holds a model out of selection. One
+    // watchdog interval (30 min) plus a minute, so the next reading releases the model rather
+    // than the clock: a reading is a claim about right now, and it should be replaced by fresher
+    // evidence, not expire into an unverified guess between checks.
+    modelHealthTtlMs: positiveInt(process.env.AI_MODEL_HEALTH_TTL_MS, 31 * 60 * 1000),
+    // AI-36 — how long a refusal that reported ZERO remaining stops further provider calls. Long
+    // enough to stop a burst of turns each paying a round-trip to be refused, short enough that a
+    // reading which is already stale (the allowance reset, another key was added) costs at most
+    // this much. A success lifts it immediately, whatever this says.
+    quotaBlockMs: positiveInt(process.env.AI_QUOTA_BLOCK_MS, 30_000),
+    // AI-38 — how long ONE attempt may take while another candidate remains. 0 (the default)
+    // disables it, because the correct value is a measurement rather than a guess: the last
+    // attempt always keeps the whole remaining budget, so an enabled cap only ever cuts short a
+    // model there was an alternative to. Enable with a value above the slowest legitimate answer
+    // measured on the deployment (5.3–19.4 s on the free tier, §27DZ/§27EA), e.g. 25000.
+    attemptMaxMs: nonNegativeInt(process.env.AI_ATTEMPT_MAX_MS, 0),
     openrouterBaseUrl: (process.env.OPENROUTER_BASE_URL || '').trim(),
 
     // Cost / rate protection (V1). See SYSTEM_SPECIFICATION.md §25.

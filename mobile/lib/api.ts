@@ -1,6 +1,8 @@
-import { apiFetch } from './client';
+import { apiFetch, ApiError, REQUEST_CANCELLED, resolveRequestToken, unreachableMessage } from './client';
 import type { QueryParams } from './client';
-import { AI_REQUEST_TIMEOUT_MS } from './config';
+import { API_URL, AI_REQUEST_TIMEOUT_MS } from './config';
+import { readSseStream, StreamIdleError } from './sse';
+import type { SseEvent } from './sse';
 
 /**
  * Typed endpoint wrappers over the backend REST API. Each function returns the
@@ -884,7 +886,184 @@ export const aiApi = {
       timeoutMs: AI_REQUEST_TIMEOUT_MS,
       signal: options.signal,
     }),
+
+  /**
+   * AI-40 — the same turn, streamed: text arrives through `onDelta` while it is being written,
+   * and the resolved value is the SAME `{ conversation, userMessage, assistantMessage }` payload
+   * the ordinary `chat` call returns.
+   *
+   * WHY IT DOES NOT GO THROUGH `apiFetch`. That client parses one JSON body and owns retry,
+   * renewal and timeout in one place; a streaming body is consumed incrementally and cannot be
+   * handed to `res.json()`. Everything that must behave identically — the refreshed token, the
+   * turn's own budget, cancellation, the error envelope — is done here explicitly, against the
+   * same constants, rather than being reimplemented by the caller.
+   *
+   * `expo/fetch` is imported lazily: it is a native streaming implementation, and the rest of
+   * the app has no reason to load it (or its module) on every launch.
+   */
+  chatStream: async (
+    token: string,
+    { conversationId, message }: { conversationId?: string | null; message: string },
+    options: {
+      signal?: AbortSignal;
+      onDelta?: (text: string) => void;
+      /**
+       * AI-40 — the streaming transport, injectable for the same reason `readModelHealth` takes
+       * a `fetchImpl`: the failure this path must survive (a body that never settles) cannot be
+       * produced by the real implementation on demand, so the only way to pin the recovery is to
+       * hand it a fake. Production passes nothing and gets `expo/fetch`, lazily.
+       */
+      fetchImpl?: (url: string, init: Record<string, unknown>) => Promise<StreamedResponse>;
+    } = {},
+  ): Promise<ApiResponse> => {
+    const effectiveToken = await resolveRequestToken(token);
+    const controller = new AbortController();
+    let abortCause: 'timeout' | 'caller' | null = null;
+    const timer = setTimeout(() => {
+      abortCause = 'timeout';
+      controller.abort();
+    }, AI_REQUEST_TIMEOUT_MS);
+    const callerSignal = options.signal ?? null;
+    const onCallerAbort = () => {
+      abortCause = 'caller';
+      controller.abort();
+    };
+    if (callerSignal) {
+      if (callerSignal.aborted) controller.abort();
+      else callerSignal.addEventListener('abort', onCallerAbort);
+    }
+    const release = (): void => {
+      clearTimeout(timer);
+      callerSignal?.removeEventListener('abort', onCallerAbort);
+    };
+
+    try {
+      const streamingFetch = options.fetchImpl ?? (await import('expo/fetch')).fetch;
+      const res = await streamingFetch(`${API_URL}/api/ai/chat`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          accept: 'text/event-stream',
+          authorization: `Bearer ${effectiveToken ?? ''}`,
+        },
+        body: JSON.stringify({ conversationId, message }),
+        signal: controller.signal,
+      });
+
+      if (!res.ok) {
+        // The server refused before streaming (validation, auth, rate limit, not configured).
+        // Its body is the ordinary error envelope, so the same ApiError reaches the screen and
+        // every existing message mapping keeps working unchanged.
+        const raw = await res.text().catch(() => '');
+        let body: { error?: string; code?: string; fields?: { field: string; message: string }[] } = {};
+        try {
+          body = raw ? JSON.parse(raw) : {};
+        } catch {
+          body = {};
+        }
+        throw new ApiError(res.status, body.code ?? null, body.error || 'Your message could not be sent.', body.fields ?? []);
+      }
+
+      const stream = res.body;
+      if (!stream) {
+        // No body, and a body that ended before its `done` event, are both the same fact to the
+        // caller: the connection did not deliver the answer. `status: 0` is the transport class
+        // the rest of the client already uses (and the one the screen may retry over JSON).
+        throw new ApiError(0, 'NETWORK_ERROR', 'The assistant could not start streaming.');
+      }
+
+      let done: ApiResponse = null;
+      let failure: { status?: number; code?: string | null; message?: string } | null = null;
+
+      /**
+       * AI-40 — the budget must settle the CALL even if the body never delivers another byte.
+       *
+       * Measured on the phone, 2026-10-23: a stream cut after its headers left `reader.read()`
+       * parked forever, so the 75 s timeout aborted a request whose promise never rejected and the
+       * screen stayed on its spinner — no answer, no sentence, no way out but killing the app.
+       * The read is therefore raced against the abort itself, and the loser is silenced so it
+       * cannot surface as an unhandled rejection later.
+       */
+      const reading = readSseStream(stream, (event: SseEvent) => {
+        if (event.event === 'delta') {
+          const parsed = safeJson(event.data);
+          const text = parsed && typeof parsed.text === 'string' ? parsed.text : '';
+          if (text) options.onDelta?.(text);
+          return;
+        }
+        if (event.event === 'done') {
+          done = safeJson(event.data);
+          return;
+        }
+        if (event.event === 'error') {
+          failure = safeJson(event.data) ?? {};
+        }
+      }, controller.signal);
+      reading.catch(() => {
+        // The abort won the race; whatever the read does next is not the caller's business.
+      });
+      await Promise.race([
+        reading,
+        new Promise<never>((_resolve, reject) => {
+          const onAbort = () => reject(new Error('stream aborted'));
+          if (controller.signal.aborted) onAbort();
+          else controller.signal.addEventListener('abort', onAbort, { once: true });
+        }),
+      ]);
+
+      if (failure) {
+        const f = failure as { status?: number; code?: string | null; message?: string };
+        throw new ApiError(
+          typeof f.status === 'number' ? f.status : 0,
+          f.code ?? 'AI_UNAVAILABLE',
+          f.message || 'The assistant could not answer. Please try again.',
+        );
+      }
+      if (!done) {
+        throw new ApiError(0, 'NETWORK_ERROR', 'The assistant closed the connection before answering.');
+      }
+      return done;
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      // The stream went quiet past its heartbeat: the connection died without closing. Reported as
+      // the transport failure it is, so the screen may retry a turn that showed no text.
+      if (err instanceof StreamIdleError) {
+        throw new ApiError(0, 'NETWORK_ERROR', 'The assistant stopped sending. Please try again.');
+      }
+      if (callerSignal?.aborted || abortCause === 'caller') {
+        throw new ApiError(0, REQUEST_CANCELLED, 'The request was cancelled.');
+      }
+      if (abortCause === 'timeout') {
+        throw new ApiError(0, 'NETWORK_TIMEOUT', 'The request timed out. Check your connection and try again.');
+      }
+      throw new ApiError(0, 'NETWORK_ERROR', unreachableMessage(API_URL, __DEV__));
+    } finally {
+      release();
+    }
+  },
 };
+
+/**
+ * AI-40 — the part of a streaming `Response` this client uses.
+ *
+ * Narrowed here rather than reusing the DOM type: a test fake must be able to provide exactly
+ * this much, and nothing in this file needs the rest of a `Response`.
+ */
+interface StreamedResponse {
+  ok: boolean;
+  status: number;
+  body: { getReader(): { read(): Promise<{ done: boolean; value?: Uint8Array }>; cancel?(): Promise<void>; releaseLock?(): void } } | null;
+  text(): Promise<string>;
+}
+
+/** Parse an event payload without ever throwing on the way to the caller. */
+function safeJson(raw: string): any {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
 
 export default {
   register,

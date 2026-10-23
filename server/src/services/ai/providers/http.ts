@@ -12,6 +12,7 @@
  */
 
 import { AiAbandoned, AiProviderError, AiQuotaExceeded } from '../aiErrors.ts';
+import { parseQuotaHeaders, type QuotaInfo } from '../quota.ts';
 
 /**
  * The upstream JSON body, as far as anything here is allowed to assume: an
@@ -24,6 +25,18 @@ import { AiAbandoned, AiProviderError, AiQuotaExceeded } from '../aiErrors.ts';
  * a property still behaves exactly as it did when the local was untyped.
  */
 export type UpstreamJsonBody = Record<string, unknown>;
+
+/**
+ * AI-36 — what one call returned: the body, and the allowance the response published.
+ *
+ * The headers used to be discarded, so the operator could not see the daily allowance shrinking
+ * and every turn after it was spent still paid for a round-trip to be refused. `quota` is null
+ * when the provider published neither number — an absence, never a zero.
+ */
+export interface PostJsonResult {
+  data: UpstreamJsonBody;
+  quota: QuotaInfo | null;
+}
 
 /**
  * One JSON-over-HTTPS call. `body` is the provider's own request payload, built
@@ -135,7 +148,52 @@ function logUpstreamDiagnostics({
   );
 }
 
-export async function postJson({ url, headers = {}, body, timeoutMs = 60000, providerName = 'ai', signal }: PostJsonOptions): Promise<UpstreamJsonBody> {
+/**
+ * The one place a non-2xx upstream response becomes an error.
+ *
+ * Shared by the JSON and the streaming call since AI-40, so the two cannot disagree about
+ * which statuses are quota refusals, which carry the allowance, or what a member is told.
+ * Every branch logs before it throws, and the body is never returned to a client.
+ */
+async function failUpstream(res: Response, providerName: string): Promise<never> {
+  // AI-6 — 429 and 402 are the two non-2xx that are NOT outages. The gateway is
+  // answering perfectly well; it is refusing because an allowance is spent.
+  // 429 is the measured dominant failure at this tier (`429
+  // free-models-per-day`, §27BF) and 402 is its sibling — an exhausted credit
+  // balance. Both used to reach the member as 502 AI_UNAVAILABLE, whose sentence
+  // tells them to try again in a moment, which cannot refill either one. 402 was
+  // previously covered by a test case that labelled it `insufficient credits`
+  // and still asserted a provider failure; it is the same class.
+  //
+  // The log line is deliberately separate and greppable, because the operator
+  // question is never "was there a 429?" but "is this a limit or an outage?".
+  const isQuotaRefusal = res.status === 429 || res.status === 402;
+  console.error(
+    isQuotaRefusal
+      ? `[ai:${providerName}] upstream rate/quota limit reached (HTTP ${res.status})`
+      : `[ai:${providerName}] upstream HTTP ${res.status}`
+  );
+  // Phase 31D.6: this branch used to throw without reading the body, so a
+  // non-2xx was diagnosable only by its status code. The read is guarded
+  // because an error body may itself fail to arrive (a truncated stream, a
+  // connection dropped mid-body) and that must not replace the error this
+  // branch throws — and it happens BEFORE the throw for the same reason it
+  // always has: the quota case needs its diagnostics just as much, and the
+  // body is still never returned to the client.
+  const errorBody = await res.text().catch(() => '');
+  logUpstreamDiagnostics({ providerName, res, body: errorBody, reason: 'HTTP error' });
+  // AI-36 — the allowance travels with the refusal. Only a reading of ZERO is acted on by the
+  // turn loop; anything else leaves the AI-6 behaviour exactly as it was.
+  const quota = parseQuotaHeaders(res.headers);
+  if (isQuotaRefusal) throw new AiQuotaExceeded(undefined, quota ?? undefined);
+  // AI-29 — the status travels with the error so the turn loop can tell a broken
+  // MODEL (404/410/5xx, worth a second model) from a broken REQUEST, KEY or NETWORK
+  // (400/401/403, where another model changes nothing). It is a classification input,
+  // never client copy: the sentence stays the safe generic one.
+  throw new AiProviderError('The AI service returned an error. Please try again.', undefined, res.status);
+}
+
+export async function postJson({ url, headers = {}, body, timeoutMs = 60000, providerName = 'ai', signal }: PostJsonOptions): Promise<PostJsonResult> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   // Either this layer's own timeout or the caller disappearing ends the request.
@@ -193,40 +251,7 @@ export async function postJson({ url, headers = {}, body, timeoutMs = 60000, pro
   }
   clearTimeout(timer);
 
-  if (!res.ok) {
-    // AI-6 — 429 and 402 are the two non-2xx that are NOT outages. The gateway is
-    // answering perfectly well; it is refusing because an allowance is spent.
-    // 429 is the measured dominant failure at this tier (`429
-    // free-models-per-day`, §27BF) and 402 is its sibling — an exhausted credit
-    // balance. Both used to reach the member as 502 AI_UNAVAILABLE, whose sentence
-    // tells them to try again in a moment, which cannot refill either one. 402 was
-    // previously covered by a test case that labelled it `insufficient credits`
-    // and still asserted a provider failure; it is the same class.
-    //
-    // The log line is deliberately separate and greppable, because the operator
-    // question is never "was there a 429?" but "is this a limit or an outage?".
-    const isQuotaRefusal = res.status === 429 || res.status === 402;
-    console.error(
-      isQuotaRefusal
-        ? `[ai:${providerName}] upstream rate/quota limit reached (HTTP ${res.status})`
-        : `[ai:${providerName}] upstream HTTP ${res.status}`
-    );
-    // Phase 31D.6: this branch used to throw without reading the body, so a
-    // non-2xx was diagnosable only by its status code. The read is guarded
-    // because an error body may itself fail to arrive (a truncated stream, a
-    // connection dropped mid-body) and that must not replace the error this
-    // branch throws — and it happens BEFORE the throw for the same reason it
-    // always has: the quota case needs its diagnostics just as much, and the
-    // body is still never returned to the client.
-    const errorBody = await res.text().catch(() => '');
-    logUpstreamDiagnostics({ providerName, res, body: errorBody, reason: 'HTTP error' });
-    if (isQuotaRefusal) throw new AiQuotaExceeded();
-    // AI-29 — the status travels with the error so the turn loop can tell a broken
-    // MODEL (404/410/5xx, worth a second model) from a broken REQUEST, KEY or NETWORK
-    // (400/401/403, where another model changes nothing). It is a classification input,
-    // never client copy: the sentence stays the safe generic one.
-    throw new AiProviderError('The AI service returned an error. Please try again.', undefined, res.status);
-  }
+  if (!res.ok) await failUpstream(res, providerName);
 
   // `unknown` at the untrusted boundary: the guard below is what narrows it, so
   // `=== null` here is a live check rather than a comparison the compiler knows
@@ -260,7 +285,207 @@ export async function postJson({ url, headers = {}, body, timeoutMs = 60000, pro
       'invalid_response',
     );
   }
-  return data as UpstreamJsonBody;
+  return { data: data as UpstreamJsonBody, quota: parseQuotaHeaders(res.headers) };
 }
 
-export default { postJson };
+/**
+ * AI-40 — one streamed completion, delivered event by event.
+ *
+ * WHY IT IS A SECOND FUNCTION RATHER THAN A FLAG ON postJson. `postJson` waits for the whole
+ * body, which is exactly what streaming exists to avoid: the answer is useful while it is being
+ * written. Everything AROUND the body is identical — the abort handling, the status
+ * classification, the diagnostics, the allowance headers — so those stay in one place and this
+ * function differs only in how the body is consumed.
+ *
+ * WHAT IT GUARANTEES. `onEvent` sees only complete SSE events: framing (`data:` lines, the blank
+ * line separator, CRLF) never reaches the provider assembler, and a chunk split mid-event is
+ * held until the rest of it arrives. When the stream ends with events still buffered, they are
+ * flushed, because a gateway that closes without a trailing blank line has still sent them.
+ *
+ * A 2xx that produced NO event at all is `invalid_response`, not an empty answer: a gateway which
+ * ignored `stream: true` answered JSON, and the caller's fallback is the ordinary request. That
+ * distinction is why the error carries its kind.
+ */
+export interface SseEvent {
+  event: string;
+  data: string;
+}
+
+export interface PostSseOptions extends PostJsonOptions {
+  /** Called once per complete event. Throwing here aborts the stream and propagates. */
+  onEvent: (event: SseEvent) => void;
+}
+
+export async function postSse({
+  url,
+  headers = {},
+  body,
+  timeoutMs = 60000,
+  providerName = 'ai',
+  signal,
+  onEvent,
+}: PostSseOptions): Promise<{ quota: QuotaInfo | null }> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const abortSignal = signal ? AbortSignal.any([controller.signal, signal]) : controller.signal;
+
+  let res!: Response;
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        accept: 'text/event-stream',
+        ...headers,
+      },
+      body: JSON.stringify(body),
+      signal: abortSignal,
+    });
+  } catch (err) {
+    clearTimeout(timer);
+    if ((err as { name?: unknown })?.name === 'AbortError') {
+      if (signal?.aborted) {
+        console.error(`[ai:${providerName}] caller went away; the upstream stream was cancelled`);
+        throw new AiAbandoned();
+      }
+      console.error(`[ai:${providerName}] stream request timed out after ${timeoutMs}ms`);
+      throw new AiProviderError(
+        'The AI service took too long to respond. Please try again.',
+        undefined,
+        undefined,
+        'timeout',
+      );
+    }
+    console.error(`[ai:${providerName}] network error: ${(err as { message?: unknown })?.message ?? 'unknown'}`);
+    throw new AiProviderError(
+      'The AI service could not be reached. Please try again.',
+      undefined,
+      undefined,
+      'network',
+    );
+  }
+
+  if (!res.ok) {
+    clearTimeout(timer);
+    await failUpstream(res, providerName);
+  }
+
+  const quota = parseQuotaHeaders(res.headers);
+  const reader = res.body?.getReader();
+  if (!reader) {
+    clearTimeout(timer);
+    throw new AiProviderError(
+      'The AI service returned an unexpected response.',
+      undefined,
+      undefined,
+      'invalid_response',
+    );
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let seen = 0;
+
+  /** One framed block -> one event. Comments (`:ping`) and unknown fields are ignored. */
+  const emit = (block: string): void => {
+    let event = 'message';
+    const data: string[] = [];
+    for (const line of block.split('\n')) {
+      if (line === '' || line.startsWith(':')) continue;
+      const colon = line.indexOf(':');
+      const field = colon === -1 ? line : line.slice(0, colon);
+      let value = colon === -1 ? '' : line.slice(colon + 1);
+      if (value.startsWith(' ')) value = value.slice(1);
+      if (field === 'event') event = value;
+      else if (field === 'data') data.push(value);
+    }
+    if (data.length === 0) return;
+    seen += 1;
+    onEvent({ event, data: data.join('\n') });
+  };
+
+  /**
+   * Append decoded text, normalising CRLF over the WHOLE buffer.
+   *
+   * AI-40 (found in review, before release) — normalising each chunk on its own is wrong: a
+   * network write can end between `\r` and `\n`, so the pair is never seen together, `\r\n`
+   * survives into the buffer, `\n\n` never matches, and a CRLF gateway delivers **no events at
+   * all** until EOF — silently turning streaming into one late paint, which is the exact failure
+   * this file exists to prevent. The `sse-crlf` case fails if this moves back to a per-chunk
+   * replace.
+   */
+  const append = (text: string): void => {
+    buffer = (buffer + text).replace(/\r\n/g, '\n');
+  };
+
+  const drain = (flush = false): void => {
+    let boundary = buffer.indexOf('\n\n');
+    while (boundary !== -1) {
+      emit(buffer.slice(0, boundary));
+      buffer = buffer.slice(boundary + 2);
+      boundary = buffer.indexOf('\n\n');
+    }
+    if (flush && buffer.trim() !== '') {
+      emit(buffer);
+      buffer = '';
+    }
+  };
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      append(decoder.decode(value, { stream: true }));
+      drain();
+    }
+    append(decoder.decode());
+    drain(true);
+  } catch (err) {
+    if ((err as { name?: unknown })?.name === 'AbortError') {
+      if (signal?.aborted) throw new AiAbandoned();
+      console.error(`[ai:${providerName}] stream timed out after ${timeoutMs}ms`);
+      throw new AiProviderError(
+        'The AI service took too long to respond. Please try again.',
+        undefined,
+        undefined,
+        'timeout',
+      );
+    }
+    // `onEvent` throws from inside this loop when the provider reports an error event or the
+    // assembler rejects a malformed one, and those must travel unchanged: they already carry the
+    // right class (and, for a mid-stream error event, the right status).
+    if (err instanceof AiProviderError || err instanceof AiQuotaExceeded || err instanceof AiAbandoned) {
+      throw err;
+    }
+    console.error(`[ai:${providerName}] stream ended unexpectedly: ${(err as { message?: unknown })?.message ?? 'unknown'}`);
+    throw new AiProviderError(
+      'The AI service returned an unexpected response.',
+      undefined,
+      undefined,
+      'network',
+    );
+  } finally {
+    clearTimeout(timer);
+    try {
+      reader.releaseLock();
+    } catch {
+      // The reader may already be closed by the error path; nothing to release then.
+    }
+  }
+
+  if (seen === 0) {
+    // A 2xx with no event at all is NOT an empty answer. The gateway ignored `stream: true` and
+    // sent JSON, and the caller's fallback is the ordinary non-streamed request.
+    console.error(`[ai:${providerName}] stream ended without a single event`);
+    throw new AiProviderError(
+      'The AI service returned an unexpected response.',
+      undefined,
+      undefined,
+      'invalid_response',
+    );
+  }
+
+  return { quota };
+}
+
+export default { postJson, postSse };

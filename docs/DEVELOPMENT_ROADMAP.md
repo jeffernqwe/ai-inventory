@@ -18749,6 +18749,227 @@ server file was touched.
 
 ---
 
+# 27EL. The deployment learns from the provider before it spends a request (2026-10-23)
+
+**Server + documentation. No route, permission, schema, index, dependency, session or mobile
+change, and no prompt change.** Five increments on top of AI-29/30/31's failover. Every one uses
+data the provider publishes for free — endpoint-health `GET`s and response headers — so none of
+them buys a completion to check a model.
+
+**AI-35 — a model the provider says is down is not tried first.** AI-28 could see a
+listed-but-dead model, and AI-34 alerted on it, but neither changed selection: a cold process
+still tried the configured model first, every turn, until five refusals opened AI-30's cooldown.
+On a 50-request day that is a tenth of the allowance, spent inside a member's turn, before any
+surviving model is asked. `modelHealthGate.ts` now holds such a model out of selection. The
+reading is the same free `GET /v1/models/{author}/{slug}/endpoints`: fired unawaited at boot and
+re-run by the watchdog. Only `unavailable` marks — `degraded` is still serving, `unknown` is a
+check that could not run. A mark lasts until the next reading (31 min, one watchdog interval plus
+grace) and is cleared by an answer, so it cannot outlive reality. **The safety valve is the part
+that makes it safe to ship:** if a reading would remove every configured model, the configured
+primary is released, so a wrong reading costs requests but can never refuse service.
+
+**AI-36 — the allowance is visible, and an exhausted one is not re-tested every turn.** The free
+tier is metered at 50 requests a day, shared by every free model, which is why AI-29 never fails
+over on a quota refusal. The number was invisible until a member's turn failed, and once spent,
+every turn still paid a round-trip to be told. `quota.ts` parses `x-ratelimit-remaining` /
+`x-ratelimit-limit` from every response; the turn line reports `quota=12/50` (or `quota=unknown`,
+never an invented zero). A refusal that reports **zero** starts a 30-second fail-fast
+(`AI_QUOTA_BLOCK_MS`) that answers the normal 429 with **zero provider calls**; a 429 without a
+reading keeps AI-6's behaviour exactly, and any success lifts the block immediately. `postJson`
+returns `{ data, quota }` and `AiQuotaExceeded` carries the reading.
+
+**AI-37 — a promotion ends by itself.** AI-31's promotion was sticky until a restart or until the
+promoted model failed five times: a recovery ten minutes later went unnoticed. The watchdog now
+ends it after **two consecutive** healthy readings of the configured model — one reading is a
+sample, two is a recovery — logs `returning to it: <id>` once, and clears the health mark in the
+same pass. A healthy fallback never ends it, and there is no paid probe: the evidence is the free
+health read.
+
+**AI-38 — an optional per-attempt slice, OFF by default.** AI-29 only fails over when the first
+model REFUSES; a model that hangs gets the whole remaining budget, so the turn waits out its
+deadline and the fallback never starts. `AI_ATTEMPT_MAX_MS` (default **0**) bounds one attempt
+while another candidate remains; the **last** attempt always keeps everything left, so a
+slow-but-working answer is never cut short when there is nowhere else to go. A capped expiry is
+treated as model-specific — it fails over and counts toward the breaker — while a transport
+failure still does not fail over, because another model would travel the same broken path. The
+default stays off deliberately: the correct value is a measurement (5.3–19.4 s measured on this
+tier, so 25 000 ms is the documented starting point), and enabling it is one variable after
+re-measuring.
+
+**AI-39 — the configuration is stated.** A fallback list longer than the five-model cap used to be
+truncated with no message, so a pasted candidate looked configured and was never used. The parser
+now returns the ignored ids and boot warns with them; the effective chain is logged once
+(`[ai] chain order: …`). The watchdog's run line also carries the live state —
+`active=<promoted> (configured=<primary>) cooling=<ids|none> quota=<reading>` — so "is production
+on its preferred model right now?" is answerable without grepping for a promotion that may be
+hours old.
+
+**Context handling was verified, then deliberately left alone.** `npm run ai:models` (free GETs)
+measured the configured chain at **66k / 262k / 1000k** context tokens — the smallest is the
+fourth candidate — against a worst realistic prompt of **~40–58k tokens** (20 history messages at
+the 4 000-char cap plus 12 000-char tool results over six rounds). A per-model trim would be
+machinery without a present fault, so none was added; the measurement is the reason, and it must
+be re-run before adding a model with a small context.
+
+**Files.** New: `server/src/services/ai/modelHealthGate.ts`, `server/src/services/ai/quota.ts`.
+Changed: `ai.service.ts`, `aiConfig.ts`, `aiErrors.ts`, `healthWatch.ts`, `providers/http.ts`,
+`providers/index.ts`, `providers/anthropicWire.ts`, `config/startup.ts`, `.env.example`,
+`README.md`, `docs/guides/6-scripts-and-commands.md`, this record, `CLAUDE.md`.
+
+**Verification.** **47 new cases** in `AI35-health-aware-selection`, `AI36-quota-header-awareness`,
+`AI37-primary-recovery`, `AI38-attempt-budget` and `AI39-ai-config-diagnostics`; the existing
+AI29/30/31/34 suites pass unchanged (one assertion updated for `postJson`'s new envelope, in
+AI6's harness positive control). Server `test:unit` **1316 tests / 1263 pass / 0 fail / 53
+skipped**, `tsc` and `eslint` clean, both module-graph checks clean (494 modules).
+
+**Residual limits.** The health marks and the quota block are process-local, like the breaker:
+several instances each learn separately, and a restart re-reads health (which is the intended
+moment to). The quota block is intentionally short and success-cleared, so it is a saving rather
+than a hard gate. AI-38 ships off, so the hanging-model case is unchanged until an operator
+enables it. The free allowance is still shared by every model, so a total outage still spends up
+to five requests before the breaker settles.
+
+---
+
+# 27EM. The answer arrives while it is being written (2026-10-23)
+
+**Server + mobile + documentation. No new route, permission, schema, index, dependency, session or
+environment change, and no prompt change.** The assistant's measured latency on the free tier is
+5–19 s per turn, and until now the screen showed a spinner for all of it: the member read the
+first word of the answer at the same moment as the last. `POST /api/ai/chat` can now deliver the
+answer as it is written, and the ordinary JSON response is untouched for every client that does
+not ask for it.
+
+**Negotiated on `Accept`, not on a second path.** `Accept: text/event-stream` selects the streamed
+form; anything else gets the exact response it got before. That was chosen over a second route or
+a body flag because the route table, the permission gate (`ai.use`) and the rate limiter are then
+provably unchanged — the Phase 23 classification, the route inventory and the RBAC mirror have
+nothing new to describe — and because a client that cannot stream cannot reach the new code by
+accident. `prepareTurn` was extracted so validation, conversation ownership, the AI-24 asked-at
+timestamp and the AI-1 abort listener happen **once, before any header is written**: a bad request
+therefore still answers the ordinary JSON `400` envelope on both paths, which is what keeps
+every existing error sentence and its mobile copy working.
+
+**The wire contract is three event names.** `delta { text }` for answer text in order, `done { … }`
+carrying the stored turn (identical to the JSON body), and `error { status, code, message }` mapped
+by the same `mapAiFailure` the JSON path uses. **`done` is the authority, not the deltas:** the
+server rewrites status constants and trims a cut-off unit before storing, so the client replaces
+what it rendered with the final message. Deltas make the wait visible; `done` makes the result
+correct. Persistence is unchanged and still happens only after the provider has answered — a
+failed turn writes nothing, on either path — and a `: ping` comment every 15 s holds the
+connection through a mobile network or a proxy. `Cache-Control: no-cache, no-transform`,
+`X-Accel-Buffering: no` and an explicit `flush()` are there because a buffering proxy defeats the
+feature while still returning 200.
+
+**The provider layer learned to read a stream, and refuses to guess.** `providers/http.ts` reads
+the upstream SSE, and `providers/anthropicWire.ts` assembles text deltas and the JSON fragments of
+a tool call into the **same** response shape the non-streaming path produces, so the turn loop,
+the tools, the breaker and the failover did not change shape at all. Three rules keep a stream from
+becoming a new failure mode: a `2xx` that carried no event is `invalid_response`, never an empty
+answer; a gateway that ignores `stream: true` gets **one** ordinary request as a fallback, but
+**never** after text has been delivered; and the existing empty-completion retry is untouched
+because an empty completion emits nothing. `ai.service` counts **delivered characters** and stops
+the failover walk once any exist — text on screen cannot be taken back, so a second model would
+show the answer twice. A transport failure still does not fail over, for the same reason it never
+did.
+
+**Mobile.** `mobile/lib/sse.ts` is an incremental parser and a byte-stream reader: it holds a
+partial event until its blank-line separator arrives, strips exactly one space after `data:`, skips
+comment lines, and decodes through **one stateful `TextDecoder`** so a character split across two
+chunks (an em dash, an accented product name) is not corrupted. CRLF is normalised **on the buffer
+rather than the chunk** — a network chunk can end between `\r` and `\n`, and normalising each chunk
+separately left that pair untouched, delivering the whole answer as one payload; the split-CRLF
+case in `ai40-sse-parser.test.ts` fails if that moves back. `aiApi.chatStream` cannot go through
+`apiFetch` (that client parses one JSON body and owns retry, renewal and timeout together), so the
+three things that must behave identically were made explicit rather than reimplemented: the token
+comes from `resolveRequestToken`, newly exported from `lib/client.ts` **because the streamed
+request is the one request that would otherwise let a nearly-expired token answer 401 and sign the
+member out** — the exact defect AUTH-03 exists to prevent; the turn keeps `AI_REQUEST_TIMEOUT_MS`
+and distinguishes the caller's abort from its own (`REQUEST_CANCELLED` versus `NETWORK_TIMEOUT`);
+and a refusal that arrives before streaming is parsed from the ordinary error envelope into the
+same `ApiError`. `expo/fetch` is imported lazily — a native streaming implementation the rest of
+the app has no reason to load. `AiChat` renders the arriving text in the answer bubble, keeps the
+thinking row only until the first character, replaces everything with the `done` payload, and
+retries through the ordinary route **only** when no text was shown and the failure is a transport
+one; a quota refusal, an ended session, a stop and an answer that was already partly read are
+never retried.
+
+**Two defects were found before release, one in review and one on the phone.** (1) The upstream
+transport normalised CRLF **per chunk**, so a `\r\n` split across two network writes left the pair
+in the buffer, `\n\n` never matched, and a CRLF gateway delivered **no events at all** until EOF —
+streaming silently became one late paint. It is normalised on the buffer now, and the `sse-crlf`
+case reports **1** event instead of **7** if that regresses (verified by reverting the fix and
+watching it fail). (2) The phone showed the more serious one: a stream that went **silent without
+closing** left `reader.read()` parked, so even the 75 s budget could not settle the call — the
+spinner stayed for minutes with no sentence and no way out but killing the app. `readSseStream` now
+has a **20-second idle window** (one server heartbeat plus grace) and an abort that settles the read
+even when the body ignores `cancel()`; `chatStream` races its own call against the abort as the last
+line of defence, and `fetchImpl` is injectable for the same reason `readModelHealth` takes one — the
+wedge cannot be produced by the real transport on demand. `ai40-chat-stream-transport.test.ts`
+(6 cases) pins both failures and the healthy path beside them. The same review consolidated the
+JSON path onto `prepareTurn` — it had been duplicated, with a comment claiming otherwise, which is
+exactly the drift the extraction exists to prevent — and add nothing else to the request path.
+
+**Verification.** **18 server cases** in `AI40-ai-streaming.test.mjs` (classified MIXED: SSE
+framing across chunk boundaries incl. the split-CRLF case, the no-event `2xx`, an `error` event,
+tool-fragment assembly, the unstreamed fallback and its prohibition after text, delta forwarding
+without changing any non-streaming request, no failover after text, the empty-completion retry,
+authentication, and the wire contract — deltas then one `done`, the JSON path unchanged, a failed
+turn persisting nothing and validation still a plain 400). **25 mobile cases**: 10 in
+`ai40-sse-parser.test.ts`, 9 in `ai40-assistant-streaming.test.tsx`, 6 in
+`ai40-chat-stream-transport.test.ts` (live text then the stored message, fallback when the stream
+never started, no retry after text was shown, quota/session/stop not treated as stream failures,
+and the idle/abort/timeout settlement) — with `ai9-assistant-stop` and `ai24-user-message-time`
+updated for the new transport and still asserting what they existed to assert. Server `test:unit`
+**1330 / 1276 pass / 0 fail / 54 skipped**, `test:db` **879 / 786 pass / 0 fail / 93 skipped**,
+`tsc`/`eslint`/both module-graph checks clean (498 files) and the secret guard clean (22 controls);
+mobile **86 suites / 1042 tests / 0 failures**, `tsc` and `eslint` clean.
+
+**Device-verified on the OPPO CPH1969, 2026-10-23** against the local server over `adb reverse`, on
+the documented demo fixture, with a local fault-injecting proxy in front of the server so each
+transport failure could be produced on demand. Six scenarios, all recorded in
+`docs/evidence/ai-streaming-2026-10-23/`: a **normal turn with a tool call** (one `POST`, `200` in
+16 232 ms, `calls=2 toolRuns=1 tools=getReorderNeededProducts`, the three fixture products with
+their quantities); a stream **cut before any text** (two POSTs 281 ms apart — the JSON retry
+answered `201` in 4 238 ms and the member saw the complete answer); a stream **cut after the first
+delta** (the partial `Three` stayed on screen with the error sentence, **one** POST, the server's
+`AI_ABANDONED` and nothing persisted — no retry, because retrying would show the answer twice); a
+**Stop** pressed mid-turn (*You stopped waiting for this answer…*, the AI-9 state); a **429 quota
+refusal** (the exact quota sentence, one POST, no provider request); and a stream that **went
+silent and never closed** (the client gave up after **20.5 s** and the ordinary retry answered in
+9 431 ms). That the streamed path served the normal turn is read off the log rather than assumed:
+the fallback would have been a second `POST`, and there was exactly one. The frames taken during
+the early wait contain no text because the turn spends its first ~12 s in the tool round — a model
+writes no answer while it is asking for one — so incremental delivery rests on the
+character-at-a-time and split-chunk cases, not on a static image. **AI-35 was observed live in the
+same session**: the provider's own health read marked `liquid/…` and `…super-120b…` unavailable at
+boot and on every turn, both were skipped before a request was spent on them, and `npm run
+ai:health` reproduced exactly those two verdicts (with `super-vl` degraded and still selected).
+**AI-37's return is proven at the decision level** ("does not return on a single healthy reading",
+"returns after two consecutive healthy readings, and says so once", "resets the count when a reading
+in between is not healthy") rather than live, because a live demonstration needs a promotion in
+progress plus two 30-minute watchdog cycles — a real cadence this session could not compress
+without faking the clock the suite already injects.
+
+**Files.** New: `mobile/lib/sse.ts`, `server/test/AI40-ai-streaming.test.mjs`,
+`mobile/__tests__/ai40-sse-parser.test.ts`, `mobile/__tests__/ai40-assistant-streaming.test.tsx`,
+`mobile/__tests__/ai40-chat-stream-transport.test.ts`, `docs/evidence/ai-streaming-2026-10-23/`.
+Changed: `ai.controller.ts`, `ai.service.ts`, `providers/anthropicWire.ts`, `providers/http.ts`,
+`providers/index.ts`, `mobile/lib/api.ts`, `mobile/lib/client.ts`, `mobile/components/AiChat.tsx`,
+`scripts/run-tests.mjs`, `README.md`, `CLAUDE.md`, this record.
+
+**Residual limits.** A dropped connection is not resumed: the answer is written once, so a stream
+that breaks after showing text is shown as a failure and is **not** retried (retrying would show
+the answer twice), while one that breaks before any text falls back to the ordinary route. There is
+no `Last-Event-ID` bookkeeping, deliberately — the server does not store a partial answer, so there
+is nothing to resume from. A proxy that ignores `no-transform` can still buffer, which no app-side
+code can detect beyond the heartbeat. A streamed turn that fails after its headers have gone out is
+a **200 on the wire** by necessity, so the failure lives in the `error` event, the turn's outcome
+line and the client's sentence rather than in the access log's status — an operator counting failed
+turns must count outcomes, not statuses. iOS remains unverified (no macOS on this host).
+
+---
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

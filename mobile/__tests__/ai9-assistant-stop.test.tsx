@@ -47,10 +47,11 @@ jest.mock('../lib/auth', () => ({
 }));
 
 jest.mock('../lib/api', () => ({
-  aiApi: { chat: jest.fn(), messages: jest.fn() },
+  aiApi: { chat: jest.fn(), chatStream: jest.fn(), messages: jest.fn() },
 }));
 
 const chat = aiApi.chat as jest.Mock;
+const chatStream = aiApi.chatStream as jest.Mock;
 const messages = aiApi.messages as jest.Mock;
 const mockedUseSession = useSession as jest.Mock;
 
@@ -105,6 +106,10 @@ const ask = async (view: Awaited<ReturnType<typeof mount>>, text: string) => {
 beforeEach(() => {
   jest.clearAllMocks();
   chat.mockImplementation(pendingUntilStopped);
+  // AI-40 — the screen streams first. These cases are about the NON-streaming turn's behaviour
+  // (a stop, an error, a session ending), so the stream is made to fail the way an old server
+  // would and the ordinary route is what they exercise.
+  chatStream.mockRejectedValue(new ApiError(404, null, 'Not found'));
   messages.mockResolvedValue({ items: [], total: 0 });
   mockedUseSession.mockReturnValue({
     user: { id: 'u1', name: 'Test Member' },
@@ -228,14 +233,26 @@ describe('AI-9 — the distinction itself', () => {
 describe('AI-9 — the transport keeps a caller’s stop apart from its own timeout', () => {
   const fetchMock = jest.fn();
 
-  /** A fetch that settles only when the signal IT was given aborts. */
+  /**
+   * A fetch that settles only when the signal IT was given aborts.
+   *
+   * It also rejects an ALREADY-aborted signal, which is what the platform does. That case became
+   * reachable with AI-40: the token is now resolved before the request starts (one microtask), so
+   * a caller that aborts synchronously no longer wins a race it used to lose — the request is
+   * cancelled before it is sent. A double that only listened would hang instead.
+   */
   const fetchWaitingForAbort = (_url: string, init: { signal?: AbortSignal }) =>
     new Promise((_resolve, reject) => {
-      init?.signal?.addEventListener('abort', () => {
+      const abort = () => {
         const err = new Error('Aborted');
         err.name = 'AbortError';
         reject(err);
-      });
+      };
+      if (init?.signal?.aborted) {
+        abort();
+        return;
+      }
+      init?.signal?.addEventListener('abort', abort);
     });
 
   beforeEach(() => {

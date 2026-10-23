@@ -17,13 +17,16 @@ import { aiConfig } from './aiConfig.ts';
 import {
   AiAbandoned,
   AiProviderError,
+  AiQuotaExceeded,
   AiTimeout,
   aiErrorAccounting,
   isAiError,
   isModelAvailabilityFailure,
   isModelSpecificProviderFailure,
 } from './aiErrors.ts';
+import { noteQuotaRefusal, noteQuotaSuccess, quotaBlockRemainingMs, quotaSnapshot } from './quota.ts';
 import { declaresToolSupport } from './modelCapabilities.ts';
+import { clearModelHealth, isModelHealthBlocked, modelHealthBlockRemainingMs } from './modelHealthGate.ts';
 import {
   coolingModels,
   isModelCooling,
@@ -60,6 +63,16 @@ interface ChatParams {
    * money instead of quietly paying for an answer nobody will read.
    */
   signal?: AbortSignal;
+  /**
+   * AI-40 — deliver answer text as the model writes it.
+   *
+   * Supplying this is the ONLY way to turn streaming on: the caller that can show live text is
+   * the caller that asks for it, and every existing caller (and every test) keeps the exact
+   * request it made before. The callback may be invoked several times per turn (a tool round
+   * can precede the final answer) and never with anything that is not going to be part of the
+   * answer's text.
+   */
+  onTextDelta?: (text: string) => void;
 }
 
 /**
@@ -191,6 +204,17 @@ export function systemPrompt(): string {
  */
 const FAILOVER_MIN_REMAINING_MS = 5000;
 
+/**
+ * AI-38 — grace after a CAPPED attempt's slice, in ms.
+ *
+ * The provider's own `timeoutMs` should fire first, which is what makes a capped attempt a known
+ * model-level timeout rather than an unknown hang. This tiny grace is the fallback for a provider
+ * (or a test double) that ignores the hint: the turn still moves on, just a few milliseconds after
+ * the slice instead of exactly at it. It applies ONLY to a capped attempt — an uncapped one is
+ * bounded by the turn deadline itself, which must not be extended.
+ */
+const ATTEMPT_TIMEOUT_GRACE_MS = 50;
+
 function truncate(str: string, max: number): string {
   if (str.length <= max) return str;
   return `${str.slice(0, max - 1)}…`;
@@ -253,7 +277,15 @@ function withBudget<T>(promise: Promise<T>, ms: number, signal?: AbortSignal): P
  * @param {string} params.message     the new user message
  * @returns {Promise<{content:string, model?:string, toolsUsed:string[], usage?:object, iterations:number}>}
  */
-export async function runAiChat({ businessId, userId, role, history = [], message, signal }: ChatParams): Promise<ChatResult> {
+export async function runAiChat({
+  businessId,
+  userId,
+  role,
+  history = [],
+  message,
+  signal,
+  onTextDelta,
+}: ChatParams): Promise<ChatResult> {
   const cfg = aiConfig();
   const provider = selectProvider();
 
@@ -287,6 +319,18 @@ export async function runAiChat({ businessId, userId, role, history = [], messag
   // and "it worked on the fourth model" are different facts about the deployment, and the
   // second one is the reason to change the primary.
   let failovers = 0;
+  // AI-40 — how many characters of answer text have already reached the caller. This is the
+  // one fact failover must respect once streaming is on: text that has been delivered cannot
+  // be taken back, so a second model answering the same question would show the answer twice.
+  // It is counted here rather than at the HTTP layer so the rule lives with the failover it
+  // constrains, and it counts DELIVERED text only — an empty completion emits nothing and
+  // remains retryable exactly as before.
+  let emittedChars = 0;
+  const emitText = (text: string): void => {
+    if (!onTextDelta || !text) return;
+    emittedChars += text.length;
+    onTextDelta(text);
+  };
 
   // AI-5 — the turn's own cost.
   //
@@ -305,6 +349,20 @@ export async function runAiChat({ businessId, userId, role, history = [], messag
   let toolRuns = 0;
 
   /**
+   * AI-36 — the allowance as the last provider response reported it, for the turn line.
+   *
+   * `unknown` is printed rather than a zero or an omission, because those mean different things:
+   * an operator reading `quota=0/50` would conclude a spent account, and one seeing no field at
+   * all cannot tell an unmeasured turn from an older log format. It is a number, never a key.
+   */
+  const quotaLabel = (): string => {
+    const snapshot = quotaSnapshot();
+    if (!snapshot) return 'unknown';
+    const remaining = snapshot.remaining === null ? 'unknown' : String(snapshot.remaining);
+    return snapshot.limit === null ? remaining : `${remaining}/${snapshot.limit}`;
+  };
+
+  /**
    * The turn's one cost line. Emitted from every exit below — including the paths
    * that throw, which is why a failed turn reports what it spent before it died.
    * `outcome` uses the same vocabulary as the error codes the controller returns,
@@ -315,7 +373,7 @@ export async function runAiChat({ businessId, userId, role, history = [], messag
       `[ai] turn outcome=${outcome} total=${Date.now() - turnStartedAt}ms` +
         ` providerMs=${providerMs}ms calls=${providerCalls}` +
         ` toolMs=${toolMs}ms toolRuns=${toolRuns} tools=${[...toolsUsed].join(',') || 'none'}` +
-        ` empty=${emptyResponses} failovers=${failovers}` +
+        ` empty=${emptyResponses} failovers=${failovers} quota=${quotaLabel()}` +
         ` in=${usage?.inputTokens ?? 0} out=${usage?.outputTokens ?? 0}` +
         ` model=${model ?? 'unknown'} iterations=${steps}`,
     );
@@ -326,6 +384,20 @@ export async function runAiChat({ businessId, userId, role, history = [], messag
   // ceiling is stated in one place and cannot be the product of two unrelated
   // knobs. Runs out at any point -> AiTimeout, which the controller maps to 504.
   const deadlineAt = Date.now() + cfg.turnDeadlineMs;
+
+  // AI-36 — a refusal that reported ZERO remaining is the one case where a provider call cannot
+  // teach us anything: the allowance is shared by every free model, so no model, no failover and
+  // no retry can succeed. Answer the 429 the member already needs, now, for the cost of a timer.
+  // The window is short and a success lifts it, so a stale reading cannot refuse service.
+  const quotaBlockedFor = quotaBlockRemainingMs();
+  if (quotaBlockedFor > 0) {
+    console.error(
+      `[ai] quota was reported spent (${Math.ceil(quotaBlockedFor / 1000)}s left on the block)` +
+        ' — failing fast without a provider call',
+    );
+    reportTurn('AI_QUOTA_EXCEEDED');
+    throw new AiQuotaExceeded();
+  }
 
   // AI-29 / AI-30 — WHICH MODEL THIS TURN IS TALKING TO, and which models it may still try.
   //
@@ -425,12 +497,29 @@ export async function runAiChat({ businessId, userId, role, history = [], messag
         .join(', ')}`,
     );
   }
-  const eligibleChain = turnChain.filter((id) => !isModelCooling(id));
+
+  // AI-35 — and a model the PROVIDER reports as not serving is skipped before any request is
+  // spent on it. This is the one signal that costs nothing to obtain and arrives before a member
+  // asks: the endpoint-health read is a GET, run at boot and every watchdog cycle. A mark is
+  // bounded and is cleared by a healthy reading or by an answer, so a stale check cannot remove
+  // a model for good.
+  const healthBlockedNow = turnChain.filter((id) => isModelHealthBlocked(id));
+  if (healthBlockedNow.length > 0) {
+    console.error(
+      `[ai] model unavailable by the provider, skipped: ${healthBlockedNow
+        .map((id) => `${id} (${Math.ceil(modelHealthBlockRemainingMs(id) / 1000)}s left)`)
+        .join(', ')}`,
+    );
+  }
+
+  const eligibleChain = turnChain.filter((id) => !isModelCooling(id) && !isModelHealthBlocked(id));
   if (turnChain.length > 0 && eligibleChain.length === 0) {
-    // Every model this deployment knows is inside a cooldown. Spending a request to prove it
-    // once more is exactly the repeated waiting this feature exists to stop, so the turn ends
-    // here — with the same honest sentence a failed provider call would produce.
-    console.error('[ai] every configured model is cooling down — failing fast without a provider call');
+    // Every model this deployment knows is unavailable — cooling after our own failures, held out
+    // by the provider's health reading, or both. Spending a request to prove it once more is
+    // exactly the repeated waiting these two mechanisms exist to stop, so the turn ends here —
+    // with the same honest sentence a failed provider call would produce.
+    const what = coolingNow.length === turnChain.length ? 'cooling down' : 'unavailable';
+    console.error(`[ai] every configured model is ${what} — failing fast without a provider call`);
     reportTurn('AI_UNAVAILABLE');
     throw new AiProviderError('The AI service is temporarily unavailable. Please try again in a moment.');
   }
@@ -454,9 +543,13 @@ export async function runAiChat({ businessId, userId, role, history = [], messag
    * The budget is read here rather than at the top of the loop so a fallback call gets the
    * time that is actually left — never more than the turn's own deadline.
    */
-  const callProvider = async (): Promise<ProviderResponse> => {
-    const budget = deadlineAt - Date.now();
-    if (budget <= 0) throw new AiTimeout();
+  const callProvider = async (attemptCapMs = 0): Promise<ProviderResponse> => {
+    const remaining = deadlineAt - Date.now();
+    if (remaining <= 0) throw new AiTimeout();
+    // AI-38 — a cap only shortens an attempt that HAS somewhere else to go; it can never spend
+    // more than the turn has left, and the last attempt is called with 0 (no cap).
+    const capped = attemptCapMs > 0 && attemptCapMs < remaining;
+    const budget = capped ? attemptCapMs : remaining;
     const startedAt = Date.now();
     try {
       // AI_TOOL_DEFS is the frozen tool catalog; the provider contract wants the
@@ -471,8 +564,11 @@ export async function runAiChat({ businessId, userId, role, history = [], messag
           timeoutMs: budget,
           signal,
           ...(currentModel ? { model: currentModel } : {}),
+          // AI-40 — streaming is requested ONLY when someone is listening. A provider that
+          // does not support it ignores these and answers whole, and the turn is unchanged.
+          ...(onTextDelta ? { stream: true, onTextDelta: emitText } : {}),
         }),
-        budget,
+        capped ? budget + ATTEMPT_TIMEOUT_GRACE_MS : budget,
         signal,
       );
     } finally {
@@ -499,26 +595,60 @@ export async function runAiChat({ businessId, userId, role, history = [], messag
    * walk continues FORWARD through the chain and nowhere else.
    */
   let walkStarted = false;
+
+  /**
+   * AI-38 — did this attempt expire because of its own slice?
+   *
+   * That is a fact about the MODEL (it produced nothing while an alternative existed), which is
+   * why it is failover-eligible. A network failure is not: another model would travel the same
+   * broken path, and that rule is unchanged whether the cap is on or off.
+   */
+  const attemptTimedOut = (err: unknown, capped: boolean): boolean =>
+    capped && (err instanceof AiTimeout || (err instanceof AiProviderError && err.kind === 'timeout'));
+
+  /** A reason for the failover line that exists even when no HTTP status does. */
+  const failureReason = (err: unknown): string => {
+    if (err instanceof AiProviderError) {
+      if (typeof err.status === 'number') return `HTTP ${err.status}`;
+      if (err.kind === 'timeout') return 'attempt timeout';
+      if (err.kind) return err.kind;
+    }
+    if (err instanceof AiTimeout) return 'attempt timeout';
+    return 'error';
+  };
+
   const completeWithFailover = async (): Promise<ProviderResponse> => {
     const attempted = currentModel ?? primaryModel;
+    // The first attempt gets a slice only when there is a candidate behind it (AI-38).
+    const attemptCap = cfg.attemptMaxMs > 0 && walkRemaining.length > 0 ? cfg.attemptMaxMs : 0;
     try {
-      const response = await callProvider();
+      const response = await callProvider(attemptCap);
+      // AI-36 — a 2xx proves the allowance is available, whether or not it carried content, so it
+      // records the reading and lifts any fail-fast window a previous refusal set.
+      noteQuotaSuccess(response.quota);
       // AI-30 — a usable 2xx is the only evidence that a model is healthy, so it is the only
       // thing that clears a failure streak. A half-open trial that succeeds closes the breaker
       // here. AI-31 — the same event promotes a model that is serving while the active is
       // cooling, so the next request starts with the model that just proved it works.
       if (hasUsableContent(response)) {
-        if (attempted) recordModelSuccess(attempted);
+        if (attempted) {
+          recordModelSuccess(attempted);
+          // AI-35 — an answer is the freshest evidence there is. It clears a mark set while this
+          // turn was already in flight, so a stale reading cannot outlive the model proving it wrong.
+          clearModelHealth(attempted);
+        }
         maybePromote(attempted);
       }
       return response;
     } catch (err) {
+      const timedOut = attemptTimedOut(err, attemptCap > 0);
       // AI-30 / AI-31 — the BREAKER counts availability failures: a model-specific
-      // status, and a classified transport failure (network, timeout, unparseable body).
-      // Quota, auth and bad-request failures are still not evidence about this model and
-      // never make a healthy model's next turn skip it. A classified transport failure
-      // counts but does not fail over — the throw below is unchanged for it.
-      if (attempted && isModelAvailabilityFailure(err)) {
+      // status, a classified transport failure (network, timeout, unparseable body), and (AI-38)
+      // an attempt that missed its own slice while another candidate existed. Quota, auth and
+      // bad-request failures are still not evidence about this model and never make a healthy
+      // model's next turn skip it. A transport failure that is NOT a slice expiry still counts
+      // but does not fail over — the throw below is unchanged for it.
+      if (attempted && (isModelAvailabilityFailure(err) || timedOut)) {
         const outcome = recordModelFailure(attempted, Date.now(), {
           threshold: cfg.modelFailureThreshold,
           cooldownMs: cfg.modelCooldownMs,
@@ -530,7 +660,13 @@ export async function runAiChat({ businessId, userId, role, history = [], messag
           );
         }
       }
-      if (!isModelSpecificProviderFailure(err)) throw err;
+      // AI-40 — once answer text has reached the caller, this turn has ONE model. A second
+      // model would answer the same question again, and the member would read both answers
+      // glued together with no way to tell which one is real. The failure is still recorded
+      // above (so the breaker and the promotion see it); the turn simply ends here.
+      if (emittedChars > 0) throw err;
+
+      if (!isModelSpecificProviderFailure(err) && !timedOut) throw err;
 
       // Already walked this turn: a later tool round failing on the model that answered is
       // final. Walking again would re-pay every attempt on every round of the same turn.
@@ -543,12 +679,18 @@ export async function runAiChat({ businessId, userId, role, history = [], messag
       // repeating the primary — a log that named the primary on every line would make a
       // three-model walk read as if the same model were tried three times.
       let from = attempted ?? 'unknown';
-      for (const candidate of walkRemaining) {
+      for (const [candidateIndex, candidate] of walkRemaining.entries()) {
         // AI-30 — a candidate inside its cooldown is not worth a request. The primary is
         // skipped before this loop (it would not be this turn's start model), so this is the
         // normal case for a fallback that has been failing too.
         if (isModelCooling(candidate)) {
           console.error(`[ai] failover skipped (cooling down): ${candidate}`);
+          continue;
+        }
+        // AI-35 — a candidate the provider reports as unavailable is not worth a request here
+        // either; the walk exists to find a model that is serving, not to re-check a known one.
+        if (isModelHealthBlocked(candidate)) {
+          console.error(`[ai] failover skipped (reported unavailable): ${candidate}`);
           continue;
         }
         const remaining = deadlineAt - Date.now();
@@ -562,23 +704,30 @@ export async function runAiChat({ businessId, userId, role, history = [], messag
         // no credential, no prompt and no upstream body is ever on it.
         console.error(
           `[ai] failover attempt=${failovers} model=${from} -> ${candidate}` +
-            ` reason=HTTP ${(lastError as AiProviderError).status} remaining=${remaining}ms`,
+            ` reason=${failureReason(lastError)} remaining=${remaining}ms`,
         );
         from = candidate;
+        // AI-38 — only a candidate with ANOTHER behind it gets a slice; the last one keeps
+        // everything left, so a slow-but-working answer is never cut short with nowhere to go.
+        const candidateCap =
+          cfg.attemptMaxMs > 0 && candidateIndex < walkRemaining.length - 1 ? cfg.attemptMaxMs : 0;
         try {
-          const response = await callProvider();
+          const response = await callProvider(candidateCap);
+          noteQuotaSuccess(response.quota);
           if (hasUsableContent(response)) {
             recordModelSuccess(candidate);
+            clearModelHealth(candidate);
             maybePromote(candidate);
           }
           return response;
         } catch (next) {
           // A refusal that is NOT about the model ends the walk: quota is shared by every
           // free model (so the next candidate would be refused identically), and a key or
-          // request problem travels with us. Only a model-specific failure moves on — a
-          // classified transport failure on a candidate counts toward its own breaker and
-          // ends the walk, because it would travel with the next candidate too.
-          if (isModelAvailabilityFailure(next)) {
+          // request problem travels with us. Only a model-specific failure (or AI-38's slice
+          // expiry) moves on — a classified transport failure on a candidate counts toward its
+          // own breaker and ends the walk, because it would travel with the next candidate too.
+          const nextTimedOut = attemptTimedOut(next, candidateCap > 0);
+          if (isModelAvailabilityFailure(next) || nextTimedOut) {
             const outcome = recordModelFailure(candidate, Date.now(), {
               threshold: cfg.modelFailureThreshold,
               cooldownMs: cfg.modelCooldownMs,
@@ -590,7 +739,10 @@ export async function runAiChat({ businessId, userId, role, history = [], messag
               );
             }
           }
-          if (!isModelSpecificProviderFailure(next)) throw next;
+          // AI-40 — a candidate that had already started answering is the last candidate
+          // this turn may use, for the same reason the first one is: the text is on screen.
+          if (emittedChars > 0) throw next;
+          if (!isModelSpecificProviderFailure(next) && !nextTimedOut) throw next;
           lastError = next;
         }
       }
@@ -616,6 +768,12 @@ export async function runAiChat({ businessId, userId, role, history = [], messag
       response = await completeWithFailover();
     } catch (err) {
       if (isAiError(err)) {
+        // AI-36 — a quota refusal may carry the allowance reading. Only a ZERO starts the bounded
+        // fail-fast window; a refusal without a reading keeps AI-6's one-request behaviour, which
+        // is what every existing case and stub relies on.
+        if (err instanceof AiQuotaExceeded) {
+          noteQuotaRefusal(err.quota, { blockMs: cfg.quotaBlockMs });
+        }
         // A failure can still know what it cost. `AiOutputLimit` is raised at the one
         // place where the model and the reported token spend are already parsed, and a
         // spent output budget is the turn whose cost matters most — it used to reach

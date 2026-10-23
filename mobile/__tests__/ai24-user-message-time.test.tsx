@@ -5,6 +5,7 @@ import AiChat, { MessageBubble, toRow } from '../components/AiChat';
 import type { ChatRow } from '../components/AiChat';
 import { aiApi } from '../lib/api';
 import { useSession } from '../lib/auth';
+import { ApiError } from '../lib/client';
 import { ThemeProvider } from '../lib/theme-context';
 
 jest.mock('expo-router', () => ({
@@ -17,15 +18,20 @@ jest.mock('../lib/auth', () => ({
 }));
 
 jest.mock('../lib/api', () => ({
-  aiApi: { chat: jest.fn(), messages: jest.fn() },
+  aiApi: { chat: jest.fn(), chatStream: jest.fn(), messages: jest.fn() },
 }));
 
 const chat = aiApi.chat as jest.Mock;
+const chatStream = aiApi.chatStream as jest.Mock;
 const messages = aiApi.messages as jest.Mock;
 const mockedUseSession = useSession as jest.Mock;
 
 beforeEach(() => {
   jest.clearAllMocks();
+  // AI-40 — this suite is about the STORED turn's clock (AI-24), which is the same on both
+  // transports. The stream is made unavailable so the existing cases keep exercising the
+  // ordinary route they were written for, with one less moving part.
+  chatStream.mockRejectedValue(new ApiError(404, null, 'Not found'));
   messages.mockResolvedValue({ items: [], total: 0 });
   mockedUseSession.mockReturnValue({
     user: { id: 'u1', name: 'Test Member' },

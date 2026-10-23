@@ -14,8 +14,9 @@
  */
 
 import { aiConfig } from '../aiConfig.ts';
-import { AiNotConfigured, AiOutputLimit } from '../aiErrors.ts';
-import { postJson, type UpstreamJsonBody } from './http.ts';
+import { AiNotConfigured, AiOutputLimit, AiProviderError } from '../aiErrors.ts';
+import type { QuotaInfo } from '../quota.ts';
+import { postJson, postSse, type SseEvent, type UpstreamJsonBody } from './http.ts';
 import type {
   AIProvider,
   ProviderMessage,
@@ -207,6 +208,166 @@ export function parseAnthropicResponse(data: AnthropicResponse, requestedModel =
 }
 
 /**
+ * AI-40 — one streamed Anthropic Messages call, assembled into the SAME response shape the JSON
+ * path produces.
+ *
+ * WHY ASSEMBLE RATHER THAN PARSE AS IT GOES. `parseAnthropicResponse` already owns every rule
+ * that matters after the body arrives — which stop reasons are truncation, which are a spent
+ * output budget, how usage is reported, what an empty completion is. Rebuilding that for the
+ * stream would be a second copy of those rules, and the two would drift. So the events are
+ * folded back into the body shape the parser already understands, and the parser runs once, at
+ * the end. A streamed turn and an unstreamed turn are therefore indistinguishable downstream.
+ *
+ * TOOL CALLS ARE ASSEMBLED TOO. Anthropic sends a tool call as a start block plus a series of
+ * `input_json_delta` fragments — the arguments as a JSON STRING, in pieces. They are joined and
+ * parsed once the block completes; malformed JSON (a cut-off stream at the output cap) becomes
+ * `{}` rather than a thrown turn, so the tool layer reports the missing arguments to the model
+ * and the turn continues. Nothing is executed from a partial argument set.
+ *
+ * `progress.emitted` is how the caller decides whether a failure may be retried unstreamed: text
+ * already delivered cannot be un-delivered, so a retry after it would show the answer twice.
+ */
+interface StreamProgress {
+  emitted: number;
+}
+
+interface StreamTarget {
+  url: string;
+  providerName: string;
+  headers: Record<string, string>;
+  requestBody: UpstreamJsonBody;
+  timeoutMs: number;
+  signal?: AbortSignal;
+  model: string;
+  onTextDelta: (text: string) => void;
+}
+
+type StreamBlock =
+  | { type: 'text'; text: string }
+  | { type: 'tool_use'; id: string; name: string; json: string };
+
+/** Tool arguments that arrived in pieces; an unparseable set is empty, never a thrown turn. */
+function parseToolInput(raw: string): UpstreamJsonBody {
+  if (!raw.trim()) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as UpstreamJsonBody) : {};
+  } catch {
+    return {};
+  }
+}
+
+/** One folded event stream -> the body `parseAnthropicResponse` expects. */
+async function readAnthropicStream(
+  target: StreamTarget,
+  progress: StreamProgress,
+): Promise<{ data: AnthropicResponse; quota: QuotaInfo | null }> {
+  const blocks = new Map<number, StreamBlock>();
+  let reportedModel = target.model;
+  let stopReason: string | null = null;
+  const usage = { inputTokens: 0, outputTokens: 0 };
+
+  const handle = ({ event, data }: SseEvent): void => {
+    // Some gateways terminate with an OpenAI-style sentinel even on an Anthropic wire.
+    if (data === '[DONE]') return;
+    let payload: UpstreamJsonBody;
+    try {
+      const parsed = JSON.parse(data);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return;
+      payload = parsed as UpstreamJsonBody;
+    } catch {
+      return;
+    }
+    const type = typeof payload.type === 'string' ? payload.type : event;
+    const index = typeof payload.index === 'number' ? payload.index : 0;
+
+    if (type === 'message_start') {
+      const message = payload.message && typeof payload.message === 'object' ? (payload.message as UpstreamJsonBody) : null;
+      if (message && typeof message.model === 'string' && message.model) reportedModel = message.model;
+      const startUsage = message?.usage && typeof message.usage === 'object' ? (message.usage as UpstreamJsonBody) : null;
+      if (startUsage && typeof startUsage.input_tokens === 'number') usage.inputTokens = startUsage.input_tokens;
+      return;
+    }
+
+    if (type === 'content_block_start') {
+      const block = payload.content_block && typeof payload.content_block === 'object' ? (payload.content_block as UpstreamJsonBody) : {};
+      if (block.type === 'tool_use') {
+        blocks.set(index, { type: 'tool_use', id: String(block.id ?? ''), name: String(block.name ?? ''), json: '' });
+      } else {
+        const initial = typeof block.text === 'string' ? block.text : '';
+        blocks.set(index, { type: 'text', text: initial });
+        if (initial) {
+          progress.emitted += initial.length;
+          target.onTextDelta(initial);
+        }
+      }
+      return;
+    }
+
+    if (type === 'content_block_delta') {
+      const delta = payload.delta && typeof payload.delta === 'object' ? (payload.delta as UpstreamJsonBody) : {};
+      const block = blocks.get(index);
+      if (delta.type === 'text_delta') {
+        const text = typeof delta.text === 'string' ? delta.text : '';
+        if (!text) return;
+        if (block && block.type === 'text') block.text += text;
+        else blocks.set(index, { type: 'text', text });
+        progress.emitted += text.length;
+        target.onTextDelta(text);
+        return;
+      }
+      if (delta.type === 'input_json_delta' && block && block.type === 'tool_use') {
+        block.json += typeof delta.partial_json === 'string' ? delta.partial_json : '';
+      }
+      return;
+    }
+
+    if (type === 'message_delta') {
+      const delta = payload.delta && typeof payload.delta === 'object' ? (payload.delta as UpstreamJsonBody) : null;
+      if (delta && typeof delta.stop_reason === 'string') stopReason = delta.stop_reason;
+      const endUsage = payload.usage && typeof payload.usage === 'object' ? (payload.usage as UpstreamJsonBody) : null;
+      if (endUsage && typeof endUsage.output_tokens === 'number') usage.outputTokens = endUsage.output_tokens;
+      return;
+    }
+
+    if (type === 'error') {
+      // A mid-stream refusal. The status, when the gateway sends one, is what lets the turn loop
+      // tell a broken model from a broken request — the same classification the JSON path gets.
+      const error = payload.error && typeof payload.error === 'object' ? (payload.error as UpstreamJsonBody) : {};
+      const status = typeof error.status === 'number' ? error.status : undefined;
+      throw new AiProviderError('The AI service returned an error. Please try again.', undefined, status);
+    }
+  };
+
+  const { quota } = await postSse({
+    url: target.url,
+    providerName: target.providerName,
+    headers: target.headers,
+    body: { ...target.requestBody, stream: true },
+    timeoutMs: target.timeoutMs,
+    signal: target.signal,
+    onEvent: handle,
+  });
+
+  const content = [...blocks.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([, block]) =>
+      block.type === 'text'
+        ? { type: 'text', text: block.text }
+        : { type: 'tool_use', id: block.id, name: block.name, input: parseToolInput(block.json) },
+    );
+
+  const data = {
+    model: reportedModel,
+    content,
+    stop_reason: stopReason ?? undefined,
+    usage: { input_tokens: usage.inputTokens, output_tokens: usage.outputTokens },
+  } as unknown as AnthropicResponse;
+
+  return { data, quota };
+}
+
+/**
  * The aiConfig() keys whose value is a STRING — the only ones that can hold a model name.
  *
  * AI-12 — found by `tsc`, not by a test. With `modelKey: keyof ReturnType<typeof aiConfig>`,
@@ -290,66 +451,122 @@ export function createAnthropicCompatibleProvider(opts: AnthropicCompatibleOptio
       return aiConfig()[modelKey] || defaultModel;
     },
 
-    async complete({ system, messages, tools, timeoutMs, signal, model: requestedModel }) {
+    async complete({
+      system,
+      messages,
+      tools,
+      timeoutMs,
+      signal,
+      model: requestedModel,
+      stream,
+      onTextDelta,
+    }) {
       const cfg = aiConfig();
       // AI-29 — a per-request override, used by the turn loop's failover. It stays a
       // parameter rather than a second environment variable so the request itself
       // records which model answered, and the parsed response reports that model.
       const model = requestedModel || cfg[modelKey] || defaultModel;
-      const data = await postJson({
+      // The turn's remaining budget when the orchestrator supplied one, so a
+      // call can never outlive the turn's single deadline (AI-1).
+      const budget = timeoutMs ?? cfg.requestTimeoutMs;
+      const requestBody = {
+        model,
+        max_tokens: cfg.maxOutputTokens,
+        system,
+        messages: toAnthropicMessages(messages),
+        tools: toAnthropicTools(tools),
+      };
+      const requestHeaders = { ...(authHeaders ? authHeaders(apiKey) : {}), ...extraHeaders };
+
+      /**
+       * One parsed body -> the neutral response, logged the same way on BOTH paths.
+       *
+       * Kept as one function so a streamed answer cannot skip the empty-completion warning
+       * (AI-12) or report a spent output budget differently from an unstreamed one (AI-10).
+       */
+      const finish = (body: AnthropicResponse, quota: QuotaInfo | null): ProviderResponse => {
+        try {
+          const parsed = parseAnthropicResponse(body, model);
+          // AI-36 — the allowance rides on the successful response so the turn loop can report it
+          // and lift a fail-fast window. It is attached AFTER parsing, so the parser's contract and
+          // its diagnostics (which print the body's field names) are untouched.
+          const withQuota = quota ? { ...parsed, quota } : parsed;
+          // AI-12 — and an empty completion is named ONCE PER OCCURRENCE, before it is
+          // returned, because the AI-2 retry means the turn-level warning appears only when
+          // a turn GIVES UP: an empty response the retry rescues used to be invisible, and
+          // the failure rate could not be counted, let alone explained. The shape is printed
+          // and never the body, for the reason `emptyResponseShape` gives.
+          if (!parsed.text && parsed.toolCalls.length === 0) {
+            console.warn(
+              `[ai:${name}] empty completion (model=${model}, ${emptyResponseShape(body)}) — the provider answered 2xx with neither text nor a tool call; the turn retries once, then degrades (AI-2)`
+            );
+          }
+          return withQuota;
+        } catch (err) {
+          if (err instanceof AiOutputLimit) {
+            console.warn(
+              `[ai:${name}] output limit reached with nothing usable (model=${model},` +
+                ` maxTokens=${cfg.maxOutputTokens}, stop=max_tokens) — the model spent its` +
+                ' whole output budget before answering'
+            );
+          }
+          throw err;
+        }
+      };
+
+      // AI-40 — the streamed path, when the caller asked for live text. It is deliberately
+      // OPTIONAL rather than the only way in: the deployed gateway is a free tier whose models
+      // vary in what they support, so a provider that answers without streaming falls back to
+      // the ordinary request for the SAME call. That fallback is allowed only before any text
+      // has been delivered — after that a retry would show the answer twice — and only for the
+      // one failure that means "this was not a stream" (`invalid_response`).
+      if (stream && onTextDelta) {
+        const progress: StreamProgress = { emitted: 0 };
+        try {
+          const streamed = await readAnthropicStream(
+            {
+              url: messagesUrl,
+              providerName: name,
+              headers: requestHeaders,
+              requestBody,
+              timeoutMs: budget,
+              signal,
+              model,
+              onTextDelta,
+            },
+            progress,
+          );
+          return finish(streamed.data, streamed.quota);
+        } catch (err) {
+          const answeredUnstreamed =
+            err instanceof AiProviderError && err.kind === 'invalid_response' && progress.emitted === 0;
+          if (!answeredUnstreamed) throw err;
+          console.error(
+            `[ai:${name}] the provider ignored stream=true (model=${model}); retrying the same call unstreamed`,
+          );
+        }
+      }
+
+      const { data, quota } = await postJson({
         url: messagesUrl,
         providerName: name,
-        // The turn's remaining budget when the orchestrator supplied one, so a
-        // call can never outlive the turn's single deadline (AI-1).
-        timeoutMs: timeoutMs ?? cfg.requestTimeoutMs,
+        timeoutMs: budget,
         signal,
-        headers: { ...(authHeaders ? authHeaders(apiKey) : {}), ...extraHeaders },
-        body: {
-          model,
-          max_tokens: cfg.maxOutputTokens,
-          system,
-          messages: toAnthropicMessages(messages),
-          tools: toAnthropicTools(tools),
-        },
+        headers: requestHeaders,
+        body: requestBody,
       });
       // AI-10 — the one failure on this path that used to leave NO trace. Every sibling
       // in providers/http.ts logs before it throws; this shape is a 2xx, so it had no
       // status line either, and the only evidence of the Q4 failure was a missing answer
-      // — which is why identifying it took elimination (§27BG). Logged HERE rather than
-      // in the parser because this is where the cap is known, and the cap is the number
+      // — which is why identifying it took elimination (§27BG). Logged in `finish` rather
+      // than in the parser because this is where the cap is known, and the cap is the number
       // an operator acts on: a model that consistently spends `maxTokens` without
       // answering is a cap that is too small (or a question that needs narrowing).
-      try {
-        // AI-12 — the model the request names is the fallback for a body that omits one
-        // (see `parseAnthropicResponse`): a provider label in a model column answers the
-        // wrong question, and it hid the model on every failing turn in the record.
-        const parsed = parseAnthropicResponse(data as AnthropicResponse, model);
-        // AI-12 — and an empty completion is named ONCE PER OCCURRENCE, before it is
-        // returned, because the AI-2 retry means the turn-level warning appears only when
-        // a turn GIVES UP: an empty response the retry rescues used to be invisible, and
-        // the failure rate could not be counted, let alone explained. The shape is printed
-        // and never the body, for the reason `emptyResponseShape` gives.
-        if (!parsed.text && parsed.toolCalls.length === 0) {
-          console.warn(
-            // "the provider", not "the gateway": this factory is shared with a
-            // first-party Anthropic deployment, and naming the wrong component is the
-            // defect class AI-10 exists to avoid.
-            `[ai:${name}] empty completion (model=${model}, ${emptyResponseShape(
-              data as AnthropicResponse
-            )}) — the provider answered 2xx with neither text nor a tool call; the turn retries once, then degrades (AI-2)`
-          );
-        }
-        return parsed;
-      } catch (err) {
-        if (err instanceof AiOutputLimit) {
-          console.warn(
-            `[ai:${name}] output limit reached with nothing usable (model=${model},` +
-              ` maxTokens=${cfg.maxOutputTokens}, stop=max_tokens) — the model spent its` +
-              ' whole output budget before answering'
-          );
-        }
-        throw err;
-      }
+      //
+      // AI-12 — the model the request names is the fallback for a body that omits one (see
+      // `parseAnthropicResponse`): a provider label in a model column answers the wrong
+      // question, and it hid the model on every failing turn in the record.
+      return finish(data as AnthropicResponse, quota);
     },
   };
 }

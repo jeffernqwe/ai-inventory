@@ -545,6 +545,47 @@ normal temporary-unavailability message without spending a request. A quota refu
 never treated as a model outage — the daily free allowance is shared by every model, so switching
 cannot help and the turn says so.
 
+### What happens before a request (AI-35–AI-38)
+
+Four mechanisms sit in front of the failover above. All of them use data the provider already
+publishes for free, and none changes what the assistant *answers* — only which model is asked and
+how long it is allowed to take.
+
+**A model the provider says is down is not tried first.** The same endpoint-health read the
+watchdog uses now also decides selection: a model whose reading is **unavailable** is skipped before
+any request is spent on it, at boot and again on every watchdog cycle. Only `unavailable` does
+this — `degraded` is still serving, and `unknown` is a check that could not run, never a verdict.
+The mark lasts until the next reading; an answer clears it at once. If a reading would remove
+**every** model, the configured primary is deliberately released so the assistant always has one
+attempt. The line that says so is `[ai] model unavailable by the provider, skipped: …`.
+
+**The allowance is visible, and an exhausted one is not re-tested every turn.** Every response
+carries the provider's remaining-request headers, so the turn line reports
+`quota=<remaining>/<limit>` (or `quota=unknown` when none is published). A refusal that reports
+**zero** remaining stops further provider calls for `AI_QUOTA_BLOCK_MS` (default 30 s) and answers
+the normal 429 immediately; a success lifts it at once. A 429 **without** that reading changes
+nothing — the old one-request-per-turn behaviour stays.
+
+**A promotion ends by itself.** The two checks that followed a promotion used to be the only way
+back: a restart, or the promoted model failing. Now the watchdog ends the promotion after **two
+consecutive** healthy readings of the configured model (one reading is a sample, two is a
+recovery), clearing its health mark at the same moment and logging
+`[ai:watchdog] the configured model is healthy again … returning to it: <id>`. One reading is
+deliberately not enough: that is the churn AI-31 exists to prevent.
+
+**Optional: a per-attempt slice.** `AI_ATTEMPT_MAX_MS` (default **0 = off**) bounds a single model
+attempt while another candidate remains, so a model that hangs instead of refusing cannot consume
+the whole turn. The **last** attempt always keeps everything left, so a slow-but-working answer is
+never cut short when there is nowhere else to go. Set it **above** the slowest legitimate answer you
+have measured — 25 000 ms is the documented starting point for this tier (5.3–19.4 s measured) —
+and re-measure after changing models.
+
+The watchdog's per-run line also states the live state, so none of this needs a log hunt:
+
+```text
+[ai:watchdog] checked 5 model(s): 3 ok, 1 degraded, 1 unavailable, 0 unknown; active=<promoted> (configured=<primary>) cooling=<ids|none> quota=12/50
+```
+
 ### What watches the models (AI-34)
 
 Nothing used to notice a dead model until a member asked a question. The **model-health watchdog**

@@ -169,8 +169,12 @@ unitSuite('AI-6 an upstream 429 is a limit, not an outage (DB-free)', () => {
     // about an error that arrived before the request did. This case asserts the
     // request genuinely landed, and that a healthy 200 is still returned as data
     // rather than being classified as a failure.
-    const body = await call(200, '{"ok":true}');
-    assert.deepEqual(body, { ok: true });
+    // AI-36 — `postJson` now returns `{ data, quota }`: the allowance the response published
+    // rides beside the body so the turn can report it. A stub that publishes no header is an
+    // absence (`quota: null`), never a zero.
+    const { data, quota } = await call(200, '{"ok":true}');
+    assert.deepEqual(data, { ok: true });
+    assert.equal(quota, null);
     assert.equal(hits, 1, 'exactly one request must have reached the stub gateway');
     assert.equal(errLines.length, 0, 'a healthy response logs no error');
   });

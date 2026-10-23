@@ -21,6 +21,7 @@
  */
 
 import { AiNotConfigured } from '../aiErrors.ts';
+import type { QuotaInfo } from '../quota.ts';
 import { createOpenrouterProvider } from './openrouterProvider.ts';
 
 /**
@@ -85,6 +86,23 @@ export interface ProviderRequest {
    * answer nobody will read.
    */
   signal?: AbortSignal;
+  /**
+   * AI-40 — ask the provider to deliver the answer while it is being written.
+   *
+   * OPTIONAL BY CONTRACT. A provider that cannot stream simply ignores both fields and returns
+   * the whole answer, which is exactly what every provider did before streaming existed — so
+   * this is an optimisation a provider opts into, not a second way for a turn to fail.
+   */
+  stream?: boolean;
+  /**
+   * AI-40 — one piece of answer text, in arrival order.
+   *
+   * Only called when `stream` is true. Text passed here is DISPLAY ONLY: the turn's stored
+   * answer is still the response's `text`, which may differ (the server rewrites status
+   * constants and trims a cut-off unit), and the client replaces what it rendered with the
+   * final message when the turn completes. Nothing here is persisted as it arrives.
+   */
+  onTextDelta?: (text: string) => void;
 }
 
 /** Token accounting as the provider reported it, or null when it reported none. */
@@ -99,6 +117,14 @@ export interface ProviderResponse {
   text: string;
   toolCalls: ToolCall[];
   usage: ProviderUsage | null;
+  /**
+   * AI-36 — the account allowance the response published, when it published one.
+   *
+   * Optional because a provider may not meter requests, and because a test double does not
+   * have to imitate a header. The turn loop records it and reports it; absence is never read
+   * as zero.
+   */
+  quota?: QuotaInfo | null;
   /**
    * AI-8 — whether the provider STOPPED because it reached the output cap.
    *

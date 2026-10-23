@@ -18922,7 +18922,7 @@ never started, no retry after text was shown, quota/session/stop not treated as 
 and the idle/abort/timeout settlement) — with `ai9-assistant-stop` and `ai24-user-message-time`
 updated for the new transport and still asserting what they existed to assert. Server `test:unit`
 **1330 / 1276 pass / 0 fail / 54 skipped**, `test:db` **879 / 786 pass / 0 fail / 93 skipped**,
-`tsc`/`eslint`/both module-graph checks clean (498 files) and the secret guard clean (22 controls);
+`tsc`/`eslint`/both module-graph checks clean (499 files) and the secret guard clean (22 controls);
 mobile **86 suites / 1042 tests / 0 failures**, `tsc` and `eslint` clean.
 
 **Device-verified on the OPPO CPH1969, 2026-10-23** against the local server over `adb reverse`, on

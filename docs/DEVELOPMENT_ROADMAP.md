@@ -19167,6 +19167,27 @@ was **not** driven — it needs a live code and the probe address has no inbox �
 suites; the verify-email screen's identical path was not reached on the device either. Evidence and
 the run's limits: `docs/evidence/device-runs/2026-10-23-auth-polish/README.md`. iOS unverified.
 
+**Device-measured 2026-10-24 — the success half, and what is still open.** The run above could only
+type a *wrong* code, because nothing can read a probe address's inbox. This one had the app make the
+request (its own Forgot password screen, so the real route minted the code) and then read the mailed
+digits back out of the stored keyed digest with the server's own `hashResetCode` and pepper, so the
+value typed on the phone was **the value that was sent**. Typing those six digits **opened the
+password step with no press**: *Set a new password — Your code was verified for
+auth.probe.…@example.com* — a step reached this way twice in the run (frames at 12:32 and
+12:43). The reset screen still named the inbox and counted *Code expires in 6m 27s* down to
+*5m 6s*; the password step reported *28 characters —
+within the limit.* while it was typed and put *Confirm password is required* **under the empty
+confirmation** without submitting; and the credential that code authorized then signed in **on the
+phone** and rendered the tenant's dashboard. Two limits stay recorded rather than papered over: the
+password step's own button was **not** carried to *Password changed* on the device (the confirmation
+was applied through the route pair afterwards; the button itself was device-measured on 2026-10-22,
+§27EI, and is suite-backed), and the **verify-email** screen's identical auto-verify was still not
+reached — it needs an unverified identity carried through Create Account's verification screen, and
+remains suite-backed (`phase16-verify-email-screen.test.tsx`). Evidence, the cleanup re-count (0
+users, 0 businesses, 0 sessions, 0 audit rows, 0 challenges) and two harness notes (typed text goes
+to whatever has focus; the dev build lost Metro and needed a reload):
+`docs/evidence/device-runs/2026-10-24-auth-auto-verify/README.md`. iOS unverified.
+
 **Still open** (recommended, not started): a per-user session cap, a new-device sign-in email, and
 invitation-based onboarding as the prerequisite for retiring legacy password login.
 

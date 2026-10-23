@@ -18951,6 +18951,20 @@ in between is not healthy") rather than live, because a live demonstration needs
 progress plus two 30-minute watchdog cycles — a real cadence this session could not compress
 without faking the clock the suite already injects.
 
+**Production (deployed 2026-10-23, commit `3294387`).** Render serves the commit that
+`/api/health` names, with `environment: production`, the database connected, **66 responses and
+zero server errors** (no 5xx) after the deploy. `POST /api/ai/chat` and `GET
+/api/ai/conversations` without a session answer **401 `AUTH_REQUIRED` as JSON — including when the
+request sends `Accept: text/event-stream`**, which is the property that matters: streaming cannot be
+reached before `requireAuth`, no SSE header is written on a refused request, and the new code adds
+no way past the gate. **An authenticated streamed turn through Render was deliberately not
+measured** (owner decision, same day): it needs a production login, and creating a production
+account for one test was judged a worse trade than leaving the setting unverified. The headers that
+keep a proxy from buffering (`no-cache, no-transform`, `X-Accel-Buffering: no`, an explicit flush)
+are verified on the local server; the production half is recorded as **unverified** rather than
+assumed, and the owner's next real turn is what will confirm it. CI green on `main` (workflow `ci`,
+run `39951211533`).
+
 **Files.** New: `mobile/lib/sse.ts`, `server/test/AI40-ai-streaming.test.mjs`,
 `mobile/__tests__/ai40-sse-parser.test.ts`, `mobile/__tests__/ai40-assistant-streaming.test.tsx`,
 `mobile/__tests__/ai40-chat-stream-transport.test.ts`, `docs/evidence/ai-streaming-2026-10-23/`.

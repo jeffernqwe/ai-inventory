@@ -13,6 +13,8 @@
 import mongoose from 'mongoose';
 
 import { DATABASE_NAMES, classifyNodeEnv, isRecognisedNodeEnv } from '../../src/config/env.ts';
+import AIConversation from '../../src/models/aiConversation.model.ts';
+import AIMessage from '../../src/models/aiMessage.model.ts';
 import Business from '../../src/models/business.model.ts';
 import Category from '../../src/models/category.model.ts';
 import Inventory from '../../src/models/inventory.model.ts';
@@ -173,6 +175,21 @@ export async function clearTenantData(businessIds) {
   const filter = { businessId: { $in: ids } };
   const counts = {};
   let removed = 0;
+
+  // AI-40 (found 2026-10-23) — the assistant's history belongs to the tenant too, and it
+  // cannot be removed by the list below: a CONVERSATION carries `businessId`, but a
+  // MESSAGE carries only `conversationId`. A production demo teardown therefore printed
+  // "leftovers: 0 — verified over every tenant collection" while three conversations and
+  // eight messages from a device run stayed behind. Resolve the conversations first, then
+  // delete their messages, then the conversations — child before parent, like the list.
+  const conversationIds = await AIConversation.find(filter).distinct('_id');
+  const messages = await AIMessage.deleteMany({ conversationId: { $in: conversationIds } });
+  counts.ai_messages = messages.deletedCount ?? 0;
+  removed += counts.ai_messages;
+  const conversations = await AIConversation.deleteMany(filter);
+  counts.ai_conversations = conversations.deletedCount ?? 0;
+  removed += counts.ai_conversations;
+
   for (const [name, model] of TENANT_DATA_COLLECTIONS) {
     const res = await model.deleteMany(filter);
     counts[name] = res.deletedCount ?? 0;
@@ -216,6 +233,11 @@ export async function countTenantLeftovers(businessIds) {
   for (const [, model] of TENANT_DATA_COLLECTIONS) {
     total += await model.countDocuments(filter);
   }
+  // Same two-step as the removal, so a collection that is removed is necessarily also
+  // verified — including the messages, which are only reachable through their conversation.
+  const conversationIds = await AIConversation.find(filter).distinct('_id');
+  total += conversationIds.length;
+  total += await AIMessage.countDocuments({ conversationId: { $in: conversationIds } });
   total += await User.countDocuments(filter);
   return total;
 }

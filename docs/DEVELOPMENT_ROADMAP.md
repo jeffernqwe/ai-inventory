@@ -18991,6 +18991,24 @@ and the final frame the whole answer with *Read: Stock movements*. Stored **once
 visible to the client (Cloudflare answers first); it is a proxy hint, delivery was incremental, and
 nothing was changed for it. CI green on `main` (workflow `ci`, run `39951211533`).
 
+**A teardown defect found while cleaning up, and fixed.** Deleting the production demo tenant
+after the phone run printed `leftovers: 0 — verified over every tenant collection` while **3
+conversations and 8 messages stayed in `ai_conversations` / `ai_messages`**, found by counting the
+collections directly. `clearTenantData` listed inventory, transactions, purchase orders, products,
+categories, locations and suppliers — but the assistant's history cannot join that list, because a
+MESSAGE carries no `businessId` (only its conversation does). It is now handled as two steps in
+`scripts/perf/lib.mjs`: resolve the tenant's conversations, delete their messages, then the
+conversations — and `countTenantLeftovers` uses the same two steps, so a collection that is removed
+is necessarily also verified. The effect is wider than the demo command: re-seeding the demo tenant
+(`clearTenantData`) now resets its assistant history instead of leaving it to accumulate, and any
+future tenant removal cannot leave orphans. **3 DB cases** in `DEMO2-tenant-ai-teardown.test.mjs`
+(target removed and counted, empty tenant a no-op, and a positive control proving the counter can
+see a conversation it did not remove), added to the runner's classification. That run's own rows —
+3 conversations, 8 messages and the account's session — were removed by that same two-step rule
+(applied once by hand, before the command learned it), and the database returned to its pre-test
+shape: 3 users, 3 businesses, 1 product, 0 conversations for the demo tenant, with the 4
+conversations belonging to the real accounts untouched.
+
 **Files.** New: `mobile/lib/sse.ts`, `server/test/AI40-ai-streaming.test.mjs`,
 `mobile/__tests__/ai40-sse-parser.test.ts`, `mobile/__tests__/ai40-assistant-streaming.test.tsx`,
 `mobile/__tests__/ai40-chat-stream-transport.test.ts`, `docs/evidence/ai-streaming-2026-10-23/`.

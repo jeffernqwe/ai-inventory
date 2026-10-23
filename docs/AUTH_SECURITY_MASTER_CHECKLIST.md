@@ -2533,9 +2533,22 @@ schema, index, dependency, session model or mobile change was made.**
   input** rather than in the banner, and a 401 **ends** the session instead of reporting it. The first
   three are the behaviours that would have degraded silently: the screen's fallback is
   `error.message`, which was correct code and unverified until this suite.
-- **Not device-verified:** the new 429s are server-side policy and were exercised over real HTTP in
-  the DB suite; no phone run was performed for this audit, and none is claimed. Mobile after the
-  suite: **83 suites / 1016 tests / 0 failures**, `tsc --noEmit` clean.
+- **Device-verified 2026-10-23 (OPPO CPH1969)**, against a local server over `adb reverse`, with a
+  disposable legacy account and the documented demo tenant:
+  - an empty form answered *Password is required* under the field and sent **no request**;
+  - with the account+address bucket spent, the phone's submit answered **`429
+    CHANGE_PASSWORD_RATE_LIMITED` in 177 ms** and rendered the server's own sentence, the form
+    stayed usable, and the next `GET /api/dashboard` still answered **304** — **the session
+    survived the refusal**;
+  - bumping `passwordChangedAt` server-side made the next requests answer **401**, and the app
+    **cleared the session and returned to Login** with no error banner;
+  - a real change answered **200**, its follow-up `logout` answered **401** (the session was already
+    invalidated) and the app still returned to Login cleanly; the **new** password signed in
+    afterwards.
+  **Not claimed:** the distributed-stuffing and shared-address cases, which remain V4 risks below,
+  and the Firebase-native step-1 refusal, which is a Firebase-local re-authentication and never
+  reaches these buckets.
+- Mobile after the suite: **83 suites / 1016 tests / 0 failures**, `tsc --noEmit` clean.
 
 ---
 

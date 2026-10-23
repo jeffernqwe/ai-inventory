@@ -18665,8 +18665,36 @@ clean), including the suite added for the half that was only asserted in prose b
 `mobile/__tests__/change-password-rate-limit.test.tsx` mounts the real screen and pins that a 429
 shows the **server's** sentence and keeps the session, that the form survives the refusal, that a
 400 `fields` refusal lands **under its input**, and that a 401 **ends** the session rather than
-reporting it. **Still not device-verified:** no phone run was performed for this audit and none is
-claimed. Residual risks the audit accepted for V1
+reporting it.
+
+## Device verification (2026-10-23, OPPO CPH1969)
+
+The behaviour above was then measured **on the phone**, against a local server over `adb reverse`,
+using a disposable legacy account (no Firebase identity, so the app takes its documented legacy
+fallback) and the documented demo tenant:
+
+- **Sign-in and authenticated requests.** Firebase-first sign-in reached
+  `POST /api/auth/firebase/exchange` **200**, then `/api/dashboard`, `/api/products/reorder` and
+  `/api/purchase-orders` **200/304**, and the dashboard rendered **6 active / 3 in stock / 3 low /
+  1 out of stock / 112 units** — exactly the fixture's figures. A legacy account's sign-in answered
+  `POST /api/auth/login` **200** after Firebase refused it, which is the fallback reached only for
+  the two codes that mean "no Firebase identity for this address".
+- **Validation.** An empty change-password form answered *Password is required* under the field and
+  sent **no request**; a wrong current password on the Firebase-native screen produced its own
+  sentence and no server call, because that step re-authenticates locally.
+- **429 keeps the session.** With the account+address bucket spent, the phone's submit answered
+  `429 CHANGE_PASSWORD_RATE_LIMITED` in **177 ms**, the screen showed the server's own sentence
+  (*"Too many password change attempts. Please wait a moment and try again."*), the form stayed
+  usable — and the next `GET /api/dashboard` still answered **304**, so nothing signed the person
+  out.
+- **401 ends it.** Bumping `passwordChangedAt` server-side made the next two requests answer
+  **401**; the app cleared the stored session and returned to Login **with no error banner**.
+- **A real change succeeds and revokes.** The correct current password answered **200** and replaced
+  the credential; the follow-up `POST /api/auth/logout` answered **401** because that session had
+  already been invalidated by the change, and the app still returned to Login cleanly. The **new**
+  password signed in afterwards, which is the credential itself proven live.
+
+Residual risks the audit accepted for V1
 — in-process limiter state, distributed stuffing, the shared-address lockout, per-IP rather than
 per-recipient email bounds, and the absent per-user session cap — are enumerated in checklist §52
 with the reason each is a V4 concern rather than a release blocker.

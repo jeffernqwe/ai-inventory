@@ -31,7 +31,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import type { ReactNode } from 'react';
 
 import ResetPasswordCodeScreen from '../app/reset-password-code';
@@ -345,5 +345,76 @@ describe('AUTH-06 — the numbers on the screen are the server’s numbers', () 
     // here has not altered their account.
     const screen = read('../app/reset-password-code.tsx');
     expect(screen).toMatch(/does not\s+change anything on your account yet/);
+  });
+});
+
+
+describe('AUTH-06 — six digits are verified without a tap', () => {
+  // The screen waits a short beat after the sixth digit, so a last digit typed by mistake can
+  // still be replaced, and a person who presses Verify (or Resend) cancels the wait. Fake
+  // timers make that beat observable instead of making the suite sleep through it.
+  beforeEach(() => {
+    jest.useFakeTimers();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('★ verifies a complete code on its own, without pressing anything', async () => {
+    const view = await mount();
+    await fireEvent.changeText(view.getByTestId('code-input'), '123456');
+
+    // Not yet: the beat exists so the last digit can still be corrected.
+    expect(mockedVerifyCode).not.toHaveBeenCalled();
+
+    await act(async () => {
+      jest.advanceTimersByTime(500);
+    });
+
+    expect(mockedVerifyCode).toHaveBeenCalledTimes(1);
+    expect(mockedVerifyCode).toHaveBeenCalledWith({ email: EMAIL, code: '123456' });
+    expect(mockReplace).toHaveBeenCalledWith('/reset-password-new');
+  });
+
+  it('sends nothing for a partial code, however long the person waits', async () => {
+    const view = await mount();
+    await fireEvent.changeText(view.getByTestId('code-input'), '12345');
+
+    await act(async () => {
+      jest.advanceTimersByTime(5000);
+    });
+
+    expect(mockedVerifyCode).not.toHaveBeenCalled();
+  });
+
+  it('★ a press wins over the wait, and the code is still sent exactly once', async () => {
+    const view = await mount();
+    await fireEvent.changeText(view.getByTestId('code-input'), '123456');
+    await fireEvent.press(view.getByRole('button', { name: SUBMIT }));
+
+    await act(async () => {
+      jest.advanceTimersByTime(1000);
+    });
+
+    // THE ATTEMPT BUDGET: the server allows five tries per challenge, so a duplicate request
+    // for the same value is not a harmless extra.
+    expect(mockedVerifyCode).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not auto-verify a code the screen already knows has expired', async () => {
+    // Eleven minutes after the send: the local clock says the window is closed, so the only
+    // useful action is a new code. A phone whose clock disagrees can still press Verify.
+    mockParams.sentAt = String(Date.now() - 11 * 60 * 1000);
+
+    const view = await mount();
+    await fireEvent.changeText(view.getByTestId('code-input'), '123456');
+
+    await act(async () => {
+      jest.advanceTimersByTime(1000);
+    });
+
+    expect(mockedVerifyCode).not.toHaveBeenCalled();
+    expect(view.getByText('That code has expired. Send a new one to continue.')).toBeTruthy();
   });
 });

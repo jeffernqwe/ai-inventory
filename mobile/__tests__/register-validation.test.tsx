@@ -212,3 +212,26 @@ describe('a complete form is unchanged', () => {
     });
   });
 });
+
+describe('the password rule is stated while it is being typed', () => {
+  it('★ counts toward the minimum, then says the value is inside the window', async () => {
+    const view = await mount();
+    const field = view.getByPlaceholderText(PASSWORD_PLACEHOLDER);
+
+    expect(view.getByText('Between 8 and 72 characters.')).toBeTruthy();
+
+    await fireEvent.changeText(field, 'abc');
+    expect(view.getByText('3 of 8 characters — 5 more to go.')).toBeTruthy();
+
+    await fireEvent.changeText(field, 'Password123!');
+    expect(view.getByText('12 characters — within the limit.')).toBeTruthy();
+  });
+
+  it('names the ceiling rather than letting the server refuse an over-long value', async () => {
+    const view = await mount();
+
+    await fireEvent.changeText(view.getByPlaceholderText(PASSWORD_PLACEHOLDER), 'a'.repeat(75));
+
+    expect(view.getByText('Too long by 3 characters.')).toBeTruthy();
+  });
+});

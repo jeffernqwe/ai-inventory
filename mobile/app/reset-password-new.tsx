@@ -8,12 +8,12 @@ import Button from '../components/Button';
 import Input from '../components/Input';
 import { confirmPasswordResetCode } from '../lib/api';
 import { useSession } from '../lib/auth';
-import { ApiError } from '../lib/client';
+import { fieldErrorsFrom } from '../lib/authCopy';
 import { clearVerifiedReset, readVerifiedReset } from '../lib/passwordResetSession';
 import { spacing, type } from '../lib/theme';
 import type { Palette } from '../lib/theme';
 import { useTheme } from '../lib/theme-context';
-import { passwordStrengthProblem } from '../lib/validation';
+import { passwordRuleHint, passwordStrengthProblem } from '../lib/validation';
 
 /**
  * AUTH-06 (two-step recovery) — STEP TWO: choose the new password.
@@ -37,14 +37,6 @@ import { passwordStrengthProblem } from '../lib/validation';
 const RESET_COMPLETED = 'Password changed. Please sign in again.';
 const GENERIC_FAILURE = 'Something went wrong. Please try again.';
 const EXPIRED_COPY = 'That verification has expired. Verify your reset code again to continue.';
-
-function fieldMap(err: unknown): Record<string, string> {
-  const out: Record<string, string> = {};
-  if (err instanceof ApiError && Array.isArray(err.fields)) {
-    for (const f of err.fields) out[f.field] = f.message;
-  }
-  return out;
-}
 
 const createStyles = (colors: Palette) =>
   StyleSheet.create({
@@ -82,6 +74,20 @@ export default function ResetPasswordNewScreen() {
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
+
+  /** Editing a field clears its own message — the same rule as Login and Register. */
+  function editField(field: string, setValue: (value: string) => void) {
+    return (value: string): void => {
+      setValue(value);
+      if (fieldErrors[field]) {
+        setFieldErrors((current) => {
+          const next = { ...current };
+          delete next[field];
+          return next;
+        });
+      }
+    };
+  }
 
   if (!verified && !done) {
     return (
@@ -145,7 +151,7 @@ export default function ResetPasswordNewScreen() {
         setFormError(EXPIRED_COPY);
         return;
       }
-      const fields = fieldMap(err);
+      const fields = fieldErrorsFrom(err);
       if (Object.keys(fields).length) setFieldErrors(fields);
       else setFormError((err as { message?: string } | null)?.message || GENERIC_FAILURE);
     } finally {
@@ -175,10 +181,10 @@ export default function ResetPasswordNewScreen() {
         name="newPassword"
         label="New password"
         value={newPassword}
-        onChangeText={setNewPassword}
+        onChangeText={editField('newPassword', setNewPassword)}
         secureTextEntry
         placeholder="At least 8 characters"
-        helper="Min 8 characters"
+        helper={passwordRuleHint(newPassword)}
         error={fieldErrors.newPassword}
         required
         autoCapitalize="none"
@@ -191,7 +197,7 @@ export default function ResetPasswordNewScreen() {
         name="confirmPassword"
         label="Confirm new password"
         value={confirmPassword}
-        onChangeText={setConfirmPassword}
+        onChangeText={editField('confirmPassword', setConfirmPassword)}
         secureTextEntry
         placeholder="Repeat your new password"
         error={fieldErrors.confirmPassword}

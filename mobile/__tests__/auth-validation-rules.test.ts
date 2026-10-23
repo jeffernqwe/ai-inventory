@@ -36,6 +36,7 @@ import {
   PASSWORD_TOO_LONG,
   PASSWORD_TOO_SHORT,
   emailProblem,
+  passwordRuleHint,
   passwordStrengthProblem,
 } from '../lib/validation';
 
@@ -194,5 +195,28 @@ describe('the client rule exists in exactly one place', () => {
     // allow, or the assertion above is a scan that could never report anything.
     const own = fs.readFileSync(path.join(__dirname, '..', 'lib', 'validation.ts'), 'utf8');
     expect(/\[[^\]]*\\s@\][^\]]*@/.test(own)).toBe(true);
+  });
+});
+
+describe('the live password rule stated under the field', () => {
+  // THE SAME TWO NUMBERS, said while the person is typing instead of after a refusal. The
+  // server has exactly one policy — length — so this reports distance from that policy and
+  // never invents a complexity rule the server would accept anyway.
+  it('★ counts up to the minimum, then confirms the value is inside the window', () => {
+    expect(passwordRuleHint('')).toBe('Between 8 and 72 characters.');
+    expect(passwordRuleHint('abc')).toBe('3 of 8 characters — 5 more to go.');
+    expect(passwordRuleHint('abcdefgh')).toBe('8 characters — within the limit.');
+    expect(passwordRuleHint('a'.repeat(72))).toBe('72 characters — within the limit.');
+  });
+
+  it('says by how much an over-long password is over, in the singular and the plural', () => {
+    expect(passwordRuleHint('a'.repeat(73))).toBe('Too long by 1 character.');
+    expect(passwordRuleHint('a'.repeat(80))).toBe('Too long by 8 characters.');
+  });
+
+  it('and its numbers are the shared constants, not a second copy', () => {
+    expect(passwordRuleHint('')).toContain(String(PASSWORD_MIN));
+    expect(passwordRuleHint('')).toContain(String(PASSWORD_MAX));
+    expect(passwordRuleHint('a'.repeat(PASSWORD_MAX + 1))).toContain('Too long by 1 character.');
   });
 });

@@ -6,6 +6,7 @@ import AuthLayout from '../components/AuthLayout';
 import Banner from '../components/Banner';
 import Button from '../components/Button';
 import Input from '../components/Input';
+import { fieldErrorsFrom } from '../lib/authCopy';
 import { ApiError } from '../lib/client';
 import { useSession } from '../lib/auth';
 import { FirebaseAuthError } from '../lib/firebase-auth';
@@ -77,15 +78,6 @@ const NO_SESSION_MESSAGE = 'Your sign-in has expired. Sign in again to continue.
 
 /** Fields this screen renders; a server field error for anything else has no input. */
 const OWN_FIELDS = new Set(['businessName', 'name']);
-
-/** Same mapping `/register` uses: server field errors become per-input errors. */
-function fieldMap(err: unknown): Record<string, string> {
-  const out: Record<string, string> = {};
-  if (err instanceof ApiError && Array.isArray(err.fields)) {
-    for (const f of err.fields) out[f.field] = f.message;
-  }
-  return out;
-}
 
 /**
  * The sentence to show at form level. Never returns a raw unknown error's message,
@@ -190,7 +182,7 @@ export default function FirebaseRegisterScreen() {
       // Navigation: on success the signedIn guard above redirects this screen away,
       // so the new owner lands in the app without a second sign-in.
     } catch (err) {
-      const fields = fieldMap(err);
+      const fields = fieldErrorsFrom(err);
       const own: Record<string, string> = {};
       const orphaned: string[] = [];
       for (const [field, message] of Object.entries(fields)) {

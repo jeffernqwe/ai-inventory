@@ -6,13 +6,13 @@ import AuthLayout from '../components/AuthLayout';
 import Banner from '../components/Banner';
 import Button from '../components/Button';
 import Input from '../components/Input';
-import { ApiError } from '../lib/client';
+import { fieldErrorsFrom } from '../lib/authCopy';
 import { useSession } from '../lib/auth';
 import { defaultHomePath } from '../lib/permissions';
 import { type } from '../lib/theme';
 import type { Palette } from '../lib/theme';
 import { useTheme } from '../lib/theme-context';
-import { emailProblem, passwordProblem, passwordStrengthProblem } from '../lib/validation';
+import { emailProblem, passwordProblem, passwordRuleHint, passwordStrengthProblem } from '../lib/validation';
 
 const createStyles = (colors: Palette) =>
   StyleSheet.create({
@@ -26,14 +26,6 @@ const createStyles = (colors: Palette) =>
     },
     link: { color: colors.link, fontWeight: '700' },
   });
-
-function fieldMap(err: unknown): Record<string, string> {
-  const out: Record<string, string> = {};
-  if (err instanceof ApiError && Array.isArray(err.fields)) {
-    for (const f of err.fields) out[f.field] = f.message;
-  }
-  return out;
-}
 
 export default function RegisterScreen() {
   const { status, user, signUp, firebaseOnboarding } = useSession();
@@ -58,6 +50,20 @@ export default function RegisterScreen() {
   // belongs on the same screen, which owns its Try Again and Sign out actions.
   if (firebaseOnboarding === 'verify-email' || firebaseOnboarding === 'verify-unreachable') {
     return <Redirect href="/verify-email" />;
+  }
+
+  /** Correcting a field clears its own message — see the same rule on Login. */
+  function editField(field: string, setValue: (value: string) => void) {
+    return (value: string): void => {
+      setValue(value);
+      if (fieldErrors[field]) {
+        setFieldErrors((current) => {
+          const next = { ...current };
+          delete next[field];
+          return next;
+        });
+      }
+    };
   }
 
   async function submit(): Promise<void> {
@@ -115,7 +121,7 @@ export default function RegisterScreen() {
         password,
       });
     } catch (err) {
-      const fields = fieldMap(err);
+      const fields = fieldErrorsFrom(err);
       if (Object.keys(fields).length) setFieldErrors(fields);
       else setFormError((err as { message?: string } | null)?.message || 'Unable to create your account. Please try again.');
     } finally {
@@ -141,8 +147,12 @@ export default function RegisterScreen() {
         name="businessName"
         label="Business name"
         value={businessName}
-        onChangeText={setBusinessName}
+        onChangeText={editField('businessName', setBusinessName)}
         placeholder="Acme Retail"
+        // A business name is a name: the keyboard should capitalise it. `Input`
+        // defaults to `none` for the code/barcode fields this app is full of.
+        autoCapitalize="words"
+        returnKeyType="next"
         error={fieldErrors.businessName}
         required
       />
@@ -150,38 +160,53 @@ export default function RegisterScreen() {
         name="name"
         label="Your name"
         value={name}
-        onChangeText={setName}
+        onChangeText={editField('name', setName)}
         placeholder="Jane Doe"
         error={fieldErrors.name}
         required
+        autoCapitalize="words"
+        autoComplete="name"
+        textContentType="name"
+        returnKeyType="next"
       />
       <Input
         name="email"
         label="Email"
         value={email}
-        onChangeText={setEmail}
+        onChangeText={editField('email', setEmail)}
         keyboardType="email-address"
         autoCapitalize="none"
         placeholder="you@company.com"
         error={fieldErrors.email}
         required
+        // What the field HOLDS, so the phone's password manager can fill it instead of
+        // asking the person to retype an address they already saved.
+        autoComplete="email"
+        textContentType="emailAddress"
+        returnKeyType="next"
       />
       <Input
         name="password"
         label="Password"
         value={password}
-        onChangeText={setPassword}
+        onChangeText={editField('password', setPassword)}
         secureTextEntry
         placeholder="At least 8 characters"
-        helper="Min 8 characters"
+        helper={passwordRuleHint(password)}
         error={fieldErrors.password}
         required
+        // THE declaration that makes a password manager offer a generated password —
+        // `current-password` here would ask it for an existing one, which cannot work on
+        // an account that does not exist yet.
+        autoComplete="new-password"
+        textContentType="newPassword"
+        returnKeyType="next"
       />
       <Input
         name="confirm"
         label="Confirm password"
         value={confirm}
-        onChangeText={setConfirm}
+        onChangeText={editField('confirm', setConfirm)}
         secureTextEntry
         placeholder="Repeat your password"
         error={fieldErrors.confirm}

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Redirect } from 'expo-router';
 import { StyleSheet, Text } from 'react-native';
 
@@ -6,10 +6,11 @@ import AuthLayout from '../components/AuthLayout';
 import Banner from '../components/Banner';
 import Button from '../components/Button';
 import CodeInput from '../components/CodeInput';
+import { fieldErrorsFrom, formatRemaining } from '../lib/authCopy';
 import { ApiError } from '../lib/client';
 import { useSession } from '../lib/auth';
 import { defaultHomePath } from '../lib/permissions';
-import { type } from '../lib/theme';
+import { spacing, type } from '../lib/theme';
 import type { Palette } from '../lib/theme';
 import { useTheme } from '../lib/theme-context';
 
@@ -63,6 +64,16 @@ const CODE_LENGTH = 6;
 const CODE_TTL_MINUTES = 10;
 
 const CODE_SENT_MESSAGE = 'Verification code sent. Check your inbox and spam folder.';
+const EXPIRED_HELPER = 'That code has expired. Send a new one to continue.';
+/**
+ * How long the sixth digit waits before the code is submitted on its own.
+ *
+ * NOT ZERO, and not a button either. A beat long enough for the last digit to be replaced
+ * (a paste that lands one char short, a typo seen immediately) and short enough that nobody
+ * reaches for the button — so the common case costs no tap, while an explicit press or a
+ * resend still cancels the wait and states what the person intended.
+ */
+const AUTO_VERIFY_DELAY_MS = 400;
 const STILL_UNVERIFIED_MESSAGE =
   'That code was accepted, but your email is not verified yet. Try again in a moment.';
 const GENERIC_FAILURE_MESSAGE = 'Something went wrong. Please try again.';
@@ -78,25 +89,6 @@ const UNREACHABLE_SUBTITLE = 'We could not confirm your sign-in just now.';
 const UNREACHABLE_BODY =
   'We could not reach the verification service. Check your connection, then try again.';
 
-/** Server field errors become per-input errors, exactly as on the other auth screens. */
-function fieldMap(err: unknown): Record<string, string> {
-  const out: Record<string, string> = {};
-  if (err instanceof ApiError && Array.isArray(err.fields)) {
-    for (const f of err.fields) out[f.field] = f.message;
-  }
-  return out;
-}
-
-/** A short, human wait: seconds below a minute, otherwise minutes and seconds. */
-function formatRemaining(seconds: number): string {
-  if (seconds >= 60) {
-    const minutes = Math.floor(seconds / 60);
-    const rest = seconds % 60;
-    return rest === 0 ? `${minutes}m` : `${minutes}m ${rest}s`;
-  }
-  return `${seconds}s`;
-}
-
 const createStyles = (colors: Palette) =>
   StyleSheet.create({
     footerText: {
@@ -104,6 +96,14 @@ const createStyles = (colors: Palette) =>
       color: colors.textMuted,
       alignSelf: 'stretch',
       textAlign: 'center',
+    },
+    // The inbox this code went to. Muted, because it is a fact to check rather than an
+    // instruction — the instruction is the label under it.
+    address: {
+      ...type.bodySmall,
+      color: colors.textSecondary,
+      alignSelf: 'stretch',
+      marginBottom: spacing.sm,
     },
     link: { color: colors.link, fontWeight: '700' },
   });
@@ -121,6 +121,7 @@ export default function VerifyEmailScreen() {
     clearVerificationEntryError,
     verificationCodeIssuedAt,
     firebaseRegistrationRequired,
+    firebaseAccountEmail,
   } = useSession();
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -138,6 +139,14 @@ export default function VerifyEmailScreen() {
   // `typeof === 'number'` rather than `!== null`, so a context value that predates the
   // field (undefined) reads as "nothing sent" instead of claiming a code is in flight.
   const [codeSent, setCodeSent] = useState(typeof verificationCodeIssuedAt === 'number');
+  /**
+   * When this journey's code was issued, in ms — the start of its 10-minute lifetime.
+   * Present when registration sent one before navigating, and set again by every
+   * successful resend, so the countdown always describes the CURRENT code.
+   */
+  const [codeIssuedAt, setCodeIssuedAt] = useState<number | null>(() =>
+    typeof verificationCodeIssuedAt === 'number' ? verificationCodeIssuedAt : null
+  );
   // IN-MEMORY ONLY, deliberately: a cooldown is a fact about the server's current window,
   // and persisting it would keep the button disabled after the window has moved on. The
   // initial value continues the server's 60-second window from the send registration
@@ -149,6 +158,24 @@ export default function VerifyEmailScreen() {
     return end > Date.now() ? end : null;
   });
   const [now, setNow] = useState<number>(() => Date.now());
+
+  /**
+   * The pending auto-submit, and whether a confirm is already in flight.
+   *
+   * The timer is cancelled by anything the person does deliberately — pressing Verify, or
+   * asking for a new code — so one code is never submitted twice. The in-flight guard
+   * covers the other order: a press that lands while the automatic request is running is
+   * ignored, because the server counts attempts and a duplicate would spend one.
+   */
+  const autoVerifyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const confirming = useRef(false);
+
+  useEffect(
+    () => () => {
+      if (autoVerifyTimer.current) clearTimeout(autoVerifyTimer.current);
+    },
+    []
+  );
 
   // Ticks only while a cooldown is running, and clears the stale notice with it.
   useEffect(() => {
@@ -169,6 +196,23 @@ export default function VerifyEmailScreen() {
   const remainingSeconds =
     cooldownUntil === null ? 0 : Math.ceil(Math.max(0, cooldownUntil - now) / 1000);
   const coolingDown = cooldownUntil !== null && remainingSeconds > 0;
+
+  /** The server's own lifetime, counted from the send — see `CODE_TTL_MINUTES`. */
+  const expiresAt = codeIssuedAt === null ? null : codeIssuedAt + CODE_TTL_MINUTES * 60_000;
+  const codeExpired = expiresAt !== null && now >= expiresAt;
+  const codeSecondsLeft =
+    expiresAt === null ? 0 : Math.ceil(Math.max(0, expiresAt - now) / 1000);
+
+  // Ticks only while a code is alive; the last render after it runs out says so.
+  useEffect(() => {
+    if (expiresAt === null || Date.now() >= expiresAt) return undefined;
+    const id = setInterval(() => {
+      const at = Date.now();
+      setNow(at);
+      if (at >= expiresAt) clearInterval(id);
+    }, 1000);
+    return () => clearInterval(id);
+  }, [expiresAt]);
 
   // AUTH-04-F (Option B) — a registration whose INITIAL code request failed arrives here
   // with a one-shot reason (a safe sentence only). It is shown until the person acts, at
@@ -201,6 +245,33 @@ export default function VerifyEmailScreen() {
     return (err as { message?: string } | null)?.message || GENERIC_FAILURE_MESSAGE;
   }
 
+  /** A deliberate action cancels the automatic one; the person's intent wins. */
+  function cancelAutoVerify(): void {
+    if (autoVerifyTimer.current) {
+      clearTimeout(autoVerifyTimer.current);
+      autoVerifyTimer.current = null;
+    }
+  }
+
+  /**
+   * A complete code is submitted without a tap — after a short beat.
+   *
+   * Nothing is scheduled for a partial code (the server's attempt budget is five, and an
+   * unfinished entry would spend one), nor for a code this screen already knows is past its
+   * window: the answer to an expired code is a new code, and the helper says so. A phone
+   * whose clock disagrees with the server can still submit by pressing Verify.
+   */
+  function handleCodeChange(value: string): void {
+    if (fieldErrors.code) setFieldErrors({});
+    setCode(value);
+    cancelAutoVerify();
+    if (value.length !== CODE_LENGTH || codeExpired) return;
+    autoVerifyTimer.current = setTimeout(() => {
+      autoVerifyTimer.current = null;
+      void submit(value);
+    }, AUTO_VERIFY_DELAY_MS);
+  }
+
   async function wrongAccount(): Promise<void> {
     setBusy(true);
     setError(null);
@@ -216,6 +287,9 @@ export default function VerifyEmailScreen() {
 
   async function sendCode(): Promise<void> {
     if (coolingDown) return;
+    // A resend replaces the code, so an automatic submission of the old one would be a
+    // request about a value that is no longer current.
+    cancelAutoVerify();
     setSending(true);
     setError(null);
     setNotice(null);
@@ -224,6 +298,8 @@ export default function VerifyEmailScreen() {
       await requestVerificationCode();
       setCodeSent(true);
       setNotice(CODE_SENT_MESSAGE);
+      // A resend replaces the code, so both clocks restart from this instant.
+      setCodeIssuedAt(Date.now());
       setCooldownUntil(Date.now() + RESEND_COOLDOWN_SECONDS * 1000);
     } catch (err) {
       // The server states the wait on a 429; honour it verbatim rather than guessing.
@@ -237,8 +313,11 @@ export default function VerifyEmailScreen() {
     }
   }
 
-  async function submit(): Promise<void> {
-    const trimmed = code.trim();
+  async function submit(candidate: string = code): Promise<void> {
+    cancelAutoVerify();
+    // One confirm at a time: the automatic request and a press can otherwise overlap.
+    if (confirming.current) return;
+    const trimmed = candidate.trim();
     // THE ATTEMPT BUDGET IS FIVE PER CHALLENGE, so an obviously incomplete value must not
     // spend one. The field already strips non-digits and caps at six, which means anything
     // shorter here is an unfinished entry: the server would answer its one
@@ -248,6 +327,7 @@ export default function VerifyEmailScreen() {
       setFieldErrors({ code: EMPTY_CODE_MESSAGE });
       return;
     }
+    confirming.current = true;
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -260,10 +340,11 @@ export default function VerifyEmailScreen() {
       if (!signedIn) setNotice(STILL_UNVERIFIED_MESSAGE);
       // On success the signedIn guard above redirects this screen away.
     } catch (err) {
-      const fields = fieldMap(err);
+      const fields = fieldErrorsFrom(err);
       if (Object.keys(fields).length) setFieldErrors(fields);
       else setError(errorMessage(err));
     } finally {
+      confirming.current = false;
       setBusy(false);
     }
   }
@@ -323,6 +404,20 @@ export default function VerifyEmailScreen() {
       {notice ? <Banner type="info" text={notice} /> : null}
       <Banner type="error" text={shownError} />
       {/**
+       * WHICH INBOX. A code that has not arrived is the commonest way this screen
+       * stalls, and the first question is "which address did I use?". The address is
+       * known when this run typed it (registration, or a sign-in that reached this
+       * screen); on a cold-start resume it is not, and the line is omitted rather than
+       * invented.
+       */}
+      {firebaseAccountEmail ? (
+        <Text style={styles.address}>
+          {codeSent
+            ? `We sent the code to ${firebaseAccountEmail}.`
+            : `We will email the code to ${firebaseAccountEmail}.`}
+        </Text>
+      ) : null}
+      {/**
        * THE SAME CONTROL THE RESET JOURNEY USES, and deliberately not a second one: both screens
        * ask for the same thing — six digits read out of an email — so they get the same boxes, the
        * same autofill declaration, the same paste and backspace behaviour and the same error slot.
@@ -331,16 +426,21 @@ export default function VerifyEmailScreen() {
       <CodeInput
         label="Verification code"
         value={code}
-        onChangeText={(value: string) => {
-          // Typing is the person acting on the previous refusal, so the stale reason goes
-          // with it: leaving "that code is invalid or has expired" under a code they are
-          // halfway through replacing describes the old value, not this one.
-          if (fieldErrors.code) setFieldErrors({});
-          setCode(value);
-        }}
+        onChangeText={handleCodeChange}
         error={fieldErrors.code}
         required
-        onSubmitEditing={submit}
+        // The lifetime as a COUNT, from this journey's own send instant. The static
+        // subtitle describes when the code was issued, not how long it has left — and an
+        // expired code is otherwise indistinguishable from a wrong one until the server
+        // refuses it.
+        helper={
+          expiresAt === null
+            ? undefined
+            : codeExpired
+              ? EXPIRED_HELPER
+              : `Code expires in ${formatRemaining(codeSecondsLeft)}`
+        }
+        onSubmitEditing={() => submit()}
       />
       {/**
        * THE RESEND COOLDOWN MUST NOT BLOCK VERIFYING. It used to: `coolingDown` was part
@@ -351,7 +451,7 @@ export default function VerifyEmailScreen() {
        */}
       <Button
         title="Verify"
-        onPress={submit}
+        onPress={() => submit()}
         loading={busy}
         disabled={sending || code.length !== CODE_LENGTH}
         full

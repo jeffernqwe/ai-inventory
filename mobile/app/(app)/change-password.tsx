@@ -8,18 +8,10 @@ import Card from '../../components/Card';
 import Input from '../../components/Input';
 import Screen from '../../components/Screen';
 import { changePassword } from '../../lib/api';
-import { ApiError } from '../../lib/client';
+import { fieldErrorsFrom } from '../../lib/authCopy';
 import { isSessionError, useSession } from '../../lib/auth';
 import { spacing } from '../../lib/theme';
-import { passwordStrengthProblem } from '../../lib/validation';
-
-function fieldMap(err: unknown): Record<string, string> {
-  const out: Record<string, string> = {};
-  if (err instanceof ApiError && Array.isArray(err.fields)) {
-    for (const f of err.fields) out[f.field] = f.message;
-  }
-  return out;
-}
+import { passwordRuleHint, passwordStrengthProblem } from '../../lib/validation';
 
 /**
  * Change the signed-in user's password (Phase 15). The server verifies the
@@ -73,7 +65,7 @@ export default function ChangePasswordScreen() {
       if (isSessionError(err)) {
         await signOut();
       } else {
-        const fields = fieldMap(err);
+        const fields = fieldErrorsFrom(err);
         if (Object.keys(fields).length) setFieldErrors(fields);
         else setFormError((err as { message?: string } | null)?.message || 'Unable to change the password.');
       }
@@ -106,7 +98,7 @@ export default function ChangePasswordScreen() {
             onChangeText={setNewPassword}
             secureTextEntry
             placeholder="At least 8 characters"
-            helper="Min 8 characters"
+            helper={passwordRuleHint(newPassword)}
             error={fieldErrors.newPassword}
             required
             autoCapitalize="none"

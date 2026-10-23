@@ -25,7 +25,7 @@
  * `AuthLayout`/`Banner`/`Button`/`Input` are the real ones.
  */
 
-import { fireEvent, render } from '@testing-library/react-native';
+import { act, fireEvent, render } from '@testing-library/react-native';
 import type { ReactNode } from 'react';
 
 import { ApiError } from '../lib/client';
@@ -460,5 +460,55 @@ describe('sign out', () => {
 
     expect(await view.findByText(GENERIC_FAILURE_MESSAGE)).toBeTruthy();
     expect(mockRedirect).not.toHaveBeenCalled();
+  });
+});
+
+describe('AUTH-04-F — a complete code is confirmed without a tap', () => {
+  // The same beat the reset screen uses: long enough to correct the last digit, short enough
+  // that the button never has to be reached for.
+  beforeEach(() => {
+    jest.useFakeTimers();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('★ confirms as soon as six digits are entered, exactly once', async () => {
+    const view = await mount();
+
+    await fireEvent.changeText(view.getByTestId('code-input'), '123456');
+    expect(confirmVerificationCode).not.toHaveBeenCalled();
+
+    await act(async () => {
+      jest.advanceTimersByTime(500);
+    });
+
+    expect(confirmVerificationCode).toHaveBeenCalledTimes(1);
+    expect(confirmVerificationCode).toHaveBeenCalledWith('123456');
+  });
+
+  it('★ a press cancels the wait, so the attempt is spent once', async () => {
+    const view = await mount();
+
+    await fireEvent.changeText(view.getByTestId('code-input'), '123456');
+    await fireEvent.press(view.getByRole('button', { name: VERIFY }));
+
+    await act(async () => {
+      jest.advanceTimersByTime(1000);
+    });
+
+    expect(confirmVerificationCode).toHaveBeenCalledTimes(1);
+  });
+
+  it('schedules nothing for an incomplete code', async () => {
+    const view = await mount();
+
+    await fireEvent.changeText(view.getByTestId('code-input'), '1234');
+    await act(async () => {
+      jest.advanceTimersByTime(5000);
+    });
+
+    expect(confirmVerificationCode).not.toHaveBeenCalled();
   });
 });

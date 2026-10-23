@@ -354,14 +354,33 @@ function verificationSendFailureMessage(err: unknown): string {
 }
 
 /**
+ * What a signed-out launch learned from the DURABLE native Firebase identity alone.
+ *
+ * TWO FACTS, NOT ONE, because 'no screen to show' covers two different situations: no
+ * identity at all, and a verified identity that Login may offer to resume. The verify
+ * screens only ever needed the first field; the Login shortcut needs the second.
+ */
+interface ResumeProbe {
+  onboarding: FirebaseOnboarding;
+  /**
+   * A VERIFIED persisted identity: the one state a signed-out launch can offer to
+   * resume from with a single tap.
+   *
+   * TRUE HERE IS STILL NOT A SESSION. Nothing is exchanged, minted or persisted by this
+   * probe; the tap is what starts the exchange, exactly as a password sign-in would.
+   */
+  resumableIdentity: boolean;
+}
+
+/**
  * AUTH-04-F — the READ-ONLY restart/resume probe (owner-ratified Option A).
  *
- * Answers which screen a SIGNED-OUT launch belongs on, from the DURABLE native
- * Firebase identity alone. Five states:
+ * Answers which screen a SIGNED-OUT launch belongs on, and whether the account behind a
+ * verified identity can be resumed with one tap. Five situations:
  *
- *   no Firebase configuration         -> 'none'                (Login)
- *   no persisted identity             -> 'none'                (Login)
- *   persisted identity, verified      -> 'none'                (Login; user-driven)
+ *   no Firebase configuration         -> 'none',                not resumable (Login)
+ *   no persisted identity             -> 'none',                not resumable (Login)
+ *   persisted identity, verified      -> 'none',                RESUMABLE     (Login)
  *   persisted identity, unverified    -> 'verify-email'
  *   identity present, state unreadable-> 'verify-unreachable'
  *
@@ -369,15 +388,16 @@ function verificationSendFailureMessage(err: unknown): string {
  * never mints or applies an Inventory AI session, never retries and never clears or
  * signs out the durable Firebase identity — not even on failure. A verified identity is
  * deliberately sent to Login rather than exchanged, because only a user-driven sign-in
- * may open a session.
+ * may open a session; the flag it reports is a hint for a control, not a credential.
  *
  * EXISTENCE IS CHECKED FIRST. `nativeReloadUser()` answers `false` when there is NO
  * user, so it cannot tell "no identity" from "unverified identity" by itself; and the
  * native boundary is lazily loaded, so a fault while asking means we cannot confirm an
  * identity at all — which is the Login answer, never a verification screen.
  */
-async function probeVerificationResume(): Promise<FirebaseOnboarding> {
-  if (!isFirebaseConfigured()) return 'none';
+async function probeResumeState(): Promise<ResumeProbe> {
+  const nothing = { onboarding: 'none' as FirebaseOnboarding, resumableIdentity: false };
+  if (!isFirebaseConfigured()) return nothing;
 
   let hasIdentity = false;
   try {
@@ -385,13 +405,15 @@ async function probeVerificationResume(): Promise<FirebaseOnboarding> {
   } catch {
     hasIdentity = false;
   }
-  if (!hasIdentity) return 'none';
+  if (!hasIdentity) return nothing;
 
   try {
     const verified = await nativeReloadUser();
-    return verified ? 'none' : 'verify-email';
+    return verified
+      ? { onboarding: 'none', resumableIdentity: true }
+      : { onboarding: 'verify-email', resumableIdentity: false };
   } catch {
-    return 'verify-unreachable';
+    return { onboarding: 'verify-unreachable', resumableIdentity: false };
   }
 }
 
@@ -467,6 +489,31 @@ async function readEmailVerified(): Promise<boolean> {
   firebaseRegistrationRequired: boolean;
   /** Phase 16 - the explicit onboarding state. In-memory; never persisted. */
   firebaseOnboarding: FirebaseOnboarding;
+  /**
+   * A VERIFIED Firebase identity is present on this device with no Inventory AI
+   * session, so the account can be resumed with one tap.
+   *
+   * Set only by the read-only boot probe, and cleared by applying or clearing a
+   * session and by ending the Firebase session. It is a hint for a control, never an
+   * authorization: `continueWithPersistedIdentity` still mints a token, re-checks
+   * verification and asks the server, exactly as a password sign-in does.
+   */
+  hasResumableFirebaseIdentity: boolean;
+  /**
+   * The address of the identity THIS RUN authenticated, or `null` when only a
+   * persisted identity is known (a cold start). Used to tell the person which inbox
+   * holds the code; never persisted, never a route parameter, never a credential.
+   */
+  firebaseAccountEmail: string | null;
+  /**
+   * Resumes the verified persisted identity, then applies the session it exchanges.
+   *
+   * Throws `FirebaseAuthError` when there is no identity or Firebase still reports it
+   * unverified, and the server's `ApiError` for every refusal — including
+   * `REGISTRATION_REQUIRED`, which arms the onboarding screen. It never runs on its
+   * own: a person has to press the control that offers it.
+   */
+  continueWithPersistedIdentity: () => Promise<AuthUser>;
   /** Profile details retained across the verify screen; never a route parameter. */
   pendingRegistration: PendingFirebaseRegistration | null;
   /**
@@ -1172,6 +1219,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Phase 16 - the explicit onboarding state. Phase 32J's boolean is now DERIVED from
   // it, so the shipped onboarding screen keeps reading exactly what it always did.
   const [firebaseOnboarding, setFirebaseOnboarding] = useState<FirebaseOnboarding>('none');
+  /**
+   * A verified Firebase identity is on this device with no Inventory AI session.
+   *
+   * Armed ONLY by the boot probe, and cleared by applying or clearing a session and by
+   * ending the Firebase session — so it describes the present, never a past sign-in.
+   * The login screen uses it to offer one tap back into the account; the tap is what
+   * performs the exchange, because this flag authorizes nothing.
+   */
+  const [hasResumableFirebaseIdentity, setHasResumableFirebaseIdentity] = useState(false);
+  /**
+   * The address of the Firebase identity this RUN authenticated, when it knows it.
+   *
+   * It is shown so the two code screens can say which inbox to check, and it exists
+   * only because the person typed or was told the address in this run. It is NOT
+   * persisted, never a route parameter and never a credential; a cold start that knows
+   * only a persisted identity simply omits the line rather than inventing an address.
+   */
+  const [firebaseAccountEmail, setFirebaseAccountEmail] = useState<string | null>(null);
   // The profile details collected at signup, held across the verify screen. In-memory
   // and never a route parameter, so no token, uid or email travels through navigation.
   const [pendingRegistration, setPendingRegistration] =
@@ -1286,6 +1351,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setPendingRegistration(null);
     setVerificationEntryError(null);
     setVerificationCodeIssuedAt(null);
+    // A live session means nothing is waiting to be resumed, and clearing one means the
+    // identity behind it is gone. Either way the offer must not outlive the state.
+    setHasResumableFirebaseIdentity(false);
+    setFirebaseAccountEmail(null);
     setToken(nextToken);
     setUser(nextUser);
     setStatus(nextToken && nextUser ? 'signedIn' : 'signedOut');
@@ -1340,6 +1409,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // `true` also covers "there was nothing to end", which is the same outcome for every
     // caller and must clear a marker left by an earlier failed attempt.
     await persistFirebaseSignOutPending(!completed);
+    // Whatever happened, this launch may no longer claim an identity to resume: a failed
+    // sign-out is retried on the next launch, and the probe decides then.
+    setHasResumableFirebaseIdentity(false);
+    setFirebaseAccountEmail(null);
   }, []);
 
   /**
@@ -1568,6 +1641,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (outcome.kind === 'idToken') {
         const verified = await readEmailVerified();
         if (!verified) {
+          // Known here because the person just typed it: the verify screen names the
+          // inbox instead of asking them to remember which address they used.
+          setFirebaseAccountEmail(email.trim());
           armVerificationRequired(null);
           throw new FirebaseAuthError(FIREBASE_VERIFICATION_REQUIRED, VERIFY_EMAIL_MESSAGE);
         }
@@ -1644,6 +1720,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // already in flight. The server mints and mails it; the plaintext never reaches
       // this app.
       const { idToken } = await ensureFirebaseAccount({ email, password, name });
+      // The address this run registered, so the verify screen can say where the code went.
+      setFirebaseAccountEmail(email.trim());
       // The instant the code was accepted, or `null` when the send failed. Recorded here
       // rather than in the arming call inside the `try`, because the journey is armed on
       // BOTH paths by the single call after this block — one place decides the state, and
@@ -1728,6 +1806,58 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     },
     [applySession]
   );
+
+  /**
+   * Resumes the verified Firebase identity this device already holds (one tap).
+   *
+   * WHY IT EXISTS. A `REGISTRATION_REQUIRED` refusal arms the onboarding screen from
+   * IN-MEMORY state, and a cold start deliberately restores no session. So a person
+   * who was refused, closed the app and reopened it landed on Login with a verified
+   * Firebase identity that the app could see but could not act on — the business-name
+   * form was unreachable without retyping a password the person had already proved.
+   * The boot probe now reports that state, and this is the action it offers.
+   *
+   * IT IS A USER-DRIVEN SIGN-IN, NOT A SILENT RESTORE. The tap is what starts the
+   * exchange; nothing in the boot path can reach this. That distinction is what keeps
+   * the long-standing rule intact — only an explicit sign-in may open a session —
+   * while removing the password re-entry that rule never intended to demand.
+   *
+   * IT RE-CHECKS VERIFICATION rather than trusting the probe: the probe is a snapshot
+   * from launch, and the token is minted now. An unverified identity is routed to the
+   * verify screen (which owns resend and sign-out) instead of being exchanged. A
+   * `REGISTRATION_REQUIRED` refusal arms onboarding exactly as it does on any other
+   * sign-in, so the journey the person lost is the journey they land back in.
+   */
+  const continueWithPersistedIdentity = useCallback(async (): Promise<AuthUser> => {
+    const idToken = await currentFirebaseIdToken();
+    if (!idToken) {
+      setHasResumableFirebaseIdentity(false);
+      throw new FirebaseAuthError(NO_FIREBASE_IDENTITY, NO_FIREBASE_IDENTITY_MESSAGE);
+    }
+
+    const verified = await readEmailVerified();
+    if (!verified) {
+      armVerificationRequired(null);
+      throw new FirebaseAuthError(FIREBASE_VERIFICATION_REQUIRED, VERIFY_EMAIL_MESSAGE);
+    }
+
+    let session: ApiResponse;
+    try {
+      session = await api.firebaseExchange({
+        idToken,
+        deviceLabel: currentDeviceLabel(),
+      });
+    } catch (err) {
+      if (isRegistrationRequired(err)) armRegistrationRequired();
+      throw err;
+    }
+
+    await applySession(session.token, session.user, {
+      tokenExpiresAt: session.tokenExpiresAt ?? null,
+      sessionExpiresAt: session.sessionExpiresAt ?? null,
+    });
+    return session.user;
+  }, [applySession, armRegistrationRequired, armVerificationRequired]);
 
   /**
    * Sign in with Google (Phase 32I).
@@ -2061,8 +2191,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // sign-out retry so a completed sign-out is never mistaken for a live unverified
         // identity, and it sets ONLY the in-memory onboarding state: nothing durable is
         // written, nothing is exchanged and no session can appear.
-        const resume = await probeVerificationResume();
-        if (active) setFirebaseOnboarding(resume);
+        const resume = await probeResumeState();
+        if (active) {
+          setFirebaseOnboarding(resume.onboarding);
+          // Set here and nowhere else: this flag is a fact about the launch, and a
+          // render that merely rendered is not evidence an identity exists.
+          setHasResumableFirebaseIdentity(resume.resumableIdentity);
+        }
         return;
       }
       try {
@@ -2231,7 +2366,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // journey this probe is replacing: forget it rather than let a stale countdown describe
     // a code this launch never sent.
     setVerificationCodeIssuedAt(null);
-    setFirebaseOnboarding(await probeVerificationResume());
+    const resume = await probeResumeState();
+    setFirebaseOnboarding(resume.onboarding);
+    setHasResumableFirebaseIdentity(resume.resumableIdentity);
   }, []);
 
   /**
@@ -2252,6 +2389,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       completeFirebaseRegistration,
       firebaseRegistrationRequired,
       firebaseOnboarding,
+      hasResumableFirebaseIdentity,
+      firebaseAccountEmail,
+      continueWithPersistedIdentity,
       pendingRegistration,
       verificationEntryError,
       clearVerificationEntryError,
@@ -2282,6 +2422,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       completeFirebaseRegistration,
       firebaseRegistrationRequired,
       firebaseOnboarding,
+      hasResumableFirebaseIdentity,
+      firebaseAccountEmail,
+      continueWithPersistedIdentity,
       pendingRegistration,
       verificationEntryError,
       clearVerificationEntryError,

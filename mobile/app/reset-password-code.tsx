@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, router, useLocalSearchParams } from 'expo-router';
 import { StyleSheet, Text } from 'react-native';
 
@@ -7,6 +7,7 @@ import Banner from '../components/Banner';
 import Button from '../components/Button';
 import CodeInput from '../components/CodeInput';
 import { requestPasswordResetCode, verifyPasswordResetCode } from '../lib/api';
+import { fieldErrorsFrom, formatRemaining } from '../lib/authCopy';
 import { ApiError } from '../lib/client';
 import { beginVerifiedReset } from '../lib/passwordResetSession';
 import { spacing, type } from '../lib/theme';
@@ -52,25 +53,13 @@ const CODE_SENT_MESSAGE = 'Password reset code sent. Check your inbox and spam f
 const GENERIC_FAILURE = 'Something went wrong. Please try again.';
 const EMPTY_CODE_MESSAGE = 'Enter the 6-digit code from your email.';
 
-const SUBTITLE = `Enter the ${CODE_LENGTH}-digit code we emailed you. It expires in ${CODE_TTL_MINUTES} minutes — you will choose a new password on the next screen.`;
-
-function fieldMap(err: unknown): Record<string, string> {
-  const out: Record<string, string> = {};
-  if (err instanceof ApiError && Array.isArray(err.fields)) {
-    for (const f of err.fields) out[f.field] = f.message;
-  }
-  return out;
-}
-
-/** A short, human wait: seconds below a minute, otherwise minutes and seconds. */
-function formatRemaining(seconds: number): string {
-  if (seconds >= 60) {
-    const minutes = Math.floor(seconds / 60);
-    const rest = seconds % 60;
-    return rest === 0 ? `${minutes}m` : `${minutes}m ${rest}s`;
-  }
-  return `${seconds}s`;
-}
+const EXPIRED_HELPER = 'That code has expired. Send a new one to continue.';
+/**
+ * How long the sixth digit waits before the code is verified on its own — the same beat the
+ * verification screen uses, and for the same reason: nobody should have to reach for the
+ * button after typing the last digit, and nobody should lose the chance to correct it.
+ */
+const AUTO_VERIFY_DELAY_MS = 400;
 
 const createStyles = (colors: Palette) =>
   StyleSheet.create({
@@ -121,13 +110,35 @@ export default function ResetPasswordCodeScreen() {
    * that window, and the remainder is what this screen must honour — the same thing `verify-email.tsx`
    * does with `verificationCodeIssuedAt`.
    */
+  // The instant this journey's code was issued: the previous screen's `sentAt`, or a
+  // resend's own success. It is the start of BOTH clocks — the 60-second resend cooldown
+  // and the 10-minute lifetime — so neither is invented by this screen.
+  const sentAt = Number(params.sentAt);
+  const initialSentAt = Number.isFinite(sentAt) && sentAt > 0 ? sentAt : null;
+  const [codeIssuedAt, setCodeIssuedAt] = useState<number | null>(initialSentAt);
   const [cooldownUntil, setCooldownUntil] = useState<number | null>(() => {
-    const sentAt = Number(params.sentAt);
-    if (!Number.isFinite(sentAt) || sentAt <= 0) return null;
-    const end = sentAt + RESEND_COOLDOWN_SECONDS * 1000;
+    if (initialSentAt === null) return null;
+    const end = initialSentAt + RESEND_COOLDOWN_SECONDS * 1000;
     return end > Date.now() ? end : null;
   });
   const [now, setNow] = useState<number>(() => Date.now());
+
+  /**
+   * The pending auto-verify, and whether a verify is already in flight.
+   *
+   * A deliberate action cancels the timer, so the same code is never verified twice; the
+   * in-flight guard covers a press that lands while the automatic request is running. The
+   * server spends the challenge's attempts, so a duplicate request is not free.
+   */
+  const autoVerifyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const verifying = useRef(false);
+
+  useEffect(
+    () => () => {
+      if (autoVerifyTimer.current) clearTimeout(autoVerifyTimer.current);
+    },
+    []
+  );
 
   // Ticks only while a cooldown is running.
   useEffect(() => {
@@ -149,6 +160,25 @@ export default function ResetPasswordCodeScreen() {
     cooldownUntil === null ? 0 : Math.ceil(Math.max(0, cooldownUntil - now) / 1000);
   const coolingDown = cooldownUntil !== null && remainingSeconds > 0;
 
+  /** The server's own lifetime, counted from the send — see `CODE_TTL_MINUTES`. */
+  const expiresAt = codeIssuedAt === null ? null : codeIssuedAt + CODE_TTL_MINUTES * 60_000;
+  const codeExpired = expiresAt !== null && now >= expiresAt;
+  const codeSecondsLeft =
+    expiresAt === null ? 0 : Math.ceil(Math.max(0, expiresAt - now) / 1000);
+
+  // Ticks only while the code is alive. When it runs out the interval stops and the last
+  // render stands with `codeExpired` true, so the screen says so instead of counting to
+  // zero and then going quiet.
+  useEffect(() => {
+    if (expiresAt === null || Date.now() >= expiresAt) return undefined;
+    const id = setInterval(() => {
+      const at = Date.now();
+      setNow(at);
+      if (at >= expiresAt) clearInterval(id);
+    }, 1000);
+    return () => clearInterval(id);
+  }, [expiresAt]);
+
   if (!email) {
     return (
       <AuthLayout title="Start again" subtitle="We need the email address first.">
@@ -161,15 +191,48 @@ export default function ResetPasswordCodeScreen() {
     );
   }
 
+  /** A deliberate action cancels the automatic one. */
+  function cancelAutoVerify(): void {
+    if (autoVerifyTimer.current) {
+      clearTimeout(autoVerifyTimer.current);
+      autoVerifyTimer.current = null;
+    }
+  }
+
+  /**
+   * Six digits are verified without a tap, after a short beat.
+   *
+   * Nothing is scheduled for a partial code (an unfinished entry would spend one of the
+   * five attempts) nor for a code this screen knows has expired — the remedy for that is a
+   * new code, and the helper already says so.
+   */
+  function handleCodeChange(value: string): void {
+    if (fieldErrors.code) setFieldErrors({});
+    setCode(value);
+    cancelAutoVerify();
+    if (value.length !== CODE_LENGTH || codeExpired) return;
+    autoVerifyTimer.current = setTimeout(() => {
+      autoVerifyTimer.current = null;
+      void submit(value);
+    }, AUTO_VERIFY_DELAY_MS);
+  }
+
   async function resend(): Promise<void> {
     if (coolingDown) return;
+    // The old code is about to be replaced; an automatic verify of it would be a request
+    // about a value the server no longer holds.
+    cancelAutoVerify();
     setSending(true);
     setFormError(null);
     setNotice(null);
     try {
       await requestPasswordResetCode(email);
       setNotice(CODE_SENT_MESSAGE);
-      setCooldownUntil(Date.now() + RESEND_COOLDOWN_SECONDS * 1000);
+      // A resend starts a NEW code, so both clocks restart from this instant. Read once,
+      // so the lifetime and the cooldown cannot disagree by a millisecond.
+      const issuedAt = Date.now();
+      setCodeIssuedAt(issuedAt);
+      setCooldownUntil(issuedAt + RESEND_COOLDOWN_SECONDS * 1000);
     } catch (err) {
       // The server states the wait on a 429; honour it verbatim rather than guessing.
       const wait = err instanceof ApiError ? err.retryAfter : null;
@@ -182,21 +245,25 @@ export default function ResetPasswordCodeScreen() {
     }
   }
 
-  async function submit(): Promise<void> {
+  async function submit(candidate: string = code): Promise<void> {
+    cancelAutoVerify();
+    // One verify at a time: the automatic request and a press can otherwise overlap.
+    if (verifying.current) return;
     // A FRIENDLY PRE-CHECK THAT SAVES SOMETHING REAL: the challenge allows five attempts, and a
     // half-typed code would be refused by the server as an invalid code, spending a guess the
     // person never made.
-    if (code.length !== CODE_LENGTH) {
+    if (candidate.length !== CODE_LENGTH) {
       setFieldErrors({ code: EMPTY_CODE_MESSAGE });
       return;
     }
 
+    verifying.current = true;
     setBusy(true);
     setFormError(null);
     setNotice(null);
     setFieldErrors({});
     try {
-      const verified = await verifyPasswordResetCode({ email, code });
+      const verified = await verifyPasswordResetCode({ email, code: candidate });
       // THE SERVER'S OWN WINDOW, not a client constant, and held in memory rather than in the
       // navigation route — see `lib/passwordResetSession.ts`.
       beginVerifiedReset({
@@ -208,7 +275,7 @@ export default function ResetPasswordCodeScreen() {
       // only offer a field that the server will refuse.
       router.replace('/reset-password-new');
     } catch (err) {
-      const fields = fieldMap(err);
+      const fields = fieldErrorsFrom(err);
       if (Object.keys(fields).length) setFieldErrors(fields);
       else
         setFormError(
@@ -216,6 +283,7 @@ export default function ResetPasswordCodeScreen() {
             'That code could not be verified. Please try again.'
         );
     } finally {
+      verifying.current = false;
       setBusy(false);
     }
   }
@@ -224,10 +292,15 @@ export default function ResetPasswordCodeScreen() {
     ? `Resend code in ${formatRemaining(remainingSeconds)}`
     : 'Resend code';
 
+  // THE SUBTITLE NAMES THE INBOX, not just the step. A code the person cannot find is
+  // the commonest way this screen stalls, and the first question it raises is "which
+  // address did I use?". The address is already on this screen's route (it is what the
+  // previous screen collected), it identifies no account on its own, and "Wrong
+  // address? Start over" is directly below — so stating it turns a guess into a decision.
   return (
     <AuthLayout
       title="Enter your reset code"
-      subtitle={SUBTITLE}
+      subtitle={`Enter the ${CODE_LENGTH}-digit code we emailed to ${email}. It expires in ${CODE_TTL_MINUTES} minutes — you will choose a new password on the next screen.`}
       footer={
         <Text style={styles.footerText}>
           Remembered it?{' '}
@@ -242,21 +315,28 @@ export default function ResetPasswordCodeScreen() {
       <CodeInput
         label="Reset code"
         value={code}
-        onChangeText={(value: string) => {
-          // Typing is the person acting on the previous refusal, so the stale reason goes with it.
-          if (fieldErrors.code) setFieldErrors({});
-          setCode(value);
-        }}
+        onChangeText={handleCodeChange}
         error={fieldErrors.code}
         required
+        // The lifetime is stated as a COUNT, from this journey's own send instant. A static
+        // "expires in 10 minutes" describes the moment the code was issued, not the moment
+        // the person is reading it — and an expired code is otherwise indistinguishable
+        // from a wrong one until the server refuses it.
+        helper={
+          expiresAt === null
+            ? undefined
+            : codeExpired
+              ? EXPIRED_HELPER
+              : `Code expires in ${formatRemaining(codeSecondsLeft)}`
+        }
         // The field declares itself as a one-time code to the platform (inside `CodeInput`), which
         // is what lets Android's autofill and the iOS QuickType bar offer all six digits instead of
         // making the person leave the app to copy them.
-        onSubmitEditing={submit}
+        onSubmitEditing={() => submit()}
       />
       <Button
         title="Verify code"
-        onPress={submit}
+        onPress={() => submit()}
         loading={busy}
         disabled={sending || code.length !== CODE_LENGTH}
         full

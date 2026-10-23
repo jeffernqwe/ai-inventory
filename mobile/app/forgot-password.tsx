@@ -7,7 +7,7 @@ import Banner from '../components/Banner';
 import Button from '../components/Button';
 import Input from '../components/Input';
 import { requestPasswordResetCode } from '../lib/api';
-import { ApiError } from '../lib/client';
+import { fieldErrorsFrom } from '../lib/authCopy';
 import { spacing, type } from '../lib/theme';
 import type { Palette } from '../lib/theme';
 import { useTheme } from '../lib/theme-context';
@@ -62,14 +62,6 @@ const createStyles = (colors: Palette) =>
     },
   });
 
-function fieldMap(err: unknown): Record<string, string> {
-  const out: Record<string, string> = {};
-  if (err instanceof ApiError && Array.isArray(err.fields)) {
-    for (const f of err.fields) out[f.field] = f.message;
-  }
-  return out;
-}
-
 export default function ForgotPasswordScreen() {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -115,7 +107,7 @@ export default function ForgotPasswordScreen() {
       });
     } catch (err) {
       setDiagnostic(`server: ${(err as { code?: string | null } | null)?.code ?? '(no code)'}`);
-      const fields = fieldMap(err);
+      const fields = fieldErrorsFrom(err);
       if (Object.keys(fields).length) setFieldErrors(fields);
       else
         setFormError(
@@ -151,12 +143,21 @@ export default function ForgotPasswordScreen() {
         name="email"
         label="Email"
         value={email}
-        onChangeText={setEmail}
+        onChangeText={(value: string) => {
+          // Editing is acting on the refusal: the message described a value that no
+          // longer exists, so it must not sit under the corrected one.
+          if (fieldErrors.email) setFieldErrors({});
+          setEmail(value);
+        }}
         keyboardType="email-address"
         autoCapitalize="none"
         placeholder="you@company.com"
         error={fieldErrors.email}
         required
+        // So the phone's password manager can supply the saved address rather than
+        // making the person retype the one thing this screen needs.
+        autoComplete="email"
+        textContentType="emailAddress"
         returnKeyType="go"
         onSubmitEditing={submit}
       />

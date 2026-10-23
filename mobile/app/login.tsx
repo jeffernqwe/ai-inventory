@@ -6,6 +6,7 @@ import AuthLayout from '../components/AuthLayout';
 import Banner from '../components/Banner';
 import Button from '../components/Button';
 import Input from '../components/Input';
+import { fieldErrorsFrom, formatRemaining } from '../lib/authCopy';
 import { ApiError } from '../lib/client';
 import { useSession } from '../lib/auth';
 import { defaultHomePath } from '../lib/permissions';
@@ -33,15 +34,14 @@ const createStyles = (colors: Palette) =>
     // banner's own spacing — the two read as one block.
     actionRow: { ...type.bodySmall, alignSelf: 'stretch', textAlign: 'center' },
     link: { color: colors.link, fontWeight: '700' },
+    // The one line that explains why a password form offers a shortcut above it.
+    hint: {
+      ...type.bodySmall,
+      color: colors.textSecondary,
+      alignSelf: 'stretch',
+      marginBottom: spacing.sm,
+    },
   });
-
-function fieldMap(err: unknown): Record<string, string> {
-  const out: Record<string, string> = {};
-  if (err instanceof ApiError && Array.isArray(err.fields)) {
-    for (const f of err.fields) out[f.field] = f.message;
-  }
-  return out;
-}
 
 /**
  * Phase 32E — the one server outcome this screen must do more than print.
@@ -90,18 +90,16 @@ const LOGIN_RATE_LIMITED = 'LOGIN_RATE_LIMITED';
 const RATE_LIMIT_MESSAGE =
   'Too many sign-in attempts. For your security, sign-in is paused for a moment.';
 
-/** A short, human wait: seconds below a minute, otherwise minutes and seconds. */
-function formatRemaining(seconds: number): string {
-  if (seconds >= 60) {
-    const minutes = Math.floor(seconds / 60);
-    const rest = seconds % 60;
-    return rest === 0 ? `${minutes}m` : `${minutes}m ${rest}s`;
-  }
-  return `${seconds}s`;
-}
-
 export default function LoginScreen() {
-  const { status, user, signIn, signInWithGoogle, firebaseOnboarding } = useSession();
+  const {
+    status,
+    user,
+    signIn,
+    signInWithGoogle,
+    firebaseOnboarding,
+    hasResumableFirebaseIdentity,
+    continueWithPersistedIdentity,
+  } = useSession();
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [email, setEmail] = useState('');
@@ -111,6 +109,12 @@ export default function LoginScreen() {
   const [needsAccount, setNeedsAccount] = useState(false);
   const [busy, setBusy] = useState(false);
   const [googleBusy, setGoogleBusy] = useState(false);
+  /**
+   * The one-tap resume (see `continueWithPersistedIdentity`). Kept separate from
+   * `busy` so the ordinary form stays inert while it runs, exactly as the Google
+   * button is handled.
+   */
+  const [continuing, setContinuing] = useState(false);
   // IN-MEMORY ONLY, deliberately: a cooldown is a fact about the server's current
   // window, and persisting it would keep the form disabled after the window has
   // already moved on (or after a restart the server no longer knows about).
@@ -162,7 +166,7 @@ export default function LoginScreen() {
    * refusal is about the Inventory AI account, not about how it was entered.
    */
   function applyAuthError(err: unknown): void {
-    const fields = fieldMap(err);
+    const fields = fieldErrorsFrom(err);
     if (Object.keys(fields).length) {
       setFieldErrors(fields);
       return;
@@ -187,6 +191,47 @@ export default function LoginScreen() {
     setFormError(null);
     setFieldErrors({});
     setNeedsAccount(false);
+  }
+
+  /**
+   * Correcting a field is acting on the refusal, so the refusal goes with it.
+   *
+   * Every other auth screen already did this where it mattered (the code field), and
+   * a red message that survives a corrected value describes a value the person can no
+   * longer see — it says the form is still wrong when it may already be right.
+   */
+  function editField(field: string, setValue: (value: string) => void) {
+    return (value: string): void => {
+      setValue(value);
+      if (fieldErrors[field]) {
+        setFieldErrors((current) => {
+          const next = { ...current };
+          delete next[field];
+          return next;
+        });
+      }
+    };
+  }
+
+  /**
+   * Resumes the verified account Firebase already holds on this device.
+   *
+   * Offered only when the boot probe found one (`hasResumableFirebaseIdentity`), which
+   * is the cold-start case: someone was refused with `REGISTRATION_REQUIRED`, closed
+   * the app, and reopened it. Tapping is the whole point — the exchange is what opens a
+   * session, and this screen never performs one on its own.
+   */
+  async function handleContinue(): Promise<void> {
+    setContinuing(true);
+    resetFeedback();
+    try {
+      await continueWithPersistedIdentity();
+      // The signedIn guard redirects this screen away on success.
+    } catch (err) {
+      applyAuthError(err);
+    } finally {
+      setContinuing(false);
+    }
   }
 
   async function submit(): Promise<void> {
@@ -276,11 +321,24 @@ export default function LoginScreen() {
           </Link>
         </Text>
       ) : null}
+      {hasResumableFirebaseIdentity ? (
+        <>
+          <Text style={styles.hint}>You are already signed in on this device.</Text>
+          <Button
+            title="Continue with saved account"
+            variant="secondary"
+            onPress={handleContinue}
+            loading={continuing}
+            disabled={busy || googleBusy}
+            full
+          />
+        </>
+      ) : null}
       <Input
         name="email"
         label="Email"
         value={email}
-        onChangeText={setEmail}
+        onChangeText={editField('email', setEmail)}
         keyboardType="email-address"
         autoCapitalize="none"
         placeholder="you@company.com"
@@ -297,7 +355,7 @@ export default function LoginScreen() {
         name="password"
         label="Password"
         value={password}
-        onChangeText={setPassword}
+        onChangeText={editField('password', setPassword)}
         secureTextEntry
         placeholder="••••••••"
         error={fieldErrors.password}
@@ -314,7 +372,7 @@ export default function LoginScreen() {
         title="Sign In"
         onPress={submit}
         loading={busy}
-        disabled={googleBusy || coolingDown}
+        disabled={googleBusy || continuing || coolingDown}
         full
       />
       <Button
@@ -322,7 +380,7 @@ export default function LoginScreen() {
         variant="secondary"
         onPress={handleGoogle}
         loading={googleBusy}
-        disabled={busy}
+        disabled={busy || continuing}
         full
       />
     </AuthLayout>

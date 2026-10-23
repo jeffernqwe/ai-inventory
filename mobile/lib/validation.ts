@@ -107,6 +107,33 @@ export function passwordStrengthProblem(value: string): string | null {
 }
 
 /**
+ * The LIVE hint under a password field being chosen.
+ *
+ * WHY IT IS NOT A "STRENGTH" METER. The server has exactly one password policy — length,
+ * 8 to 72 — and nothing else. A meter or a checklist of invented rules ("one number", "one
+ * symbol") would refuse passwords the server accepts, which is a client inventing a rule
+ * nobody asked for. So this reports the ONE rule there is, against the value being typed:
+ * how far it is from the minimum, whether it is inside the window, or by how much it is
+ * over. It is computed from `PASSWORD_MIN`/`PASSWORD_MAX`, the constants already pinned to
+ * the server's own source by `auth-validation-rules.test.ts`.
+ *
+ * An EMPTY field gets the rule as a statement rather than a countdown: nothing has been
+ * typed yet, so "0 of 8 characters" would describe a mistake that has not been made.
+ */
+export function passwordRuleHint(value: string): string {
+  if (!value) return `Between ${PASSWORD_MIN} and ${PASSWORD_MAX} characters.`;
+  if (value.length < PASSWORD_MIN) {
+    const missing = PASSWORD_MIN - value.length;
+    return `${value.length} of ${PASSWORD_MIN} characters — ${missing} more to go.`;
+  }
+  if (value.length > PASSWORD_MAX) {
+    const over = value.length - PASSWORD_MAX;
+    return `Too long by ${over} character${over === 1 ? '' : 's'}.`;
+  }
+  return `${value.length} characters — within the limit.`;
+}
+
+/**
  * The email/password pair as the field-keyed map a screen's `Input`s read.
  *
  * Returns an EMPTY OBJECT when both are usable, so a caller's whole guard is

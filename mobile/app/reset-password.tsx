@@ -8,12 +8,12 @@ import Button from '../components/Button';
 import Input from '../components/Input';
 import { resetPassword } from '../lib/api';
 import { clearPasswordResetPending, markPasswordResetPending, useSession } from '../lib/auth';
-import { ApiError } from '../lib/client';
+import { fieldErrorsFrom } from '../lib/authCopy';
 import { confirmFirebasePasswordReset, verifyFirebasePasswordResetCode } from '../lib/firebase-auth';
 import { type } from '../lib/theme';
 import type { Palette } from '../lib/theme';
 import { useTheme } from '../lib/theme-context';
-import { passwordStrengthProblem } from '../lib/validation';
+import { passwordRuleHint, passwordStrengthProblem } from '../lib/validation';
 
 const RESET_COMPLETED = 'Password changed. Please sign in again.';
 
@@ -54,14 +54,6 @@ function readCode(raw: unknown): string {
 type ResetAttempt =
   | { kind: 'firebase'; oobCode: string }
   | { kind: 'legacy'; token: string };
-
-function fieldMap(err: unknown): Record<string, string> {
-  const out: Record<string, string> = {};
-  if (err instanceof ApiError && Array.isArray(err.fields)) {
-    for (const f of err.fields) out[f.field] = f.message;
-  }
-  return out;
-}
 
 const createStyles = (colors: Palette) =>
   StyleSheet.create({
@@ -249,7 +241,7 @@ function ResetPasswordForm({ attempt }: { attempt: ResetAttempt }) {
       // where the token this screen holds is already dead.
       await clearSession();
     } catch (err) {
-      const fields = fieldMap(err);
+      const fields = fieldErrorsFrom(err);
       // The link code has no input of its own, so a field error naming it would be
       // invisible; promote it to the form level instead of dropping it. (Only the custom
       // flow can produce one: Firebase's outcomes never carry `fields`.)
@@ -294,7 +286,7 @@ function ResetPasswordForm({ attempt }: { attempt: ResetAttempt }) {
         onChangeText={setNewPassword}
         secureTextEntry
         placeholder="At least 8 characters"
-        helper="Min 8 characters"
+        helper={passwordRuleHint(newPassword)}
         error={fieldErrors.newPassword}
         required
         autoCapitalize="none"

@@ -19050,6 +19050,128 @@ turns must count outcomes, not statuses. iOS remains unverified (no macOS on thi
 
 ---
 
+# 27EN. The auth screens stop making people guess (2026-10-23)
+
+**Mobile only — no route, permission, schema, dependency, session-model or environment change.**
+Five behaviours on the screens a person meets before they are inside the app. Each was chosen
+because it was a real moment of friction, not because a checklist named it.
+
+**1. Autofill on Create Account.** The registration fields declared nothing about what they hold,
+so a password manager could not fill the address it already had or offer to generate a password —
+on the one screen where generating one matters most. The address now declares `email` /
+`emailAddress`, the password `new-password` / `newPassword` (not `current-password`, which asks for
+a credential that cannot exist yet), and the two name fields declare `name` and capitalise words.
+Login and the new-password screen already did this; the three cannot drift apart silently now
+(`auth-flow-continuity.test.tsx`).
+
+**2. A corrected field stops looking wrong.** Login, Create Account, Forgot Password and the
+reset password step left a field's red message in place while the value was being replaced, so a
+form that was already right still looked wrong until the next submit. Editing a field now clears
+that field's message and nothing else — the same rule the code field already used.
+
+**3. A code's lifetime is counted, not restated.** Both six-digit screens printed "expires in 10
+minutes" as fixed text, which describes when the code was issued rather than how long it has left —
+so an expired code was indistinguishable from a wrong one until the server refused it. Each screen
+now counts down from its own send instant (the verify screen's `verificationCodeIssuedAt`, the reset
+screen's `sentAt`, both reset by a successful resend) and says *That code has expired. Send a new
+one to continue.* when the window closes. The numbers are the server's constants, already pinned
+to its source by the existing drift guard.
+
+**4. The code screens name the inbox.** A code that has not arrived is the commonest way these
+screens stall, and the first question is "which address did I use?". Verify says which address it
+sent to when this run knows it; the reset screen always does, because the previous screen collected
+it. The reset screen's "Wrong address? Start over" is directly below, so the fact makes the next
+step obvious instead of adding a second one.
+
+**5. A cold start no longer strands a verified identity.** A `REGISTRATION_REQUIRED` refusal arms
+the business-name form from **in-memory** state, and a cold start restores no session — so someone
+refused, who then closed the app, arrived at Login holding a verified Firebase identity the app
+could see but could not act on. The only way back was retyping a password Firebase had already
+accepted. The read-only boot probe now reports `hasResumableFirebaseIdentity` alongside the
+verification state, Login offers **Continue with saved account**, and the tap performs the ordinary
+exchange. **The rule is intact:** a launch still mints nothing and exchanges nothing; only a tap
+opens a session, and the action re-checks `emailVerified` at the moment of use rather than trusting
+a launch-time snapshot. A refusal arms onboarding exactly as a password sign-in does, so the journey
+the person lost is the one they land back in.
+
+**What was deliberately not done.** No persisted flag, token, uid or address; the address used in
+point 4 is in-memory for the run and never a route parameter on the verify path (`firebaseAccountEmail`).
+No new native or provider boundary: the resume control reuses the existing probe, `currentFirebaseIdToken`
+and `firebaseExchange`. No visual redesign — the existing `AuthLayout`, tokens and contrast work are
+untouched. No change to any limiter, code lifetime, attempt budget or session rule.
+
+**Verification.** Mobile `tsc` clean, `eslint` clean, **88 suites / 1063 tests / 0 failures** (two new
+suites: `auth-flow-continuity.test.tsx` — 14 cases on the five behaviours — and
+`auth-resume-identity.test.tsx` — 7 cases proving the probe mints nothing, only a tap exchanges,
+verification is re-checked, and `REGISTRATION_REQUIRED` still arms onboarding). Every pre-existing
+auth suite passes unchanged. No server file was touched, so the server baselines are unchanged.
+**Device-verified 2026-10-23** on the OPPO CPH1969 against the local server (see the evidence in
+`docs/evidence/device-runs/2026-10-23-auth-polish/`): Login offered **Continue with saved account**
+and one tap opened the tenant's dashboard, and the offer was **gone** after signing out. iOS remains
+unverified (no macOS on this host).
+
+**Still open from the review this came from** (recommended, not started): a per-user session cap,
+a new-device sign-in email, and invitation-based onboarding. The live password rule and the shared
+helpers landed in §27EO.
+
+---
+
+
+# 27EO. The rule is stated while it is typed, and six digits verify themselves (2026-10-23)
+
+**Mobile only — no route, permission, schema, dependency, session-model or environment change, and
+no server file touched.** Three follow-ups from the auth review in §27EN, each small enough to check
+by hand and each removing a moment where the screen knew more than it said.
+
+**1. The password rule is stated live, not after a refusal.** The server has exactly one password
+policy — 8 to 72 characters — and the four screens that *choose* a password said only "Min 8
+characters", so a 73-character password and a 5-character one both travelled to the server and came
+back in a developer's words. `passwordRuleHint` in `lib/validation.ts` now reports distance from that
+one policy while the value is being typed — *3 of 8 characters — 5 more to go.*, *12 characters —
+within the limit.*, *Too long by 3 characters.* — on Create Account, the reset password step, the
+emailed-link reset screen and Change Password. It deliberately **invents no complexity rule**: a
+checklist of "one number, one symbol" would refuse passwords the server accepts, which is a client
+guardrail nobody asked for. The numbers are the shared constants, already pinned to the server's own
+source by `auth-validation-rules.test.ts`.
+
+**2. Six digits verify without a tap — after a beat.** Both code screens waited for a press even
+when all six boxes were full. They now submit themselves **400 ms** after the sixth digit, which is
+long enough to replace a mistyped last digit and short enough that nobody reaches for the button.
+A deliberate action wins: pressing Verify or Resend **cancels** the pending request, so one code is
+never submitted twice, and an in-flight guard covers the press that lands while the automatic request
+runs. Nothing is scheduled for a partial code (the challenge allows five attempts and an unfinished
+entry would spend one) or for a code the screen already knows has expired (the remedy is a new code,
+and the helper says so; a phone whose clock disagrees can still press Verify). The same rule is on
+both screens, so the verify screen and the reset screen behave alike.
+
+**3. The copied helpers have one home.** `fieldMap` had been pasted into nine auth screens and
+`formatRemaining` into three; copies drift one sentence at a time, and the person then reads two
+explanations of the same refusal depending on which screen they were on. `lib/authCopy.ts` now holds
+both, imported everywhere they were duplicated. A source scan in `auth-copy.test.ts` fails if any
+auth screen defines its own again, with a positive control so the scan cannot pass by seeing nothing.
+This is the mechanical half of "one failure vocabulary"; the sentences screens *own* — which are
+genuinely different per step — stay where they are.
+
+**Verification.** Mobile `tsc` and `eslint` clean; **89 suites / 1082 tests / 0 failures**, 19 new
+cases (`auth-copy.test.ts`, four auto-verify cases on each code screen, three on the password hint
+and its rendering). No server file changed, so the server baselines stand as last measured
+(unit 1330 tests / 1276 pass / 0 fail / 54 skipped; db 884 / 791 / 0 / 93).
+
+**Device-measured 2026-10-23** on the OPPO CPH1969 through `scrcpy`, against the local server:
+the Create Account hint moved *Between 8 and 72 characters.* → *3 of 8 characters — 5 more to go.*
+→ *12 characters — within the limit.* as characters were typed; the reset screen named the inbox and
+counted *Code expires in 8m 48s*; and typing `123456` produced **exactly one**
+`POST /api/auth/password-reset/verify` (400) **without pressing anything**, with the server's refusal
+rendered as the banner. The success half of auto-verify (a correct code opening the password step)
+was **not** driven — it needs a live code and the probe address has no inbox — and is covered by the
+suites; the verify-email screen's identical path was not reached on the device either. Evidence and
+the run's limits: `docs/evidence/device-runs/2026-10-23-auth-polish/README.md`. iOS unverified.
+
+**Still open** (recommended, not started): a per-user session cap, a new-device sign-in email, and
+invitation-based onboarding as the prerequisite for retiring legacy password login.
+
+---
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

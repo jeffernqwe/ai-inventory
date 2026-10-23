@@ -18736,8 +18736,10 @@ marker and, after the automatic sign-in and `credentials-changed`, **revokes eve
 session**. Firebase's own hosted form changes the password and revokes nothing (D2/OD-9),
 so deleting the page would remove the only session-revoking destination such a link has.
 That makes the path a security asset rather than dead weight, and the earlier justification
-— "a link already in somebody's inbox" — was corrected in place, because action codes are
-short-lived and any pre-AUTH-06 link has expired. The Firebase email templates themselves
+— "a link already in somebody's inbox" — is superseded here rather than in the file, because
+action codes are short-lived and any pre-AUTH-06 link has expired, while
+`lib/firebase-auth.ts` is pinned byte-for-byte by the frozen-module tripwire (a comment-only
+edit moves that hash, so the deliberation belongs in this record instead). The Firebase email templates themselves
 need no change: nothing the app does consults them, and the verification template is simply
 unused.
 

@@ -18976,8 +18976,18 @@ the tenant was torn down with **0 leftovers** and the database returned to its p
 (3 users / 3 businesses / 1 product / 0 conversations). Render's own log stream was **not**
 available from this host, so that review used the deployment's counters, the rows and the request
 telemetry rather than log lines — recorded as a narrower instrument, not as a log review. The run
-was **API-level, not on the phone**: the installed build bakes its API base at build time and
-points at the local server, and the client half is the phone run below. `X-Accel-Buffering` was not
+first ran **API-level**, and was then **repeated on the phone** (same day, 21:08–21:17 Manila,
+scrcpy over USB): Metro was started with `EXPO_PUBLIC_API_URL=https://ai-inventory-l1mi.onrender.com`
+and the fetched bundle was checked to contain that host — a `development` client's JS comes from
+Metro, so this needed no new APK — `adb reverse tcp:4000` was removed so nothing could fall back to
+the local server, and the app signed in as the seeded production demo OWNER (dashboard: 3 in stock /
+3 low / **1** out / 6 active / **112** on hand, and a session row in `inventoryai_prod_db` at
+13:08:50 UTC). **Four turns** answered from production with the fixture's numbers — 112 units and
+its health split, the movement history, and low stock with a **6** and **5** unit shortfall — and
+one was screenshotted every ~0.74 s: **12.9 s** showed the intro plus two bullets cut off
+mid-sentence with **Stop** still up, **15.2 s** a third bullet and a fourth trailing at `on 2026-`,
+and the final frame the whole answer with *Read: Stock movements*. Stored **once**: 3 conversations,
+2 / 4 / 2 messages, no duplicate row, all on the configured primary model. `5xx` stayed **0**. `X-Accel-Buffering` was not
 visible to the client (Cloudflare answers first); it is a proxy hint, delivery was incremental, and
 nothing was changed for it. CI green on `main` (workflow `ci`, run `39951211533`).
 

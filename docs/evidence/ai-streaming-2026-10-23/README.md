@@ -111,6 +111,60 @@ or product was touched. The Firebase identity was left in place, as that teardow
 demo address is on a reserved domain and re-seeding reuses it). The password used for the run was
 deleted from this host afterwards.
 
+## Production, on the phone (2026-10-23, 21:08–21:17 Manila)
+
+Screenshots in `prod-phone/`. This is the same production deployment as the section above, driven
+from the OPPO CPH1969 with scrcpy mirroring the screen over USB, and the UI operated through `adb`.
+
+**No new APK was built, and the reason is structural rather than a shortcut.** The installed build
+is a `development` client: its JavaScript comes from Metro, so `EXPO_PUBLIC_API_URL` is inlined when
+the bundle is served, not when the APK is compiled. Metro was started with
+`EXPO_PUBLIC_API_URL=https://ai-inventory-l1mi.onrender.com` (`mobile/.env` does not set that name,
+so the shell value is the only source), the 7.8 MB bundle was fetched from Metro and **contains the
+production host**, and `adb reverse tcp:4000` was **removed** so no request could fall back to the
+local server. The app was force-stopped and relaunched to load that bundle.
+
+**The session is production's own.** The demo identity was seeded into `inventoryai_prod_db` by
+naming the database on the command, and the app's Login screen (Firebase email/password) took it.
+The dashboard then showed **Demo Tester / Owner**, 3 in stock, 3 low, 1 out of stock, 6 active
+products and **112 on hand** — and `inventoryai_prod_db` gained a session row for that user at
+**13:08:50 UTC**, which is how the run knows it was not a local lookalike (the dev fixture has the
+same six products and the same numbers).
+
+**Four turns, and one of them filmed at 0.74-second intervals.**
+
+| # | Question | On screen | Stored |
+|---|---|---|---|
+| 1 | *How much stock do we hold?* (`5-answer-112-units.png`) | 112 units, 6 products tracked, 3 in stock, 3 low, 1 out; *Read: Inventory summary* | conversation 1 — **2** messages, 257 chars |
+| 2 | *What has moved recently?* | the movement cards and a closing summary | conversation 2 — **4** messages (two exchanges in one chat), 1 181 + 661 chars |
+| 3 | *Which low stock products need attention, and how each pending shortfall?* (typed) | Demo Coffee Beans 1 kg 4 vs 10 → **shortfall 6**; Demo Paper Cups 100 pk 15 vs 20 → **shortfall 5**; *Open the full restock list* | (the second exchange above) |
+| 4 | *What has moved recently?* in a **new** chat | see the three frames below | conversation 3 — **2** messages, 553 chars |
+
+**Progressive rendering, visible rather than inferred.** Turn 4 was screenshotted every ~0.74 s from
+the moment it was sent:
+
+- `1-mid-answer.png` at **12.9 s** — the intro *“9 movements total; the 5 most recent are below.”*
+  and two bullets, cut off mid-sentence inside the second one, with the **Stop** button still shown;
+- `2-still-streaming.png` at **15.2 s** — a third bullet complete and the fourth trailing off at
+  `on 2026-`;
+- `3-final-answer.png` at **~17 s** and after — the whole answer, *Read: Stock movements*, **Send**
+  restored.
+
+Frames at 11.4 s still showed only the spinner, and the file sizes grew 132 KB → 174 KB → 213 KB →
+225 KB → 249 KB as the text arrived, so the growth is the rendering, not an animation.
+
+**Stored exactly once.** `inventoryai_prod_db` after the run: **3** conversations for the account,
+with **2 / 4 / 2** messages, roles in order `USER,ASSISTANT` (and `USER,ASSISTANT,USER,ASSISTANT` in
+the reused chat), no duplicate assistant row, every answer by
+`nvidia/nemotron-3.5-lightning:free` — the configured primary, so no failover happened.
+
+**Health after the phone run:** `responses: 279`, `4xx: 1` (the deliberate unauthenticated probe
+from the section above), **`5xx: 0`**, `serverErrors: 0`.
+
+**An environment hiccup worth recording, because it looked like an app fault.** The `adb` server on
+this host had been running since 15:04 and had stopped answering — every `adb` command hung until
+that single process was killed and the server restarted. Nothing in the app was involved.
+
 ## What this run does not prove
 
 - The **idle** and **abort** paths are measured (scenarios 6 and 4); a genuine mid-answer TCP reset

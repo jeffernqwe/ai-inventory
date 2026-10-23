@@ -86,10 +86,20 @@
  * Brevo (AUTH-06), and the app takes that code and the new password on its own screen.
  *
  * WHAT REMAINS HERE IS THE REDEMPTION HALF — `verifyFirebasePasswordResetCode` and
- * `confirmFirebasePasswordReset` — and it remains because a `?oobCode=` link that is
- * ALREADY in somebody's inbox has to keep working. Removing the sender while keeping the
- * redeemer is deliberate: no new mail of that kind is asked for, and no link already sent
- * is stranded.
+ * `confirmFirebasePasswordReset` — and it stays for a reason this module cannot show on
+ * its own: THIS APP no longer composes that mail, but Firebase still can. Its public
+ * `accounts:sendOobCode` endpoint answers to the project key that ships inside the binary,
+ * and the console's per-user *Reset password* action uses it too, so a real reset link can
+ * still reach a real inbox. When one does, `GET /auth/reset` on this server forwards it
+ * into `reset-password.tsx`, which writes the N-4 recovery marker and — after the
+ * automatic sign-in and `credentials-changed` — revokes every session. Firebase's own
+ * hosted form changes the password and revokes nothing (D2/OD-9), so deleting this
+ * redeemer would take away the only session-revoking destination such a link has.
+ *
+ * THE EARLIER REASON RECORDED HERE — "a link already in somebody's inbox" — was true when
+ * AUTH-06 landed and is no longer the argument: action codes are short-lived, so any link
+ * from before that change has expired. The mail that can still arrive is the one described
+ * above.
  */
 
 // THERE IS DELIBERATELY NO `import … from 'firebase/auth'` HERE ANY MORE (Phase D).

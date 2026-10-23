@@ -18673,6 +18673,52 @@ with the reason each is a V4 concern rather than a release blocker.
 
 ---
 
+# 27EK. The Firebase verification email had no sender left (2026-10-23)
+
+**Mobile only — one dead capability removed. No route, permission, schema, dependency,
+session, environment or Firebase-console change, and no behaviour change.**
+
+An owner review asked whether Firebase's password-reset and email-verification machinery is
+still needed now that both journeys belong to this application. Traced from call site to SDK
+verb, the answer splits cleanly.
+
+**Everything Firebase does as the identity provider stays.** Native email/password and Google
+sign-in, the forced ID token, `reload()`/`emailVerified`, and on the server the Admin SDK's
+`verifyIdToken`, the `emailVerified` and password writes, and `revokeRefreshTokens` are all
+live and were not touched.
+
+**No code asks Firebase to send an email.** AUTH-06 removed `sendPasswordResetEmail`, and
+AUTH-04 had already replaced the verification message with this server's six-digit code —
+which left `nativeSendEmailVerification` exported with **no caller anywhere in `app/` or
+`lib/`**, only its own test. It is now removed, with its two boundary cases replaced by the
+equivalent pair for `nativeUpdatePassword`: that credential write shares the same
+no-current-user contract (Android resolves a user-scoped call with no user while iOS rejects
+it) and previously had no direct test. The verb also leaves the suite's SDK mock, so the
+mocked surface cannot assert a call the boundary can no longer make. This is the same
+principle AUTH-06 applied to `sendPasswordResetEmail`: a permitted capability with no caller
+is one nobody reviews, and the boundary exists to keep the reachable set small.
+
+**What was deliberately NOT removed, and why.** The AUTH-05 landing page (`GET /auth/reset`),
+its `?oobCode=` redemption in `reset-password.tsx`, and the console's *Customize action URL*
+all stay. They are reachable without this app: Firebase's own `accounts:sendOobCode`
+endpoint answers to the project key that ships inside the binary, and the console's
+per-user *Reset password* action uses it too — so a real reset link can still reach a real
+inbox. When one does, our page forwards it into the app, which writes the N-4 recovery
+marker and, after the automatic sign-in and `credentials-changed`, **revokes every
+session**. Firebase's own hosted form changes the password and revokes nothing (D2/OD-9),
+so deleting the page would remove the only session-revoking destination such a link has.
+That makes the path a security asset rather than dead weight, and the earlier justification
+— "a link already in somebody's inbox" — was corrected in place, because action codes are
+short-lived and any pre-AUTH-06 link has expired. The Firebase email templates themselves
+need no change: nothing the app does consults them, and the verification template is simply
+unused.
+
+**Verification.** Mobile `tsc` clean; **83 suites / 1016 tests / 0 failures**, including the
+Phase 1 inertness guard and the Phase 16 verification suites, which pass unchanged. No
+server file was touched.
+
+---
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

@@ -474,17 +474,24 @@ export async function nativeConfirmPasswordReset(
 }
 
 // ---------------------------------------------------------------------------
-// The native operations (Phase 16) — email verification
+// The native operations (Phase 16) — verification state and credential change
 // ---------------------------------------------------------------------------
 //
-// THE THREE OPERATIONS THE VERIFICATION FLOW NEEDS. They live here rather than in
-// `lib/firebase-auth.ts` because that module is frozen work and stays byte-identical,
-// so the boundary grows the native calls it needs and the JOURNEY lives in
-// `lib/auth.tsx`. Nothing here makes a policy decision: each function performs one SDK
-// call and reports what actually happened.
+// THEY LIVE HERE RATHER THAN IN `lib/firebase-auth.ts` because that module is frozen work,
+// so the boundary grows the native calls it needs and the JOURNEY lives in `lib/auth.tsx`.
+// Nothing here makes a policy decision: each function performs one SDK call and reports
+// what actually happened.
+//
+// THE SEND HALF IS GONE (2026-10-23). `nativeSendEmailVerification` called Firebase's own
+// `sendEmailVerification`, and AUTH-04 replaced that message with this server's six-digit
+// code delivered through Brevo — so the verb lost its last caller. It is REMOVED rather
+// than left here, for the same reason `sendPasswordResetEmail` was: a permitted capability
+// with no caller is one nobody reviews, and the point of this boundary is to keep the set
+// of Firebase capabilities this app can reach small enough to read. What remains is
+// read-only state (`reload`, the forced token) and the credential write below.
 //
 // NO RESOLVED PROMISE IS TREATED AS PROOF OF ANYTHING (RNFirebase 26.4.0 divergence).
-// Android resolves `reload`/`sendEmailVerification` when no user is signed in
+// Android resolves a user-scoped call when no user is signed in
 // (`promiseNoUser(promise, false)` -> `resolve(null)`), while iOS rejects with
 // `auth/no-current-user`. Each function below checks `instance.currentUser` itself, so
 // the answer does not depend on which platform produced it.
@@ -511,13 +518,6 @@ class NativeNoCurrentUserError extends Error {
 }
 
 /**
- * Sends Firebase's own email-verification message for the signed-in user.
- *
- * THROWS when there is no current user, on both platforms, rather than inheriting
- * Android's silent resolve: a resolved call then means the message was really sent.
- * The caller classifies the thrown code through the shared error set.
- */
-/**
  * Sets a NEW Firebase password for the signed-in identity. THIS IS THE CREDENTIAL
  * OPERATION (Phase A / F-1).
  *
@@ -527,10 +527,11 @@ class NativeNoCurrentUserError extends Error {
  * report beyond that, and inventing one would invite a caller to treat an SDK result
  * as an authorization fact.
  *
- * THROWS when there is no current user, on both platforms, for the reason
- * `nativeSendEmailVerification` records: Android resolves user-scoped calls with no
- * user while iOS rejects them, so the check is made here and the answer does not
- * depend on the platform. Otherwise it throws the SDK's own error and CLASSIFIES
+ * THROWS when there is no current user, on both platforms, rather than inheriting
+ * Android's silent resolve: the platform divergence documented at the top of this
+ * section means a resolved call cannot be trusted to mean the write happened, so the
+ * check is made here and the answer does not depend on the platform. Otherwise it
+ * throws the SDK's own error and CLASSIFIES
  * NOTHING — `auth/requires-recent-login`, `auth/weak-password`,
  * `auth/network-request-failed` and the rest are the caller's to read, because
  * deciding what a code means is `lib/firebase-auth.ts`'s job and mirroring a code
@@ -545,13 +546,6 @@ export async function nativeUpdatePassword(newPassword: string): Promise<void> {
   const user = instance.currentUser;
   if (!user) throw new NativeNoCurrentUserError();
   await auth.updatePassword(user, newPassword);
-}
-
-export async function nativeSendEmailVerification(): Promise<void> {
-  const { auth, instance } = requireNativeFirebase();
-  const user = instance.currentUser;
-  if (!user) throw new NativeNoCurrentUserError();
-  await auth.sendEmailVerification(user);
 }
 
 /**

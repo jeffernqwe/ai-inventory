@@ -66,13 +66,17 @@ const mockNative: {
 const mockUpdateProfile = jest.fn();
 
 /**
- * Phase 16 — the two MODULAR operations the verification flow needs. Modular, not
- * `User` methods: the boundary calls `auth.sendEmailVerification(user)` and
- * `auth.reload(user)`, so these belong on the auth namespace alongside
- * `signInWithEmailAndPassword`.
+ * Phase 16 — the MODULAR operations the verification flow needs. Modular, not `User`
+ * methods: the boundary calls `auth.reload(user)` and `auth.updatePassword(user, …)`, so
+ * these belong on the auth namespace alongside `signInWithEmailAndPassword`.
+ *
+ * `auth.sendEmailVerification` left this mock on 2026-10-23 with the boundary function
+ * that called it: AUTH-04 delivers the code from this server, so nothing in the app asks
+ * Firebase to send a verification message and a mocked verb would only assert a call that
+ * can no longer happen.
  */
-const mockSendEmailVerification = jest.fn();
 const mockReload = jest.fn();
+const mockUpdatePassword = jest.fn();
 
 jest.mock('@react-native-firebase/app', () => {
   mockNativeLoads.app += 1;
@@ -99,7 +103,7 @@ jest.mock('@react-native-firebase/auth', () => {
       if (mockNative.signOutError) throw mockNative.signOutError;
     },
     updateProfile: (...args: unknown[]) => mockUpdateProfile(...args),
-    sendEmailVerification: (...args: unknown[]) => mockSendEmailVerification(...args),
+    updatePassword: (...args: unknown[]) => mockUpdatePassword(...args),
     reload: (...args: unknown[]) => mockReload(...args),
   };
 });
@@ -151,8 +155,8 @@ beforeEach(() => {
   mockNative.signOutError = null;
   mockUpdateProfile.mockReset();
   mockUpdateProfile.mockResolvedValue(undefined);
-  mockSendEmailVerification.mockReset();
-  mockSendEmailVerification.mockResolvedValue(undefined);
+  mockUpdatePassword.mockReset();
+  mockUpdatePassword.mockResolvedValue(undefined);
   mockReload.mockReset();
   mockReload.mockResolvedValue(undefined);
   mockIsFirebaseConfigured.mockReset();
@@ -352,26 +356,26 @@ describe('nativeHasCurrentUser / nativeCurrentIdToken', () => {
 describe('the verification operations', () => {
   beforeEach(() => mockIsFirebaseConfigured.mockReturnValue(true));
 
-  it('sends the Firebase verification email for the signed-in user', async () => {
-    const user = { emailVerified: false };
+  it('writes the new password for the signed-in user', async () => {
+    const user = { emailVerified: true };
     mockNative.currentUser = user;
 
-    await expect(loadBoundary().nativeSendEmailVerification()).resolves.toBeUndefined();
-    expect(mockSendEmailVerification).toHaveBeenCalledTimes(1);
-    expect(mockSendEmailVerification).toHaveBeenCalledWith(user);
+    await expect(loadBoundary().nativeUpdatePassword('a-new-password')).resolves.toBeUndefined();
+    expect(mockUpdatePassword).toHaveBeenCalledTimes(1);
+    expect(mockUpdatePassword).toHaveBeenCalledWith(user, 'a-new-password');
   });
 
   it('★ THROWS when no user is signed in, rather than inheriting the Android silent resolve', async () => {
-    // RNFirebase 26.4.0 diverges here: Android RESOLVES `reload`/`sendEmailVerification`
-    // when no user exists, while iOS rejects with `auth/no-current-user`. A resolved
-    // promise must therefore never be read as "the email was sent", or a sign-out would
-    // look like a successful resend.
+    // RNFirebase 26.4.0 diverges here: Android RESOLVES a user-scoped call when no user
+    // exists, while iOS rejects with `auth/no-current-user`. A resolved promise must
+    // therefore never be read as "the write happened", or a signed-out device would look
+    // like a successful credential change.
     mockNative.currentUser = null;
 
-    await expect(loadBoundary().nativeSendEmailVerification()).rejects.toMatchObject({
+    await expect(loadBoundary().nativeUpdatePassword('a-new-password')).rejects.toMatchObject({
       code: 'native/no-current-user',
     });
-    expect(mockSendEmailVerification).not.toHaveBeenCalled();
+    expect(mockUpdatePassword).not.toHaveBeenCalled();
   });
 
   it('answers false with no user, without calling the native reload at all', async () => {

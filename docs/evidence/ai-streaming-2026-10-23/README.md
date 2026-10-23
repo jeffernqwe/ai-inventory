@@ -43,6 +43,74 @@ refusal. Every number below was observed, not inferred from the code.
    whole buffer rather than per chunk. `AI40-ai-streaming.test.mjs` now has a case that reports
    **1** event instead of **7** if that regresses.
 
+## Production, authenticated (2026-10-23)
+
+Run separately from everything above, against `https://ai-inventory-l1mi.onrender.com` (commit
+`3294387`, `environment: production`) — the deployment, not the local server. **Not a phone run:**
+the installed build bakes its API base at build time and points at the local server, so this half
+was driven over the public internet with a real session, which is the part that proves what Render
+and the Cloudflare edge in front of it do with an event stream. The client half of streaming was
+proven on the phone above.
+
+**The session was real.** The demo tenant (`demo-preview@example.invalid`, the same fixture, so the
+correct answer is again 112 units and the same three restock products) was seeded into
+`inventoryai_prod_db` by naming the database on the command, its Firebase identity was created in
+the project the deployed server verifies (`inventoryai-d0d20`), and the identity was signed in
+through Firebase, then exchanged at `POST /api/auth/firebase/exchange` — **200**, a 293-character
+Inventory AI token. The Firebase ID token never became the bearer credential.
+
+**One streamed turn, measured on the wire:**
+
+| | |
+|---|---|
+| `POST /api/ai/chat` + `Accept: text/event-stream` | **200**, `text/event-stream; charset=utf-8`, `cache-control: no-cache, no-transform` |
+| Network chunks | **36**, arriving between **13 476 ms** and **14 735 ms** |
+| `delta` events | **98**, first at **13 477 ms**, last at **14 521 ms** — 1 044 ms of delivery, not one paint |
+| `done` | **1**, at **14 734 ms** |
+| Answer | *3 products need restocking…* Demo Desk Lamp 0 vs min 3, Demo Coffee Beans 1 kg 4 vs 10, Demo Paper Cups 100 pk 15 vs 20; **total 112 units** |
+| Turn | `model=nvidia/nemotron-3.5-lightning:free` (the configured primary), tools `getInventorySummary` + `getReorderNeededProducts` |
+
+Ninety-eight deltas over 36 separate network chunks a second apart is the fact that matters: a
+buffering proxy returns the body in one piece at the end, and this one did not. The 13.5 s before
+the first delta is the tool round — the model writes no answer while it is asking for one — and it
+is the same shape measured locally.
+
+**Stored exactly once.** After the turn: **1** conversation for the account, **2** messages in it,
+`USER` then `ASSISTANT`, the assistant message **309** characters and containing `112`. No third
+row, no duplicate turn.
+
+**Three failure paths, on the same deployment:**
+
+- An **unauthenticated** streamed request (`Accept: text/event-stream`, no session) answered
+  **401** `application/json` with no SSE header — streaming is still behind `requireAuth`.
+- An **empty message** on the streamed path answered **400** `VALIDATION_ERROR` as the ordinary JSON
+  envelope with `fields`, not an `error` event — `prepareTurn` runs before any header is written.
+- A streamed turn **abandoned by the client at 2 180 ms** left the conversation count and its two
+  messages **unchanged**: the turn was cancelled, and nothing was persisted.
+
+**Server health after all of it:** `responses: 77`, `4xx: 2` (the deliberate 401 and 400 above),
+**`5xx: 0`**, `serverErrors: 0`, `lastServerErrorAt: null`. No authentication error occurred in the
+successful flow, and no provider retry is implied: one assistant row, the primary model named on
+it, and a turn length in line with the two-call tool round measured locally.
+
+**What was not available here:** Render's own log stream — there is no dashboard or API credential
+for it on this host — so the review of logs used the deployment's own counters, the database rows
+and the request telemetry above rather than the log lines. That is a narrower instrument, and it is
+why the counters are quoted instead of a claim that the logs were read.
+
+**`X-Accel-Buffering: no` was not visible on the client's copy of the response headers** (Cloudflare
+answers in front of Render). It is a hint for nginx-style proxies rather than something the client
+needs, and delivery was incremental regardless, so nothing was changed for it; the measurement that
+matters is the 36 chunks.
+
+**Cleanup, verified.** The demo tenant was removed with `cleanup:demo-tenant --database=inventoryai_prod_db`:
+1 user, 1 business, 6 products, 7 inventory rows, 9 transactions, 2 categories and 3 locations
+deleted, **leftovers 0** over every tenant collection. The database then read **3 users / 3
+businesses / 1 product / 0 conversations**, exactly its pre-test shape — no real account, business
+or product was touched. The Firebase identity was left in place, as that teardown documents (the
+demo address is on a reserved domain and re-seeding reuses it). The password used for the run was
+deleted from this host afterwards.
+
 ## What this run does not prove
 
 - The **idle** and **abort** paths are measured (scenarios 6 and 4); a genuine mid-answer TCP reset

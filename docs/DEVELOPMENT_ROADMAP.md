@@ -18957,13 +18957,29 @@ zero server errors** (no 5xx) after the deploy. `POST /api/ai/chat` and `GET
 /api/ai/conversations` without a session answer **401 `AUTH_REQUIRED` as JSON — including when the
 request sends `Accept: text/event-stream`**, which is the property that matters: streaming cannot be
 reached before `requireAuth`, no SSE header is written on a refused request, and the new code adds
-no way past the gate. **An authenticated streamed turn through Render was deliberately not
-measured** (owner decision, same day): it needs a production login, and creating a production
-account for one test was judged a worse trade than leaving the setting unverified. The headers that
-keep a proxy from buffering (`no-cache, no-transform`, `X-Accel-Buffering: no`, an explicit flush)
-are verified on the local server; the production half is recorded as **unverified** rather than
-assumed, and the owner's next real turn is what will confirm it. CI green on `main` (workflow `ci`,
-run `39951211533`).
+no way past the gate. **An authenticated streamed turn through Render was then measured
+(2026-10-23, the same day), separately from the local server.** The demo tenant was seeded into
+`inventoryai_prod_db` by naming the database, its Firebase identity was created in the project the
+deployment verifies, and the identity was signed in through Firebase and exchanged at
+`POST /api/auth/firebase/exchange` (**200**, a 293-character token). One streamed turn answered
+**200** `text/event-stream`, and the body arrived as **36 network chunks carrying 98 `delta`
+events over 1 044 ms** (13 477 → 14 521 ms) before one `done` at 14 734 ms — so the Cloudflare edge
+in front of Render does **not** buffer it, which is the only thing an authenticated production call
+could add. The answer was the fixture's: 112 units, the three restock products, model
+`nvidia/nemotron-3.5-lightning:free`, tools `getInventorySummary` +
+`getReorderNeededProducts`. It was stored **once**: 1 conversation, 2 messages (`USER`,
+`ASSISTANT`). On the same deployment an **unauthenticated** streamed request answered **401** JSON
+with no SSE header, an **empty message** answered **400** `VALIDATION_ERROR` as the ordinary JSON
+envelope (so `prepareTurn` really does precede the headers), and a turn **abandoned at 2 180 ms**
+left both counts unchanged. Afterwards the counters read **77 responses, 0 5xx, 0 server errors**;
+the tenant was torn down with **0 leftovers** and the database returned to its pre-test shape
+(3 users / 3 businesses / 1 product / 0 conversations). Render's own log stream was **not**
+available from this host, so that review used the deployment's counters, the rows and the request
+telemetry rather than log lines — recorded as a narrower instrument, not as a log review. The run
+was **API-level, not on the phone**: the installed build bakes its API base at build time and
+points at the local server, and the client half is the phone run below. `X-Accel-Buffering` was not
+visible to the client (Cloudflare answers first); it is a proxy hint, delivery was incremental, and
+nothing was changed for it. CI green on `main` (workflow `ci`, run `39951211533`).
 
 **Files.** New: `mobile/lib/sse.ts`, `server/test/AI40-ai-streaming.test.mjs`,
 `mobile/__tests__/ai40-sse-parser.test.ts`, `mobile/__tests__/ai40-assistant-streaming.test.tsx`,

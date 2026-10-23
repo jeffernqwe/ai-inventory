@@ -19001,9 +19001,31 @@ MESSAGE carries no `businessId` (only its conversation does). It is now handled 
 conversations — and `countTenantLeftovers` uses the same two steps, so a collection that is removed
 is necessarily also verified. The effect is wider than the demo command: re-seeding the demo tenant
 (`clearTenantData`) now resets its assistant history instead of leaving it to accumulate, and any
-future tenant removal cannot leave orphans. **3 DB cases** in `DEMO2-tenant-ai-teardown.test.mjs`
+future tenant removal cannot leave orphans. **5 DB cases** in `DEMO2-tenant-ai-teardown.test.mjs`
 (target removed and counted, empty tenant a no-op, and a positive control proving the counter can
-see a conversation it did not remove), added to the runner's classification. That run's own rows —
+see a conversation it did not remove), added to the runner's classification.
+
+**The same audit then found two more gaps, so the list is now exhaustive rather than repaired.**
+Comparing every model against what the teardown touched turned up `audit_logs` (which does carry
+`businessId` and was simply missing) and the account-scoped rows a tenant owns **indirectly** —
+`sessions`, `password_reset_tokens` and `password_reset_challenges`, which carry only `userId`.
+Audit rows now sit in `TENANT_DATA_COLLECTIONS`, so a data reset clears a fixture tenant's own
+governance trail and a removal does too; and `removeTenant` resolves the tenant's user ids **before**
+deleting the users and removes those three collections by owner, with their counts — deleting the
+users first is what would have stranded them, since afterwards no query could tie them to the tenant
+again. The demo cleanup's closing line also stopped overstating itself: it now says it verified
+*every collection carrying the businessId (and the assistant messages, through their conversation)*,
+because a `userId`-only row cannot be found by that predicate and its removal is evidenced by the
+counts above it instead. `email_verification_challenges` are deliberately untouched — they are
+keyed by a keyed digest of the address, carry no user or tenant id, and expire on their own TTL.
+The two new cases create a whole tenant (business, user, session, reset token, reset challenge,
+audit row) and prove each one is removed and counted while a second tenant keeps all of its own.
+**Observed on the real command, in the dev database:** `cleanup:demo-tenant` reported removing
+**20 `ai_messages`, 5 `ai_conversations`, 4 `audit_logs` and 3 `sessions`** before the users and the
+business — rows the previous version would have left behind — and closed with the corrected
+sentence. The fixture was then re-seeded and its 15 checks matched.
+
+That run's own rows —
 3 conversations, 8 messages and the account's session — were removed by that same two-step rule
 (applied once by hand, before the command learned it), and the database returned to its pre-test
 shape: 3 users, 3 businesses, 1 product, 0 conversations for the demo tenant, with the 4

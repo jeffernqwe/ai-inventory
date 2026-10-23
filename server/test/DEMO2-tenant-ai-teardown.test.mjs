@@ -1,15 +1,19 @@
-// DEMO-2 — a tenant teardown removes the assistant's own history.
+// DEMO-2 — a tenant teardown removes everything that belongs to the tenant.
 //
 // Found on 2026-10-23 while deleting a production demo tenant after a device run:
 // `clearTenantData` covered inventory, products, categories, locations, suppliers and
 // purchase orders, but not `ai_conversations` / `ai_messages`. The teardown printed
 // "leftovers: 0 — verified over every tenant collection" while three conversations and
-// eight messages from the run stayed behind.
+// eight messages from the run stayed behind. Auditing the same list against the models
+// then found two more gaps: `audit_logs` (which carries businessId) and the
+// account-scoped rows a tenant owns indirectly — `sessions`, `password_reset_tokens`
+// and `password_reset_challenges` (each carries only `userId`).
 //
-// The reason it needs an extra step rather than another row in TENANT_DATA_COLLECTIONS:
-// a conversation carries `businessId`, but a MESSAGE does not — it points at its
-// conversation. So the conversations have to be resolved first and their messages
-// deleted by `conversationId`, before the conversations themselves.
+// Why these need more than another row in TENANT_DATA_COLLECTIONS:
+//   * a MESSAGE has no businessId — it points at its conversation, so conversations
+//     must be resolved first and messages deleted by `conversationId`;
+//   * sessions and reset credentials have no businessId either, so the whole tenant's
+//     user ids must be resolved before the users are deleted.
 
 import { it, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -17,16 +21,27 @@ import mongoose from 'mongoose';
 
 import { dbSuite } from './testEnv.mjs';
 import { ensureDb, disconnectDb } from './helpers.mjs';
+import AuditLog from '../src/models/auditLog.model.ts';
+import Business from '../src/models/business.model.ts';
+import PasswordResetChallenge from '../src/models/passwordResetChallenge.model.ts';
+import PasswordResetToken from '../src/models/passwordResetToken.model.ts';
 import Product from '../src/models/product.model.ts';
+import Session from '../src/models/session.model.ts';
+import User from '../src/models/user.model.ts';
 import AIConversation from '../src/models/aiConversation.model.ts';
 import AIMessage from '../src/models/aiMessage.model.ts';
-import { clearTenantData, countTenantLeftovers } from '../scripts/perf/lib.mjs';
+import { clearTenantData, countTenantLeftovers, removeTenant } from '../scripts/perf/lib.mjs';
 
 const oid = () => new mongoose.Types.ObjectId();
 const targetBusiness = oid();
 const keeperBusiness = oid();
 const targetUser = oid();
 const keeperUser = oid();
+
+const TARGET_EMAIL = 'demo2-target@example.invalid';
+const KEEPER_EMAIL = 'demo2-keeper@example.invalid';
+const TARGET_NAME = 'DEMO2 Teardown Target';
+const KEEPER_NAME = 'DEMO2 Teardown Keeper';
 
 async function seedTenant(businessId, userId, productName) {
   const conversation = await AIConversation.create({ businessId, userId, title: `conv ${productName}` });
@@ -45,25 +60,75 @@ async function seedTenant(businessId, userId, productName) {
   return { conversation, messages, product };
 }
 
+/** A whole tenant: business, one user, a session and one of each reset artefact. */
+async function seedAccount(businessId, userId, email, name) {
+  const business = await Business.create({ _id: businessId, name });
+  const user = await User.create({
+    _id: userId,
+    businessId: business._id,
+    name,
+    email,
+    role: 'OWNER',
+    status: 'ACTIVE',
+  });
+  const session = await Session.create({
+    userId: user._id,
+    jti: `demo2-${String(user._id)}`,
+    expiresAt: new Date(Date.now() + 60_000),
+  });
+  const token = await PasswordResetToken.create({
+    userId: user._id,
+    tokenHash: `demo2-token-${String(user._id)}`,
+    expiresAt: new Date(Date.now() + 60_000),
+  });
+  const challenge = await PasswordResetChallenge.create({
+    emailHmac: `demo2-email-${String(user._id)}`,
+    userId: user._id,
+    codeHmac: `demo2-code-${String(user._id)}`,
+    lastSentAt: new Date(),
+    expiresAt: new Date(Date.now() + 60_000),
+    attempts: 0,
+  });
+  return { business, user, session, token, challenge };
+}
+
+/** Remove every row these tests could have written, so a re-run starts clean. */
+async function resetDemo2() {
+  const users = await User.find({ email: { $in: [TARGET_EMAIL, KEEPER_EMAIL] } })
+    .select('_id businessId')
+    .lean();
+  const userIds = users.map((u) => u._id);
+  const businessIds = [targetBusiness, keeperBusiness, ...users.map((u) => u.businessId).filter(Boolean)];
+
+  const conversations = await AIConversation.find({ businessId: { $in: businessIds } })
+    .select('_id')
+    .lean();
+
+  await Promise.all([
+    Session.deleteMany({ userId: { $in: userIds } }),
+    PasswordResetToken.deleteMany({ userId: { $in: userIds } }),
+    PasswordResetChallenge.deleteMany({ userId: { $in: userIds } }),
+    User.deleteMany({ _id: { $in: userIds } }),
+    Business.deleteMany({ _id: { $in: businessIds } }),
+    Product.deleteMany({ businessId: { $in: businessIds } }),
+    AuditLog.deleteMany({ businessId: { $in: businessIds } }),
+    AIMessage.deleteMany({ conversationId: { $in: conversations.map((c) => c._id) } }),
+    AIConversation.deleteMany({ businessId: { $in: businessIds } }),
+  ]);
+}
+
 const dbOk = await ensureDb();
 
-dbSuite('DEMO-2 a tenant teardown takes the assistant history with it', dbOk, () => {
+dbSuite('DEMO-2 a tenant teardown takes everything the tenant owns', dbOk, () => {
   beforeEach(async () => {
     await ensureDb();
-    await Promise.all([
-      AIConversation.deleteMany({ businessId: { $in: [targetBusiness, keeperBusiness] } }),
-      Product.deleteMany({ businessId: { $in: [targetBusiness, keeperBusiness] } }),
-    ]);
-    await AIMessage.deleteMany({ content: /stock do we hold|112 units/ });
+    await resetDemo2();
   });
 
   // Inside the suite, so a unit run (where dbSuite never registers the tests) does not
   // touch a database it deliberately has no connection to.
   after(async () => {
-    await Promise.all([
-      AIConversation.deleteMany({ businessId: { $in: [targetBusiness, keeperBusiness] } }),
-      Product.deleteMany({ businessId: { $in: [targetBusiness, keeperBusiness] } }),
-    ]);
+    await resetDemo2();
     await disconnectDb();
   });
 
@@ -89,10 +154,53 @@ dbSuite('DEMO-2 a tenant teardown takes the assistant history with it', dbOk, ()
     assert.equal(await countTenantLeftovers([targetBusiness]), 0, 'the verification agrees with the removal');
   });
 
+  it('★ a tenant data reset clears its audit trail, and leaves another tenant’s alone', async () => {
+    await AuditLog.create([
+      { businessId: targetBusiness, action: 'PRODUCT_CREATED', entityType: 'PRODUCT' },
+      { businessId: targetBusiness, action: 'STOCK_IN', entityType: 'INVENTORY' },
+      { businessId: keeperBusiness, action: 'PRODUCT_CREATED', entityType: 'PRODUCT' },
+    ]);
+
+    const result = await clearTenantData([targetBusiness]);
+
+    assert.equal(result.counts.audit_logs, 2, 'the tenant’s own governance rows go with it');
+    assert.equal(await AuditLog.countDocuments({ businessId: targetBusiness }), 0);
+    assert.equal(await AuditLog.countDocuments({ businessId: keeperBusiness }), 1);
+    assert.equal(await countTenantLeftovers([targetBusiness]), 0);
+  });
+
+  it('★ removing a whole tenant takes its sessions and reset credentials with it', async () => {
+    const target = await seedAccount(targetBusiness, targetUser, TARGET_EMAIL, TARGET_NAME);
+    const keeper = await seedAccount(keeperBusiness, keeperUser, KEEPER_EMAIL, KEEPER_NAME);
+    await AuditLog.create({ businessId: targetBusiness, action: 'SESSION_CREATED', entityType: 'SESSION' });
+
+    const result = await removeTenant([targetBusiness]);
+
+    assert.equal(result.counts.sessions, 1, 'the dead session is not left behind');
+    assert.equal(result.counts.password_reset_tokens, 1);
+    assert.equal(result.counts.password_reset_challenges, 1);
+    assert.equal(result.counts.audit_logs, 1);
+    assert.equal(result.counts.users, 1);
+    assert.equal(result.counts.businesses, 1);
+
+    assert.equal(await Session.countDocuments({ userId: target.user._id }), 0);
+    assert.equal(await PasswordResetToken.countDocuments({ userId: target.user._id }), 0);
+    assert.equal(await PasswordResetChallenge.countDocuments({ userId: target.user._id }), 0);
+    assert.equal(await User.countDocuments({ _id: target.user._id }), 0);
+    assert.equal(await Business.countDocuments({ _id: targetBusiness }), 0);
+
+    // Isolation: the other account keeps its session and its single-use credentials.
+    assert.equal(await Session.countDocuments({ userId: keeper.user._id }), 1);
+    assert.equal(await PasswordResetToken.countDocuments({ userId: keeper.user._id }), 1);
+    assert.equal(await PasswordResetChallenge.countDocuments({ userId: keeper.user._id }), 1);
+    assert.equal(await Business.countDocuments({ _id: keeperBusiness }), 1);
+  });
+
   it('★ an empty tenant is a no-op that still reports zero, not an error', async () => {
     const result = await clearTenantData([oid()]);
     assert.equal(result.counts.ai_conversations, 0);
     assert.equal(result.counts.ai_messages, 0);
+    assert.equal(result.counts.audit_logs, 0);
     assert.equal(await countTenantLeftovers([oid()]), 0);
   });
 
@@ -109,4 +217,3 @@ dbSuite('DEMO-2 a tenant teardown takes the assistant history with it', dbOk, ()
     await Product.deleteMany({ businessId: orphan.conversation.businessId });
   });
 });
-

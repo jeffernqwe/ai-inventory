@@ -1,9 +1,18 @@
 // `npm run cleanup:demo-tenant -- --database=<resolved database name>`
 //
-// Remove the demo tenant's MongoDB rows: its inventory, ledger, products,
-// locations, categories and suppliers, then its users and the business row itself.
-// It prints per-collection counts and then re-counts, refusing success if even one
-// document still carries the businessId.
+// Remove the demo tenant's MongoDB rows: its inventory, ledger, products, locations,
+// categories and suppliers, the assistant's conversations and their messages, its audit
+// trail, and the account-scoped rows its users own (sessions, password-reset tokens and
+// reset challenges) — then its users and the business row itself. It prints
+// per-collection counts and then re-counts, refusing success if even one document still
+// carries the businessId.
+//
+// WHAT THE FINAL COUNT CAN AND CANNOT SEE. `countTenantLeftovers` is anchored on the
+// businessId, so it covers every collection that carries one, plus the assistant's
+// messages through their conversation. Sessions and reset rows carry only `userId` and
+// are deleted by id BEFORE their users — after which nothing could tie them to this
+// tenant any more. Their removal is therefore evidenced by the counts above, and the
+// final line says which collections it verified rather than claiming to be exhaustive.
 //
 // WHAT IS LEFT BEHIND, ON PURPOSE. The Firebase identity. `docs/DEVELOPMENT_ROADMAP.md`
 // §27BB (F-50) records the failure mode of the opposite order: a MongoDB user whose
@@ -71,7 +80,10 @@ async function main() {
   for (const [collection, count] of Object.entries(result.counts)) {
     console.log(`[${COMMAND}]   ${String(collection).padEnd(24)} ${count}`);
   }
-  console.log(`[${COMMAND}] leftovers : ${result.leftovers} — verified over every tenant collection`);
+  console.log(
+    `[${COMMAND}] leftovers : ${result.leftovers} — verified over every collection carrying the businessId` +
+      ' (and the assistant messages, through their conversation)',
+  );
   console.log(`[${COMMAND}] identity  : the Firebase identity was left in place (see the script header)`);
   console.log(`[${COMMAND}] OK`);
 

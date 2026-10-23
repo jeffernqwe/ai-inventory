@@ -74,7 +74,7 @@ const PURE_UNIT = [
   'device-harness.test.mjs', // the phone-pass harness's own judgements: dump parsing, exact-then-substring label matching, signed-out as blocked rather than failed, blank and mid-scroll dumps refused, a field found by its label and read back, the type target's validation, the report's exit codes, and the two source guards (binaries leave the phone via exec-out, never through the shell) — no phone, no database
 ];
 const PURE_DB = [
-  'DEMO2-tenant-ai-teardown.test.mjs', // DEMO-2: a tenant teardown removes the assistant's conversations AND their messages — a message carries no businessId (only its conversation does), so the demo teardown printed "leftovers: 0" while a device run's history stayed behind; also asserts another tenant's history and catalogue are untouched and that the leftover counter can see a conversation it did not remove (positive control)
+  'DEMO2-tenant-ai-teardown.test.mjs', // DEMO-2: a tenant teardown removes EVERYTHING the tenant owns — the assistant's conversations and their messages (a message carries no businessId, only its conversation does, so the demo teardown printed "leftovers: 0" while a device run's history stayed behind), its audit trail (businessId, and simply missing), and the account-scoped sessions, password-reset tokens and reset challenges (userId only, resolved before the users are deleted); also asserts a second tenant keeps all of its own, that the leftover counter can see a conversation it did not remove (positive control), and that an empty tenant is a no-op
   'phase03-auth.test.mjs',            // auth + RBAC over real routes + Mongo
   'phase04-catalog.test.mjs',         // categories/locations/products CRUD
   'phase04-inventory.test.mjs',       // stock in/out/adjust + dashboard

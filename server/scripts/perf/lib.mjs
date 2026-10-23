@@ -15,13 +15,17 @@ import mongoose from 'mongoose';
 import { DATABASE_NAMES, classifyNodeEnv, isRecognisedNodeEnv } from '../../src/config/env.ts';
 import AIConversation from '../../src/models/aiConversation.model.ts';
 import AIMessage from '../../src/models/aiMessage.model.ts';
+import AuditLog from '../../src/models/auditLog.model.ts';
 import Business from '../../src/models/business.model.ts';
 import Category from '../../src/models/category.model.ts';
 import Inventory from '../../src/models/inventory.model.ts';
 import InventoryTransaction from '../../src/models/inventoryTransaction.model.ts';
 import Location from '../../src/models/location.model.ts';
+import PasswordResetChallenge from '../../src/models/passwordResetChallenge.model.ts';
+import PasswordResetToken from '../../src/models/passwordResetToken.model.ts';
 import Product from '../../src/models/product.model.ts';
 import PurchaseOrder from '../../src/models/purchaseOrder.model.ts';
+import Session from '../../src/models/session.model.ts';
 import Supplier from '../../src/models/supplier.model.ts';
 import User from '../../src/models/user.model.ts';
 
@@ -148,6 +152,11 @@ export const TENANT_DATA_COLLECTIONS = [
   ['categories', Category],
   ['locations', Location],
   ['suppliers', Supplier],
+  // AI-40 (audit 2026-10-23) — governance rows carry `businessId` too, and the list was
+  // missing them: a tenant teardown left its audit trail behind while reporting a clean
+  // result. They are the tenant's own records (every caller of this module removes a
+  // seeded fixture), so a reset takes them and a removal takes them.
+  ['audit_logs', AuditLog],
 ];
 
 /** Every businessId that belongs to the seed tenant, by BOTH fingerprints. */
@@ -210,6 +219,23 @@ export async function removeTenant(businessIds) {
 
   const { removed: dataRemoved, counts } = await clearTenantData(businessIds);
   let removed = dataRemoved;
+
+  // AI-40 (audit 2026-10-23) — the account-scoped rows a tenant owns INDIRECTLY. Sessions,
+  // password-reset tokens and reset challenges carry only `userId`, so neither the
+  // collection list nor `countTenantLeftovers` can reach them by businessId, and deleting
+  // the users first would strand them as rows no query can ever tie to a tenant again.
+  // Resolve the ids while the users still exist, then remove the rows with their owner.
+  const userIds = await User.find(filter).distinct('_id');
+  const userFilter = { userId: { $in: userIds } };
+  for (const [name, model] of [
+    ['sessions', Session],
+    ['password_reset_tokens', PasswordResetToken],
+    ['password_reset_challenges', PasswordResetChallenge],
+  ]) {
+    const res = await model.deleteMany(userFilter);
+    counts[name] = res.deletedCount ?? 0;
+    removed += counts[name];
+  }
 
   const users = await User.deleteMany(filter);
   counts.users = users.deletedCount ?? 0;

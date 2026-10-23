@@ -180,6 +180,56 @@ export function deploymentNotes(report: IntegrationReport): string[] {
 }
 
 /**
+ * The inputs `proxyTrustNote` decides from. Both are non-secret, server-derived facts.
+ */
+export interface ProxyTrustState {
+  /** The posture this process serves: `production`, `development` or `test`. */
+  nodeEnv: string;
+  /** `TRUST_PROXY` as a hop count (0 = no proxy trusted). */
+  trustProxy: number;
+}
+
+/**
+ * 2026-10-23 security audit — a PRODUCTION service behind a proxy that does not declare it.
+ *
+ * WHY THIS IS A WARNING AND NOT A REFUSAL. It is the same class as the notes above: a
+ * deployment that boots, answers every request, and is quietly weaker than it looks. But it is
+ * also the one note whose consequence reaches EVERY member, so it is stated in the log with the
+ * exact numbers rather than as a general "check your proxy".
+ *
+ * WHAT ACTUALLY HAPPENS WITHOUT IT. Express resolves `req.ip` from the direct socket peer unless
+ * a proxy is trusted. Render terminates TLS at a proxy, so `req.ip` becomes that proxy's address
+ * for every caller — and every per-IP auth limiter therefore counts ONE bucket for the whole
+ * world: the login IP bucket (60 failures / 15 min) means sixty wrong passwords from anywhere
+ * answer 429 to every member's login for a quarter of an hour; the password-reset IP bucket
+ * (20 / hour) and the registration / exchange / verification buckets collapse the same way. The
+ * per-account login bucket becomes effectively per-email globally, so one source can also lock a
+ * known account for the window.
+ *
+ * It is not a security downgrade in the opposite direction: with trust 0, a spoofed
+ * `X-Forwarded-For` is ignored, so no caller can manufacture fresh buckets. The failure is
+ * availability and lockout, not bypass — which is exactly why it hides. Nothing in a request's
+ * status code reveals it; only the log line does.
+ *
+ * The value is compared as a NUMBER, and the message names the variable and the safe value. It
+ * never reads or prints anything from the environment.
+ */
+export function proxyTrustNote({ nodeEnv, trustProxy }: ProxyTrustState): string | null {
+  if (nodeEnv !== 'production') return null;
+  const hops = Number(trustProxy);
+  if (Number.isFinite(hops) && hops > 0) return null;
+  return (
+    'TRUST_PROXY is not set on this PRODUCTION service. Every per-IP auth rate limiter is ' +
+    'therefore keying on the proxy in front of this process instead of on the caller: the login ' +
+    'IP bucket (60 failures / 15 min) becomes ONE global bucket, so sixty failed logins from ' +
+    'anywhere answer 429 to every member for a quarter of an hour, and the password-reset ' +
+    '(20 / hour), registration (30 / hour), Firebase exchange (30 / 15 min), email-verification ' +
+    '(30 / 15 min) and session-renewal (120 / 15 min) buckets collapse the same way. Set ' +
+    'TRUST_PROXY=1 on Render (the exact number of proxy hops, never `true`).'
+  );
+}
+
+/**
  * What this build is: the deployed commit and how long the process has been up.
  *
  * The two halves answer the two deployment questions that could not be asked from outside the
@@ -212,4 +262,4 @@ export function buildInfo(
   };
 }
 
-export default { integrationReport, deploymentLine, deploymentNotes, buildInfo };
+export default { integrationReport, deploymentLine, deploymentNotes, proxyTrustNote, buildInfo };

@@ -137,6 +137,27 @@ export function createApp({
   // it is a browser-facing HTML page (2026-10-20, see pages/resetPasswordLink.ts), not
   // a JSON endpoint, and its path is the one configured in the Firebase console.
   app.use('/auth', authActionRoutes);
+
+  // 2026-10-23 security audit — NO AUTH RESPONSE MAY BE STORED BY AN INTERMEDIARY.
+  //
+  // Bodies under this prefix carry credentials (an access token, a reset
+  // authorization) or facts about an account (a 202 for a recovery request, a
+  // 401 that names an invalidation). The reset LINK page already sets this for
+  // itself (pages/resetPasswordLink.ts); this is the same rule for the JSON API,
+  // applied once at the mount point so a new auth route inherits it instead of
+  // having to remember it.
+  //
+  // `no-store` rather than `no-cache`: no-cache PERMITS storage and requires
+  // revalidation, which still leaves a token written somewhere between this
+  // process and the phone. `Pragma` is the HTTP/1.0 spelling, carried for
+  // intermediaries that still read it. It is mounted before the router and
+  // matches by prefix, so it runs for auth 404s and 429s as well as 2xxs.
+  app.use('/api/auth', (_req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Pragma', 'no-cache');
+    next();
+  });
+
   app.use('/api/auth', createAuthRouter({ limits: authLimits }));
   app.use('/api/users', userRoutes);
   app.use('/api/categories', categoryRoutes);

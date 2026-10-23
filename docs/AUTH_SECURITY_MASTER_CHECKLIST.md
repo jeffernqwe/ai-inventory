@@ -2426,6 +2426,117 @@ Full engineering record: roadmap, *"A server must name the environment it serves
 | **Deployed and verified** | Merged to `main` (fast-forward) and pushed as **`0c79450`**, the commit CI run **`39756616296`** passed on all four jobs. From outside, without changing a host variable: `/api/health` **200** with `environment: "production"` and `commit: 0c79450…`; `/ready` and `/live` **200**; `login {}` **400** with fields only; unknown-address login **401** in 0.78 s; `GET /api/products` and `POST /api/auth/renew` **401** `AUTH_REQUIRED` (the latter proves the AUTH-03 route merged in this release is mounted); `GET /api/no-such-route` **404** with no internal detail; `GET /auth/reset` without a code **400** on its own page. No `stack`, `file:///`, `node_modules` or absolute local path in any probe body |
 | **Still open** | `env.nodeEnv` still falls back to `development` for scripts that never boot the server, and a stray `TEST_MODE` on a host would serve from the test database (visible as `environment: development` on `/api/health`); the refusal itself was exercised locally, never by breaking the live service |
 
+## 52. SECURITY AUDIT — AUTHENTICATION, VERIFICATION AND RATE LIMITING (2026-10-23)
+
+**Owner-requested audit of the whole authentication surface, with the confirmed problems fixed in
+the same pass.** Scope: registration and onboarding; the AUTH-04 six-digit code; AUTH-06 recovery
+(request, verify, confirm); login and the retained password path; access tokens, sessions, renewal,
+revocation and the 14-day cap; account enumeration and error hygiene; validation; brute force, replay
+and automated abuse; every auth rate limiter and the production proxy configuration; plus the wider
+API's authorization, tenant isolation, query construction, headers, CORS, logging and error handling.
+The mobile client's handling was checked against the server contract. **No route, permission, role,
+schema, index, dependency, session model or mobile change was made.**
+
+### What was found, and fixed
+
+| # | Severity | Endpoint / component | Finding | Fix |
+| --- | --- | --- | --- | --- |
+| 1 | **High** | `POST /api/auth/change-password` | **No limiter.** `currentPassword` is the only re-authentication this route performs, so a caller holding any live session could guess the account's password without bound — and a correct guess installs a new credential. Each attempt also costs a bcrypt comparison, so the endpoint was a CPU lever for any authenticated user | Two stacked limiters **after** `requireAuth`: per account+address **10 / 15 min**, then per address **30 / 15 min**; every attempt counts. 429 `CHANGE_PASSWORD_RATE_LIMITED` |
+| 2 | **Medium** | `POST /api/auth/firebase/link` | **Unlimited.** Each attempt spends an outbound Firebase `checkRevoked` verification plus an audit write; the earlier comment justified its absence by calling the verification local, which was wrong | Per-account limiter **10 / 15 min**; 429 `FIREBASE_LINK_RATE_LIMITED` |
+| 3 | **Medium** | `POST /api/auth/credentials-changed` | **Unlimited.** Each attempt spends the same Firebase verification plus a `revokeAllSessions` update | Per-account limiter **20 / 15 min**, leaving room for the recovery handoff's retries; 429 `CREDENTIALS_CHANGED_RATE_LIMITED` |
+| 4 | **Medium (operational)** | Production hosting / every per-IP limiter | A production process behind a reverse proxy with `TRUST_PROXY` unset resolves `req.ip` to the proxy, so **every per-IP bucket becomes ONE global bucket**: 60 failed logins from anywhere answer 429 to every member for 15 minutes; the reset (20/hour), registration (30/hour), exchange (30/15 min), verification (30/15 min) and renewal (120/15 min) buckets collapse the same way. Nothing in any response reveals it | New pure `proxyTrustNote()` in `config/deploymentReadiness.ts`, wired into `startServer` as a `[config] warning:` naming the variable and the consequence. Deliberately a **warning**, matching the readiness contract (a degraded deployment keeps serving). Production is documented and owner-verified as `TRUST_PROXY=1`; this makes a regression visible at the next boot |
+| 5 | **Low** | Every `/api/auth` response | **No cache directive.** A body carrying an access token, a reset authorization or a 202 about an account could be stored by an intermediary | `Cache-Control: no-store` + `Pragma: no-cache` applied once at the mount point; scoped to `/api/auth` and asserted **not** to leak onto other API responses |
+
+### Verified sound (no change)
+
+- **Codes.** Both six-digit codes come from one CSPRNG draw over 10^6 (rejection-sampled, padded), are
+  stored only as **keyed, domain-separated HMAC-SHA256** digests, and are compared with
+  `timingSafeEqual`. Neither challenge collection holds a plaintext code, an address, a user id, a
+  business id, a role or a session.
+- **Expiry, attempts and single use.** Expiry is in every query predicate as well as the TTL index; the
+  attempt cap is an atomic reservation (`$inc` behind `attempts: { $lt: max }`); AUTH-06 verification
+  is single-use by `verifiedAt: null` in the reservation predicate, and the reset authorization is a
+  fresh 32-byte CSPRNG value whose digest is spent by a second conditional update. A new code unsets
+  both the verified state and any authorization in the same write.
+- **Enumeration.** Login is timing-equalized (`verifyPassword` cannot accept the equalizer) and answers
+  one generic 401; both recovery surfaces answer one uniform 202/400 for a known address, an unknown
+  one and an ineligible account; the reset code is resolved from the challenge, never from the
+  submitted address; Firebase identity is resolved by **uid only** and email is never a join key.
+- **Sessions.** `jti` is mandatory; a token must name a live, unrevoked, unexpired session row; the
+  14-day cap is anchored at creation and never moved by renewal; `passwordChangedAt` invalidates older
+  tokens; the AUTH-06 reset and the N-4 bridge revoke **every** session; session and audit routes are
+  owner-scoped in the filter, not by an after-the-fact check.
+- **Tokens.** HS256 pinned, issuer and audience validated by the library, expiry classified only after
+  a second full (expiry-ignoring) verification, role/business never claims.
+- **Tenant isolation.** Every service filters by the server-derived `businessId`; AI conversations by
+  business **and** user; audit rows by business; no route reads a `businessId`, `userId`, `role` or
+  `firebaseUid` from a body.
+- **Input and queries.** Every query parameter is validated or coerced; `$regex` inputs are escaped and
+  length-bounded; pagination is capped at 100; the JSON body is capped at 100 kb; `/me` and `/logout`
+  use strict key allow-lists; no request value reaches a Mongo filter as an object.
+- **Errors and logs.** Stack traces are released only to an explicitly development/test process; the
+  access log records method, path (never the query), status, duration and actor id — no headers, body
+  or token; limiter 429s carry only `{ error, code }` and a `Retry-After`.
+- **Transport surface.** `x-powered-by` off, helmet headers on every response, CORS default-deny (no
+  wildcard, no credentials), HSTS via helmet.
+- **Mobile.** The access token lives in SecureStore only; every 429 surfaces the server's sentence and
+  `Retry-After` (login, reset, verification, renewal); an expired-but-live session is recovered once and
+  a revoked/invalidated one ends the session; no token, password or code is logged.
+
+### Residual risks — accepted for V1, recorded rather than glossed
+
+- **Limiter state is in-process.** On the single Render instance this is correct, but it resets on
+  restart/deploy and cannot coordinate across instances. A shared store is the V4 work already deferred
+  with B2/E3.
+- **Distributed credential stuffing is bounded, not eliminated.** The per-account login bucket is
+  IP+account, so an attacker with N addresses gets N×10 tries per account per window; the per-IP bucket
+  (60 failures) bounds a single source. A per-account backoff that does not enable lockout needs the
+  shared store above.
+- **A shared address can lock an account.** Ten failures from an address spend that address's 10-try
+  account budget, and the correct password is then refused for the window (pinned by the existing
+  suite). This is not remotely exploitable unless the caller shares the victim's address (mobile CGNAT)
+  or the deployment is behind an undeclared proxy — the state §52 finding 4 now warns about at boot.
+  **No account-wide lockout exists**, deliberately, because that would make the same Denial-of-Service
+  one request wide from anywhere.
+- **Registration necessarily reveals a taken address** (`EMAIL_IN_USE`), and so does linking a
+  conflicting identity (`FIREBASE_IDENTITY_CONFLICT`, deliberately generic). Both are rate-limited and
+  both are the minimum needed to complete the flow; the recovery surfaces reveal nothing.
+- **Email-triggering endpoints are bounded per IP, not per recipient.** A distributed sender can still
+  deliver several codes to one address; provider-side suppression or a recipient-keyed counter is the
+  V4 answer.
+- **Session-table growth has no per-user cap.** A valid account can create sessions at the limiter's
+  rate (30 exchanges / 15 min / IP). Bounded per window, unbounded over time; a per-user cap is a
+  product decision, not a defect.
+- **`/api/health` publishes the commit, the posture and response counters** — deliberate, and already
+  documented in `routes/health.routes.ts`; it names behaviour, not people.
+- **Logout, session listing and single-session revocation stay unlimited** — authenticated, cheap,
+  idempotent, and a throttle there would only obstruct a legitimate "sign out everywhere" retry.
+
+### Verification
+
+- **12 new cases, 4 existing guards updated** (each updated guard still asserts `requireAuth` is
+  first and **no** permission/role gate was added): 7 in `phase07b-auth-security.test.mjs` (account
+  budget, correct change still succeeds, per-account isolation, per-address backstop, anonymous 401
+  before any bucket, link, credentials-changed), 1 in `phase07c-http-security.test.mjs` (no-store,
+  scoped) and 4 in `DEP-1-deployment-readiness.test.mjs` (the pure note in both directions, an
+  unusable hop count, and a real production boot that warns **before** the connect and still listens).
+- **Server:** `test:unit` **1269 tests / 1216 pass / 0 fail / 53 skipped**; `test:db` **871 tests /
+  781 pass / 0 fail / 90 skipped**; `tsc --noEmit`, `eslint .`, `check:module-graph extensions` and
+  `check:module-graph specifiers` clean (486 modules).
+- **Configuration:** eight new `AUTH_*` names are documented in `server/.env.example` and the README
+  table (now **thirty** variables / fifteen pairs). They are all optional; the documented defaults are
+  the production values.
+- **The CLIENT half is now pinned by a suite, and still not by a phone.** `mobile/__tests__/
+  change-password-rate-limit.test.tsx` (4 cases) mounts the real change-password screen: a 429
+  `CHANGE_PASSWORD_RATE_LIMITED` **shows the server's sentence** and keeps the session, the form is
+  still usable after the refusal (a wait, not a dead end), a 400 `fields` refusal lands **under the
+  input** rather than in the banner, and a 401 **ends** the session instead of reporting it. The first
+  three are the behaviours that would have degraded silently: the screen's fallback is
+  `error.message`, which was correct code and unverified until this suite.
+- **Not device-verified:** the new 429s are server-side policy and were exercised over real HTTP in
+  the DB suite; no phone run was performed for this audit, and none is claimed. Mobile after the
+  suite: **83 suites / 1016 tests / 0 failures**, `tsc --noEmit` clean.
+
 ---
 
 > **MAINTENANCE.** This is a living navigation document. On any authentication/security change:

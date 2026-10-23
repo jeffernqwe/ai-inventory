@@ -562,12 +562,26 @@ dbSuite('Phase 26A — session lifecycle over real HTTP', dbOk, () => {
       assert.equal(handlers.length, 2, `${route} must be requireAuth + controller`);
       assert.equal(handlers[0].handle, requireAuth, `${route} must be gated by requireAuth`);
     }
-    for (const route of ['GET /me', 'PATCH /me', 'POST /change-password']) {
+    for (const route of ['GET /me', 'PATCH /me']) {
       const handlers = byPath.get(route);
       assert.ok(handlers, `${route} must still be registered`);
       assert.equal(handlers.length, 2, `${route} must still be requireAuth + controller`);
       assert.equal(handlers[0].handle, requireAuth);
     }
+    // 2026-10-23 security audit: POST /change-password gained TWO rate limiters —
+    // per account+address and per address — because its currentPassword comparison
+    // was unlimited. The property this case pins is unchanged: requireAuth is FIRST
+    // and no permission gate was added. The middle handlers are (req,res,next)
+    // limiters, and the controller is the only other handler.
+    const changePasswordHandlers = byPath.get('POST /change-password');
+    assert.ok(changePasswordHandlers, 'POST /change-password must still be registered');
+    assert.equal(changePasswordHandlers.length, 4, 'requireAuth + two limiters + controller');
+    assert.equal(changePasswordHandlers[0].handle, requireAuth);
+    assert.ok(
+      changePasswordHandlers.slice(1, -1).every((h) => h.handle.length === 3),
+      'both middle handlers are (req,res,next) limiters'
+    );
+    assert.equal(changePasswordHandlers[3].handle.length, 2, 'the last handler is the controller');
 
     // The public routes are unchanged: still reachable without a token.
     const loginRes = await api('POST', '/api/auth/login', {

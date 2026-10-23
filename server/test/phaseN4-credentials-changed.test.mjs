@@ -729,20 +729,26 @@ dbSuite('N-4 — the credential-change bridge over HTTP and a real database', db
   // 11 — the authorization contract
   // -------------------------------------------------------------------------
 
-  it('11. ★ the route is registered as requireAuth + controller, with no gate and no second middleware', () => {
+  it('11. ★ the route is registered as requireAuth + the audit limiter + controller, with no gate', () => {
     const layer = authRouter.stack.find(
       (entry) => entry.route?.path === '/credentials-changed' && entry.route.methods?.post
     );
     assert.ok(layer, 'POST /api/auth/credentials-changed is registered on the auth router');
     const handlers = layer.route.stack.map((s) => s.handle);
-    assert.equal(handlers.length, 2, 'exactly two handlers: the choke point and the controller');
+    // 2026-10-23 security audit: the bridge gained a per-account rate limiter, because
+    // each call spends an outbound Firebase verification plus a revokeAllSessions
+    // update. The limiter is not an authorization gate, requireAuth is still first,
+    // and no permission middleware exists in the chain.
+    assert.equal(handlers.length, 3, 'requireAuth, the limiter, and the controller');
     assert.equal(
       handlers[0],
       requireAuth,
       'requireAuth is first — the route cannot be reached unauthenticated'
     );
+    assert.equal(handlers[1].length, 3, 'the middle handler is a (req,res,next) limiter, not a gate');
     assert.notEqual(handlers[1], requireAuth, 'requireAuth is not applied twice');
-    assert.equal(typeof handlers[1], 'function', 'the second handler is the controller');
+    assert.equal(typeof handlers[2], 'function', 'the last handler is the controller');
+    assert.equal(handlers[2].length, 2, 'and it is a controller, not another middleware');
   });
 
   it('11b. ★ the Phase 23 authorization contract declares the route in its AUTHENTICATED bucket', () => {

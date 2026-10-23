@@ -51,6 +51,7 @@ import {
   deploymentLine,
   deploymentNotes,
   integrationReport,
+  proxyTrustNote,
 } from '../src/config/deploymentReadiness.ts';
 import { createHealthRouter } from '../src/routes/health.routes.ts';
 import { startServer } from '../src/config/startup.ts';
@@ -274,6 +275,38 @@ describe('DEP-1 the deployment warnings', () => {
     // boot in production), so this module must not duplicate it — a doubled
     // warning is how a warning list stops being read.
     assert.deepEqual(deploymentNotes(report({ ai: true, aiProvider: 'openrouter' })), []);
+  });
+
+  // -------------------------------------------------------------------------
+  // 2026-10-23 security audit — the warning that is about the HOST rather than an
+  // integration. A production process behind a reverse proxy that does not declare
+  // it resolves `req.ip` to the proxy, so every per-IP auth limiter counts ONE
+  // bucket for the whole world. Nothing in any response reveals it; only this line
+  // does, which is why its absence in the well-configured case is asserted too.
+  // -------------------------------------------------------------------------
+  it('warns when a PRODUCTION service does not trust the proxy in front of it', () => {
+    const note = proxyTrustNote({ nodeEnv: 'production', trustProxy: 0 });
+
+    assert.ok(note, 'production without a trusted proxy must say so');
+    assert.match(note, /TRUST_PROXY is not set on this PRODUCTION service/);
+    assert.ok(note.includes('TRUST_PROXY=1'), 'the safe value must be stated explicitly');
+    assert.match(note, /ONE global bucket/, 'the consequence, not a vague "check your proxy"');
+    assert.ok(note.includes('60 failures / 15 min'), 'the login bucket is stated with its cap');
+    assert.match(note, /sixty failed logins/, 'the attack that produces it is spelled out');
+  });
+
+  it('is silent once a proxy hop is trusted, and outside production always', () => {
+    assert.equal(proxyTrustNote({ nodeEnv: 'production', trustProxy: 1 }), null);
+    assert.equal(proxyTrustNote({ nodeEnv: 'production', trustProxy: 2 }), null);
+    assert.equal(proxyTrustNote({ nodeEnv: 'development', trustProxy: 0 }), null);
+    assert.equal(proxyTrustNote({ nodeEnv: 'test', trustProxy: 0 }), null);
+  });
+
+  it('treats an unusable hop count as untrusted rather than as configured', () => {
+    // A NaN (or a value the process never received) cannot mean "one hop".
+    // Reading it as configured would hide exactly the deployment this note exists for.
+    assert.ok(proxyTrustNote({ nodeEnv: 'production', trustProxy: Number.NaN }));
+    assert.ok(proxyTrustNote({ nodeEnv: 'production', trustProxy: undefined }));
   });
 
   it('cannot leak a secret through the line or the notes', () => {
@@ -507,10 +540,13 @@ describe('DEP-1 the boot wiring', () => {
 
   const signalTarget = { on: () => {}, listeners: () => [] };
 
-  async function boot({ readiness, nodeEnv = 'development', events }) {
+  async function boot({ readiness, nodeEnv = 'development', events, proxyTrust = 1 }) {
     const exits = [];
     const result = await startServer({
       nodeEnv,
+      // A boot that is not about the proxy warning declares a correctly configured
+      // proxy, so its log assertions stay about the readiness report alone.
+      proxyTrust,
       appInstance: express(),
       port: 0,
       validator: () => [],
@@ -555,6 +591,45 @@ describe('DEP-1 the boot wiring', () => {
       assert.ok(
         events.indexOf(warnings[0]) < connectIndex,
         'the warnings are emitted BEFORE the database is touched',
+      );
+    } finally {
+      await close(result.server);
+    }
+  });
+
+  // 2026-10-23 security audit — the host-level warning reaches the boot log, before
+  // the database, and is still never a refusal.
+  it('warns about an untrusted proxy in production, before the connect, and still boots', async () => {
+    const events = [];
+    const healthy = report({
+      mail: true,
+      mailProvider: SEAM_PROVIDER,
+      firebase: true,
+      emailVerification: true,
+      ai: true,
+      aiProvider: 'openrouter',
+    });
+    const { result, exits } = await boot({
+      events,
+      nodeEnv: 'production',
+      proxyTrust: 0,
+      readiness: () => healthy,
+    });
+
+    try {
+      assert.ok(result && result.server, 'the server still listens');
+      assert.deepEqual(exits, [], 'a host-level warning must not take the service down');
+
+      const warnings = events.filter(
+        (entry) => entry.channel === 'error' && entry.message.startsWith('[config] warning: '),
+      );
+      assert.equal(warnings.length, 1, 'exactly one warning for a healthy-but-untrusted host');
+      assert.match(warnings[0].message, /TRUST_PROXY/);
+
+      const connectIndex = events.findIndex((entry) => entry.message === 'connect');
+      assert.ok(
+        events.indexOf(warnings[0]) < connectIndex,
+        'the warning is emitted BEFORE the database is touched',
       );
     } finally {
       await close(result.server);

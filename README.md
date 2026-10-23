@@ -197,13 +197,21 @@ default and needs no dashboard entry. Verify the current values in the Render da
 | `FIREBASE_SERVICE_ACCOUNT_JSON` — or the three-variable form | **all-or-nothing** | a partially supplied service account fails fast; none at all = Firebase disabled |
 | `TRUST_PROXY` | **effectively required behind Render** | set to `1`; see below |
 | `MAIL_PROVIDER`, `MAIL_FROM`, `BREVO_API_KEY`, `PASSWORD_RESET_URL` | optional | **Brevo** is the mail provider in development and production and the **only built-in transport** (`MAIL_PROVIDER=brevo`). Missing configuration **disables password recovery only** (`forgot-password` answers 503) — the server still starts and serves every other feature. The mail layer keeps a provider-agnostic boundary, but no second transport ships; no Firebase reset flow is implemented |
-| `AUTH_*_RATE_LIMIT_*` — **twenty-two** variables (eleven window/limit pairs) | optional | the documented defaults are the production values; the count is taken from code, not estimated. AUTH-03 added the per-IP session-renewal pair (`AUTH_SESSION_RENEW_RATE_LIMIT_WINDOW_MS` / `AUTH_SESSION_RENEW_RATE_LIMIT_MAX`, default 15 min / 120) and AUTH-04 the two per-IP email-verification pairs (`AUTH_EMAIL_VERIFICATION_REQUEST_*` / `AUTH_EMAIL_VERIFICATION_CONFIRM_*`, both 15 min / 30). `TRUST_PROXY` and `JWT_SECRET` / `JWT_EXPIRES_IN` / `JWT_ISSUER` / `JWT_AUDIENCE` are listed separately above and are **not** `AUTH_*` variables |
+| `AUTH_*_RATE_LIMIT_*` — **thirty** variables (fifteen window/limit pairs) | optional | the documented defaults are the production values; the count is taken from code, not estimated. AUTH-03 added the per-IP session-renewal pair (`AUTH_SESSION_RENEW_RATE_LIMIT_WINDOW_MS` / `AUTH_SESSION_RENEW_RATE_LIMIT_MAX`, default 15 min / 120) and AUTH-04 the two per-IP email-verification pairs (`AUTH_EMAIL_VERIFICATION_REQUEST_*` / `AUTH_EMAIL_VERIFICATION_CONFIRM_*`, both 15 min / 30). The **2026-10-23 security audit** added the four authenticated pairs — `AUTH_CHANGE_PASSWORD_*` (10 / 15 min per account+address) and `AUTH_CHANGE_PASSWORD_IP_*` (30 / 15 min per address), `AUTH_FIREBASE_LINK_*` (10 / 15 min per account) and `AUTH_CREDENTIALS_CHANGED_*` (20 / 15 min per account). `TRUST_PROXY` and `JWT_SECRET` / `JWT_EXPIRES_IN` / `JWT_ISSUER` / `JWT_AUDIENCE` are listed separately above and are **not** `AUTH_*` variables |
 | `CORS_ORIGINS`, `JSON_BODY_LIMIT`, `SHUTDOWN_TIMEOUT_MS`, `LOG_REQUESTS` | optional | the documented defaults are the production values |
 
 **`TRUST_PROXY=1`.** Render terminates TLS at a proxy, so without this setting `req.ip` is the proxy's
-address for every request and the per-IP auth rate limiters would share one bucket across all clients.
-Setting the exact hop count (`1`) restores real client addresses. Never set it to `true` — an unbounded
-forwarded chain lets anyone spoof `X-Forwarded-For`. See `server/src/config/env.ts`.
+address for every request and the per-IP auth rate limiters would share one bucket across all clients:
+sixty failed logins from anywhere would answer 429 to every member for fifteen minutes, and the
+password-reset, registration, Firebase-exchange, email-verification and session-renewal buckets would
+collapse the same way. Setting the exact hop count (`1`) restores real client addresses. Never set it
+to `true` — an unbounded forwarded chain lets anyone spoof `X-Forwarded-For`. See
+`server/src/config/env.ts`.
+
+Since the **2026-10-23 security audit** a production boot that does not declare a proxy logs a
+`[config] warning: TRUST_PROXY is not set on this PRODUCTION service…` line naming that consequence,
+next to the other deployment warnings. It is a warning rather than a refusal (a degraded deployment
+keeps serving), so it must be read in the deploy log — nothing in a response reveals the state.
 
 **Mobile (EAS project).** Only `preview` and `production` carry an explicit `env` block in
 `mobile/eas.json`, and only for `EXPO_PUBLIC_API_URL` (both point at `https://ai-inventory-l1mi.onrender.com`).

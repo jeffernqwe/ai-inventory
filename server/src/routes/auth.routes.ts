@@ -22,6 +22,10 @@ import {
   createSessionRenewLimiter,
   createEmailVerificationRequestLimiter,
   createEmailVerificationConfirmLimiter,
+  createChangePasswordLimiter,
+  createChangePasswordIpLimiter,
+  createFirebaseLinkLimiter,
+  createCredentialsChangedLimiter,
   resetLoginAccountBucketOnSuccess,
 } from '../middlewares/rateLimit.ts';
 import type { AuthRateConfig } from '../middlewares/rateLimit.ts';
@@ -164,7 +168,22 @@ export function createAuthRouter({ limits }: AuthRouterOptions = {}) {
   router.get('/me', requireAuth, me);
   // Phase 15: self-service account security + profile.
   router.patch('/me', requireAuth, updateMe);
-  router.post('/change-password', requireAuth, changePassword);
+  // 2026-10-23 security audit — THIS ROUTE IS LIMITED, on two stacked buckets, and the
+  // ordering is requireAuth -> limiter -> controller so an anonymous caller is refused
+  // with 401 and never charged a bucket it has no identity to own.
+  //
+  // WHY IT WAS THE MOST IMPORTANT UNLIMITED ENDPOINT. `currentPassword` is the only
+  // re-authentication this operation performs, and nothing bounded how often it could be
+  // submitted: a caller holding a stolen session could guess the account's password at
+  // machine speed, and a correct guess installs a new credential (a durable takeover for
+  // a legacy password account). Each attempt also costs a bcrypt comparison, and a success
+  // a second hash, so the same endpoint was a cheap CPU lever for any authenticated user.
+  //
+  // Two buckets, for the two attacks: account+address bounds one account's guesses (ten
+  // per fifteen minutes), and the per-address bucket bounds one source rotating accounts.
+  // Every attempt counts — unlike login, a successful call here is the expensive operation
+  // being bounded, and it is the outcome an attacker wants.
+  router.post('/change-password', requireAuth, createChangePasswordLimiter(limits), createChangePasswordIpLimiter(limits), changePassword);
   // Phase 26A: session lifecycle. Authenticated routes only — no new permission
   // is involved, because a user manages nothing but their own sessions, and the
   // owning userId comes from req.user, never from the request.
@@ -202,27 +221,29 @@ export function createAuthRouter({ limits }: AuthRouterOptions = {}) {
   // instrument for "what you may attach to yourself" — the same reasoning the
   // session routes above carry.
   //
-  // No rate limiter, deliberately and consistently: no authenticated route in this
-  // application is limited. Each attempt requires a live Inventory AI session AND a
-  // Firebase credential, and the only work it can do is a local signature
-  // verification plus two indexed lookups, so the limiter it would need is not the
-  // one that protects the public routes. Adding one means a new factory and a new
-  // config entry in middlewares/rateLimit.ts — scope this phase does not have, and
-  // no finding that asks for it.
+  // LIMITED SINCE THE 2026-10-23 SECURITY AUDIT, per account rather than per
+  // address. The earlier note here said no authenticated route was limited because
+  // each attempt only cost a local verification plus two indexed lookups; that
+  // understated it — `verifyFirebaseIdToken` performs an outbound Firebase
+  // `checkRevoked` verification, and every attempt also writes an audit row. Ten
+  // attempts per quarter hour bounds that work for an operation a person performs
+  // once, and keying on `req.user.id` means rotating addresses buys no fresh budget.
   //
   // The ID token travels in the POST body, like the exchange's, so it cannot reach
   // the access log (httpLogger records req.path only) or a Referer header.
-  router.post('/firebase/link', requireAuth, firebaseLink);
+  router.post('/firebase/link', requireAuth, createFirebaseLinkLimiter(limits), firebaseLink);
 
   // N-4: the credential-change bridge. AUTHENTICATED, and once again the
   // authentication IS the operation's ownership proof rather than a convenience —
   // the account is `req.user.id` and the identity must equal the uid already on
   // it, so no permission key could express "record a credential change on my own
   // account" without inventing an authorization concept the catalogue does not
-  // have. It is registered as `requireAuth, controller` — no second middleware —
-  // which is also why it is not rate-limited: every authenticated route in this
-  // application is unlimited, and each attempt here requires a live session AND a
-  // verified, RECENT Firebase credential whose uid matches this account.
+  // have. It is registered as `requireAuth, limiter, controller` since the
+  // 2026-10-23 security audit. Each attempt requires a live session AND a
+  // verified, RECENT Firebase credential whose uid matches this account, but it
+  // also spends an outbound Firebase verification and a `revokeAllSessions`
+  // update, so it is bounded per account (twenty per quarter hour) rather than
+  // left unlimited.
   //
   // It is the route the approved recovery sequence reaches last-but-one: the user
   // signs in again with the new password, the PUBLIC exchange above mints a
@@ -237,7 +258,7 @@ export function createAuthRouter({ limits }: AuthRouterOptions = {}) {
   // The ID token travels in the POST body, like every other Firebase route, so it
   // cannot reach the access log (httpLogger records req.path only) or a Referer
   // header.
-  router.post('/credentials-changed', requireAuth, credentialsChanged);
+  router.post('/credentials-changed', requireAuth, createCredentialsChangedLimiter(limits), credentialsChanged);
 
   return router;
 }

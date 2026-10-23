@@ -702,3 +702,194 @@ dbSuite('Phase 07B — H1 authentication rate limiting', dbOk, () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// 2026-10-23 SECURITY AUDIT — the AUTHENTICATED credential operations.
+//
+// WHY THESE ROUTES NEED THEIR OWN CASES RATHER THAN INHERITING H1's. Every limit
+// above protects a route a caller reaches WITHOUT a session, so its key is built
+// from something the caller supplies. These three sit behind requireAuth, so the
+// budget belongs to the ACCOUNT (`req.user.id`) and the cases have to prove that:
+// one user exhausting a bucket must not touch another, a source rotating accounts
+// must still meet the address bucket, and an anonymous caller must be refused by
+// authentication BEFORE any bucket is charged.
+//
+// WHAT IS BEING DEFENDED, CONCRETELY. `change-password` verifies the CURRENT
+// password, and that comparison is the only re-authentication the endpoint
+// performs: unlimited, it is an unlimited guess at the account's password by
+// anyone holding a session token, and a correct guess installs a new credential.
+// Each attempt also costs a bcrypt comparison. `firebase/link` and
+// `credentials-changed` each spend an outbound Firebase `checkRevoked`
+// verification and a write, so the same account could otherwise drive that work
+// without bound.
+//
+// Every case builds a FRESH app so each limiter starts with an empty store, exactly
+// as H1 does.
+// ---------------------------------------------------------------------------
+dbSuite('Security audit (2026-10-23) — authenticated credential operations', dbOk, () => {
+  const build = async (limits, fn) => {
+    const ctx = await startApp(buildApp({ limits }));
+    try {
+      await fn(ctx.baseUrl);
+    } finally {
+      await ctx.close();
+    }
+  };
+
+  const changePassword = (url, seed, currentPassword) =>
+    api(url, 'POST', '/api/auth/change-password', {
+      token: seed.token,
+      body: { currentPassword, newPassword: 'Replacement123!' },
+    });
+
+  it('change-password spends its account budget on wrong current passwords, then refuses even the correct one', async () => {
+    await build(
+      { changePasswordWindowMs: 60000, changePasswordMax: 2, changePasswordIpMax: 100 },
+      async (url) => {
+        const seed = await seedBusinessUser();
+
+        for (let i = 0; i < 2; i++) {
+          const res = await changePassword(url, seed, 'WrongPass123!');
+          assert.equal(res.status, 400, `attempt ${i + 1} is an ordinary refusal`);
+          assert.equal(res.json.code, 'INVALID_CURRENT_PASSWORD');
+        }
+
+        // The third attempt is blocked BEFORE the comparison. That is the point: a
+        // session holder cannot keep guessing the current password, and a guessed
+        // credential can never be installed. The correct password being blocked too
+        // is the documented cost of a limiter that runs ahead of the controller.
+        const blocked = await changePassword(url, seed, seed.password);
+        assertRateLimitBlock(blocked, 'CHANGE_PASSWORD_RATE_LIMITED');
+
+        // And nothing was written by any of the three: the original still signs in.
+        const login = await api(url, 'POST', '/api/auth/login', {
+          body: { email: seed.email, password: seed.password },
+        });
+        assert.equal(login.status, 200, 'a blocked attempt cannot change the credential');
+      }
+    );
+  });
+
+  it('a correct change within the budget still succeeds, so the limiter does not break the flow', async () => {
+    await build(
+      { changePasswordWindowMs: 60000, changePasswordMax: 3, changePasswordIpMax: 100 },
+      async (url) => {
+        const seed = await seedBusinessUser();
+        const res = await changePassword(url, seed, seed.password);
+        assert.equal(res.status, 200);
+        assert.equal(res.json.message, 'Password changed. Please sign in again.');
+
+        const login = await api(url, 'POST', '/api/auth/login', {
+          body: { email: seed.email, password: 'Replacement123!' },
+        });
+        assert.equal(login.status, 200, 'the replacement password is the one that works now');
+      }
+    );
+  });
+
+  it('the account budget is per account: one user exhausting it does not block another', async () => {
+    await build(
+      { changePasswordWindowMs: 60000, changePasswordMax: 1, changePasswordIpMax: 100 },
+      async (url) => {
+        const blockedUser = await seedBusinessUser();
+        const other = await seedBusinessUser();
+
+        const spent = await changePassword(url, blockedUser, 'WrongPass123!');
+        assert.equal(spent.status, 400);
+        const blocked = await changePassword(url, blockedUser, blockedUser.password);
+        assertRateLimitBlock(blocked, 'CHANGE_PASSWORD_RATE_LIMITED');
+
+        // A DIFFERENT account, from the same address, still has its own budget.
+        const allowed = await changePassword(url, other, other.password);
+        assert.equal(allowed.status, 200, 'another account is not rate limited by this one');
+      }
+    );
+  });
+
+  it('the per-address bucket still bounds one source rotating accounts', async () => {
+    await build(
+      {
+        changePasswordWindowMs: 60000,
+        changePasswordMax: 100,
+        changePasswordIpWindowMs: 60000,
+        changePasswordIpMax: 3,
+      },
+      async (url) => {
+        const seeds = [
+          await seedBusinessUser(),
+          await seedBusinessUser(),
+          await seedBusinessUser(),
+        ];
+
+        for (let i = 0; i < 3; i++) {
+          const res = await changePassword(url, seeds[i], 'WrongPass123!');
+          assert.equal(res.status, 400, `account ${i + 1} is still under its own budget`);
+        }
+
+        // The account bucket is far from spent (100), so only the address bucket can
+        // produce this refusal — which is the property the case exists for.
+        const blocked = await changePassword(url, seeds[0], seeds[0].password);
+        assertRateLimitBlock(blocked, 'CHANGE_PASSWORD_RATE_LIMITED');
+      }
+    );
+  });
+
+  it('an anonymous caller is refused by authentication before any bucket is charged', async () => {
+    await build(
+      { changePasswordWindowMs: 60000, changePasswordMax: 1, changePasswordIpMax: 1 },
+      async (url) => {
+        for (let i = 0; i < 3; i++) {
+          const res = await api(url, 'POST', '/api/auth/change-password', {
+            body: { currentPassword: 'anything', newPassword: 'Replacement123!' },
+          });
+          assert.equal(res.status, 401, 'no token is an authentication answer, not a throttle');
+          assert.equal(res.json.code, 'AUTH_REQUIRED');
+        }
+
+        // If the anonymous requests had spent either bucket, this first authenticated
+        // attempt would already be a 429 (both caps are 1).
+        const seed = await seedBusinessUser();
+        const ok = await changePassword(url, seed, seed.password);
+        assert.equal(ok.status, 200, 'anonymous traffic cannot spend an account\'s budget');
+      }
+    );
+  });
+
+  it('firebase/link is bounded per account', async () => {
+    await build({ firebaseLinkWindowMs: 60000, firebaseLinkMax: 2 }, async (url) => {
+      const seed = await seedBusinessUser();
+      const link = () =>
+        api(url, 'POST', '/api/auth/firebase/link', {
+          token: seed.token,
+          body: { idToken: 'not-a-firebase-token' },
+        });
+
+      // The first two attempts reach the controller and are refused for the token
+      // (400) or for the missing Firebase configuration (503) — never for volume.
+      for (let i = 0; i < 2; i++) {
+        const res = await link();
+        assert.notEqual(res.status, 429, `attempt ${i + 1} reaches the controller`);
+      }
+
+      assertRateLimitBlock(await link(), 'FIREBASE_LINK_RATE_LIMITED');
+    });
+  });
+
+  it('credentials-changed is bounded per account', async () => {
+    await build({ credentialsChangedWindowMs: 60000, credentialsChangedMax: 2 }, async (url) => {
+      const seed = await seedBusinessUser();
+      const record = () =>
+        api(url, 'POST', '/api/auth/credentials-changed', {
+          token: seed.token,
+          body: { idToken: 'not-a-firebase-token' },
+        });
+
+      for (let i = 0; i < 2; i++) {
+        const res = await record();
+        assert.notEqual(res.status, 429, `attempt ${i + 1} reaches the controller`);
+      }
+
+      assertRateLimitBlock(await record(), 'CREDENTIALS_CHANGED_RATE_LIMITED');
+    });
+  });
+});

@@ -138,6 +138,32 @@ describe('H6 security headers (Phase 07C)', () => {
     assertSecurityHeaders(res, '404');
   });
 
+    // 2026-10-23 security audit — auth responses must not be storable.
+    //
+    // A body under /api/auth can carry an access token, a reset authorization or a
+    // fact about an account, so an intermediary (proxy, corporate TLS inspector, a
+    // browser that later learns CORS) must not be allowed to keep it. The reset LINK
+    // page already sets this for itself; this pins the JSON API's mount-point rule.
+    //
+    // `no-store` rather than `no-cache`: the latter PERMITS storage. The control below
+    // matters as much as the assertion — a directive applied to the whole API would
+    // silently change every other response, so the non-auth route is asserted to be
+    // untouched.
+    it('auth responses are no-store, and the directive is scoped to /api/auth', async () => {
+      const auth = await request(baseUrl, { path: '/api/auth/me' });
+      assert.equal(auth.status, 401, 'a tokenless /me is a normal 401');
+      assert.equal(auth.header('cache-control'), 'no-store');
+      assert.equal(auth.header('pragma'), 'no-cache');
+
+      const health = await request(baseUrl, { path: '/api/health' });
+      assert.equal(health.status, 200);
+      assert.equal(
+        health.header('cache-control'),
+        null,
+        'the auth caching rule must not leak onto every API response'
+      );
+    });
+
   }); // end unitSuite DB-free cases
 
   dbSuite('H6 security headers — authenticated case (Phase 07C)', dbOk, () => {

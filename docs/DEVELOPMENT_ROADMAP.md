@@ -18582,6 +18582,97 @@ and Metro restarted so the bundle carried it; it was restored to the local serve
 confirmed on their own mailbox. The flow itself is no longer unverified in production — this run used
 production's own mail path, credential write and revocation.
 
+# 27EJ. The audit that found three open doors, and closed them (2026-10-23)
+
+**Security audit. Server + documentation; no route, permission, role, schema, index, dependency,
+session model or mobile change.** An owner-requested review of the whole authentication surface —
+registration, the AUTH-04 code, AUTH-06 recovery, login, sessions and renewal, enumeration, error
+hygiene, validation, every auth limiter and the production proxy configuration — plus the wider API's
+authorization, tenant isolation, query construction, headers and logging. The full record, including
+the findings that needed no change, is **checklist §52**; this entry records the engineering.
+
+## What was actually wrong
+
+1. **`POST /api/auth/change-password` had no rate limiter (High).** It is the one authenticated route
+   whose body carries a **password** — and `currentPassword` is the only re-authentication it does.
+   Anyone holding a live session could therefore guess the account's password at machine speed, and a
+   correct guess installs a new credential (and revokes the sessions, so the real owner is signed out
+   last). Each attempt also costs a bcrypt comparison, which made it a CPU lever for any member. The
+   route now has **two** buckets after `requireAuth`: **10 per account+address / 15 min**, then **30 per
+   address / 15 min** as an address-rotation backstop, with every attempt counted because a refusal
+   must spend budget. 429 `CHANGE_PASSWORD_RATE_LIMITED`.
+2. **`POST /api/auth/firebase/link` and `POST /api/auth/credentials-changed` were unlimited (Medium).**
+   Both were written when the Firebase check was assumed local; it is an **outbound** `checkRevoked`
+   verification, and the second also writes a `revokeAllSessions` update. They now have per-account
+   buckets (10 and 20 per 15 min). `credentials-changed` is deliberately the larger of the two because
+   the recovery handoff retries it.
+3. **A proxy without `TRUST_PROXY` silently breaks every per-IP limiter (Medium, operational).** On a
+   host that terminates TLS in front of the process, `req.ip` is the proxy for every request, so all
+   per-IP buckets collapse into one: **60 failed logins from anywhere** would answer 429 to every member
+   for 15 minutes, and registration (30/h), reset (20/h), exchange (30/15 min), verification (30/15 min)
+   and renewal (120/15 min) collapse the same way. Nothing in a response reveals it, so it can only be
+   noticed as "the app is weirdly locked" — which is exactly how it would have been noticed. The fix is
+   detection, not a default: `proxyTrustNote()` in `config/deploymentReadiness.ts` is a pure function
+   over `NODE_ENV` + `TRUST_PROXY`, and `startServer` logs a `[config] warning:` naming the variable and
+   the consequence. It is a warning rather than a refusal because the readiness contract already says a
+   degraded deployment keeps serving; the existing fail-fast list stays unchanged.
+4. **Auth responses had no cache directive (Low).** A 200 carrying an access token, a 202 about an
+   address or a 200 carrying a reset authorization could be stored by an intermediary. `/api/auth` now
+   sends `Cache-Control: no-store` and `Pragma: no-cache`, applied once at the mount point and pinned
+   by a test that also asserts the header does **not** appear on ordinary API responses.
+
+## What was checked and left alone
+
+Code generation and storage (CSPRNG, keyed domain-separated HMAC, timing-safe compare), expiry and
+attempt caps as atomic predicates, AUTH-06's single-use verify→authorize chain, uniform 202/400 on both
+recovery surfaces, timing-equalized login, uid-only Firebase joins, `jti`-backed sessions with the
+14-day cap and `passwordChangedAt` invalidation, claim-free tokens, server-derived tenant filters on
+every service (AI conversations by business **and** user), escaped `$regex`, capped pagination, the
+100 kb body limit, fail-closed stack traces, path-only access logging, default-deny CORS, helmet, and
+the mobile client's 429 / `Retry-After` handling. Each is listed with its evidence in checklist §52.
+
+## Limiter inventory after the audit
+
+| Endpoint | Buckets | Window / cap | Counts |
+| --- | --- | --- | --- |
+| `POST /auth/login` | IP+account, IP | 15 min / 10 failed, 15 min / 60 failed | failures only |
+| `POST /auth/register` | IP | 1 h / 30 | every attempt |
+| `POST /auth/firebase/exchange` | IP | 15 min / 30 | every attempt |
+| `POST /auth/firebase/register` | IP | 1 h / 30 | every attempt |
+| `POST /auth/session/renew` | IP | 15 min / 120 | every attempt |
+| `POST /auth/email-verification/request` | IP (+ 60 s per-identity cooldown in the service) | 15 min / 30 | every attempt |
+| `POST /auth/email-verification/confirm` | IP (+ 5 attempts per challenge) | 15 min / 30 | every attempt |
+| `POST /auth/password-reset/code` | IP+address, IP | 1 h / 5, 1 h / 20 | every attempt |
+| `POST /auth/password-reset/verify` | IP (shared with confirm) | 15 min / 20 | every attempt |
+| `POST /auth/password-reset/confirm` | IP (shared with verify) | 15 min / 20 | every attempt |
+| `POST /auth/forgot-password` | IP+address, IP | 1 h / 5, 1 h / 20 | every attempt |
+| `POST /auth/reset-password` | IP | 15 min / 20 | every attempt |
+| **`POST /auth/change-password`** | **account+IP, IP** | **15 min / 10, 15 min / 30** | **every attempt** |
+| **`POST /auth/firebase/link`** | **account** | **15 min / 10** | **every attempt** |
+| **`POST /auth/credentials-changed`** | **account** | **15 min / 20** | **every attempt** |
+| `POST /auth/logout`, session revocations | none | — | authenticated, cheap, idempotent |
+
+All eight new variables are optional and documented in `server/.env.example` and the README table
+(thirty variables, fifteen pairs); every documented default is the production value.
+
+## Verification
+
+**12 new cases, 4 existing guards updated** — and each updated guard still asserts `requireAuth`
+comes first and no permission or role gate was added. Server `test:unit` **1269 tests / 1216 pass / 0
+fail / 53 skipped**, `test:db` **871 / 781 pass / 0 fail / 90 skipped**, `tsc`, `eslint` and both
+module-graph checks clean (486 modules). Mobile **83 suites / 1016 tests / 0 failures** (`tsc`
+clean), including the suite added for the half that was only asserted in prose before:
+`mobile/__tests__/change-password-rate-limit.test.tsx` mounts the real screen and pins that a 429
+shows the **server's** sentence and keeps the session, that the form survives the refusal, that a
+400 `fields` refusal lands **under its input**, and that a 401 **ends** the session rather than
+reporting it. **Still not device-verified:** no phone run was performed for this audit and none is
+claimed. Residual risks the audit accepted for V1
+— in-process limiter state, distributed stuffing, the shared-address lockout, per-IP rather than
+per-recipient email bounds, and the absent per-user session cap — are enumerated in checklist §52
+with the reason each is a V4 concern rather than a release blocker.
+
+---
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

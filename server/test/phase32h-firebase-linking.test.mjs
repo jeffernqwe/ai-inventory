@@ -608,7 +608,7 @@ dbSuite('Phase 32H — identity linking over HTTP and a real database', dbOk, ()
     assert.deepEqual(verifiedTokens(), []);
   });
 
-  it('11. the link route is `requireAuth, handler` and nothing else', async () => {
+  it('11. the link route is `requireAuth, limiter, handler` — no gate and no other middleware', async () => {
     const { createAuthRouter } = await import('../src/routes/auth.routes.ts');
     const router = createAuthRouter({ limits: UNCAPPED });
     const layer = router.stack.find((l) => l.route?.path === '/firebase/link');
@@ -618,8 +618,18 @@ dbSuite('Phase 32H — identity linking over HTTP and a real database', dbOk, ()
       ['post'],
       'POST is the only verb — the identity travels in a body, never a URL'
     );
-    assert.equal(layer.route.stack.length, 2, 'a gate and a controller, with no third handler to reason about');
+    // 2026-10-23 security audit: the chain is now requireAuth -> per-account
+    // limiter -> controller. The limiter is NOT an authorization gate (it decides
+    // how often, never who), requireAuth is still first, and there is still no
+    // permission middleware anywhere in the chain.
+    assert.equal(layer.route.stack.length, 3, 'requireAuth, the link limiter, and the controller');
     assert.equal(layer.route.stack[0].handle, requireAuth, 'the middleware IS requireAuth');
+    assert.equal(
+      layer.route.stack[1].handle.length,
+      3,
+      'the middle handler is a (req,res,next) limiter, not a gate'
+    );
+    assert.equal(layer.route.stack[2].handle.length, 2, 'and the controller is last');
   });
 
   // -------------------------------------------------------------------------

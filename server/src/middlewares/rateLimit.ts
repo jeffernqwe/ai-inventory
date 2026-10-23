@@ -1,11 +1,18 @@
 /**
  * Public auth-endpoint rate limiting (Phase 07B / H1, extended by Phase 26B-3).
  *
- * login, register and the two password-recovery routes are the unauthenticated
- * write endpoints, so they are the vectors for credential stuffing, password
- * spraying, brute force, mass account creation, reset-mail flooding and
- * reset-token guessing. They get dedicated limiters (stricter than the rest of
- * the API, which has none).
+ * login, register and the password-recovery routes are the unauthenticated write
+ * endpoints, so they are the vectors for credential stuffing, password spraying,
+ * brute force, mass account creation, reset-mail flooding and reset-token
+ * guessing. They get dedicated limiters (stricter than the rest of the API, which
+ * has none).
+ *
+ * Since the 2026-10-23 security audit, three AUTHENTICATED operations are limited
+ * as well — change-password, firebase/link and credentials-changed — because each
+ * one spends a credential comparison or a Firebase verification per call, and
+ * change-password's comparison is the only re-authentication that endpoint
+ * performs. Those are keyed on `req.user.id` (the server-derived account), not on
+ * anything the caller supplies, and are mounted AFTER requireAuth.
  *
  *   login   -> two stacked limiters:
  *               1) per IP + normalized-email bucket, strict (targeted brute
@@ -63,6 +70,14 @@ export type AuthRateConfig = {
   emailVerificationRequestMax: number;
   emailVerificationConfirmWindowMs: number;
   emailVerificationConfirmMax: number;
+  changePasswordWindowMs: number;
+  changePasswordMax: number;
+  changePasswordIpWindowMs: number;
+  changePasswordIpMax: number;
+  firebaseLinkWindowMs: number;
+  firebaseLinkMax: number;
+  credentialsChangedWindowMs: number;
+  credentialsChangedMax: number;
 };
 
 function positiveInt(raw: string | undefined, fallback: number): number {
@@ -173,6 +188,49 @@ export function authRateConfig(overrides: Partial<AuthRateConfig> = {}): AuthRat
       process.env.AUTH_EMAIL_VERIFICATION_CONFIRM_RATE_LIMIT_MAX,
       30
     ),
+    // 2026-10-23 security audit — the AUTHENTICATED credential and identity operations.
+    //
+    // These are not guesses at a public credential, so their budgets are about WORK and
+    // about re-authentication rather than about a code space:
+    //
+    //   change-password -> one bcrypt comparison per attempt and a second hash on success,
+    //                      against a signed-in caller who already holds a session token. The
+    //                      comparison IS the only re-authentication this endpoint performs,
+    //                      so an unlimited endpoint is an unlimited guess at the account's
+    //                      current password (and, for any legacy password account, a path to
+    //                      a durable takeover: guess it once, set a new one).
+    //   firebase/link   -> one Firebase checkRevoked verification (an outbound key fetch and
+    //                      a signed-token verification) plus an audit write, per call.
+    //   credentials-changed -> the same verification plus a stamped account and a
+    //                      revokeAllSessions update, per call.
+    //
+    // Every one of them counts ALL attempts rather than only failures. `skipSuccessfulRequests`
+    // is what keeps a legitimate login from spending its own budget, and it has no analogue
+    // here: a successful credential change or link is exactly the expensive operation this
+    // bounds, and a correct guess is the one an attacker wants. Ten changes, ten links and
+    // twenty bridge calls per fifteen minutes are far above any real use — a person changes
+    // one password, links one identity and completes one recovery — while still bounding the
+    // work a single authenticated account can demand.
+    changePasswordWindowMs: positiveInt(
+      process.env.AUTH_CHANGE_PASSWORD_RATE_LIMIT_WINDOW_MS,
+      15 * 60 * 1000
+    ),
+    changePasswordMax: positiveInt(process.env.AUTH_CHANGE_PASSWORD_RATE_LIMIT_MAX, 10),
+    changePasswordIpWindowMs: positiveInt(
+      process.env.AUTH_CHANGE_PASSWORD_IP_RATE_LIMIT_WINDOW_MS,
+      15 * 60 * 1000
+    ),
+    changePasswordIpMax: positiveInt(process.env.AUTH_CHANGE_PASSWORD_IP_RATE_LIMIT_MAX, 30),
+    firebaseLinkWindowMs: positiveInt(
+      process.env.AUTH_FIREBASE_LINK_RATE_LIMIT_WINDOW_MS,
+      15 * 60 * 1000
+    ),
+    firebaseLinkMax: positiveInt(process.env.AUTH_FIREBASE_LINK_RATE_LIMIT_MAX, 10),
+    credentialsChangedWindowMs: positiveInt(
+      process.env.AUTH_CREDENTIALS_CHANGED_RATE_LIMIT_WINDOW_MS,
+      15 * 60 * 1000
+    ),
+    credentialsChangedMax: positiveInt(process.env.AUTH_CREDENTIALS_CHANGED_RATE_LIMIT_MAX, 20),
     ...overrides,
   };
 }
@@ -583,8 +641,157 @@ export function createEmailVerificationConfirmLimiter(overrides: Partial<AuthRat
   });
 }
 
+// ---------------------------------------------------------------------------
+// Authenticated credential and identity operations (2026-10-23 security audit)
+// ---------------------------------------------------------------------------
+//
+// Everything above this line protects a route a caller reaches WITHOUT a session, which is why
+// every key in it is derived from something the caller supplies. The three inline limiters below
+// are the other half: they sit behind `requireAuth`, so the account is already established and
+// `req.user.id` is a server-derived fact rather than a claim. Keying on it is what makes the
+// budget belong to the ACCOUNT, so rotating addresses buys no fresh budget on the two per-account
+// limiters. The change-password strict bucket is the ONE exception: it joins the account with the
+// client address, so a different address does buy a fresh ten there. That is deliberate — an
+// account-wide bucket would let anyone already holding a session for the account keep the victim's
+// OWN password change refused for the window — and the per-address bucket below still bounds a
+// single source (thirty per fifteen minutes). Checklist §52 records the N×10 consequence.
+//
+// THEY ARE DELIBERATELY NOT ENFORCED BEFORE AUTHENTICATION. Each is mounted after requireAuth, so
+// an anonymous caller is answered 401 and never spends (or is refused by) a bucket it has no
+// identity to own. That is the same ordering AUTH-03's `/renew` uses, and the Phase 23 classifier
+// treats "requireAuth + limiter + controller" as AUTHENTICATED rather than gated.
+//
+// THE CODES ARE DISTINCT PER OPERATION rather than one shared `*_RATE_LIMITED`, because the
+// remedies differ in wording for a human reading the sentence: "too many password changes" and
+// "too many attempts to connect this sign-in" are different things to say, and the mobile client
+// displays `error.message` for a 429 on every one of these screens.
+const CHANGE_PASSWORD_RATE_LIMITED = 'CHANGE_PASSWORD_RATE_LIMITED';
+const CHANGE_PASSWORD_RATE_LIMITED_MESSAGE =
+  'Too many password change attempts. Please wait a moment and try again.';
+
+const FIREBASE_LINK_RATE_LIMITED = 'FIREBASE_LINK_RATE_LIMITED';
+const FIREBASE_LINK_RATE_LIMITED_MESSAGE =
+  'Too many attempts to connect this sign-in. Please wait a moment and try again.';
+
+const CREDENTIALS_CHANGED_RATE_LIMITED = 'CREDENTIALS_CHANGED_RATE_LIMITED';
+const CREDENTIALS_CHANGED_RATE_LIMITED_MESSAGE =
+  'Too many attempts to record this credential change. Please wait a moment and try again.';
+
+/**
+ * The request shape these limiters key on. Structural and local, following the rest of this
+ * project: `user` exists only because `requireAuth` ran, so declaring it globally would let any
+ * module read an authoritative-looking identity on a public route.
+ */
+type AuthenticatedRequest = Request & { user?: { id?: unknown } };
+
+/**
+ * The account a limiter is charging: `req.user.id`, and nothing else.
+ *
+ * The IP fallback is not an alternative identity — it keeps the key finite if a future route mounts
+ * one of these factories ahead of `requireAuth`, which no route does today. It never lets a
+ * caller CHOOSE which bucket is charged: reaching the fallback means there is no authenticated
+ * account at all, and the request is about to be refused by a controller or an earlier gate.
+ */
+function authenticatedAccountKey(request: Request): string {
+  const userId = (request as AuthenticatedRequest).user?.id;
+  if (typeof userId === 'string' && userId.length > 0) return `user:${userId}`;
+  return `ip:${ipKeyGenerator(clientIp(request))}`;
+}
+
+/**
+ * The same account joined with the client address, for change-password's strict bucket.
+ *
+ * Deliberately NOT used by the two Firebase routes: their cost is the same wherever it comes from,
+ * and a person who links an identity from a phone and then from a laptop should not have two
+ * independent budgets for one account.
+ */
+function authenticatedAccountIpKey(request: Request): string {
+  return `${ipKeyGenerator(clientIp(request))}|${authenticatedAccountKey(request)}`;
+}
+
+/**
+ * Change-password limiter #1 — per account + client address (strict).
+ *
+ * The strict bucket exists because this endpoint verifies the CURRENT password: an attacker who
+ * holds a stolen session tries the victim's password here, and a success hands them a durable
+ * credential. Ten attempts per quarter hour is generous for the legitimate flow (one change ends
+ * the session and asks for a fresh sign-in) and useless for guessing.
+ */
+export function createChangePasswordLimiter(overrides: Partial<AuthRateConfig> = {}) {
+  const { changePasswordWindowMs, changePasswordMax } = authRateConfig(overrides);
+  return rateLimit({
+    windowMs: changePasswordWindowMs,
+    limit: changePasswordMax,
+    keyGenerator: authenticatedAccountIpKey,
+    ...limitResponse(CHANGE_PASSWORD_RATE_LIMITED, CHANGE_PASSWORD_RATE_LIMITED_MESSAGE),
+  });
+}
+
+/**
+ * Change-password limiter #2 — per client address (looser).
+ *
+ * The backstop for one source that rotates ACCOUNTS rather than attempts: each account bucket is
+ * fresh, but every bcrypt comparison still costs this server CPU. Same explicit `request.ip`
+ * keying rationale as createLoginIpLimiter — never the library default, which turns a spoofed
+ * X-Forwarded-For into a 500 until the operator sets TRUST_PROXY.
+ */
+export function createChangePasswordIpLimiter(overrides: Partial<AuthRateConfig> = {}) {
+  const { changePasswordIpWindowMs, changePasswordIpMax } = authRateConfig(overrides);
+  return rateLimit({
+    windowMs: changePasswordIpWindowMs,
+    limit: changePasswordIpMax,
+    keyGenerator(request) {
+      return ipKeyGenerator(clientIp(request));
+    },
+    ...limitResponse(CHANGE_PASSWORD_RATE_LIMITED, CHANGE_PASSWORD_RATE_LIMITED_MESSAGE),
+  });
+}
+
+/**
+ * Firebase-link limiter — per account.
+ *
+ * Linking is idempotent and a person performs it once, so ten authenticated attempts per quarter
+ * hour bounds the Firebase verification work an account can demand without touching any
+ * legitimate flow. Keyed on the account rather than the address: rotating addresses must not buy
+ * a fresh budget for the same identity.
+ */
+export function createFirebaseLinkLimiter(overrides: Partial<AuthRateConfig> = {}) {
+  const { firebaseLinkWindowMs, firebaseLinkMax } = authRateConfig(overrides);
+  return rateLimit({
+    windowMs: firebaseLinkWindowMs,
+    limit: firebaseLinkMax,
+    keyGenerator: authenticatedAccountKey,
+    ...limitResponse(FIREBASE_LINK_RATE_LIMITED, FIREBASE_LINK_RATE_LIMITED_MESSAGE),
+  });
+}
+
+/**
+ * Credential-change bridge limiter — per account.
+ *
+ * The bridge revokes every session for the account, so its cost is a write-heavy update and its
+ * abuse value is a self-inflicted sign-out loop. Twenty per quarter hour covers the recovery
+ * handoff's retries (the client repeats the call while a revocation is still owed) and stops a
+ * caller turning the bridge into a write amplifier.
+ */
+export function createCredentialsChangedLimiter(overrides: Partial<AuthRateConfig> = {}) {
+  const { credentialsChangedWindowMs, credentialsChangedMax } = authRateConfig(overrides);
+  return rateLimit({
+    windowMs: credentialsChangedWindowMs,
+    limit: credentialsChangedMax,
+    keyGenerator: authenticatedAccountKey,
+    ...limitResponse(
+      CREDENTIALS_CHANGED_RATE_LIMITED,
+      CREDENTIALS_CHANGED_RATE_LIMITED_MESSAGE
+    ),
+  });
+}
+
 export default {
   authRateConfig,
+  createChangePasswordLimiter,
+  createChangePasswordIpLimiter,
+  createFirebaseLinkLimiter,
+  createCredentialsChangedLimiter,
   createLoginAccountLimiter,
   createLoginIpLimiter,
   createRegisterLimiter,

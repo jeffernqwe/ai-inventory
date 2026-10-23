@@ -490,8 +490,16 @@ unitSuite('AUTH-04-D — limiter configuration and route shape (no database)', (
   it('neither factory skips successful requests, and both key on the client address', () => {
     const text = srcText('middlewares/rateLimit.ts');
     const start = text.indexOf('export function createEmailVerificationRequestLimiter');
-    const end = text.indexOf('export default {', start);
-    assert.ok(start > 0 && end > start, 'both factories must sit before the default export');
+    // The slice ends at the NEXT declared factory section rather than at the default
+    // export: the 2026-10-23 security audit appended authenticated-operations factories
+    // after this pair, and they also key per address. Bounding the slice here keeps this
+    // case about the AUTH-04 pair alone — the count below is still exactly two, and the
+    // slice is still asserted to contain both factories.
+    const end = text.indexOf('// Authenticated credential and identity operations', start);
+    assert.ok(
+      start > 0 && end > start,
+      'both AUTH-04 factories must sit together, before the next factory section'
+    );
     const slice = text.slice(start, end);
     assert.ok(slice.includes('createEmailVerificationConfirmLimiter'), 'the slice covers both');
     assert.equal(slice.includes('skipSuccessfulRequests'), false);

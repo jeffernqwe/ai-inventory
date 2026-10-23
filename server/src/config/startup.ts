@@ -25,7 +25,7 @@ import env, {
 } from './env.ts';
 import type { NodeEnvKind } from './env.ts';
 import { connectDatabase, disconnectDatabase } from './db.ts';
-import { deploymentLine, deploymentNotes, integrationReport } from './deploymentReadiness.ts';
+import { deploymentLine, deploymentNotes, proxyTrustNote, integrationReport } from './deploymentReadiness.ts';
 import type { IntegrationReport } from './deploymentReadiness.ts';
 import {
   createShutdownHandler,
@@ -75,6 +75,13 @@ type StartServerOptions = {
   logger?: Logger;
   signalTarget?: SignalTarget;
   shutdownTimeoutMs?: number;
+  /**
+   * 2026-10-23 security audit — `TRUST_PROXY` as a hop count, for the boot warning that a
+   * PRODUCTION service behind a proxy has not declared it. Defaults to the live value;
+   * injectable so a suite can pin the warning without rewriting the environment of a process
+   * it did not start (the same reason `environment` is injectable).
+   */
+  proxyTrust?: number;
   probe?: (port: number) => Promise<PortProbeResult>;
   /**
    * What `NODE_ENV` says, and whether this declares itself a test process.
@@ -141,6 +148,7 @@ export async function startServer({
   logger = console,
   signalTarget = process,
   shutdownTimeoutMs = env.shutdownTimeoutMs,
+  proxyTrust = env.trustProxy,
   environment = defaultEnvironment,
   probe,
   modelCheck,
@@ -212,6 +220,14 @@ export async function startServer({
   for (const note of deploymentNotes(report)) {
     logger.error(`[config] warning: ${note}`);
   }
+
+  // 2026-10-23 security audit — the one readiness state that is about the HOST rather than an
+  // integration: a production process whose per-IP limiters all share the proxy's address. It is
+  // a warning for the same reason the notes above are (a degraded deployment keeps serving), but
+  // it is emitted before the database is touched, next to the other warnings, because it is the
+  // one an operator must not scroll past.
+  const proxyNote = proxyTrustNote({ nodeEnv, trustProxy: proxyTrust });
+  if (proxyNote) logger.error(`[config] warning: ${proxyNote}`);
 
   // H8 — connect before accepting traffic. Production treats a failed connect
   // as fatal (the app must never sit alive while every request 500s/buffers);

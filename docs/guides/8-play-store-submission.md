@@ -41,7 +41,7 @@ or higher, so this build meets the current requirement rather than needing an ex
 | Short description (80 max) | `Track stock, scan barcodes and ask an AI assistant about your inventory.` (77) |
 | Category | Business |
 | Contact email | the owner's Play account email |
-| Privacy policy URL | **MISSING — blocker, see §6** |
+| Privacy policy URL | `<server>/privacy` — implemented, **live only after the next server deploy**; see §6.1 |
 
 **Full description (draft, 4,000 max).** Adjust the tone, keep the facts:
 
@@ -76,7 +76,7 @@ or higher, so this build meets the current requirement rather than needing an ex
 
 | Section | Answer |
 |---|---|
-| **Privacy policy** | **blocker** — a public URL is mandatory, and it must match what §4 says is collected |
+| **Privacy policy** | `<server>/privacy` — must match what §4 says is collected; live after the next deploy |
 | **App access** | All functionality requires sign-in → provide a **review account** and instructions (§7) |
 | **Ads** | No |
 | **Content rating** | Questionnaire: no violence, sexuality, gambling, drugs, profanity, or user-to-user communication. Expect "Everyone" / PEGI 3 |
@@ -135,18 +135,26 @@ it, the upload came from a build older than that change.
 
 ---
 
-## 6. The two blockers
+## 6. The two blockers, and where each stands
 
-### 6.1 No privacy policy
+### 6.1 Privacy policy — page built, not yet live
 
-Play requires a public, non-PDF URL that is reachable without signing in and covers what §4 lists,
-including the AI provider and email provider, retention, and how to request deletion.
+`GET /privacy` now exists in the server (`server/src/pages/privacyPolicy.ts`), outside `/api`, and
+covers what §4 lists: the processors by name (Firebase, Brevo, OpenRouter, MongoDB Atlas, Render),
+what is not collected, retention, security, 18+, and how to request deletion. It is served from the
+same place as the code that creates the obligation, so it cannot drift into a separate document.
 
-**Smallest honest option:** serve it from the backend as a static page beside the existing
-`GET /auth/reset` page (`server/src/pages/`), and point the console at
-`https://ai-inventory-l1mi.onrender.com/privacy`. That keeps it versioned with the code that creates
-the obligation. It is a new **public** route, so it changes the route inventory and needs its own
-documented change.
+**Still to do, and it is not code:**
+
+1. **Deploy the server** — until then the URL answers 404 and the listing cannot use it.
+2. **Confirm the contact address** in the page (it is the owner's, in one constant).
+3. Decide whether to add a **legal entity / jurisdiction** line. The draft deliberately claims
+   neither; inventing one would be worse than omitting it.
+4. Paste `https://ai-inventory-l1mi.onrender.com/privacy` into the console and check it in a
+   **private browser window** (signed out), because that is how a reviewer opens it.
+
+The page and its guards: `server/src/pages/privacyPolicy.ts`, `server/test/PRIVACY-page.test.mjs`;
+the change record is roadmap §27EV.
 
 ### 6.2 No way to delete an account
 

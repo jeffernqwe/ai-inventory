@@ -10,6 +10,7 @@ import requestLogger from './middlewares/httpLogger.ts';
 import healthRoutes from './routes/health.routes.ts';
 import { createAuthRouter } from './routes/auth.routes.ts';
 import authActionRoutes from './routes/authAction.routes.ts';
+import privacyRoutes from './routes/privacy.routes.ts';
 import userRoutes from './routes/users.routes.ts';
 import categoryRoutes from './routes/categories.routes.ts';
 import locationRoutes from './routes/locations.routes.ts';
@@ -137,6 +138,11 @@ export function createApp({
   // it is a browser-facing HTML page (2026-10-20, see pages/resetPasswordLink.ts), not
   // a JSON endpoint, and its path is the one configured in the Firebase console.
   app.use('/auth', authActionRoutes);
+  // The public privacy policy (2026-10-24), also outside `/api` and for the same reason: it is an
+  // HTML page a person or a store reviewer opens in a browser, at the address the Play listing
+  // points to. Public by requirement — a policy behind a login cannot be read by someone deciding
+  // whether to create an account.
+  app.use('/privacy', privacyRoutes);
 
   // 2026-10-23 security audit — NO AUTH RESPONSE MAY BE STORED BY AN INTERMEDIARY.
   //

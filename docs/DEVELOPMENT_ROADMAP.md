@@ -19582,6 +19582,60 @@ store-installed build remain unexercised.
 
 ---
 
+# 27EV. The privacy policy, served by the server that creates the obligation (2026-10-24)
+
+**Server and documentation only — one new PUBLIC page route, no permission, schema, dependency,
+session-model or mobile change.** §27EU named the missing privacy policy as one of two Play blockers.
+This ships it as a page rather than a document, so it cannot drift from the code it describes.
+
+**1. What exists.** `GET /privacy` — mounted **outside `/api`** in `server/src/app.ts`, beside the
+AUTH-05 reset page and for the same reason: it is HTML a person or a store reviewer opens in a
+browser, at the address the Play listing will point to. `server/src/pages/privacyPolicy.ts` holds the
+content and `server/src/routes/privacy.routes.ts` the route. Public by requirement — a policy behind
+a login cannot be read by someone deciding whether to create an account — and it performs no I/O, so
+it adds no failure mode.
+
+**2. What it says, checked against the code.** The policy names each processor the application
+actually uses — **Firebase Authentication** (identity), **Brevo** (verification and reset mail),
+**OpenRouter** (the assistant's question, recent conversation and the inventory data it reads, with
+no name/email/password unless typed), **MongoDB Atlas** (database) and **Render** (hosting); it
+states what is deliberately **not** collected (location, contacts, photos, microphone, advertising
+identifiers) and that there is **no advertising, analytics or crash-reporting SDK**; it describes
+HTTPS, the password never reaching this application, secure token storage, per-business filtering and
+path-only request logs; retention; children (not intended under 18); and change control (the date at
+the top moves with the content).
+
+**3. Deletion is described as it exists today.** The page tells the reader to email the address on
+the account, which is the only path that works before the §27EU deletion design ships. That is
+deliberate: a policy promising an in-app button that does not exist would be a false statement to a
+reviewer. **The deletion work must edit this page in the same change** — and
+`PRIVACY-page.test.mjs` asserts the mailto sentence, so the page cannot silently keep claiming a
+route that no longer exists without a test failing.
+
+**4. Why it is safe to serve.** No script at all: CSP is `default-src 'none'` plus the stylesheet's
+**SHA-256 hash computed from the bytes served** (the AUTH-05 technique), so a policy can never
+describe a different document. `no-store`, `no-referrer`, `nosniff`, `frame-ancestors 'none'`, no
+`X-Powered-By`. No request data reaches the page, so there is nothing to reflect, and `POST /privacy`
+is a 404 rather than a write endpoint.
+
+**5. Ownership detail to confirm.** The contact address is the owner's, hardcoded in one constant;
+the wording deliberately **does not claim a jurisdiction or legal entity**, because inventing either
+would be worse than omitting it. Replacing the address, or adding an entity line, is a one-line edit
+plus the date.
+
+**Verification.** `PRIVACY-page.test.mjs` — 6 cases: served at `GET /privacy` with no auth; **CSP
+hash matches the stylesheet in the response** and no `script-src`/`unsafe-*`; `no-store`,
+`no-referrer`, `nosniff`, no `X-Powered-By`; every processor named; no placeholder text and the
+mailto deletion path pinned; `POST` → 404. Route inventory **76 → 77** (public **16 → 17**), recorded
+in design §2.6 and re-measured by `phase-docs-route-inventory`. Server **`test:unit` 1336 tests /
+1282 pass / 0 fail / 54 skipped**, `tsc`/`eslint`/both module-graph checks clean (510 modules).
+
+**Not verified:** the page is **not live** — it ships with the next server deploy, so the Play
+listing cannot point at it yet, and no reviewer has seen it. No device pass applies (no mobile
+change). The deletion half of the Play requirement remains open, and iOS is untouched (no macOS).
+
+---
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

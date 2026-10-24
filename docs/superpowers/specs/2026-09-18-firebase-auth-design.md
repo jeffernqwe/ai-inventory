@@ -156,7 +156,7 @@ set.
 
 ## 2.6 Route inventory
 
-Phase 23 classifies **76 routes**: **47 permission-gated**, **13 authenticated**, **16 public**, **0 role-gated**. The `PUBLIC` and `AUTHENTICATED` buckets are explicit lists that each carry a
+Phase 23 classifies **77 routes**: **47 permission-gated**, **13 authenticated**, **17 public**, **0 role-gated**. The `PUBLIC` and `AUTHENTICATED` buckets are explicit lists that each carry a
 written reason; a route in no bucket fails the guard, and a declared exemption that has stopped being
 true also fails. The guard deliberately asserts **no route count** — a route is *declared* or it is not,
 and the number is derived from the declarations — so the figure above is pinned separately, by

@@ -19437,6 +19437,58 @@ which remains unexercised.
 
 ---
 
+# 27ES. The production AAB: built with store packaging, inspected before any upload (2026-10-24)
+
+**Documentation and build verification only — no code, route, permission, schema, server,
+session-model or dependency change, and no upload.** §27ER proved the production profile's *code path*
+on a phone by temporarily packaging it as an APK. This entry produced the artifact Google Play would
+actually receive, and checked what is inside it.
+
+**1. The build uses the profile as committed.** EAS `09d77d3d-0f1c-4f8e-948f-7a99ccaa2a56`, profile
+`production`, **`android.buildType` absent** (default store packaging), `autoIncrement: true` — the
+settings restored by §27ER — so the artifact is an **AAB**, 80,230,212 bytes, SHA-256
+`dcbc6323…`. `versionCode` **2**, one higher than the rehearsal's 1, which is auto-increment working.
+
+**2. What the artifact says, read out of the artifact itself.** A 1,500-entry bundle containing
+`base/manifest/AndroidManifest.xml`, `base/resources.pb`, `base/dex/classes.dex` and four ABIs
+(`arm64-v8a`, `armeabi-v7a`, `x86`, `x86_64`); package `com.inventoryai.app`, `versionName 1.0.0`,
+`minSdk 24` / `targetSdk 36`; a JAR signature produced with the production keystore; update
+meta-data `EXPO_UPDATE_URL = https://u.expo.dev/607eca05-…` with
+`{"expo-channel-name":"production"}`; `expo_runtime_version` `1.0.0` with
+`runtimeVersion: { policy: "appVersion" }`; `checkAutomatically: ON_LOAD` and
+`fallbackToCacheTimeout: 0`; 60 Play upload debug-symbol files; **no** `expo-dev-menu`,
+`expo-dev-launcher`, `react-native-web`, `.env` or secret-named entries. The Hermes bundle contains
+`ai-inventory-l1mi.onrender.com` **once**, `localhost:4000` **zero** times, and the
+offline-boot profile key `inventoryai.auth.userSnapshot` — i.e. this is the production API **and**
+the fixed launch behaviour, in the store artifact, not just in the rehearsal.
+
+**3. Twelve permissions, recorded rather than silently accepted.** `INTERNET`,
+`ACCESS_NETWORK_STATE`, `CAMERA`, `VIBRATE`, `WAKE_LOCK`, `BIND_JOB_SERVICE`, `DUMP`,
+`USE_BIOMETRIC`, `USE_FINGERPRINT`, `SYSTEM_ALERT_WINDOW`, `READ_EXTERNAL_STORAGE`,
+`WRITE_EXTERNAL_STORAGE`. `SYSTEM_ALERT_WINDOW` and the storage pair come from React Native / Expo
+libraries, not from `app.json`; on modern Android they are not granted implicitly and are inert at
+`targetSdk 36`, so they are noted for the Play listing rather than removed — removing a permission a
+library may use is a native change that needs its own build and device pass.
+
+**4. It is reproducible.** `docs/evidence/device-runs/2026-10-24-release-aab/verify.py` (stdlib only,
+no Java, `bundletool` or Android SDK) re-derives every row above from the file, and its output is
+recorded beside it in `aab-verification.txt`. The guide now names the command, the AAB-versus-APK
+distinction and the `versionCode` behaviour.
+
+**Verification.** The scripted run reproduced the recorded output in full on a re-run. No test suite
+was affected: nothing under `server/` or `mobile/` changed, and the documentation guards
+(`phase-docs-section-integrity`, `phase-docs-route-inventory`) pass.
+
+**Not verified, stated rather than implied:** the AAB has **never been installed** (an AAB cannot be
+installed with `adb`, and this host has no Java, so `bundletool` could not generate split APKs from
+it) — behaviour remains proven on §27ER's production-profile APK, built from the same source, keystore,
+channel and environment; **nothing has been uploaded**, so Play App Signing, the upload-key handover,
+Play's manifest/permission review and pre-launch reports have not run; signing is verified as
+*present*, not cryptographically (no `jarsigner` here); and iOS remains unverified (no macOS on this
+host).
+
+---
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

@@ -52,6 +52,26 @@ Then download the APK from the link EAS prints and install it (see
 [2. Running Inventory AI on a phone](2-run-on-your-phone.md) for the `adb install` line). This is
 also the build that finally carries the update runtime, so it must be the version people keep.
 
+**For the Play Store the same command is run with `--profile production`**, and that profile
+produces an **AAB**, not an APK — the default packaging, which is what Google Play requires. An
+AAB cannot be installed on a phone with `adb`, so it is released through Play rather than side-loaded;
+if you need to install a production build directly for a rehearsal, `android.buildType: "apk"` in
+the profile is the temporary switch (see the release-build record), and it must be removed again.
+`autoIncrement` is on for that profile, so every production build gets a new `versionCode` — the
+AAB built on 2026-10-24 is `versionCode 2`.
+
+Before uploading, check what is inside the artifact rather than trusting the build log:
+
+```bash
+cd C:/Users/jeffe/inventory-ai
+python docs/evidence/device-runs/2026-10-24-release-aab/verify.py path/to/app-release.aab
+```
+
+It reports the package id, version, SDK levels, permissions, signing entries, update channel and
+runtime version, and greps the bundled JavaScript for the API host — enough to catch the two
+mistakes worth catching (a production build pointing at `localhost`, or one carrying the wrong
+channel).
+
 ---
 
 ## 4. Shipping a change over the air
@@ -295,5 +315,14 @@ launches. The rehearsal built an **APK** (an AAB cannot be installed with `adb`)
 store packaging afterwards, so it does not prove Play Store packaging or Play App Signing. Frame and
 measurements: [2026-10-24-release-build](../evidence/device-runs/2026-10-24-release-build/README.md).
 
-**Not yet verified:** a store-signed **AAB** and its upload path, iOS (no macOS on this host), and
+**Verified as an artifact, not on a device (2026-10-24).** The production profile was then built with
+its **default store packaging** (EAS `09d77d3d`): a 1,500-entry **AAB**, `com.inventoryai.app`,
+`versionName 1.0.0`, `versionCode 2`, `minSdk 24` / `targetSdk 36`, signed with the production
+keystore, channel `production`, runtime `1.0.0`, 12 permissions, and a JavaScript bundle containing
+the production API host once and `localhost:4000` never. Reproduce it with `verify.py` beside this
+record: [2026-10-24-release-aab](../evidence/device-runs/2026-10-24-release-aab/README.md).
+
+**Not yet verified:** the **AAB's upload path** — Play App Signing, the upload-key handover and Play's
+own pre-launch checks have never run, and the AAB has never been installed (an AAB cannot be, and
+this host has no Java for `bundletool`). iOS (no macOS on this host), and
 `update:rollback <group-id>` (re-publishing an earlier group), which remains unexercised.

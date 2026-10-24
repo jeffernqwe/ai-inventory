@@ -733,6 +733,31 @@ export async function nativeSignInWithGoogle(): Promise<NativeGoogleSignInResult
     scopes: [...NATIVE_GOOGLE_SCOPES],
   });
 
+  // CLEAR THE SAVED GOOGLE SIGN-IN FIRST, SO THE SHEET IS ACTUALLY A CHOICE.
+  //
+  // Measured on the OPPO CPH1969 (2026-10-24): once one Google account had been used with
+  // this app, `signIn()` resolved that same account in about a second with **no account
+  // sheet at all**, on a phone holding many Google accounts. The consequence is not
+  // cosmetic — a person with two Google accounts can never use the second one, and on a
+  // shared handset the next person tapping "Continue with Google" is signed straight into
+  // the previous person's inventory. The first Google test run proved it by landing in an
+  // existing member's dashboard without ever showing a chooser.
+  //
+  // `GoogleSignin.signOut()` clears ONLY this app's saved Google credential (Play Services'
+  // last-signed-in account for this client). It does not sign the person out of Google, and
+  // it does not touch the Firebase session, which is a separate thing this boundary does
+  // not own. Clearing it is what makes the next `signIn()` show the chooser.
+  //
+  // A failure here is ignored on purpose: "nothing saved" is the ordinary first-run case,
+  // not a reason to refuse a sign-in. `signIn()` below is the call that decides whether
+  // Google sign-in can work at all, and it reports its own failure through the same
+  // classification this function already had.
+  try {
+    await google.GoogleSignin.signOut();
+  } catch {
+    // See above: a clean state is not an error.
+  }
+
   let response: Awaited<ReturnType<NativeGoogleSigninModule['GoogleSignin']['signIn']>>;
   try {
     response = await google.GoogleSignin.signIn();

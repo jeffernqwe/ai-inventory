@@ -34,10 +34,15 @@ const mockGoogleLoads = { count: 0 };
 const mockGoogle: {
   signInResponse: unknown;
   signInError: unknown;
+  signOutError: unknown;
 } = {
   signInResponse: null,
   signInError: null,
+  signOutError: null,
 };
+
+/** The Google calls the boundary made, in order. */
+const mockGoogleCalls: string[] = [];
 
 const mockConfigure = jest.fn();
 const mockGoogleCredentialNative = jest.fn();
@@ -55,7 +60,16 @@ jest.mock('@react-native-google-signin/google-signin', () => {
     },
     GoogleSignin: {
       configure: (...args: unknown[]) => mockConfigure(...args),
+      // The boundary clears this app's saved Google credential before asking, so the
+      // account sheet can offer somebody other than the last person. The calls are
+      // recorded in order, because the ORDER is the behaviour: signOut precedes signIn.
+      signOut: async () => {
+        mockGoogleCalls.push('signOut');
+        if (mockGoogle.signOutError) throw mockGoogle.signOutError;
+        return null;
+      },
       signIn: async () => {
+        mockGoogleCalls.push('signIn');
         if (mockGoogle.signInError) throw mockGoogle.signInError;
         return mockGoogle.signInResponse;
       },
@@ -161,6 +175,8 @@ beforeEach(() => {
   mockGoogleLoads.count = 0;
   mockGoogle.signInResponse = null;
   mockGoogle.signInError = null;
+  mockGoogle.signOutError = null;
+  mockGoogleCalls.length = 0;
   mockConfigure.mockReset();
   mockGoogleCredentialNative.mockReset();
   mockGoogleCredentialNative.mockReturnValue({ __credential: true });
@@ -254,6 +270,31 @@ describe('nativeSignInWithGoogle — success', () => {
     // field cannot be added without this line failing.
     expect(result).toEqual({ kind: 'idToken', idToken: FIREBASE_ID_TOKEN });
     expect(JSON.stringify(result)).not.toContain(GOOGLE_ID_TOKEN);
+  });
+
+  it('★ clears the saved Google account before asking, so the sheet can offer another one', async () => {
+    mockGoogle.signInResponse = successResponse();
+
+    await loadBoundary().nativeSignInWithGoogle();
+
+    // Measured on the OPPO on 2026-10-24: without this, `signIn()` resolved the account
+    // that had used the app before in about a second with NO account sheet at all, so a
+    // second Google account could never be chosen and a shared handset returned the
+    // previous person's session. The ORDER is the behaviour, so it is asserted as a list.
+    expect(mockGoogleCalls).toEqual(['signOut', 'signIn']);
+  });
+
+  it('still signs in when there was no saved Google account to clear', async () => {
+    mockGoogle.signInResponse = successResponse();
+    mockGoogle.signOutError = Object.assign(new Error('no saved credential'), {
+      code: 'SIGN_IN_REQUIRED',
+    });
+
+    const result = await loadBoundary().nativeSignInWithGoogle();
+
+    // The ordinary first-run case: nothing to clear. It must not become a failed sign-in.
+    expect(result).toEqual({ kind: 'idToken', idToken: FIREBASE_ID_TOKEN });
+    expect(mockGoogleCalls).toEqual(['signOut', 'signIn']);
   });
 
   it('loads the Google package exactly once, after the gate has passed', async () => {

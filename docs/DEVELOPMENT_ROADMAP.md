@@ -19873,6 +19873,75 @@ unexercised; iOS is untouched (no macOS).
 
 ---
 
+# 27EY. The Google button, on a real Google account (2026-10-24)
+
+**Mobile + documentation — one function changed in `mobile/lib/firebase-native.ts`, no route, schema,
+permission, session-model, native-module, dependency or environment change.** This closes the gap
+§27EX listed: the Firebase deletion branch had only been driven with an **Admin-SDK-created identity**
+onboarded through the app. A **real Google account** (`broccolifreebuff05179@gmail.com`, disposable)
+went through the real **Continue with Google** button end to end, on the installed
+production-facing APK (`versionName 1.0.0` / `versionCode 1`, embedded JS, no Metro, no `adb
+reverse`) against `https://ai-inventory-l1mi.onrender.com`. Evidence:
+`docs/evidence/device-runs/2026-10-24-google-sign-in/` (8 frames).
+
+**1. A defect that only a provider sign-in could show.** The **first** tap of *Continue with Google*
+resolved the Google account this app had used before in about a second, **with no account sheet at
+all**, and landed in a dashboard belonging to a **different person's** tenant (frame 01: the button's
+spinner, no sheet). On a handset holding a single Google account that looks like convenience; on one
+holding several it means **the second account can never be reached**, and on a shared device it means
+the next person tapping that button is signed into the **previous person's** Google identity and
+therefore their inventory. The subsequent tap *did* show the chooser (frame 02), which is what made
+the difference measurable rather than a guess.
+
+**2. The fix is one call, in the boundary that owns the provider.** `nativeSignInWithGoogle` now
+clears this app's saved Google credential (`GoogleSignin.signOut()`) **before** it asks, so the sheet
+is a choice. A failure to clear is **ignored on purpose** — "nothing saved" is the ordinary
+first-run case, and `signIn()` below it is the call that decides whether Google sign-in can work at
+all, reporting through the classification this boundary already had. It touches only Play Services'
+last account for this client: it does not sign the person out of Google and does not touch the
+Firebase session. `phaseC-native-google.test.ts` gains the ★ *clears the saved Google account before
+asking, so the sheet can offer another one* case and a *still signs in when there was no saved Google
+account to clear* case — **19/19**. The change is **JavaScript only**, so it can ship over the air or
+in the next build; it is **not** on the APK used for this run.
+
+**3. Registration through Google.** Choosing the disposable account answered the info banner *"This
+sign-in is not linked to an Inventory AI account yet. Create a business account to continue."* (`403
+`REGISTRATION_REQUIRED`, frame 03); **Create a business account** then created the tenant
+`PROBE-google-broccoli` through the app's own onboarding, producing an `OWNER`/`ACTIVE` user with a
+`firebaseUid` and **no `passwordHash`** — the shape that forces the delete screen onto the provider
+branch.
+
+**4. Deletion, and the half a password branch cannot prove.** The screen showed *"We will confirm this
+with your sign-in. You do not need to type your password."* with **no password field**, *Type DELETE
+to confirm* and the *What stays, if others still use your business* paragraph (frame 04). `DELETE` +
+**Delete my account** returned the app to **Login** (frame 05). Then, in production:
+
+- **MongoDB** — the user row and the `PROBE-google-broccoli` business row are **gone**, **0**
+  `PROBE-` businesses remain, and the other three tenants are untouched at **3 businesses / 3 users**.
+- **No dangling references** — 33 audit rows and 1 conversation / 8 messages, **0** pointing at a
+  missing business or conversation, and no `DELETE`-shaped audit row, as designed for the sole-member
+  branch.
+- **Sessions** — 11 rows, every one belonging to a live user and every one `revokedAt`-stamped,
+  **0 orphans**, so deletion left no live session behind.
+- **Firebase** — `getUserByEmail(...)` answers **`auth/user-not-found`**: the identity is gone from the
+  provider, not merely unlinked. ★ **Signing in with the same Google account again cannot get back
+  in**: the chooser appears, choosing that account answers the same `REGISTRATION_REQUIRED` banner,
+  and no tenant, dashboard or session is reachable (frame 06). The identity that sign-in re-created
+  (`fKinxuUtvpYykfVsRpKLguUMuIS2`, provider `google.com`) was deleted with the Admin SDK afterwards →
+  `auth/user-not-found`, Mongo still 3 / 3, no row for the address.
+
+**5. One observation, not a defect.** After that identity was deleted server-side, a cold start showed
+the AUTH-04-F *"We could not reach the verification service"* state (frame 07); **Try again** landed
+on **Login** (frame 08). That is the documented unreachable state doing its job — it shows no cached
+account and mints no session by itself — and it cost the user one tap.
+
+**Verification.** Mobile `tsc` clean, `eslint` clean, **93 suites / 1116 tests / 0 failures**
+(`phaseC-native-google.test.ts` **19/19**). No server file touched, so the server baselines of §27EX
+stand. **Not verified:** the chooser fix **on hardware** (the installed APK predates it; source and
+suite only), a store-installed build from Play, Play App Signing, Play's review, and iOS.
+
+---
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

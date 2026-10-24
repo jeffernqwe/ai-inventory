@@ -226,15 +226,19 @@ gone. The evidence, including a 43-check API regression over both ownership case
 
 1. Fill in Data safety with both URLs and the deletion answer, keeping it consistent with the two
    ownership cases above.
-2. **Google Sign-In** reaching the same branch has not been measured separately. The Firebase path
-   itself *has*: an Admin-SDK-created identity onboarded through the app, signed in on the phone and
-   deleted from the screen — no password field, the provider identity gone (`auth/user-not-found`),
-   and the old address refused at Login. The same `firebaseUid` check serves a Google account, but
-   that sign-in surface is not in this evidence.
+2. **Google Sign-In was measured separately** (2026-10-24) and reaches the same branch: a real Google
+   account registered through the button (`403 REGISTRATION_REQUIRED` → *Create a business
+   account*), the delete screen showed the provider wording **with no password field**, deletion
+   returned the app to Login, the provider identity answered `auth/user-not-found`, and **signing in
+   again with the same Google account could not get back in** — the same banner, no tenant, no
+   session. The run also found and fixed a shared-device defect (a saved Google account was reused
+   with **no account chooser**); that fix is JavaScript only and is **not** on the APK used for the
+   run. Evidence: `docs/evidence/device-runs/2026-10-24-google-sign-in/`.
 
-Implementation records: roadmap §27EW (deletion) and §27EX (the sole-member closure and the
-production run); tests `server/test/ACCOUNT-DELETION.test.mjs` (server) and
-`mobile/__tests__/account-deletion.test.tsx` (screen).
+Implementation records: roadmap §27EW (deletion), §27EX (the sole-member closure and the production
+run) and §27EY (the Google account run and the chooser fix); tests
+`server/test/ACCOUNT-DELETION.test.mjs` (server), `mobile/__tests__/account-deletion.test.tsx`
+(screen) and `mobile/__tests__/phaseC-native-google.test.ts` (the chooser).
 
 ---
 

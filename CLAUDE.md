@@ -446,8 +446,11 @@ accepted — the dangerous one is `CAMERA`, used by the scanner; the storage pai
 `docs/evidence/device-runs/2026-10-24-release-aab/verify.py` (standard library only — no Java,
 `bundletool` or Android SDK) re-derives every row and its output is stored beside it in
 `aab-verification.txt`; the guide now states the AAB-vs-APK distinction, the `versionCode` behaviour
-and the command. **Not verified:** the AAB has **never been installed** (an AAB cannot be, and this
-host has no Java for `bundletool`), so behaviour still rests on the production-profile APK built from
+and the command. The artifact was **later validated with Google's own tooling** — Android Studio's
+bundled JetBrains Runtime (OpenJDK 25) runs `bundletool` 1.18.3, and both `validate` and
+`dump manifest` were run on it without any keystore (see §27ET). **Not verified:** the AAB has
+**never been installed** (an AAB cannot be, and a locally re-signed rebuild would break the installed
+app's signature lineage), so behaviour still rests on the production-profile APK built from
 the same source, keystore, channel and environment; **nothing has been uploaded**, so Play App Signing,
 the upload-key handover and Play's own review have not run; signing is verified as *present*, not
 cryptographically; iOS remains unverified (no macOS). Evidence
@@ -476,7 +479,13 @@ used is in it, `expo-camera`/`CameraView` still exist, and the camera permission
 `versionCode` **3**, 80,230,207 bytes, SHA-256 `76740691…` — `SYSTEM_ALERT_WINDOW` absent, declarations
 **12 → 11**, storage caps now printed per permission by `verify.py`, and the **JavaScript byte-identical
 to §27ES's artifact** (`index.android.bundle` 2,847,364 bytes, SHA-256 `1156e960…` in both), so only
-the manifest and embedded config moved. Mobile **92 suites / 1,103 tests / 0 failures**, `tsc`/`eslint`
+the manifest and embedded config moved. **Google's own tooling validated it too:** Android Studio's
+bundled JetBrains Runtime (OpenJDK **25.0.3**) runs **bundletool 1.18.3**, so `bundletool validate`
+(exit **0**) and `bundletool dump manifest --module=base` were run on both artifacts — the dump prints
+`versionCode 3`, `minSdk 24`, `targetSdk 36`, `compileSdk 37` and exactly the 11 permissions with
+`maxSdkVersion="32"` on the storage pair, while the previous build's dump lists 12 and includes
+`SYSTEM_ALERT_WINDOW`. Neither command signs, so **no keystore or password was read, printed or
+committed**. Mobile **92 suites / 1,103 tests / 0 failures**, `tsc`/`eslint`
 clean, `check-build-env --profile production` clean (17 controls). **Not verified:** a build carrying
 this manifest was never installed — the device runs rest on the byte-identical earlier build, so the
 permission change itself and `SYSTEM_ALERT_WINDOW` were never exercised either way — and nothing is

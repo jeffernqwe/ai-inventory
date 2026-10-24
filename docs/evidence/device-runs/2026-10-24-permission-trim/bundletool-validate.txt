@@ -1,0 +1,4 @@
+App Bundle information
+------------
+Feature modules:
+	Feature module: base

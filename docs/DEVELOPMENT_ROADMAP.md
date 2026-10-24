@@ -19480,8 +19480,8 @@ was affected: nothing under `server/` or `mobile/` changed, and the documentatio
 (`phase-docs-section-integrity`, `phase-docs-route-inventory`) pass.
 
 **Not verified, stated rather than implied:** the AAB has **never been installed** (an AAB cannot be
-installed with `adb`, and this host has no Java, so `bundletool` could not generate split APKs from
-it) — behaviour remains proven on §27ER's production-profile APK, built from the same source, keystore,
+installed with `adb`, and a locally re-signed rebuild would break the installed app's signature
+lineage) — behaviour remains proven on §27ER's production-profile APK, built from the same source, keystore,
 channel and environment; **nothing has been uploaded**, so Play App Signing, the upload-key handover,
 Play's manifest/permission review and pre-launch reports have not run; signing is verified as
 *present*, not cryptographically (no `jarsigner` here); and iOS remains unverified (no macOS on this
@@ -19535,10 +19535,21 @@ change removes a permission nothing requested at runtime. A re-install would exe
 with one fewer declaration, so it was not performed; **an install of a build carrying this manifest,
 and `SYSTEM_ALERT_WINDOW` itself, were never exercised either way.**
 
+**6. Also validated with Google's own tooling, which this host turned out to have.** Android Studio's
+bundled JetBrains Runtime (OpenJDK **25.0.3**) runs **bundletool 1.18.3**, so the repository's reader
+is no longer the only check: `bundletool validate` exits **0** on the artifact, and
+`bundletool dump manifest --module=base` prints the authoritative XML — `versionCode 3`,
+`minSdkVersion 24`, `targetSdkVersion 36`, `compileSdkVersion 37`, exactly the 11 permissions with
+`maxSdkVersion="32"` on the storage pair and no `SYSTEM_ALERT_WINDOW`, against the previous build's
+dump that lists 12 and includes it. Neither command signs, so **no keystore or password was read,
+printed or committed**. Installing still did not happen: `build-apks` would re-sign with a key this
+host does not hold, and a differently signed APK cannot replace the installed production build.
+
 **Verification.** Mobile **92 suites / 1,103 tests / 0 failures** (`android-permissions` added, 4
 cases), `tsc`/`eslint` clean, `check-build-env --profile production` clean (17 self-test controls).
 Evidence: `docs/evidence/device-runs/2026-10-24-permission-trim/` (attribution table, before/after
-permission lists, bundle hashes, unedited verifier output).
+permission lists, bundle hashes, unedited verifier output, bundletool validation and both manifest
+dumps).
 
 **Not verified:** the AAB is still never installed and **nothing is uploaded**, so Play App Signing,
 the upload-key handover and Play's review remain unexercised; signing is verified as present, not

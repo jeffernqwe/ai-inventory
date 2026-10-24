@@ -62,12 +62,19 @@ embedded config is `base/assets/app.config`. No Java, `bundletool` or Android SD
 `python docs/evidence/device-runs/2026-10-24-release-aab/verify.py <file.aab>` reproduces every row
 above (the script is the one used for `aab-verification.txt`).
 
+**Checked again with Google's tooling later the same day.** Android Studio's bundled JetBrains Runtime
+(OpenJDK 25) runs `bundletool` 1.18.3, so this artifact was also validated and its manifest dumped
+by the tool Google ships: `validate` exits 0, and the dump confirms package, `versionCode 2`, the SDK
+levels and the permission list — stored here as [`bundletool-manifest.xml`](bundletool-manifest.xml).
+See [2026-10-24-permission-trim](../2026-10-24-permission-trim/README.md). `validate`/`dump` need no
+keystore, so no signing material was read, printed or committed.
+
 ## Limits — what this does not prove
 
-- **It is not installed.** An AAB cannot be installed with `adb`, and this host has no Java, so
-  `bundletool` could not generate split APKs from it either. Behaviour was proven on the
-  **production-profile APK** built one build earlier (`versionCode 1`, same source, keystore,
-  channel and environment) — see
+- **It is not installed.** An AAB cannot be installed with `adb`; `bundletool build-apks` would have
+  to re-sign it with a key this host does not hold, and a differently signed APK cannot replace the
+  installed production build in place. Behaviour was proven on the **production-profile APK** built
+  one build earlier (`versionCode 1`, same source, keystore, channel and environment) — see
   [2026-10-24-release-build](../2026-10-24-release-build/README.md).
 - **No upload and no Play processing.** Play App Signing, the upload-key handover, pre-launch reports
   and Play's own manifest/permission review have not run.

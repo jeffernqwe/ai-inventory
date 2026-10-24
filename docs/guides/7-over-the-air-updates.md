@@ -327,7 +327,26 @@ keystore, channel `production`, runtime `1.0.0`, 12 permissions, and a JavaScrip
 the production API host once and `localhost:4000` never. Reproduce it with `verify.py` beside this
 record: [2026-10-24-release-aab](../evidence/device-runs/2026-10-24-release-aab/README.md).
 
+A second build (`4b133d62`, `versionCode 3`) removed the unused `SYSTEM_ALERT_WINDOW` permission Expo
+adds by default, leaving 11 declarations with byte-identical JavaScript — evidence and the permission
+attribution: [2026-10-24-permission-trim](../evidence/device-runs/2026-10-24-permission-trim/README.md).
+
+**Checked with bundletool too (2026-10-24).** Android Studio installs a JetBrains Runtime, so
+`bundletool` runs on this host without installing a JDK:
+
+```bash
+cd C:/Users/jeffe/inventory-ai
+JAVA="/c/Program Files/Android/Android Studio/jbr/bin/java.exe"
+"$JAVA" -jar bundletool.jar validate --bundle=app-release.aab
+"$JAVA" -jar bundletool.jar dump manifest --bundle=app-release.aab --module=base
+```
+
+`validate` exits 0 on the store artifact and the dump prints the authoritative manifest — version
+code, SDK levels and the permission list with its `maxSdkVersion` caps. Neither command signs, so no
+keystore is needed. (`build-apks` is different: it re-signs the APKs, so it needs a key, and an APK
+signed with a different key cannot replace an installed store build.)
+
 **Not yet verified:** the **AAB's upload path** — Play App Signing, the upload-key handover and Play's
 own pre-launch checks have never run, and the AAB has never been installed (an AAB cannot be, and
-this host has no Java for `bundletool`). iOS (no macOS on this host), and
-`update:rollback <group-id>` (re-publishing an earlier group), which remains unexercised.
+re-signing it locally would break the installed app's signature lineage). iOS (no macOS on this
+host), and `update:rollback <group-id>` (re-publishing an earlier group), which remains unexercised.

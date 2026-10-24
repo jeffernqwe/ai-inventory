@@ -54,9 +54,23 @@ default packaging, `versionCode` **3**, 80,230,207 bytes, SHA-256 `76740691…`)
   differ (`app.config` SHA-256 `36ed58d9…` → `f6b652cb…`, the added `blockedPermissions`).
 - Everything else is unchanged: package, `versionName`, SDK levels, signature entries, production
   channel, runtime `1.0.0`, `ON_LOAD`/`fallbackToCacheTimeout: 0`, 60 debug-symbol files, production
-  API host once and `localhost:4000` never, no dev-menu/web/`.env` entries.
+  API host once and `localhost:4000` never, no dev-menu/web/`.env` entries.**With Google's own tooling.** Android Studio's bundled JetBrains Runtime (OpenJDK **25.0.3**) runs
+`bundletool` **1.18.3**, so the bundle was validated by the tool Google ships for it rather than by
+this repository's reader alone:
+
+- `bundletool validate --bundle=app-release.aab` → exit **0**, "App Bundle information / Feature
+  modules: base" ([output](bundletool-validate.txt), warnings stripped).
+- `bundletool dump manifest --bundle=app-release.aab --module=base` → authoritative XML
+  ([before](../2026-10-24-release-aab/bundletool-manifest.xml) /
+  [after](bundletool-manifest.xml)). It confirms `versionCode="3"`, `minSdkVersion="24"`,
+  `targetSdkVersion="36"`, `compileSdkVersion="37"` and lists **exactly** the 11 permissions above,
+  with `maxSdkVersion="32"` printed on the storage pair and **no `SYSTEM_ALERT_WINDOW`** — while the
+  previous build's dump lists 12 including it.
+- **No keystore or password was needed, read, printed or committed** for either command: `validate`
+  and `dump` do not sign.
 
 **Device:** not re-run. The JavaScript in the rebuilt artifact is byte-identical to the build that was
+
 driven on the phone on 2026-10-24
 ([release build](../2026-10-24-release-build/README.md), [preview](../2026-10-24-preview-journeys/README.md),
 [OTA](../2026-10-24-preview-ota/README.md)), and the manifest change removes a permission the app
@@ -64,10 +78,17 @@ never requested at runtime — so a re-install would exercise the same code with
 declaration. This is recorded as a gap rather than a pass: an install of a build carrying this
 manifest was not performed, and `SYSTEM_ALERT_WINDOW` was never exercised either way.
 
+**Why it was not installed even with bundletool available:** an install would need `bundletool
+build-apks`, which re-signs the APKs with a key this host does not have (the production keystore lives
+in EAS). A locally signed APK shares the package name but not the signature, so `adb install -r`
+would be refused; installing it would mean uninstalling the production build on the phone and
+losing in-place update continuity for a manifest-only change.
+
 ## 4. What is still open
 
-- The **AAB is still not installed** (an AAB cannot be, and this host has no Java for `bundletool`)
-  and **nothing has been uploaded** — Play App Signing and Play's own review remain unexercised.
+- The **AAB is still not installed** (an AAB cannot be installed as-is, and re-signing it locally
+  would break the installed app's signature lineage) and **nothing has been uploaded** — Play App
+  Signing and Play's own review remain unexercised.
 - `CAMERA` remains the only permission a user is ever prompted for, and it is justified by the
   scanner; the Play Data safety form should say so.
 - iOS untouched (no macOS on this host).

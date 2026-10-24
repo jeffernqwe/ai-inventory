@@ -103,10 +103,26 @@ export default function DeleteAccountScreen() {
     <>
       <Stack.Screen options={{ title: 'Delete account' }} />
       <Screen scroll contentStyle={styles.content}>
-        <Banner type="warn" text="This permanently closes your account. It cannot be undone." />
+        <Banner
+          type="warn"
+          text={
+            'This permanently closes your account — and your business, if you are its only ' +
+            'member. It cannot be undone.'
+          }
+        />
         <Banner type="error" text={formError} />
 
         <Card>
+          {/* The most likely reader of this screen is a sole proprietor, and for them the
+              business goes too. That consequence is stated FIRST: a summary that opens with
+              "what is deleted" reads as though only the person's own details are at stake. */}
+          <Text style={styles.heading}>If you are the only member</Text>
+          <Text style={styles.body}>
+            Closing the account of a business&apos;s only member closes the business as well: its
+            products, stock, movements, purchase orders, suppliers and history are deleted with it.
+            There would be nobody left to own them. Everything below still applies to you.
+          </Text>
+
           <Text style={styles.heading}>What is deleted</Text>
           <Text style={styles.body}>
             Your name and email address, your password and any Google sign-in connection, every
@@ -114,19 +130,12 @@ export default function DeleteAccountScreen() {
             conversations.
           </Text>
 
-          <Text style={styles.heading}>What stays</Text>
+          <Text style={styles.heading}>What stays, if others still use your business</Text>
           <Text style={styles.body}>
-            While other people still use your business, its stock levels, stock movements,
-            purchase orders and audit trail stay with it, because deleting them would make its
-            inventory history wrong for everyone else. They no longer identify you. If somebody
-            else remains but is not an owner, the app asks you to make them an owner first.
-          </Text>
-
-          <Text style={styles.heading}>If you are the only member</Text>
-          <Text style={styles.body}>
-            Closing the account of a business&apos;s only member closes the business as well: its
-            products, stock, movements, purchase orders and history are deleted with it. There
-            would be nobody left to own them.
+            Its stock levels, stock movements, purchase orders and audit trail stay with it,
+            because deleting them would make its inventory history wrong for everyone else. They
+            no longer identify you. If somebody else remains but nobody else is an owner, the app
+            asks you to make them an owner first — a business must always have an owner.
           </Text>
         </Card>
 

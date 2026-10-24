@@ -19307,6 +19307,74 @@ exercised. The first-publish refusal above remains unexplained.
 
 ---
 
+# 27EQ. The preview build against production: channel isolation, and every account journey on the installed app (2026-10-24)
+
+**No production code, route, permission, schema, index, session-model or dependency change.** One
+configuration variable was added to an EAS environment, and the run found and fixed a latent defect
+that would have made any production-channel update unreachable. This entry records measurements the
+previous one could not make: that a preview install cannot receive a production update, and that
+registration, verification, reset and an offline cold start all work on the installed build that
+points at the deployed server.
+
+**1. Isolation, measured at the service and on the phone.** Only one update channel exists
+(`preview`, pointing at branch `preview`, holding groups `9e3936aa…` and `6e14b317…`). A manifest
+request at the build's runtime version (`1.0.0`) naming `production` or `development` answered
+**404** (*There is no channel named production…*). A probe was then published to `production`
+(`d165e4cb…`, manifest `01a16cb2…`) and a second, **visible marker** publish followed
+(`3c777c22…`, manifest `01a16cb5…`, temporarily changing the Login tagline) — newer than the
+`preview` manifest `01a16c95…` the phone was running. Requests then showed the split cleanly:
+`preview` → `01a16c95…` (unchanged), `production` → `01a16cb5…`. The phone, cold-launched **twice**
+while the marker was live, kept the real tagline and logged **zero** references to `01a16cb5…`.
+The `production` channel and branch were deleted, and the 404 returned. The channel is compiled into
+the APK, so this is a property of the binary, not a policy that could be forgotten.
+
+**2. A defect found while setting that up: the production EAS environment had no API URL.**
+`eas env:list --environment production` showed the Firebase values but **not**
+`EXPO_PUBLIC_API_URL`; the preview environment had it. `mobile/lib/config.ts` falls back to
+`http://localhost:4000` when the variable is absent, and `eas update` reads `--environment`, not the
+build profile — so the first production publish would have shipped a bundle that could reach no
+server. The variable was added to that environment. Proof it took: the next production publish
+produced the **same asset key** (`mX841Vs3…`) as the preview publish, whose bytes had already been
+grepped to contain `ai-inventory-l1mi.onrender.com` once and `localhost:4000` zero times. Guide 7
+now tells the operator to check this before any production publish, with the command and the fix.
+
+**3. Every account journey, on the installed build, against production.** A probe account
+(`auth.preview.1024@example.invalid`, *Preview Probe Co*) was created **from the phone**: the form
+accepted five fields and reported *19 characters — within the limit.*; the verify screen named the
+inbox and counted from **8m 29s**; six digits typed with **no press of Verify** completed
+confirm → register → exchange and opened the **new tenant's dashboard**. Production rows afterwards:
+`role=OWNER`, `status=ACTIVE`, `emailVerified=true`, `firebaseUid` present, business `ACTIVE`, one
+session, challenge `attempts=1 usedAt` stamped. Then: aeroplane mode, force-stop, cold launch →
+**signed in**, dashboard offline state with *Try again* (not Login); network restored, the first tap
+12 s later still failed, the second loaded the dashboard. Password reset followed the two-step
+journey — code screen (inbox named, **9m 50s**, resend **50 s**), six digits with no press
+(`attempts=1`, `verifiedAt`, authorization minted), new-password step with an **18-character** hint,
+*Password changed* (`usedAt` stamped, four `audit_logs` rows for the business), the **old password
+refused** (*Invalid email or password*), the **new password signed in** to the same tenant, and the
+platform offered to save the credential (the `new-password` / `newPassword` field declarations
+working).
+Codes were recovered from the stored keyed digests with the server's own labels and pepper — the
+probe address has no inbox — and the helper scripts were deleted; no code or pepper is committed.
+
+**4. Cleanup verified, not assumed.** The probe's Firebase identity was deleted and every
+collection was scanned for its `businessId`: users 0, businesses 0, reset challenges 0, audit rows 0,
+the business name 0. The phone was signed out and left on Login. (The first teardown used slightly wrong collection
+names for some business-scoped rows — `auditlogs` instead of `audit_logs` — so the sweep by
+`businessId` across the real collection list is what actually closed it out; four audit rows were
+removed.)
+
+**Verification.** Mobile `tsc`/`eslint` clean, **91 suites / 1098 tests / 0 failures**; server
+`tsc`/`eslint` clean, `test:unit` **1330 tests / 1276 pass / 0 fail / 54 skipped**. Artifacts:
+`docs/evidence/device-runs/2026-10-24-preview-journeys/` (eleven frames plus the isolation frame and
+the README with the measurements above).
+
+**Not verified, stated rather than implied:** a store-signed production build; iOS (no macOS on this
+host); a real inbox in *this* run (delivery to one was measured on 2026-10-22 and is unchanged); an
+induced 5xx (error handling was exercised by an unreachable network, not a failing server); and the
+cause of the one failed *Try again*, recorded as observed.
+
+---
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

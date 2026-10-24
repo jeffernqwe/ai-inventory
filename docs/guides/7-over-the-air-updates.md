@@ -160,6 +160,28 @@ anything. `appVersion` removes that class of mismatch. The lesson is recorded he
 Publishing to `preview` cannot touch the production channel's update, and vice versa. That is not a
 policy that could be forgotten — the channel is in the binary.
 
+**One thing to check before ever publishing to production.** `eas update` reads its variables from
+the EAS environment named by `--environment`, not from `eas.json`'s build profile. On 2026-10-24 the
+**production** environment was missing `EXPO_PUBLIC_API_URL` while the preview one had it, and
+`mobile/lib/config.ts` falls back to `http://localhost:4000` when that variable is absent — so a
+production update published that way would have produced a bundle that could reach no server at
+all. The variable has been added to that environment; confirm it is still there before publishing:
+
+```bash
+npx eas-cli env:list --environment production | grep EXPO_PUBLIC_API_URL
+```
+
+If it is missing, add it (the value is public — it is the same host the app already talks to):
+
+```bash
+npx eas-cli env:set --environment production \
+  --name EXPO_PUBLIC_API_URL --value https://ai-inventory-l1mi.onrender.com --visibility plaintext
+```
+
+A way to see the mistake before a phone does: the published production bundle and the published
+preview bundle should contain the same API host. When both environments agree, EAS even deduplicates
+the identical bundle to one content key.
+
 A development build runs its JavaScript from Metro instead of from EAS Update, so the `development`
 channel exists mainly so the configuration is uniform; day-to-day development still uses fast
 refresh, which is faster than any update.
@@ -239,6 +261,19 @@ the next launch ran it, and an offline cold start then stayed signed in — the 
 published to deliver, and impossible before it. The same run proved the bundle carried the
 production URL, not `localhost`. Evidence, frames and the limits of the run:
 [2026-10-24-preview-ota](../evidence/device-runs/2026-10-24-preview-ota/README.md).
+
+**Channel isolation, measured the same day.** With only the `preview` channel existing, a manifest
+request for `production` or `development` at the build's runtime version answered **404**. A probe
+was then published to the `production` channel — including a visible marker, newer than the bundle
+the phone was running — and the phone, across two cold launches, kept its own Login text and logged
+**zero** references to the production manifest, while the `preview` manifest kept the same update id
+throughout. The production channel and branch were deleted afterwards and the 404 returned.
+
+**The account journeys on that same installed build.** Registration → six-digit verification → new
+tenant, then password reset → *Password changed* → old password refused → new password signed in,
+then an aeroplane-mode cold start that kept the session — all against the production API, with the
+production database checked afterwards and the probe tenant removed. Frames, measurements and the
+limits: [2026-10-24-preview-journeys](../evidence/device-runs/2026-10-24-preview-journeys/README.md).
 
 **Not yet verified:** a store-signed production build, iOS (no macOS on this host), and automated
 rollback after a genuinely crashing update (the rollback commands exist but were not exercised).

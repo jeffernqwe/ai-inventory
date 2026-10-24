@@ -19966,6 +19966,55 @@ rollback of *this* update group, and iOS.
 
 ---
 
+# 27EZ. The store artifact was the wrong commit — a parity gate, and no upload (2026-10-24)
+
+The next step was to upload the `versionCode 3` AAB (`4b133d62…`, the permission-trimmed artifact of
+§27ET) to Play. Before uploading, the **JavaScript inside it** — not its manifest — was searched for
+the copy of the features shipped after it was built. **Neither AAB contains a single occurrence of
+any account-deletion copy**: `Delete account` 0, `Delete my account` 0, `Type DELETE` 0,
+`delete-account` 0, in both the `versionCode 2` rehearsal AAB and the `versionCode 3` trimmed one.
+Both were built before the screen existed (`381c3f8`, 20:56 local; the two artifacts were downloaded
+at 16:51 and 17:41), and their bundles are **byte-for-byte the same length, 2,847,364** — the
+permission trim changed the manifest, not the JavaScript, which is precisely why every packaging
+check in §27ES/§27ET passed on an artifact that could not be submitted.
+
+**Why this is a release-level defect, not a documentation slip.** Play's account-deletion policy
+requires the in-app deletion path in the **uploaded build**. The feature had reached the installed
+test build only by **over-the-air update** (§27EY), which a fresh install receives on a *later* launch
+— unacceptable as the sole answer to a policy requirement, and invisible to a reviewer who tests on
+first launch. The two builds were also missing the Google account-chooser fix (`bfc9c6e`), which is
+JavaScript-only and would likewise have arrived late.
+
+**What was added.** `mobile/scripts/check-aab.mjs` — a release gate that reads
+`base/assets/index.android.bundle` out of an AAB (a ZIP inside a ZIP, Hermes bytecode) using only the
+standard library, and requires four **user-visible** sentences: `Delete my account` and
+`Type DELETE to confirm` (the policy requirement), `Continue with Google` (the provider entry point)
+and `Create your workspace` (the onboarding a new identity needs). Exit codes follow the repository
+convention: **0** verified, **1** a required sentence is missing, **2** not verified (no file, no ZIP,
+no bundle). Nine controls run first (`--self-test`): a complete bundle passes, a bundle missing the
+deletion copy is reported **by name**, a missing bundle entry returns `null`, a non-ZIP is refused,
+and **each probe must still be copy that exists in `app/`/`components/`** — so rewording a sentence
+forces the list to be updated instead of silently disarming the gate.
+`mobile/__tests__/release-aab-parity-guard.test.ts` runs the controls and pins the negative case at
+source; `npm run check:aab -- <file>` invokes it.
+
+**Measured.** Both artifacts exit **1**, missing `Delete my account` and `Type DELETE to confirm`,
+with `Continue with Google` and `Create your workspace` present — so the gate discriminates rather
+than blanket-failing. Raw output: `docs/evidence/device-runs/2026-10-24-release-aab/bundle-parity.txt`.
+
+**Decision: nothing was uploaded.** Neither existing AAB is uploadable; the store needs a build from
+a current commit, and `eas build` is refused until the Free plan's Android build quota resets
+(**2026-11-01**). The order is now: build from a commit containing the features → `npm run check:aab`
+must answer **0** → upload to **internal testing** → enroll **Play App Signing** → install **from
+Play** → repeat the Google chooser, shared-device isolation, account-deletion and offline-launch
+journeys on Play's re-signed artifact.
+
+**Verification.** Mobile `tsc` clean, `eslint .` clean, **94 suites / 1117 tests / 0 failures**; the
+docs integrity and route-inventory guards pass. No server, schema, permission, dependency or session
+change. **Not verified:** Play App Signing, an internal-testing install, Play's review, and iOS.
+
+---
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

@@ -1,0 +1,50 @@
+Release-bundle parity check — 2026-10-24, after both AABs had been built and inspected.
+Command: node scripts/check-aab.mjs <file>   (0 verified / 1 wrong / 2 not verified)
+
+== self-test ==
+release-bundle guard self-test: 9 control(s) passed
+exit=0
+
+== 09d77d3d… (versionCode 2) ==
+aab: C:/Users/jeffe/AppData/Local/Temp/app-release.aab
+bytes: 80230212
+sha256: dcbc63231d92307d344859747d1231fbe0a222fd17266d8c90ab87255648f50a
+bundle bytes: 2847364
+  MISSING  Delete my account  (Play's account-deletion requirement)
+  present  Continue with Google  (the Google sign-in entry point)
+  present  Create your workspace  (Firebase registration onboarding)
+  MISSING  Type DELETE to confirm  (the accidental-deletion safeguard)
+
+WRONG: 2 required sentence(s) absent — this AAB predates them.
+exit=1
+
+== 4b133d62… (versionCode 3, permission-trimmed) ==
+aab: C:/Users/jeffe/AppData/Local/Temp/app-release-trimmed.aab
+bytes: 80230207
+sha256: 76740691da0f3e91a47a1959c0724c43b7ec8975d79ef6e51f70fe45893be517
+bundle bytes: 2847364
+  MISSING  Delete my account  (Play's account-deletion requirement)
+  present  Continue with Google  (the Google sign-in entry point)
+  present  Create your workspace  (Firebase registration onboarding)
+  MISSING  Type DELETE to confirm  (the accidental-deletion safeguard)
+
+WRONG: 2 required sentence(s) absent — this AAB predates them.
+exit=1
+
+== literal occurrence counts in the embedded bundle ==
+
+09d77d3d / versionCode 2
+  "Delete account": 0
+  "Delete my account": 0
+  "Type DELETE": 0
+  "delete-account": 0
+  "Delete Account": 0
+  "Close my account": 0
+
+4b133d62 / versionCode 3
+  "Delete account": 0
+  "Delete my account": 0
+  "Type DELETE": 0
+  "delete-account": 0
+  "Delete Account": 0
+  "Close my account": 0

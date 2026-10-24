@@ -37,6 +37,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "check:build-env": "node scripts/check-build-env.mjs",
+    "check:aab": "node scripts/check-aab.mjs",
     "test": "jest",
     "test:watch": "jest --watch"
   },

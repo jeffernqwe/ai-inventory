@@ -7,10 +7,17 @@ carefully:
 
 - what the bundle **is** (measured),
 - what the Play Console form **should say** (a recommendation to review),
-- what is **missing** and blocks a submission (two things, both owner decisions).
+- what is **missing** and blocks a submission.
 
 **Nothing has been uploaded.** There is no Play Console access in this repository, and uploading is
 the owner's action.
+
+**The current blocker is the artifact, not the paperwork.** Both AABs that exist (versionCode 2 and
+the permission-trimmed versionCode 3) were built **before 2026-10-24 20:56**, when the in-app
+account-deletion screen landed — their embedded JavaScript contains **none** of its copy, so an
+upload of either would answer Play's account-deletion requirement with a build in which the feature
+does not exist. §1.1 is the check that proves it and must be run on every future artifact. A new
+build is not possible before the Free plan's Android build quota resets (2026-11-01).
 
 ---
 
@@ -18,7 +25,7 @@ the owner's action.
 
 | | |
 |---|---|
-| File | AAB, profile `production`, EAS `4b133d62…` |
+| File | AAB, profile `production`, EAS `4b133d62…` (newest; supersedes the `09d77d3d…` rehearsal AAB, `versionCode 2`) |
 | Package | `com.inventoryai.app` |
 | Version | `versionName 1.0.0`, `versionCode 3` |
 | SDK levels | `minSdk 24`, `targetSdk 36`, `compileSdk 37` |
@@ -26,10 +33,45 @@ the owner's action.
 | Permissions | 11 declared — see §5 |
 | Ads / analytics / billing SDKs | none in `package.json` |
 | Update channel | `production`, runtime `1.0.0` |
+| Embedded JavaScript | **predates account deletion** — see §1.1. Not uploadable |
 
 `targetSdk 36` matters: from **31 August 2026** new apps and updates must target Android 16 (API 36)
 or higher, so this build meets the current requirement rather than needing an exception
 ([Play's target API rule](https://support.google.com/googleplay/android-developer/answer/11926878)).
+
+### 1.1 The pre-upload gate: is this the app we think we built?
+
+Every other check in the artifact record looks at **packaging** — package id, version, SDK levels,
+signature, channel, permissions. All of them passed on both AABs, and both were still the wrong
+artifact: their JavaScript was from a commit that had no account-deletion screen. A store build is
+only as good as the bundle inside it, and the bundle is the one thing a manifest does not describe.
+
+```bash
+cd mobile
+npm run check:aab -- /path/to/inventory-ai.aab     # 0 verified · 1 wrong · 2 not verified
+```
+
+It reads `base/assets/index.android.bundle` out of the AAB (a ZIP inside the ZIP, Hermes bytecode,
+string literals intact) and requires four **user-visible** sentences from features that must be in any
+store build: `Delete my account` and `Type DELETE to confirm` (Play's deletion requirement), 
+`Continue with Google` (the provider entry point) and `Create your workspace` (the onboarding a new
+identity needs). Hermes keeps these verbatim, which is what makes the question cheap; it is a parity
+check against a known list, not a source-map or commit check, and editing that copy means updating the
+list. Its own controls include a negative case, and one that fails if a probe is no longer copy in
+`app/`/`components/`, so a reworded sentence cannot silently disarm it
+(`mobile/__tests__/release-aab-parity-guard.test.ts` runs them).
+
+**Measured on the two artifacts that exist (2026-10-24):**
+
+| Artifact | `versionCode` | Bundle bytes | Deletion copy | Verdict |
+|---|---|---|---|---|
+| `09d77d3d…` (rehearsal AAB) | 2 | 2,847,364 | **0 occurrences** | WRONG (exit 1) |
+| `4b133d62…` (permission-trimmed) | 3 | 2,847,364 | **0 occurrences** | WRONG (exit 1) |
+
+Their bundles are byte-for-byte the same length because the permission trim changed the **manifest**,
+not the JavaScript — which is exactly why a manifest-level review could not have noticed. Both were
+built before the deletion screen existed. Evidence and raw output:
+[`2026-10-24-release-aab`](../evidence/device-runs/2026-10-24-release-aab/README.md).
 
 ---
 
@@ -137,12 +179,13 @@ it, the upload came from a build older than that change.
 
 ---
 
-## 6. The two blockers, and where each stands
+## 6. The two Play requirements, and where each stands
 
 Both are now **live, covered by tests and exercised**: the pages are served by production and were
 opened signed out, and the deletion flow has been run on a phone with a throwaway account
 (`docs/evidence/device-runs/2026-10-24-account-deletion/`). What remains for either is a **console
-entry**, not code.
+entry**, not code — plus, for the in-app half of deletion, **an artifact built after 2026-10-24 20:56**
+(§1.1).
 
 ### 6.1 Privacy policy — live
 
@@ -214,6 +257,11 @@ signed in 200, STAFF created 201 and signed in 200, mistyped word 400, wrong pas
 owner unaffected 200, and the deleted member absent from `GET /api/users` (0 rows). The probe tenants
 were then removed (leftovers **0**) and no real account was touched.
 
+**Delivered to the phone by update, not by build.** The installed production-profile APK predates the
+screen, so it arrived there through the `production` OTA channel (the same route the Google chooser
+fix took); the run below therefore proves the **feature on a device**, not that a store artifact
+contains it. Neither AAB does — §1.1.
+
 **Deployed and device-tested (2026-10-24).** The sole-member change is live (commit `a5a8b10`;
 `GET /api/health` publishes it as `production`), and both public pages serve the two-outcome wording.
 On the phone, with a throwaway account: Profile → Delete account stated the consequences, refused a
@@ -262,16 +310,20 @@ creates this shape, and `cleanup:demo-tenant` removes it — the same pair used 
 
 ## 8. Upload checklist (when you decide to upload)
 
-1. **Back up the production keystore** and its passwords (EAS credentials). If it is lost before
+0. **Build from a commit that contains what you are submitting** (`eas build --profile production`;
+   needs the build quota — the Free plan resets 2026-11-01).
+1. **Run the parity gate on the file you are about to upload** — §1.1, `npm run check:aab -- <file>`.
+   Exit 1 means the artifact predates a required feature; do not upload it, whatever the manifest says.
+2. **Back up the production keystore** and its passwords (EAS credentials). If it is lost before
    Play App Signing is enrolled, the package name is unrecoverable.
-2. Create the app in Play Console with package `com.inventoryai.app`, enroll in **Play App Signing**
+3. Create the app in Play Console with package `com.inventoryai.app`, enroll in **Play App Signing**
    (Google holds the app signing key; the current keystore becomes the **upload key**).
-3. Complete §2–§5, including the privacy policy URL and the deletion URL.
-4. Upload the AAB to **Internal testing** first — `eas build` prints its artifact URL; the file can
+4. Complete §2–§5, including the privacy policy URL and the deletion URL.
+5. Upload the AAB to **Internal testing** first — `eas build` prints its artifact URL; the file can
    also be downloaded and uploaded by hand, which is the simplest first path (no service account).
-5. Add your own account as an internal tester, install **from Play**, and run the journeys
+6. Add your own account as an internal tester, install **from Play**, and run the journeys
    (sign-in, dashboard, scanner, assistant, offline launch, password reset).
-6. Only then promote to closed/production. Every later upload needs a higher `versionCode`;
+7. Only then promote to closed/production. Every later upload needs a higher `versionCode`;
    `autoIncrement` is on, so each `eas build` produces one.
 
 **Still unproven at this point:** nothing has been uploaded, so Play App Signing, Play's own

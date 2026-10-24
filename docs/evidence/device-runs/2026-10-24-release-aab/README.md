@@ -69,6 +69,32 @@ levels and the permission list — stored here as [`bundletool-manifest.xml`](bu
 See [2026-10-24-permission-trim](../2026-10-24-permission-trim/README.md). `validate`/`dump` need no
 keystore, so no signing material was read, printed or committed.
 
+## What these checks did not ask, and what the answer was (2026-10-24, later)
+
+Every row above inspects **packaging**. None of them asked whether the JavaScript inside the bundle
+was the JavaScript under review. It was not.
+
+The same day, after the in-app account-deletion screen shipped (`381c3f8`, 20:56 local) and the
+Google account chooser was fixed (`bfc9c6e`, 23:07), a parity check was run against both artifacts
+still on disk. Both were built **before** those commits — `09d77d3d` and `4b133d62` were downloaded
+at 16:51 and 17:41 — and neither bundle contains a single occurrence of any deletion copy:
+
+| Artifact | `versionCode` | Bundle bytes | `Delete my account` | `Type DELETE` | `Continue with Google` | Verdict |
+|---|---|---|---|---|---|---|
+| `09d77d3d…` | 2 | 2,847,364 | 0 | 0 | present | **WRONG** |
+| `4b133d62…` | 3 | 2,847,364 | 0 | 0 | present | **WRONG** |
+
+Their bundles have exactly the same length because the permission trim changed the **manifest**, not
+the JavaScript. That is the crux: a download that is signed, correctly versioned, correctly channelled
+and one permission lighter can still be an artifact of a commit that lacked a Play-required feature,
+and every manifest-level check passes.
+
+Raw output: [`bundle-parity.txt`](bundle-parity.txt). The check is now a gate:
+`mobile/scripts/check-aab.mjs` (`npm run check:aab -- <file>`), with its controls run by
+`mobile/__tests__/release-aab-parity-guard.test.ts`. **Neither artifact is uploadable**; a build from a
+current commit is required, and the Free plan's Android build quota resets 2026-11-01. Guide §1.1,
+roadmap §27EZ.
+
 ## Limits — what this does not prove
 
 - **It is not installed.** An AAB cannot be installed with `adb`; `bundletool build-apks` would have

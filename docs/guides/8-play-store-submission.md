@@ -41,8 +41,8 @@ or higher, so this build meets the current requirement rather than needing an ex
 | Short description (80 max) | `Track stock, scan barcodes and ask an AI assistant about your inventory.` (77) |
 | Category | Business |
 | Contact email | the owner's Play account email |
-| Privacy policy URL | `<server>/privacy` — implemented, **live only after the next server deploy**; see §6.1 |
-| Account deletion URL | `<server>/account-deletion` — implemented, **live only after the next server deploy**; see §6.2 |
+| Privacy policy URL | `https://ai-inventory-l1mi.onrender.com/privacy` — **live and measured**; see §6.1 |
+| Account deletion URL | `https://ai-inventory-l1mi.onrender.com/account-deletion` — **live and measured**; see §6.2 |
 
 **Full description (draft, 4,000 max).** Adjust the tone, keep the facts:
 
@@ -77,7 +77,7 @@ or higher, so this build meets the current requirement rather than needing an ex
 
 | Section | Answer |
 |---|---|
-| **Privacy policy** | `<server>/privacy` — must match what §4 says is collected; live after the next deploy |
+| **Privacy policy** | `https://ai-inventory-l1mi.onrender.com/privacy` — live; must stay consistent with what §4 says is collected |
 | **Account deletion** | in-app **Profile → Delete account**, and `<server>/account-deletion` for the Data safety form |
 | **App access** | All functionality requires sign-in → provide a **review account** and instructions (§7) |
 | **Ads** | No |
@@ -139,8 +139,10 @@ it, the upload came from a build older than that change.
 
 ## 6. The two blockers, and where each stands
 
-Both are now **implemented in the code and covered by tests**. What remains for each is a deploy and a
-console entry, and — for deletion — a device run. Neither is a code gap any more.
+Both are now **live, covered by tests and exercised**: the pages are served by production and were
+opened signed out, and the deletion flow has been run on a phone with a throwaway account
+(`docs/evidence/device-runs/2026-10-24-account-deletion/`). What remains for either is a **console
+entry**, not code.
 
 ### 6.1 Privacy policy — live
 
@@ -212,15 +214,22 @@ signed in 200, STAFF created 201 and signed in 200, mistyped word 400, wrong pas
 owner unaffected 200, and the deleted member absent from `GET /api/users` (0 rows). The probe tenants
 were then removed (leftovers **0**) and no real account was touched.
 
+**Deployed and device-tested (2026-10-24).** The sole-member change is live (commit `a5a8b10`;
+`GET /api/health` publishes it as `production`), and both public pages serve the two-outcome wording.
+On the phone, with a throwaway account: Profile → Delete account stated the consequences, refused a
+blank word and a mistyped one **without making a request**, then returned the app to Login on
+`DELETE` plus the password — after which the user row, the business row and the old password were all
+gone. The evidence, including a 43-check API regression over both ownership cases, is
+`docs/evidence/device-runs/2026-10-24-account-deletion/`.
+
 **Still to do:**
 
-1. **Deploy** the sole-member change (it is committed, not yet live — until then production still
-   answers the 409 for a business's only member, and both public pages still carry the old wording).
-2. **Device run the in-app flow**: create a throwaway account, delete it, confirm the screen returns
-   to Login, the old password is refused, and the profile is gone. A disposable account is required —
-   this is the one flow whose test destroys what it touches.
-3. Fill in Data safety with both URLs and the deletion answer, keeping it consistent with the two
+1. Fill in Data safety with both URLs and the deletion answer, keeping it consistent with the two
    ownership cases above.
+2. Deleting an account **linked to Firebase** has not been run on a device — the screen asks the
+   provider to confirm instead of asking for a password. That branch is covered by the server and
+   mobile suites; the probe account used here was a password account, so the field on screen was the
+   password one.
 
 Implementation records: roadmap §27EW (deletion) and §27EX (the sole-member closure and the
 production run); tests `server/test/ACCOUNT-DELETION.test.mjs` (server) and

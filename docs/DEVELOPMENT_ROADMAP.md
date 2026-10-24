@@ -19817,11 +19817,43 @@ included) were then removed through the same `removeTenant` definition:
 probe businesses remaining in `inventoryai_prod_db`. No real account, business or Firebase
 identity was touched.
 
-**Not verified:** the new **sole-member closure is not deployed yet** — production still holds the
-`409` for a sole owner until the next server deploy, and `/account-deletion` and `/privacy` still
-serve the corrected wording only after it. The in-app screen has **not been re-run on a device**
-(the handset disconnected from USB before the pass; the 2026-10-24 deletion runs were API-level).
-Play App Signing, an internal-testing install and review are still unexercised; iOS is untouched.
+**6. Deployed the same evening, and measured end to end.** Commit `a5a8b10` was pushed and Render
+auto-deployed it — `GET /api/health` published `commit: a5a8b10…` with `environment: production`.
+`GET /privacy` and `GET /account-deletion` then answered **200 `text/html` from the live host,
+signed out**, with `Cache-Control: no-store`, `Referrer-Policy: no-referrer`,
+`X-Content-Type-Options: nosniff` and the CSP hash recomputed from the bytes served, and **both
+carried the two-outcome wording** (*make another member an owner first* … *if you are the business's
+only member*). A second API regression against production repeated both shapes — **43 checks, 0
+failures** (`docs/evidence/device-runs/2026-10-24-account-deletion/`): the only member's deletion
+removes the business row, its users, its audit trail, its sessions (looked up by the deleted user's
+id, since `sessions` carries no `businessId`) and its assistant conversations, frees the address to
+register again, and the second account created on that same address also closes with its business;
+a STAFF member leaving leaves the business **`ACTIVE`**, the owner untouched and the owner's session
+alive, the leaver's row a tombstone (`DELETED`, `Deleted user`, `deleted+<id>@deleted.invalid`, no
+credential, no `firebaseUid`, `deletedAt` set), one `ACCOUNT_DELETED` audit row with `userId: null`,
+and the leaver a 404 detail and a 401 login; then the owner, with only a tombstone left, closed the
+rest — business, tombstone and trail to 0. Both runs ended with **0** probe rows in
+`inventoryai_prod_db`, and the counts returned to their pre-run values (3 businesses / 3 users /
+8 sessions / 27 audit rows / 1 conversation / 8 messages / 5 categories / 5 locations).
+
+**7. The screen on the phone.** The installed production-profile APK (`12829e5d…`) predates the
+feature, so the screen could only be there through an over-the-air update: two were published to the
+`production` channel that day, and the second (`c7a108b1-…`, built from `a5a8b10`) carried the
+**re-ordered card and the new banner**, which the frames show — so delivery and content were verified
+together. On the OPPO CPH1969, signed in as a throwaway legacy-password account created through the
+API: Profile lists **Delete account** below Sign out; the screen states the consequences before the
+button; pressing it with the word blank answers *Type DELETE to confirm* with **no request**;
+`DELET` answers *Type DELETE exactly*; `DELETE` with the password returned the app to **Login**, and
+the user row, the business row and the old password were all gone (login **401
+`INVALID_CREDENTIALS`**). The `production` channel and branch were then **deleted**, so no
+future store build — same `appVersion`, therefore same runtime — can pick up a test update, and
+the manifest answers 404 again.
+
+**Not verified:** the **Firebase re-authentication branch was not driven on the device** — the probe
+account is a legacy password account, so the screen showed the password field and the server checked
+`currentPassword`; the `idToken` branch is covered by `ACCOUNT-DELETION.test.mjs` and the mobile
+suite. Play App Signing, an internal-testing install and review are still unexercised; iOS is
+untouched (no macOS).
 
 ---
 

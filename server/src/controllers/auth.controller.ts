@@ -6,6 +6,7 @@ import {
   validateChangePassword,
   validateMeUpdate,
   validateLogout,
+  validateAccountDeletion,
 } from '../utils/validate.ts';
 import {
   registerBusinessOwner,
@@ -21,9 +22,18 @@ import {
   revokeAllSessions,
   toPublicSession,
 } from '../services/session.service.ts';
+import { deleteOwnAccount } from '../services/accountDeletion.service.ts';
 import ApiError from '../utils/ApiError.ts';
 import env from '../config/env.ts';
 import { accessTokenExpiresAt } from '../config/jwt.ts';
+import {
+  FirebaseNotConfigured,
+  FirebaseTokenError,
+  FirebaseUnavailableError,
+  FIREBASE_NOT_CONFIGURED,
+  FIREBASE_TOKEN_INVALID,
+  FIREBASE_UNAVAILABLE,
+} from '../services/firebase/index.ts';
 
 /**
  * The request context this controller reads, following `users.controller.ts`,
@@ -229,6 +239,74 @@ export async function revokeSession(req: AuthenticatedRequest, res: Response) {
   return res.status(200).json({ message: 'Session ended', id: String(session._id) });
 }
 
+/**
+ * Maps a Firebase failure raised by account deletion to a response.
+ *
+ * THE TOKEN CASE IS A 400, NOT A 401, and that is the same rule the authenticated
+ * Firebase boundary follows: the client clears its session on a 401/403, and a
+ * rejected Firebase credential must never sign somebody out — least of all on the
+ * screen where they are already asking to destroy the account. A 503 for the other
+ * two keeps an operator misconfiguration and a Google outage distinct, exactly as
+ * every other Firebase route answers them.
+ */
+function mapAccountDeletionFirebaseFailure(err: unknown): never {
+  if (err instanceof FirebaseNotConfigured) {
+    throw new ApiError(
+      503,
+      'Account deletion is temporarily unavailable because this server cannot reach its identity provider.',
+      FIREBASE_NOT_CONFIGURED
+    );
+  }
+  if (err instanceof FirebaseUnavailableError) {
+    throw new ApiError(
+      503,
+      'Account deletion could not be completed just now. Please try again in a moment.',
+      FIREBASE_UNAVAILABLE
+    );
+  }
+  if (err instanceof FirebaseTokenError) {
+    throw new ApiError(400, 'Please sign in again to confirm this deletion.', FIREBASE_TOKEN_INVALID);
+  }
+  throw err;
+}
+
+/**
+ * DELETE /api/auth/me (account deletion).
+ *
+ * AUTHENTICATED, and the authentication is the ownership proof: the account deleted
+ * is always `req.user.id`, so there is no id in the request that could aim this at
+ * another person. It names NO permission for the same reason the session routes do
+ * not — it is a self-service capability on the caller's own account, not an
+ * authority over anybody else's.
+ *
+ * The response is deliberately thin: `{ deleted: true }` and nothing else. No
+ * tombstone-shaped user is echoed, so the endpoint cannot be used to read back what
+ * was stored.
+ */
+export async function deleteMe(req: AuthenticatedRequest, res: Response) {
+  const { problems, confirmation, currentPassword, idToken } = validateAccountDeletion(
+    req.body ?? {}
+  );
+  if (problems.length > 0) {
+    const err = new ApiError(400, 'Validation failed', 'VALIDATION_ERROR');
+    err.fields = problems;
+    throw err;
+  }
+
+  try {
+    const result = await deleteOwnAccount({
+      userId: req.user!.id,
+      confirmation: confirmation as string,
+      currentPassword,
+      idToken,
+    });
+
+    return res.status(200).json({ deleted: true, changed: result.changed });
+  } catch (err) {
+    return mapAccountDeletionFirebaseFailure(err);
+  }
+}
+
 export default {
   register,
   login,
@@ -238,4 +316,5 @@ export default {
   logout,
   listSessions,
   revokeSession,
+  deleteMe,
 };

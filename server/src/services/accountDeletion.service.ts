@@ -1,0 +1,334 @@
+/**
+ * Self-service account deletion (Google Play account-deletion requirement).
+ *
+ * WHAT DELETION MEANS HERE. The person's account is closed and their personal
+ * information is removed, but the row that their business's records already point
+ * at is NOT hard-deleted: audit rows, inventory transactions, purchase orders and
+ * the AI usage history all carry a `userId`/`entityId`, and erasing the row would
+ * turn those into dangling references — which would falsify an inventory history
+ * that other members of the same business still rely on. So the user row becomes a
+ * TOMBSTONE:
+ *
+ *   - `status: 'DELETED'` and `deletedAt` — every authentication path already
+ *     refuses a status that is not ACTIVE, so the account can never be signed into
+ *     again, and `users.service` never lists or edits it;
+ *   - `name: 'Deleted user'` — the only human-readable personal field;
+ *   - `email` replaced by a unique, non-routable placeholder
+ *     (`deleted+<id>@deleted.invalid`), which frees the real address AND keeps the
+ *     unique index intact. It is deliberately in the reserved `.invalid` TLD, so it
+ *     can never be delivered to;
+ *   - `firebaseUid` and `passwordHash` UNSET — no identity linkage and no credential
+ *     survives;
+ *   - `emailVerified: false`, `passwordChangedAt: now` — a belt-and-braces
+ *     invalidation of any token minted before this moment.
+ *
+ * The Firebase identity itself is deleted BEFORE the tombstone is written. That
+ * order matters: Firebase is the identity provider, so leaving the identity alive
+ * would keep accepting the person's password and land them on
+ * `REGISTRATION_REQUIRED` — a deleted account that is still a usable identity.
+ * Writing the tombstone last also makes the whole operation converge on retry: a
+ * crash after the Firebase delete leaves an ACTIVE row that a second request can
+ * still tombstone, and the second Firebase delete is answered as already-gone.
+ *
+ * WHAT IS DELETED OUTRIGHT. Everything that holds personal content and is not part
+ * of the business's inventory record: the person's sessions (all devices), their
+ * password-reset tokens and reset challenges, their email-verification challenge,
+ * their AI conversations and the messages inside them. Audit rows are KEPT but
+ * ANONYMIZED (`userId: null`), because the trail is a governance record of the
+ * business and the deletion itself must be visible in it; one `ACCOUNT_DELETED`
+ * row is written with `userId: null` so the deletion does not re-introduce a
+ * reference to the row it just anonymized.
+ *
+ * TENANT ISOLATION. Every filter below is derived from the loaded `User` document —
+ * `_id`, `businessId`, `firebaseUid` — never from the request body. The caller is
+ * `requireAuth`'s own `req.user.id`, so a request cannot name another account, and
+ * the AI message deletion is scoped by conversation ids that were themselves
+ * selected by this user.
+ *
+ * THE LAST-OWNER RULE. A business must always have an active OWNER, so an OWNER who
+ * is the only active one is refused (409 `LAST_OWNER_TRANSFER_REQUIRED`) and told to
+ * transfer ownership first. Another OWNER existing is the only thing that unlocks
+ * it. The count is scoped by `businessId` and `status: 'ACTIVE'`, so a tombstoned or
+ * disabled second owner does not satisfy it.
+ *
+ * IDEMPOTENCY. The tombstone update is CONDITIONAL on `status: 'ACTIVE'`; when it
+ * matches nothing — a concurrent or repeated request — the destructive work is not
+ * repeated and the caller is told the account is deleted. A retry therefore cannot
+ * delete a second Firebase identity, count a business's owners twice, or write a
+ * second audit row.
+ *
+ * This module decides no HTTP status. The controller maps its errors, following the
+ * same split the password-reset and Firebase services use.
+ */
+
+import type mongoose from 'mongoose';
+import bcrypt from 'bcryptjs';
+
+import User from '../models/user.model.ts';
+import Session from '../models/session.model.ts';
+import AuditLog from '../models/auditLog.model.ts';
+import PasswordResetToken from '../models/passwordResetToken.model.ts';
+import PasswordResetChallenge from '../models/passwordResetChallenge.model.ts';
+import EmailVerificationChallenge from '../models/emailVerificationChallenge.model.ts';
+import AIConversation from '../models/aiConversation.model.ts';
+import AIMessage from '../models/aiMessage.model.ts';
+import { recordAudit } from './audit.service.ts';
+import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../constants/audit.ts';
+import { deleteFirebaseUser, verifyFirebaseIdToken } from './firebase/index.ts';
+import type { FirebaseTokenError, FirebaseUnavailableError, FirebaseNotConfigured } from './firebase/index.ts';
+import { ApiError } from '../utils/ApiError.ts';
+import {
+  DELETE_CONFIRMATION_PHRASE,
+  DELETED_USER_NAME,
+  DELETED_EMAIL_DOMAIN,
+} from '../constants/accountDeletion.ts';
+
+/** A document id, as the models accept it. Local, following the other services. */
+type IdLike = string | mongoose.Types.ObjectId;
+
+// Re-exported so a caller that already imports this service does not need a second
+// import for the values it enforces. The definitions live in constants/.
+export { DELETE_CONFIRMATION_PHRASE, DELETED_USER_NAME, DELETED_EMAIL_DOMAIN };
+
+export const LAST_OWNER_TRANSFER_REQUIRED = 'LAST_OWNER_TRANSFER_REQUIRED';
+export const INVALID_CURRENT_PASSWORD = 'INVALID_CURRENT_PASSWORD';
+export const FIREBASE_REAUTHENTICATION_REQUIRED = 'FIREBASE_REAUTHENTICATION_REQUIRED';
+export const FIREBASE_IDENTITY_CONFLICT = 'FIREBASE_IDENTITY_CONFLICT';
+
+export interface DeleteAccountInput {
+  /** `req.user.id` — the caller, never a request-supplied id. */
+  userId: string;
+  /** The typed confirmation word, already trimmed by the validator. */
+  confirmation: string;
+  /** Present when the person re-authenticated with their password (legacy account). */
+  currentPassword?: string;
+  /** Present when the person re-authenticated with a Firebase ID token. */
+  idToken?: string;
+}
+
+export interface DeleteAccountResult {
+  deleted: true;
+  /** True when this request performed the deletion; false when it was already done. */
+  changed: boolean;
+  /** True when a Firebase identity was removed by this request. */
+  firebaseIdentityDeleted: boolean;
+}
+
+/**
+ * Verifies the caller's re-authentication credential.
+ *
+ * A Firebase-linked account proves itself with a Firebase ID token, and the token's
+ * uid must be the caller's own — otherwise a valid token for a DIFFERENT identity
+ * could authorize deleting this one, which is the whole attack this check exists to
+ * stop. A legacy account proves itself with its current password.
+ *
+ * Both are refused with a 400-level code rather than a 401: the caller's session is
+ * valid and must not be ended by a mistyped confirmation. `FIREBASE_*` errors are
+ * rethrown untouched for the controller to map as it does on every other Firebase
+ * route.
+ */
+async function verifyReauthentication(
+  user: { firebaseUid?: string | null; passwordHash?: string | null },
+  input: DeleteAccountInput,
+  passwordHash: string | null
+): Promise<void> {
+  const wantsFirebase = typeof input.idToken === 'string' && input.idToken.trim() !== '';
+
+  if (wantsFirebase) {
+    if (!user.firebaseUid) {
+      // No Firebase identity is linked to this account, so no Firebase token can
+      // speak for it.
+      throw new ApiError(
+        400,
+        'This account does not sign in with Firebase. Confirm with your current password instead.',
+        FIREBASE_REAUTHENTICATION_REQUIRED
+      );
+    }
+
+    const identity = await verifyFirebaseIdToken(input.idToken);
+    if (identity.uid !== user.firebaseUid) {
+      // ONE 409 that names nothing: not the account, not the tenant, not a uid.
+      throw new ApiError(
+        409,
+        'That sign-in does not belong to this account.',
+        FIREBASE_IDENTITY_CONFLICT
+      );
+    }
+    return;
+  }
+
+  if (user.firebaseUid && !passwordHash) {
+    // A Firebase-only account has no password this server can check. Asking for an
+    // ID token is the only re-authentication it has.
+    throw new ApiError(
+      400,
+      'Confirm this deletion by signing in again.',
+      FIREBASE_REAUTHENTICATION_REQUIRED
+    );
+  }
+
+  if (typeof input.currentPassword !== 'string' || input.currentPassword === '') {
+    throw new ApiError(400, 'Your current password is required.', 'VALIDATION_ERROR');
+  }
+
+  if (!passwordHash) {
+    throw new ApiError(400, 'Your current password is incorrect.', INVALID_CURRENT_PASSWORD);
+  }
+
+  const matches = await bcrypt.compare(input.currentPassword, passwordHash);
+  if (!matches) {
+    throw new ApiError(400, 'Your current password is incorrect.', INVALID_CURRENT_PASSWORD);
+  }
+}
+
+/**
+ * The last-OWNER rule, stated as one query.
+ *
+ * `$ne` against the caller's own id rather than counting and comparing: the caller
+ * is an active OWNER by the time this runs, so "another ACTIVE OWNER exists in this
+ * business" is exactly the condition that makes deletion safe.
+ */
+async function assertNotLastOwner(user: {
+  _id: IdLike;
+  businessId: IdLike;
+  role: string;
+}): Promise<void> {
+  if (user.role !== 'OWNER') return;
+
+  const otherOwner = await User.exists({
+    _id: { $ne: user._id },
+    businessId: user.businessId,
+    role: 'OWNER',
+    status: 'ACTIVE',
+  });
+
+  if (!otherOwner) {
+    throw new ApiError(
+      409,
+      'You are the only owner of this business. Make another member an owner before deleting your account.',
+      LAST_OWNER_TRANSFER_REQUIRED
+    );
+  }
+}
+
+/**
+ * Removes everything that holds the person's content or grants them access.
+ *
+ * Ordered from the most security-relevant to the least, and each step is scoped by
+ * the loaded document's own ids. Failures here, once the tombstone is written, are
+ * allowed to surface: the account is already unusable, and a retry converges
+ * because the tombstone step reports `changed: false` and does not repeat the
+ * Firebase delete, while these deletes are idempotent themselves.
+ */
+async function deleteOwnedRecords(user: {
+  _id: IdLike;
+  businessId: IdLike;
+  firebaseUid?: string | null;
+}): Promise<void> {
+  await Session.deleteMany({ userId: user._id });
+  await PasswordResetToken.deleteMany({ userId: user._id });
+  await PasswordResetChallenge.deleteMany({ userId: user._id });
+  await AuditLog.updateMany({ userId: user._id }, { $set: { userId: null } });
+
+  if (user.firebaseUid) {
+    await EmailVerificationChallenge.deleteMany({ uid: user.firebaseUid });
+  }
+
+  const conversations = await AIConversation.find({ userId: user._id }).select('_id').lean();
+  const conversationIds = conversations.map((row) => row._id);
+  if (conversationIds.length > 0) {
+    await AIMessage.deleteMany({ conversationId: { $in: conversationIds } });
+  }
+  await AIConversation.deleteMany({ userId: user._id });
+}
+
+/**
+ * Deletes the caller's own account.
+ *
+ * Throws `ApiError` for every refusal this layer decides (400/404/409) and the
+ * Firebase domain errors for a provider failure. Never returns a tombstone-shaped
+ * user: the only thing a caller may learn is that the account is gone.
+ */
+export async function deleteOwnAccount(input: DeleteAccountInput): Promise<DeleteAccountResult> {
+  if (input.confirmation !== DELETE_CONFIRMATION_PHRASE) {
+    throw new ApiError(
+      400,
+      `Type ${DELETE_CONFIRMATION_PHRASE} to confirm.`,
+      'VALIDATION_ERROR'
+    );
+  }
+
+  // `passwordHash` is `select: false`, so it is asked for explicitly — and only
+  // here, where it is compared and immediately discarded.
+  const user = await User.findById(input.userId).select('+passwordHash').lean();
+  if (!user) {
+    throw new ApiError(404, 'User not found', 'NOT_FOUND');
+  }
+
+  // Already tombstoned: answer as success without repeating any destructive work.
+  if (user.status === 'DELETED') {
+    return { deleted: true, changed: false, firebaseIdentityDeleted: false };
+  }
+
+  if (user.status !== 'ACTIVE') {
+    throw new ApiError(403, 'This account is not active.', 'ACCOUNT_DISABLED');
+  }
+
+  await verifyReauthentication(user, input, user.passwordHash ?? null);
+  await assertNotLastOwner(user as { _id: IdLike; businessId: IdLike; role: string });
+
+  // ★ FIREBASE FIRST. A deleted Inventory AI account must not remain a usable
+  //   Firebase identity; see the module comment for why this precedes the write.
+  let firebaseIdentityDeleted = false;
+  if (user.firebaseUid) {
+    const removal = await deleteFirebaseUser(user.firebaseUid);
+    firebaseIdentityDeleted = removal.deleted;
+  }
+
+  const now = new Date();
+  const tombstone = await User.findOneAndUpdate(
+    { _id: user._id, status: 'ACTIVE' },
+    {
+      $set: {
+        status: 'DELETED',
+        deletedAt: now,
+        name: DELETED_USER_NAME,
+        email: `deleted+${String(user._id)}@${DELETED_EMAIL_DOMAIN}`,
+        emailVerified: false,
+        // Invalidates every token minted before this instant, independently of the
+        // status check, so an already-issued JWT cannot outlive the deletion.
+        passwordChangedAt: now,
+      },
+      $unset: { firebaseUid: '', passwordHash: '' },
+    },
+    { new: true }
+  );
+
+  if (!tombstone) {
+    // A concurrent request wrote the tombstone between the read and this update. It
+    // owns the cleanup; this one only reports the outcome.
+    return { deleted: true, changed: false, firebaseIdentityDeleted: false };
+  }
+
+  await deleteOwnedRecords(user as { _id: IdLike; businessId: IdLike; firebaseUid?: string | null });
+
+  // `userId: null` ON PURPOSE: naming the caller would immediately re-point the
+  // trail at the account whose identifiers this operation just removed.
+  await recordAudit({
+    businessId: user.businessId,
+    userId: null,
+    action: AUDIT_ACTIONS.ACCOUNT_DELETED,
+    entityType: AUDIT_ENTITY_TYPES.USER,
+    entityId: user._id,
+    metadata: { role: user.role },
+  });
+
+  return { deleted: true, changed: true, firebaseIdentityDeleted };
+}
+
+export type AccountDeletionFirebaseError =
+  | FirebaseNotConfigured
+  | FirebaseTokenError
+  | FirebaseUnavailableError;
+
+export default { deleteOwnAccount, DELETE_CONFIRMATION_PHRASE, DELETED_USER_NAME };

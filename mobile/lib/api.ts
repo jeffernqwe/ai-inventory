@@ -32,6 +32,31 @@ export type ApiResponse = any;
 // Auth
 // ---------------------------------------------------------------------------
 
+/**
+ * What DELETE /api/auth/me accepts. Exactly one re-authentication credential is sent:
+ * `idToken` for an account that signs in through Firebase, `currentPassword` for a
+ * legacy password account. The account deleted is the token's own, so there is no id
+ * field — a client cannot express "delete somebody else".
+ */
+export interface DeleteAccountPayload {
+  confirmation: string;
+  currentPassword?: string;
+  idToken?: string;
+}
+
+/**
+ * DELETE /api/auth/me -> { deleted: true, changed }.
+ *
+ * The response deliberately carries no user object, so a caller cannot read back
+ * what was stored. A refusal is a 400 (wrong word, wrong password, mismatched
+ * Firebase identity), a 409 (last owner, or the identity does not match) or a 503
+ * (the provider could not be reached) — never a 401, so a typo cannot end the
+ * session.
+ */
+export function deleteAccount(token: string, payload: DeleteAccountPayload): Promise<ApiResponse> {
+  return apiFetch('/api/auth/me', { token, method: 'DELETE', body: payload });
+}
+
 export interface RegisterPayload {
   businessName: string;
   name: string;

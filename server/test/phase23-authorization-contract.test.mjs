@@ -278,6 +278,10 @@ const AUTHENTICATED_ROUTES = [
   { route: 'GET /api/auth/me', why: 'reads only the caller’s own account' },
   { route: 'PATCH /api/auth/me', why: 'writes only the caller’s own name' },
   { route: 'POST /api/auth/change-password', why: 'changes only the caller’s own password' },
+  {
+    route: 'DELETE /api/auth/me',
+    why: 'account deletion: deletes only the CALLER’S OWN account — the subject is req.user.id with no id in the request that could aim it elsewhere, re-authentication is required first, and no permission key could express "may delete my own account" without inventing an authorization concept the catalogue does not have',
+  },
   { route: 'POST /api/auth/logout', why: 'Phase 26A: ends only the caller’s own session' },
   { route: 'GET /api/auth/sessions', why: 'Phase 26A: lists only the caller’s own sessions' },
   { route: 'DELETE /api/auth/sessions/:id', why: 'Phase 26A: ends only a session the caller owns' },

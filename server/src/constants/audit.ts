@@ -63,6 +63,12 @@ export const AUDIT_ACTIONS = Object.freeze({
   // makes it hold.
   FIREBASE_IDENTITY_LINKED: 'FIREBASE_IDENTITY_LINKED',
   FIREBASE_IDENTITY_LINK_CONFLICT: 'FIREBASE_IDENTITY_LINK_CONFLICT',
+  // Account deletion (2026-10-24). ONE event, recorded with `userId: null` because
+  // naming the caller would immediately re-point the trail at the account whose
+  // identifiers the same transaction removes. `entityId` is the tombstone's id, so the
+  // business's governance record still shows that an account was closed, when, and
+  // under which role, without identifying the person afterwards.
+  ACCOUNT_DELETED: 'ACCOUNT_DELETED',
 });
 
 export const AUDIT_ENTITY_TYPES = Object.freeze({

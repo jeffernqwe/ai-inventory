@@ -274,6 +274,20 @@ export default function ProfileScreen() {
       <Button title="Refresh account" variant="secondary" style={styles.spaced} onPress={() => refresh()} />
       <Button title="Back to home" variant="secondary" style={styles.spaced} onPress={() => router.replace(defaultHomePath(user))} />
       <Button title="Sign out" variant="danger" style={styles.spaced} onPress={onSignOut} />
+
+      {/*
+       * Deletion lives at the BOTTOM of the profile, below sign-out, and behind its own
+       * confirmation screen — never a one-tap action beside it. The screen it opens is
+       * the only place the consequences are stated, so this row is a doorway rather than
+       * the decision. `secondary` keeps it visually quieter than sign-out: closing the
+       * account is rarer and more consequential, not more prominent.
+       */}
+      <Button
+        title="Delete account"
+        variant="secondary"
+        style={styles.spaced}
+        onPress={() => router.push('/delete-account')}
+      />
     </Screen>
   );
 }

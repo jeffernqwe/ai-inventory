@@ -18,6 +18,11 @@
  *   updateFirebaseUserEmailVerified(uid)
  *                           — the AUTH-04-B2 write: sets a verified identity's
  *                             `emailVerified` flag, and nothing else.
+ *   deleteFirebaseUser(uid) — the account-deletion DELETE: removes the identity so a
+ *                             closed account is not still usable at the provider. It
+ *                             lives in its own module (`identityDeleter.ts`) because
+ *                             the AUTH-04-B2 bridge's guards exist to keep that bridge
+ *                             to a single non-destructive field write.
  *
  * Note what this layer does NOT do: it does not issue a session, does not read or
  * write MongoDB, does not know a user exists, and does not decide an HTTP status.
@@ -53,6 +58,13 @@ import {
   hasCustomFirebaseUserUpdater,
 } from './userUpdater.ts';
 import type { FirebaseEmailVerificationWrite, FirebaseUserUpdater } from './userUpdater.ts';
+import {
+  deleteFirebaseUser,
+  setFirebaseUserDeleter,
+  resetFirebaseUserDeleter,
+  hasCustomFirebaseUserDeleter,
+} from './identityDeleter.ts';
+import type { FirebaseUserDeletion, FirebaseUserDeleter } from './identityDeleter.ts';
 
 export {
   FirebaseNotConfigured,
@@ -72,15 +84,21 @@ export {
   isStructurallyJwtShaped,
   assertFirebaseTokenEnvironment,
   updateFirebaseUserEmailVerified,
+  deleteFirebaseUser,
   setFirebaseUserUpdater,
   resetFirebaseUserUpdater,
   hasCustomFirebaseUserUpdater,
+  setFirebaseUserDeleter,
+  resetFirebaseUserDeleter,
+  hasCustomFirebaseUserDeleter,
 };
 export type {
   VerifiedFirebaseIdentity,
   FirebaseIdTokenVerifier,
   FirebaseEmailVerificationWrite,
   FirebaseUserUpdater,
+  FirebaseUserDeletion,
+  FirebaseUserDeleter,
 };
 
 /**

@@ -15,8 +15,13 @@
  *     one that receives a question and the inventory data the assistant reads.
  *   - `server/src/services/firebase/` — Firebase Authentication is the identity provider,
  *     and Google processes sign-in identifiers for it.
- *   - Account deletion, when it ships, REPLACES the "email us" instruction below. Until
- *     then this page says what is true today rather than promising a feature.
+ *   - `server/src/services/accountDeletion.service.ts` — account deletion is now a real
+ *     in-app operation, so the "Deleting your data" section describes what that code
+ *     actually does (tombstone, what is erased, what remains) instead of asking people
+ *     to send an email. The public `/account-deletion` page is the store-facing copy of
+ *     the same facts, and both must change together.
+ *   - `mobile/components/` barcode scanning — the camera opens only for a scan the person
+ *     starts, and nothing it sees leaves the device; the policy has to keep saying so.
  *
  * NO SCRIPT, NO TRACKING, NO EXTERNAL ASSET. That is deliberate: a privacy page that
  * loads a font from somewhere else would undermine the sentence it is making. The only
@@ -30,8 +35,14 @@
 
 import { createHash } from 'node:crypto';
 
-/** Where a person writes about their data. A real, monitored mailbox is a requirement. */
-const CONTACT_EMAIL = 'jefferndullamalinaozxc@gmail.com';
+/**
+ * Where a person writes about their data. A real, monitored mailbox is a requirement.
+ *
+ * EXPORTED because `/account-deletion` offers the same address as the way to delete an
+ * account when signing in is not possible. One constant means the two pages cannot drift
+ * apart and leave a store reviewer with an address that bounces.
+ */
+export const CONTACT_EMAIL = 'jefferndullamalinaozxc@gmail.com';
 
 /** Shown at the top and used as the "last changed" fact. Update both together. */
 const EFFECTIVE_DATE = '24 October 2026';
@@ -140,6 +151,10 @@ where you live.</p>
 advertising identifiers, and the app contains no advertising, analytics or crash-reporting SDK.
 We do not sell your data and we do not use it for advertising.</p>
 
+<p><strong>The camera is used only for barcode scanning.</strong> It opens when you choose to scan
+a product barcode, the barcode is read on the device, and no camera image or video is uploaded,
+stored or shared. You can decline the camera permission and still use every other part of the app.</p>
+
 <h2>Why we need it</h2>
 <ul>
   <li>To run the app: show your inventory, record stock movements and answer your questions.</li>
@@ -176,11 +191,21 @@ business stays readable. Assistant conversations are kept until you or your admi
 them, or until your account is deleted.</p>
 
 <h2>Deleting your data</h2>
-<p>To delete your account and the information that identifies you, email
-<a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a> from the address on the account. We will
-confirm the request and complete it. Records that belong to a business — stock movements, purchase
-orders, audit entries — may be kept as part of that business's history after your personal details
-have been removed from them.</p>
+<p>You can delete your account inside the app: open <strong>Profile</strong> and choose
+<strong>Delete account</strong>, then confirm it. The same option is described at
+<a href="/account-deletion">/account-deletion</a>, which is the public page Google Play requires.
+If you cannot sign in, email <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a> from the address
+on the account and we will complete the deletion for you.</p>
+<p><strong>What is removed.</strong> Your name, your email address, your password and any Google
+sign-in connection, your signed-in sessions, your password-reset and email-verification records, and
+your assistant conversations and their messages. The account is closed and cannot be signed into
+again. The Firebase Authentication identity behind it is deleted as well.</p>
+<p><strong>What remains, and why.</strong> Your business's own records — stock movements, purchase
+orders, stock levels, and audit entries — belong to the business and stay readable by its remaining
+members, because deleting them would falsify that business's inventory history. Audit entries that
+named you are kept but no longer identify you, and the account row itself is kept only as an
+anonymous placeholder that those records can point at. If you are the last owner of a business,
+the app asks you to make another member an owner first.</p>
 
 <h2>Children</h2>
 <p>Inventory AI is a business tool and is not intended for anyone under 18. We do not knowingly

@@ -3,7 +3,13 @@ import mongoose from 'mongoose';
 const { Schema } = mongoose;
 
 const userRoles = ['OWNER', 'ADMIN', 'MANAGER', 'STAFF'];
-const userStatuses = ['ACTIVE', 'DISABLED'];
+// DELETED (account deletion) is a TOMBSTONE, not a disabled account: the row is
+// kept only so that audit rows, transactions and a former USER entityId still
+// resolve, and every identifying field is overwritten or unset when it is written.
+// A DELETED user can never authenticate again — `status !== 'ACTIVE'` is already
+// refused on both the password path and the Firebase exchange — and it cannot be
+// re-activated, because the status is write-once by design.
+const userStatuses = ['ACTIVE', 'DISABLED', 'DELETED'];
 
 const userSchema = new Schema(
   {
@@ -88,6 +94,13 @@ const userSchema = new Schema(
     // minted before it (SESSION_INVALIDATED). null = never changed → no
     // invalidation (safe default for every pre-existing user, no migration).
     passwordChangedAt: {
+      type: Date,
+      default: null,
+    },
+    // Account deletion: the instant the row became a tombstone. Only ever set by
+    // `accountDeletion.service.ts`, and only together with `status: 'DELETED'`. A
+    // null value means the row has never been deleted, so no migration is needed.
+    deletedAt: {
       type: Date,
       default: null,
     },

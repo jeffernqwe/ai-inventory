@@ -19634,6 +19634,118 @@ in design §2.6 and re-measured by `phase-docs-route-inventory`. Server **`test:
 listing cannot point at it yet, and no reviewer has seen it. No device pass applies (no mobile
 change). The deletion half of the Play requirement remains open, and iOS is untouched (no macOS).
 
+> **Updated 2026-10-24 (§27EW).** The page now describes the **shipped** in-app deletion flow and
+> the tombstone rather than a mailto instruction (the address is kept only for somebody who cannot
+> sign in), and it states the camera's **barcode-only** use. `PRIVACY-page.test.mjs` grew from 6 to
+> 9 cases: it now asserts the new deletion wording, the camera paragraph, and the separate
+> `/account-deletion` page. Route inventory is **79** (the page count moved by the deletion page,
+> not by this one).
+
+---
+
+# 27EW. Account deletion — in the app and on the web (2026-10-24)
+
+**Server + mobile + documentation — one AUTHENTICATED route, one PUBLIC page and one mobile screen;
+no new permission, dependency, schema migration or session-model change.** §27EU recorded the second
+Play blocker: Play requires an **in-app** way to delete an account *and* a **web URL** for people who
+no longer have the app. The retained data is the hard part, not the deletion: every audit row,
+inventory transaction and purchase order cites a `User`, so erasing the row would make another
+member's inventory history point at nothing.
+
+**1. The decision: delete the person, tombstone the row.** A deletion removes everything that
+identifies the person or grants them access — name, real email address, password hash, Firebase
+identity, all sessions, password-reset and email-verification records, and their assistant
+conversations with their messages — and **keeps** the business's own records, with the person's
+`userId` set to `null`. The `User` row survives as a placeholder (`status: 'DELETED'`, name
+`Deleted user`, address `deleted+<id>@deleted.invalid`, no credential, no identity link), so the
+business's trail still resolves while the person is no longer named. The address is genuinely freed:
+`deleted.invalid` is RFC 2606's never-delivered TLD, so the placeholder cannot become an inbox.
+
+**2. `DELETE /api/auth/me`** (`controllers/auth.controller.ts`, `services/accountDeletion.service.ts`).
+The account is **`req.user.id`** — `validateAccountDeletion` returns only `confirmation`,
+`currentPassword` and `idToken`, so there is no field through which a request could name another
+account, tenant, role or uid. Two proofs are required and they answer different questions:
+
+- the typed word `DELETE` (a `VALIDATION_ERROR` field under the input, re-checked by the service for
+direct callers);
+- **re-authentication**: a Firebase ID token whose `uid` must equal the account's own
+  (`409 FIREBASE_IDENTITY_CONFLICT` otherwise, naming nothing), or the current password for a legacy
+  account (`400 INVALID_CURRENT_PASSWORD`). A Firebase-only account cannot fall through to the
+  password branch: with no stored hash it is answered `400 FIREBASE_REAUTHENTICATION_REQUIRED`.
+
+Both refusals are **400/409, never 401**, so a typo cannot end a session. The last active `OWNER` is
+refused `409 LAST_OWNER_TRANSFER_REQUIRED`; a second active owner unlocks it. The write is conditional
+on `status: 'ACTIVE'`, so a concurrent or repeated request converges (`200 { deleted: true,
+changed: false }`) instead of deleting a second identity or writing a second audit row.
+
+**3. The order is the safety property.** The **Firebase identity is deleted first**, then the
+tombstone is written, then the owned records are erased and the audit row is written. A crash after
+the provider delete leaves an ACTIVE row that a retry can still tombstone (the second provider delete
+answers `auth/user-not-found`, reported as `deleted: false`), while a provider outage happens
+**before** anything is written, so the account stays usable and the session alive (503). A deletion
+that left a working Firebase identity would be an account that is gone and still able to sign in —
+the state a deletion promise must rule out.
+
+**4. The trail.** Audit rows that named the person are KEPT with `userId: null` (the business's
+governance record), and the deletion itself writes one `ACCOUNT_DELETED` row with `userId: null`,
+`entityId` the tombstone's id and `metadata.role` — so the event is visible without re-identifying
+the account the transaction just anonymized. `AUDIT_ACTIONS.ACCOUNT_DELETED` and the mobile label
+("Account deleted") were added together, so the audit screen cannot render a raw enum.
+
+**5. The web half.** `GET /account-deletion` (`pages/accountDeletionPage.ts`,
+`routes/accountDeletion.routes.ts`) is mounted outside `/api`, public and unauthenticated — somebody
+who cannot sign in is exactly one of the people who needs it — and describes the same operation: the
+in-app steps, the confirmation word, the last-owner rule, what is deleted, and what is kept. No
+script; CSP is `default-src 'none'` plus the stylesheet's SHA-256 hash computed from the bytes
+served; `no-store`, `no-referrer`, `nosniff`, `noindex`, `frame-ancestors 'none'`; `POST` is a 404.
+
+**6. The mobile half.** `lib/accountDeletion.ts` owns the two decisions the screen must not make:
+the confirmation constant (pinned to the server's copy by a test that reads the file) and **which
+credential** the account has (`authMethods.firebase` → a forced-refresh ID token; otherwise the
+password). `app/(app)/delete-account.tsx` states the consequences before the button, refuses a
+blank/mistyped word or a missing password client-side, shows every server refusal in place (last
+owner, wrong password, 429), and only clears the session on success or a genuine 401. Profile links
+to it **below** Sign out, as a quieter secondary action: closing the account is rarer and more
+consequential, not more prominent. The destructive button is deliberately **not** disabled while the
+word is untyped — a disabled control cannot be focused, so it cannot say why — and `submit()` refuses
+instead, under the field.
+
+**7. Limiter.** The route is budgeted per account at **5 per hour** (`AUTH_ACCOUNT_DELETION_*`,
+`createAccountDeletionLimiter`), mounted `requireAuth → limiter → controller` so an anonymous caller
+is refused 401 without spending a bucket. Enough for a mistyped confirmation and a retry after a
+transient provider failure; far below what makes an irreversible operation worth fuzzing.
+
+**Verification.** `ACCOUNT-DELETION.test.mjs` — **12 cases, 0 failures** over a real database:
+unauthenticated 401; mistyped word and wrong password refused with the account **and session**
+intact; the last-owner 409 then a co-owner unlocking it; the tombstone field by field (status, name,
+address, `deletedAt`, no `passwordHash`, no `firebaseUid`); sessions, reset tokens, reset challenges
+and AI conversations/messages gone; the audit row `userId: null` and the `ACCOUNT_DELETED` row; the
+old token refused; the real address free to register again; the repeat call converging; another
+business and its member untouched; a deleted member hidden from `GET /api/users` and `GET
+/api/users/:id`; Firebase mismatch/absence/attempt ordering; the provider-failure rollback; and the
+429. `PRIVACY-page.test.mjs` grew to **9 cases** (privacy + deletion page: no auth, CSP hash, headers,
+processors, camera, the shipped deletion wording, no placeholder, GET only). Mobile
+`account-deletion.test.tsx` — **9 cases**: the consequences, the word gate, the password path, the
+Firebase path (and no password field), the no-identity refusal, the last-owner/wrong-password/429
+refusals keeping the session, and the success path clearing it. Two existing guards were updated on
+purpose: Phase F-1's `$unset firebaseUid` prohibition now permits **exactly one** file by name
+(`services/accountDeletion.service.ts`) and separately asserts that its tombstone also removes the
+credential and is terminal, and the design §2.6 route inventory moved **77 → 79** (authenticated
+**13 → 14**, public **17 → 18**). The Firebase delete bridge lives in its own module
+(`services/firebase/identityDeleter.ts`) rather than beside the AUTH-04-B2 updater, because that
+bridge's guards exist to keep it a single non-destructive field write; all 32 of them still pass.
+Server **`test:unit` 1343 / 1288 pass / 0 fail / 55 skipped**; targeted DB suites (users,
+pagination, Phase 24 matrix, 26A sessions, AUTH-02, AUTH-03, deletion) **92 tests / 0 fail**; mobile
+**93 suites / 1114 tests / 0 failures**; `tsc`/`eslint`/both module-graph checks clean.
+
+**Not verified:** the URLs are **not live** until the next server deploy, so neither has been opened
+by a reviewer or in a private browser window; the **in-app flow has not been run on a device** — it
+destroys the account it is used on, so it needs a disposable account, and the store-installed build
+is the only place Play's entry points would be exercised end to end; Play App Signing and upload
+remain unexercised; iOS is untouched (no macOS). Business deletion (as opposed to person deletion)
+is deliberately **not** in scope and would be its own confirmed action, because it destroys history
+other members rely on.
+
 ---
 
 # 28. Phase Gate System

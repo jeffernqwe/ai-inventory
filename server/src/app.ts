@@ -11,6 +11,7 @@ import healthRoutes from './routes/health.routes.ts';
 import { createAuthRouter } from './routes/auth.routes.ts';
 import authActionRoutes from './routes/authAction.routes.ts';
 import privacyRoutes from './routes/privacy.routes.ts';
+import accountDeletionRoutes from './routes/accountDeletion.routes.ts';
 import userRoutes from './routes/users.routes.ts';
 import categoryRoutes from './routes/categories.routes.ts';
 import locationRoutes from './routes/locations.routes.ts';
@@ -143,6 +144,10 @@ export function createApp({
   // points to. Public by requirement — a policy behind a login cannot be read by someone deciding
   // whether to create an account.
   app.use('/privacy', privacyRoutes);
+  // The public account-deletion page (2026-10-24), the web address Google Play's data-deletion
+  // policy requires. Outside `/api` for the same reason: it is an HTML page, and it is public
+  // because somebody who cannot sign in is exactly one of the people who needs to read it.
+  app.use('/account-deletion', accountDeletionRoutes);
 
   // 2026-10-23 security audit — NO AUTH RESPONSE MAY BE STORED BY AN INTERMEDIARY.
   //

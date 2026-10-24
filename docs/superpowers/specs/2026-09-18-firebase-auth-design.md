@@ -156,7 +156,7 @@ set.
 
 ## 2.6 Route inventory
 
-Phase 23 classifies **77 routes**: **47 permission-gated**, **13 authenticated**, **17 public**, **0 role-gated**. The `PUBLIC` and `AUTHENTICATED` buckets are explicit lists that each carry a
+Phase 23 classifies **79 routes**: **47 permission-gated**, **14 authenticated**, **18 public**, **0 role-gated**. The `PUBLIC` and `AUTHENTICATED` buckets are explicit lists that each carry a
 written reason; a route in no bucket fails the guard, and a declared exemption that has stopped being
 true also fails. The guard deliberately asserts **no route count** — a route is *declared* or it is not,
 and the number is derived from the declarations — so the figure above is pinned separately, by
@@ -207,6 +207,17 @@ fails if the two disagree.
 > cannot be navigated into. The route is public for the same reason the other two are, issues no
 > session, and shares the confirm limiter with `/confirm` so both steps draw on one per-IP budget.
 > The **gated** tier is still **47**.
+>
+> **Account deletion (2026-10-24) added one authenticated route, `DELETE /api/auth/me`, and one
+> public page, `GET /account-deletion`** — 47 + 14 + 18 = **79**. The page is the web address
+> Google Play's data-deletion policy requires, so it is public by requirement: somebody who cannot
+> sign in has to be able to read how to delete the account. It reads no request data and performs
+> no I/O. It deletes the CALLER'S OWN account (`req.user.id`, never an id from the
+> request), refuses unless the account is re-authenticated and is not a business's last active
+> owner, and answers `{ deleted: true }`. It names no permission for the same reason
+> `POST /api/auth/logout` does not: the subject is the caller's own account, and a capability that
+> governed "what you may do to others" would be the wrong instrument for it. The **gated** tier is
+> still **47**.
 
 The auth surface (`server/src/routes/auth.routes.ts`):
 
@@ -223,6 +234,7 @@ The auth surface (`server/src/routes/auth.routes.ts`):
 | POST | `/api/auth/firebase/register` | firebase register limiter → controller |
 | GET | `/api/auth/me` | `requireAuth` |
 | PATCH | `/api/auth/me` | `requireAuth` |
+| DELETE | `/api/auth/me` | `requireAuth` → account-deletion limiter → controller |
 | POST | `/api/auth/change-password` | `requireAuth` |
 | POST | `/api/auth/logout` | `requireAuth` (sign-out-everywhere is this route with `{all:true}`) |
 | GET | `/api/auth/sessions` | `requireAuth` |

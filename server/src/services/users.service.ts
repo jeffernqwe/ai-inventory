@@ -91,7 +91,11 @@ function isDuplicateKey(err: unknown) {
 export const usersService = {
   async list(businessId: IdLike, { q, status, skip, limit }: UserListFilters) {
     const filter: UserFilter = { businessId };
-    if (status) filter.status = status;
+    // Deleted accounts are NOT part of the member list. The tombstone stays in the
+    // collection so audit rows and transactions still resolve, but a former member
+    // must not appear as a member, be searchable by the address they no longer own,
+    // or be counted. An explicit status filter still narrows within that.
+    filter.status = status ? status : { $ne: 'DELETED' };
     if (q) {
       filter.$or = [
         { name: { $regex: escapeRegExp(q), $options: 'i' } },
@@ -109,7 +113,9 @@ export const usersService = {
   },
 
   async get(businessId: IdLike, id: IdLike) {
-    const user = await User.findOne({ _id: id, businessId });
+    // Same reason as `list`: a tombstone is unreachable through user management, and
+    // answers the same 404 as an id from another business.
+    const user = await User.findOne({ _id: id, businessId, status: { $ne: 'DELETED' } });
     if (!user) notFound();
     return toPublicUser(user);
   },
@@ -177,7 +183,11 @@ export const usersService = {
    * restrictions — so a cross-business id never leaks a more specific reason.
    */
   async update(actor: Actor, id: IdLike, payload: UserUpdatePayload) {
-    const target = await User.findOne({ _id: id, businessId: actor.businessId });
+    const target = await User.findOne({
+      _id: id,
+      businessId: actor.businessId,
+      status: { $ne: 'DELETED' },
+    });
     if (!target) notFound();
 
     if (String(target._id) === String(actor.id)) {

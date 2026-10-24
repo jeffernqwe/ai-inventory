@@ -8,6 +8,7 @@
 
 import { NON_OWNER_ROLES } from '../constants/roles.ts';
 import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../constants/audit.ts';
+import { DELETE_CONFIRMATION_PHRASE } from '../constants/accountDeletion.ts';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_EMAIL = 254;
@@ -134,6 +135,62 @@ export function validateChangePassword(body: Body) {
     ...passwordProblems(body?.newPassword).map((p) => ({ ...p, field: 'newPassword' }))
   );
   return problems;
+}
+
+/**
+ * Account-deletion payload (Google Play account-deletion requirement).
+ *
+ * Three fields, and the shape itself is the security property:
+ *
+ *   - `confirmation` is the typed word that makes an accidental tap survivable.
+ *     It is TRIMMED (it is a word, not a secret) and compared exactly by the
+ *     service against the one accepted value.
+ *   - `currentPassword` is read RAW, never trimmed — trimming would quietly change
+ *     the credential being compared and refuse a password that ends in a space.
+ *   - `idToken` is the Firebase re-authentication for a linked account, bounded
+ *     like every other ID token in this file.
+ *
+ * NO IDENTITY FIELD IS READ. There is no `userId`, `businessId`, `role` or
+ * `firebaseUid` in the returned object, so a body carrying one cannot steer the
+ * operation: the account is `req.user.id`, and the only uid involved comes from the
+ * verified token inside the service.
+ */
+export function validateAccountDeletion(body: Body) {
+  const problems = [];
+
+  const confirmation = requiredString(body?.confirmation, 'confirmation', 32);
+  problems.push(...confirmation.problems);
+  // THE WORD IS CHECKED HERE, not only in the service, so the refusal is a FIELD error
+  // under the input the person is editing. The service checks it again — a direct caller
+  // must be refused too — but via HTTP this is the answer that reaches the screen.
+  if (confirmation.value !== undefined && confirmation.value !== DELETE_CONFIRMATION_PHRASE) {
+    problems.push({
+      field: 'confirmation',
+      message: `Type ${DELETE_CONFIRMATION_PHRASE} to confirm`,
+    });
+  }
+
+  const rawPassword = body?.currentPassword;
+  if (rawPassword !== undefined && rawPassword !== null) {
+    if (typeof rawPassword !== 'string') {
+      problems.push({ field: 'currentPassword', message: 'currentPassword must be a string' });
+    } else if (rawPassword.length > 200) {
+      problems.push({
+        field: 'currentPassword',
+        message: 'currentPassword must be at most 200 characters',
+      });
+    }
+  }
+
+  const idToken = optionalString(body?.idToken, 'idToken', MAX_ID_TOKEN);
+  problems.push(...idToken.problems);
+
+  return {
+    problems,
+    confirmation: confirmation.value,
+    currentPassword: typeof rawPassword === 'string' ? rawPassword : undefined,
+    idToken: idToken.value,
+  };
 }
 
 const ME_NAME_MAX = 100;

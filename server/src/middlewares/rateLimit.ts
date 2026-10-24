@@ -78,6 +78,8 @@ export type AuthRateConfig = {
   firebaseLinkMax: number;
   credentialsChangedWindowMs: number;
   credentialsChangedMax: number;
+  accountDeletionWindowMs: number;
+  accountDeletionMax: number;
 };
 
 function positiveInt(raw: string | undefined, fallback: number): number {
@@ -231,6 +233,17 @@ export function authRateConfig(overrides: Partial<AuthRateConfig> = {}): AuthRat
       15 * 60 * 1000
     ),
     credentialsChangedMax: positiveInt(process.env.AUTH_CREDENTIALS_CHANGED_RATE_LIMIT_MAX, 20),
+    // Account deletion is irreversible and a person performs it ONCE, so the budget
+    // is deliberately tiny. It is not a brute-force surface like change-password —
+    // the credential is verified either by bcrypt against the stored hash or by a
+    // verified Firebase token — but every accepted request deletes a Firebase
+    // identity and a set of records. Five per hour per account leaves room for a
+    // mistyped confirmation and a retry after a transient failure, and nothing more.
+    accountDeletionWindowMs: positiveInt(
+      process.env.AUTH_ACCOUNT_DELETION_RATE_LIMIT_WINDOW_MS,
+      60 * 60 * 1000
+    ),
+    accountDeletionMax: positiveInt(process.env.AUTH_ACCOUNT_DELETION_RATE_LIMIT_MAX, 5),
     ...overrides,
   };
 }
@@ -673,6 +686,10 @@ const FIREBASE_LINK_RATE_LIMITED = 'FIREBASE_LINK_RATE_LIMITED';
 const FIREBASE_LINK_RATE_LIMITED_MESSAGE =
   'Too many attempts to connect this sign-in. Please wait a moment and try again.';
 
+const ACCOUNT_DELETION_RATE_LIMITED = 'ACCOUNT_DELETION_RATE_LIMITED';
+const ACCOUNT_DELETION_RATE_LIMITED_MESSAGE =
+  'Too many account deletion attempts. Please wait a moment and try again.';
+
 const CREDENTIALS_CHANGED_RATE_LIMITED = 'CREDENTIALS_CHANGED_RATE_LIMITED';
 const CREDENTIALS_CHANGED_RATE_LIMITED_MESSAGE =
   'Too many attempts to record this credential change. Please wait a moment and try again.';
@@ -786,9 +803,28 @@ export function createCredentialsChangedLimiter(overrides: Partial<AuthRateConfi
   });
 }
 
+/**
+ * Account-deletion limiter — per account.
+ *
+ * Mounted AFTER `requireAuth`, so an anonymous caller is refused with 401 and never
+ * charged a bucket it has no identity to own. Keyed on the account for the same
+ * reason the credential-change limiter is: rotating addresses must not buy a fresh
+ * budget for the same identity.
+ */
+export function createAccountDeletionLimiter(overrides: Partial<AuthRateConfig> = {}) {
+  const { accountDeletionWindowMs, accountDeletionMax } = authRateConfig(overrides);
+  return rateLimit({
+    windowMs: accountDeletionWindowMs,
+    limit: accountDeletionMax,
+    keyGenerator: authenticatedAccountKey,
+    ...limitResponse(ACCOUNT_DELETION_RATE_LIMITED, ACCOUNT_DELETION_RATE_LIMITED_MESSAGE),
+  });
+}
+
 export default {
   authRateConfig,
   createChangePasswordLimiter,
+  createAccountDeletionLimiter,
   createChangePasswordIpLimiter,
   createFirebaseLinkLimiter,
   createCredentialsChangedLimiter,

@@ -168,16 +168,48 @@ unitSuite('Phase A (F-1) — the Firebase credential authority (declaration guar
   });
 
   describe('no reachable path can clear firebaseUid', () => {
-    it('★ no $unset anywhere under src/ names firebaseUid', () => {
-      // The unlink was the only $unset in the codebase; this is the guard that keeps one
-      // from coming back the quiet way, as a field added to some other update.
+    /**
+     * The ONE reviewed exception: account deletion.
+     *
+     * The unlink capability was removed because a live account must not be able to
+     * detach its identity. DELETING the account is the opposite situation — the account
+     * ceases to exist, so its identity linkage must not survive it — and the tombstone
+     * cannot be reversed because `DELETED` is terminal and `requireAuth` refuses any
+     * status but ACTIVE. The exception is allowed by NAME rather than by pattern, so a
+     * second file cannot inherit it.
+     */
+    const DELETION_TOMBSTONE = 'services/accountDeletion.service.ts';
+
+    it('★ no $unset anywhere under src/ names firebaseUid, except the deletion tombstone', () => {
+      // This is the guard that keeps the removed unlink from coming back the quiet way,
+      // as a field added to some other update.
       const offenders = SOURCES.flatMap(({ rel, code }) =>
         updateBlocks(code, '$unset')
           .filter((block) => block.includes('firebaseUid'))
-          .map((block) => rel + ': ' + block.slice(0, 120))
+          .map((block) => ({ rel, block }))
+          .filter(({ rel }) => rel !== DELETION_TOMBSTONE)
+          .map(({ rel, block }) => rel + ': ' + block.slice(0, 120))
       );
 
       assert.deepEqual(offenders, []);
+    });
+
+    it('★ the exception is the deletion tombstone, which also removes the credential and is terminal', () => {
+      const file = SOURCES.find(({ rel }) => rel === DELETION_TOMBSTONE);
+      assert.ok(file, 'the deletion service must exist for its exception to be meaningful');
+
+      const unsets = updateBlocks(file.code, '$unset');
+      assert.equal(unsets.length, 1, 'the tombstone must be the only $unset in that file');
+      assert.match(unsets[0], /firebaseUid/, 'the identity link must be unset');
+      assert.match(unsets[0], /passwordHash/, 'the credential must be unset too');
+
+      // The status is what makes it irreversible: no route can set DELETED back to
+      // ACTIVE, because the assignable statuses are exactly the two below, so the
+      // cleared link cannot be re-used by the same account.
+      assert.match(file.code, /status: 'DELETED'/);
+      const validator = SOURCES.find(({ rel }) => rel === 'utils/validate.ts');
+      assert.ok(validator, 'the status vocabulary lives in utils/validate.ts');
+      assert.match(validator.code, /USER_STATUSES = Object\.freeze\(\['ACTIVE', 'DISABLED'\]\)/);
     });
 
     it('★ exactly one $set names firebaseUid, and it ATTACHES a verified identity', () => {

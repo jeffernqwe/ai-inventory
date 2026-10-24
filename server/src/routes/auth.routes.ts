@@ -1,6 +1,6 @@
 import { Router } from 'express';
 
-import { register, login, me, changePassword, updateMe, logout, listSessions, revokeSession } from '../controllers/auth.controller.ts';
+import { register, login, me, changePassword, updateMe, logout, listSessions, revokeSession, deleteMe } from '../controllers/auth.controller.ts';
 import { forgotPassword, resetPassword as resetPasswordHandler } from '../controllers/passwordReset.controller.ts';
 import {
   passwordResetCodeRequest,
@@ -26,6 +26,7 @@ import {
   createChangePasswordIpLimiter,
   createFirebaseLinkLimiter,
   createCredentialsChangedLimiter,
+  createAccountDeletionLimiter,
   resetLoginAccountBucketOnSuccess,
 } from '../middlewares/rateLimit.ts';
 import type { AuthRateConfig } from '../middlewares/rateLimit.ts';
@@ -168,6 +169,20 @@ export function createAuthRouter({ limits }: AuthRouterOptions = {}) {
   router.get('/me', requireAuth, me);
   // Phase 15: self-service account security + profile.
   router.patch('/me', requireAuth, updateMe);
+  // Google Play account-deletion requirement: DELETE /api/auth/me — AUTHENTICATED,
+  // no permission, because the account is `req.user.id` and there is no id in the
+  // request that could aim it anywhere else.
+  //
+  // LIMITED per account, and mounted `requireAuth, limiter, controller` for the
+  // reason the change-password route is: an anonymous caller is refused with 401
+  // and never charged a bucket it has no identity to own. Five attempts per hour is
+  // enough for a mistyped confirmation and a retry after a transient Firebase
+  // failure, and far below what would make an irreversible operation worth fuzzing.
+  //
+  // The re-authentication credential — `currentPassword` or `idToken` — travels in
+  // the POST-style body of this DELETE, never the query string, so it cannot reach
+  // the access log (httpLogger records req.path only) or a Referer header.
+  router.delete('/me', requireAuth, createAccountDeletionLimiter(limits), deleteMe);
   // 2026-10-23 security audit — THIS ROUTE IS LIMITED, on two stacked buckets, and the
   // ordering is requireAuth -> limiter -> controller so an anonymous caller is refused
   // with 401 and never charged a bucket it has no identity to own.

@@ -42,6 +42,7 @@ or higher, so this build meets the current requirement rather than needing an ex
 | Category | Business |
 | Contact email | the owner's Play account email |
 | Privacy policy URL | `<server>/privacy` — implemented, **live only after the next server deploy**; see §6.1 |
+| Account deletion URL | `<server>/account-deletion` — implemented, **live only after the next server deploy**; see §6.2 |
 
 **Full description (draft, 4,000 max).** Adjust the tone, keep the facts:
 
@@ -77,6 +78,7 @@ or higher, so this build meets the current requirement rather than needing an ex
 | Section | Answer |
 |---|---|
 | **Privacy policy** | `<server>/privacy` — must match what §4 says is collected; live after the next deploy |
+| **Account deletion** | in-app **Profile → Delete account**, and `<server>/account-deletion` for the Data safety form |
 | **App access** | All functionality requires sign-in → provide a **review account** and instructions (§7) |
 | **Ads** | No |
 | **Content rating** | Questionnaire: no violence, sexuality, gambling, drugs, profanity, or user-to-user communication. Expect "Everyone" / PEGI 3 |
@@ -110,7 +112,7 @@ Read from the code paths, not the marketing copy:
   Brevo (transactional email delivery), OpenRouter (the assistant's question and the inventory data
   it reads). The privacy policy must name them.
 - **Encrypted in transit:** yes (HTTPS only; the app refuses cleartext in release).
-- **Data deletion:** **blocker** — see §6.
+- **Data deletion:** in-app flow and public page both implemented — see §6.2.
 
 ---
 
@@ -137,26 +139,31 @@ it, the upload came from a build older than that change.
 
 ## 6. The two blockers, and where each stands
 
-### 6.1 Privacy policy — page built, not yet live
+Both are now **implemented in the code and covered by tests**. What remains for each is a deploy and a
+console entry, and — for deletion — a device run. Neither is a code gap any more.
 
-`GET /privacy` now exists in the server (`server/src/pages/privacyPolicy.ts`), outside `/api`, and
-covers what §4 lists: the processors by name (Firebase, Brevo, OpenRouter, MongoDB Atlas, Render),
-what is not collected, retention, security, 18+, and how to request deletion. It is served from the
-same place as the code that creates the obligation, so it cannot drift into a separate document.
+### 6.1 Privacy policy — implemented, awaiting deploy
 
-**Still to do, and it is not code:**
+`GET /privacy` exists in the server (`server/src/pages/privacyPolicy.ts`), outside `/api`, and covers
+what §4 lists: the processors by name (Firebase, Brevo, OpenRouter, MongoDB Atlas, Render), what is not
+collected, the camera's barcode-only use, retention, security, 18+, and **how a person deletes their
+account and what happens to their data**. It is served from the same place as the code that creates
+the obligation, so it cannot drift into a separate document.
+
+**Still to do, and none of it is code:**
 
 1. **Deploy the server** — until then the URL answers 404 and the listing cannot use it.
-2. **Confirm the contact address** in the page (it is the owner's, in one constant).
+2. **Confirm the contact address** in the page (`CONTACT_EMAIL`, one constant, also used by the
+   deletion page).
 3. Decide whether to add a **legal entity / jurisdiction** line. The draft deliberately claims
    neither; inventing one would be worse than omitting it.
 4. Paste `https://ai-inventory-l1mi.onrender.com/privacy` into the console and check it in a
    **private browser window** (signed out), because that is how a reviewer opens it.
 
 The page and its guards: `server/src/pages/privacyPolicy.ts`, `server/test/PRIVACY-page.test.mjs`;
-the change record is roadmap §27EV.
+the change record is roadmap §27EV (privacy) and §27EW (deletion).
 
-### 6.2 No way to delete an account
+### 6.2 Account deletion — implemented, awaiting deploy and a device run
 
 Google requires apps that let people create an account to offer **both**:
 
@@ -166,19 +173,39 @@ Google requires apps that let people create an account to offer **both**:
 Sources: [Play's account-deletion policy](https://support.google.com/googleplay/android-developer/answer/13327111),
 [the design guidance](https://android-developers.googleblog.com/2024/03/designing-your-account-deletion-experience-google-play.html).
 
-Inventory AI has neither. The decision that comes first is **what deletion means for a tenant**:
+**Both halves now exist.**
 
-- **Recommended for V1:** delete the *person* — Firebase identity, sessions, verification and reset
-  challenges, AI conversations they own, and their `User` row — and **refuse** the deletion of the
-  last `OWNER` of a business until ownership is transferred (or the business itself is deleted).
-  Deleting a business is a separate, confirm-by-typing action, because it destroys inventory
-  history that other people rely on.
-- Alternative: make every deletion an email request to the owner. That satisfies the *web* half but
-  not the in-app requirement.
+- **In the app:** Profile → **Delete account** (`mobile/app/(app)/delete-account.tsx`). It states what
+  is deleted and what stays, requires the word `DELETE` and a re-authentication credential (a
+  Firebase ID token for a linked account, the current password for a legacy one), then signs the
+  person out.
+- **On the web:** `GET /account-deletion` (`server/src/pages/accountDeletionPage.ts`), outside `/api`,
+  public and unauthenticated so somebody who cannot sign in can still use it. Paste
+  `https://ai-inventory-l1mi.onrender.com/account-deletion` into the Data safety form.
+- **On the server:** `DELETE /api/auth/me` (`server/src/services/accountDeletion.service.ts`). The
+  account is always `req.user.id` — no id in the request can aim it elsewhere — and the operation is
+  a **tombstone**, not a hard delete:
 
-Either way the work is: one server route with re-authentication, one mobile screen, a public
-instructions page for the URL, and an audit entry. It is a phase-sized change, not a patch, and it
-should not ship without its own tests.
+  | Removed | Kept |
+  | --- | --- |
+  | name, real email address, password hash, Firebase identity (deleted at the provider), all sessions, reset + verification records, AI conversations and their messages | the business's stock levels, movements, purchase orders and audit trail, with the person's `userId` set to `null`; the `User` row survives as an anonymous placeholder |
+
+  The last active `OWNER` of a business is refused with `409 LAST_OWNER_TRANSFER_REQUIRED` until
+  another owner exists; that is the one case where deletion cannot complete on its own. A repeat
+  request converges (`changed: false`) instead of repeating the destructive work.
+
+**Still to do:**
+
+1. **Deploy** the server so both URLs are live.
+2. Open both in a **private window** and confirm they render signed out.
+3. **Device run the in-app flow**: create a throwaway account, delete it, confirm the screen returns
+   to Login, the old password is refused, and the tombstone is anonymized in the database. A
+   disposable account is required — this is the one flow whose test destroys what it touches.
+4. Fill in Data safety with both URLs and the deletion answer, and keep the answer consistent with
+   what §6.2's table says is kept.
+
+Implementation record: roadmap §27EW; tests `server/test/ACCOUNT-DELETION.test.mjs` (server) and
+`mobile/__tests__/account-deletion.test.tsx` (screen).
 
 ---
 

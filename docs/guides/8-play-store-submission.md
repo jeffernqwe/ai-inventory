@@ -107,7 +107,7 @@ everything it is shown. Evidence and raw output:
 | Contact email | the owner's Play account email |
 | Privacy policy URL | `https://ai-inventory-l1mi.onrender.com/privacy` — **live and measured**; see §6.1 |
 | Account deletion URL | `https://ai-inventory-l1mi.onrender.com/account-deletion` — **live and measured**; see §6.2 |
-| Terms of use URL | `https://ai-inventory-l1mi.onrender.com/terms` — **ships with the next server deploy**; there is no console field for it, so it is linked from the privacy policy; see §6.3 |
+| Terms of use URL | `https://ai-inventory-l1mi.onrender.com/terms` — **live and measured** (2026-10-25); there is no console field for it, so it is linked from the privacy policy; see §6.3 |
 
 **Full description (draft, 4,000 max).** Adjust the tone, keep the facts:
 
@@ -249,9 +249,13 @@ business is deleted with their account**, and **no consumer right is limited** b
 paragraph. It names the operator, uses the same contact address as the other two pages, and carries no
 placeholder.
 
-**To do once it is deployed:** open `https://ai-inventory-l1mi.onrender.com/terms` in a private
-window, and confirm the two links on it resolve (`/privacy`, `/account-deletion`). Until then the URL
-is **not live** — it is code in the repository, so do not put it on the store listing yet.
+**Measured live (2026-10-25):** `GET https://ai-inventory-l1mi.onrender.com/terms` answers **200**
+with `Cache-Control: no-store`, `Referrer-Policy: no-referrer`, `nosniff` and a CSP carrying the
+computed hash of its inline stylesheet; both links on it resolve to **200** pages, and the body
+contains no placeholder. The in-app *Terms of use* button was then opened **on the phone** and the
+page rendered in Chrome — see the evidence run
+[`2026-10-25-invitations`](../evidence/device-runs/2026-10-25-invitations/README.md). The URL can be
+quoted wherever a terms URL is wanted.
 
 The page and its guards: `server/src/pages/termsOfUse.ts`, `server/test/TERMS-page.test.mjs`, and
 `mobile/__tests__/legal-pages-in-app.test.tsx` for the in-app entry point; the change record is

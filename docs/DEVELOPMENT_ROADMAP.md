@@ -20130,7 +20130,9 @@ legal-page increment.
 `node --test test/ACCOUNT-DELETION.test.mjs` with `TEST_MODE=db` **13 pass / 0 fail / 1 skipped** over the
 real database, which includes the new audit-metadata case; `tsc`, `eslint` and both module-graph checks
 clean. Mobile **95 suites / 1122 tests / 0 failures**, `tsc` and `eslint` clean. **Not verified:** the page
-is **not live** — it ships with the next server deploy, so the Play listing cannot point at `/terms` yet;
+is **not live** — it ships with the next server deploy, so the Play listing cannot point at `/terms` yet
+*(corrected 2026-10-25: it **is** live and measured, and the Legal card was opened on the phone —
+§27FC)*;
 **no device pass** was run for the Legal card (it is suite-proven, and it opens the same host the app
 already talks to); the full `test:db` mode was not re-run this pass, only the deletion suite it touches; and
 iOS remains unverified (no macOS).
@@ -20248,9 +20250,90 @@ reflected; `GET /api/auth/invitation` answers **404 `INVITATION_INVALID`** for a
 failures** — `mobile/__tests__/invitations.test.tsx` adds **13 cases**, including the token reaching the
 real `AuthProvider`'s registration request and being forgotten once a session exists. **Not verified:**
 **no device pass** — the invited journey has not been walked on the phone (the link, the registration, a
-real inbox) and is suite-proven only; **the server change is not deployed at the time of writing**, so
-`/invite` and the three management routes are not live yet; a **real inbox** was not used (the suite
+real inbox) and is suite-proven only *(corrected 2026-10-25: the journey **was** walked on the phone and
+this deployed — §27FC)*; **the server change is not deployed at the time of writing**, so
+`/invite` and the three management routes are not live yet *(corrected 2026-10-25: deployed — §27FC)*; a **real inbox** was not used (the suite
 reads the token out of the recorded message); and iOS remains unverified (no macOS).
+
+---
+
+# 27FC. The invitation flow, on production and on the phone (2026-10-25)
+
+**Deployment, measurement and one dependency decision — no application behaviour was changed after
+§27FA/§27FB; the only code-level change in this pass is a lockfile bump.** §27FA shipped the terms page
+and found the audit defect; §27FB shipped invitations. Both were verified against a local boot and a
+test database, and both were explicit that nothing was live and nothing had been walked on a handset.
+This entry is that gap closed, with the limits that survive it stated at the end.
+
+**1. Deployed, and the deploy is what proved it.** The tree was committed as `33bdd54` (50 files) and
+pushed to `main`; Render deploys that branch on commit with `rootDir: server`. Two routes that did not
+exist before the push answer on the live host — `GET /terms` **200** and `GET /invite` **200** for a
+well-formed token — so the deploy is evidenced by behaviour rather than by a green build log. The full
+live surface was then read over HTTPS: `/terms` carries `Cache-Control: no-store`,
+`Referrer-Policy: no-referrer`, `nosniff` and a CSP with the **computed** `sha256-…` of its inline
+stylesheet; `/privacy` and `/account-deletion` each link to it; `/invite` answers **400** for a missing
+or malformed token and forwards a well-formed one to the constant `inventoryai://invite?token=…`;
+`GET /api/auth/invitation` answers a real pending row with exactly `email`, `role`, `businessName`,
+`expiresAt`; and `GET /api/invitations` answers **401 `AUTH_REQUIRED`** unauthenticated.
+
+**2. Delivered to the installed app over the air, not by rebuilding it.** The phone's build is the
+production-profile APK from the 2026-10-24 rehearsal (`versionCode 1`, runtime `1.0.0`, channel
+`production`). A JavaScript-only publish to that channel and runtime — group `936e1e55-…`, from
+`33bdd54` — put the new screens on the handset on the next cold launch; the run proves which bytes
+were loaded by opening a route that exists only in this commit. **No APK was built, downloaded or
+installed for this pass**, which is the OTA claim §27EP made now being used for a feature rather than
+for a fix.
+
+**3. The invited journey, measured end to end against production.** A throwaway address with no inbox
+(`invite.probe.20261025@gmail.com`) was invited into the disposable demo tenant as **STAFF**; the token
+and the AUTH-04 code were minted for the run, because the address cannot receive mail (before using the
+laptop's pepper to read a code digest, it was **proved** equal to production's by matching a real
+reset-code challenge by exhaustive comparison). On the phone: the `inventoryai://invite` deep link
+opened the invitation screen naming the address, the business and **Staff**; *Create your account*
+opened the **invited** registration shape — no business-name field, the address prefilled and locked,
+the person choosing their own password; six digits auto-verified, and the app landed on **the demo
+tenant's own inventory** rather than a new workspace. In the production database afterwards: the user's
+`businessId` is the **inviting** tenant, role `STAFF`, `emailVerified` true, **no `passwordHash`**, the
+business count unchanged at 5 (4 existing + the demo tenant), the invitation `ACCEPTED` with
+`acceptedBy`/`acceptedAt`, and one `INVITATION_ACCEPTED` audit row whose metadata is `{ role: 'STAFF' }`
+and carries **no address**. Evidence, frames and the full measurement table:
+`docs/evidence/device-runs/2026-10-25-invitations/`.
+
+**4. The same account then deleted itself, and the business survived.** Profile → *Delete account* said
+*We will confirm this with your sign-in. You do not need to type your password* — the Firebase-only
+path — and after the type-`DELETE` confirmation the app returned to Login. Measured: the row is the
+tombstone (`Deleted user`, `deleted+<id>@deleted.invalid`, `firebaseUid` gone), **0** invitations for
+that address, **0** sessions, `ACCOUNT_DELETED` with `userId: null` and metadata `{ role: 'STAFF' }`,
+Firebase `getUserByEmail` → **`auth/user-not-found`**, and the demo business still present with its one
+owner — the §27FA fate rule (a non-owner's departure never closes a tenant) holding on the live path.
+
+**5. Cleanup, and production restored.** The demo tenant was removed with `cleanup:demo-tenant`
+(**0 leftovers** over every collection carrying the `businessId`), and a final read of the production
+database shows **4 users / 4 businesses / 0 invitations / 0 probe addresses / 0 demo businesses** — the
+exact shape before the run. The forward-only records that remain are the `ACCOUNT_DELETED` and
+`INVITATION_ACCEPTED` rows the product deliberately keeps, and those were removed with the tenant they
+belonged to.
+
+**6. The dependency audit, decided rather than deferred silently.** `npm audit` on the server reported one
+**high** and one **moderate** advisory: body-parser accepted trailing bytes after a compressed request
+body (a denial of service any caller could start) and `ip-address` could stall on one long string. Both
+had a compatible release, so they were raised in the **lockfile only** — body-parser **2.4.0**,
+`ip-address` **10.7.4** — with no dependency added, removed or re-declared, and the suite unchanged at
+**1359 tests / 1303 pass / 0 fail**. The mobile package still reports **six high** advisories, all inside
+Expo's own build tooling (`@expo/cli`, `expo-updates` code-signing dependencies and a bundled `zod`);
+their only advertised fix is installing an older Expo, which would undo SDK 58, so they are **recorded
+for the upgrade train and deliberately not forced**.
+
+**Verification.** Server `test:unit` **1359 / 1303 pass / 0 fail / 56 skipped**, `test:db` **909 / 814
+pass / 0 fail / 95 skipped**, `tsc`, `eslint`, both module-graph checks and `npm audit` (0
+vulnerabilities) clean; mobile **96 suites / 1138 tests / 0 failures**, `tsc` and `eslint` clean. Live
+checks and the device run are tabulated in the evidence README.
+
+**Not verified:** **Play App Signing and an internal-testing install** — this is a production-profile APK,
+not a Play-signed build, so the store path is still the open gate; **an admin sending the invitation from
+the Users screen on a device**, and **a real inbox** receiving the mail (the token was minted, not
+mailed); **Google Sign-In converging on an invitation** (suite-covered only); **iOS** (no macOS); and the
+three residual V1 security items recorded in checklist §52 are unchanged by this pass.
 
 ---
 

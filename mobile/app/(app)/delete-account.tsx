@@ -116,10 +116,17 @@ export default function DeleteAccountScreen() {
 
           <Text style={styles.heading}>What stays</Text>
           <Text style={styles.body}>
-            Your business&apos;s stock levels, stock movements, purchase orders and audit trail stay
-            with the business, because deleting them would make its inventory history wrong for
-            everyone else. They no longer identify you. If you are the only owner, the app will ask
-            you to make another member an owner first.
+            While other people still use your business, its stock levels, stock movements,
+            purchase orders and audit trail stay with it, because deleting them would make its
+            inventory history wrong for everyone else. They no longer identify you. If somebody
+            else remains but is not an owner, the app asks you to make them an owner first.
+          </Text>
+
+          <Text style={styles.heading}>If you are the only member</Text>
+          <Text style={styles.body}>
+            Closing the account of a business&apos;s only member closes the business as well: its
+            products, stock, movements, purchase orders and history are deleted with it. There
+            would be nobody left to own them.
           </Text>
         </Card>
 

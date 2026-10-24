@@ -11,11 +11,18 @@
  *      wrong password or a mismatched Firebase identity is refused without touching a
  *      single record, and none of those refusals is a 401 — a typo must not sign the
  *      person out.
- *   3. A BUSINESS KEEPS AN OWNER. The last active OWNER is refused until another owner
- *      exists, because a business with no owner can never be administered again.
- *   4. DELETION IS A TOMBSTONE, NOT A HARD DELETE. Name, email, password, Firebase link,
- *      sessions, reset/verification records and assistant conversations are erased; the
- *      business's own records and its audit trail survive with the identity anonymized.
+ *   3. A BUSINESS KEEPS AN OWNER WHILE IT HAS MEMBERS. An OWNER is refused (409) while
+ *      another active member remains, because a business with no owner can never be
+ *      administered again; a second OWNER unlocks the account-only deletion.
+ *   3a. A BUSINESS WITH NOBODY ELSE LEFT IS CLOSED WITH THE ACCOUNT. Keeping it would
+ *      retain personal data for nobody's benefit — and would leave a sole proprietor
+ *      permanently unable to close their account, which is what Google Play requires.
+ *      That branch removes the tenant through the SAME definition the cleanup tooling
+ *      uses, so the two can never drift apart.
+ *   4. AN ORDINARY DELETION IS A TOMBSTONE, NOT A HARD DELETE. Name, email, password,
+ *      Firebase link, sessions, reset/verification records and assistant conversations
+ *      are erased; the business's own records and its audit trail survive with the
+ *      identity anonymized.
  *   5. THE FIREBASE IDENTITY IS DELETED TOO, so a deleted account is not still a usable
  *      identity at the provider.
  *   6. IT IS IDEMPOTENT. A repeat call reports success without repeating the destructive
@@ -187,18 +194,77 @@ dbSuite('account deletion — over a real database', dbOk, () => {
     assert.equal((await User.findById(target.userId)).status, 'ACTIVE');
   });
 
-  it('refuses to delete a business’s only active owner', async () => {
+  it('★ closes the whole business when its only member deletes their account', async () => {
     const target = await freshOwner();
+    const bystander = await freshOwner();
+
+    // Evidence that the tenant's own records are reached by the teardown: a governance
+    // row, the assistant's history (a message is only reachable through its
+    // conversation) and a second member's session are all created before the call.
+    await AuditLog.create({
+      businessId: target.businessId,
+      userId: target.userId,
+      action: 'PRODUCT_CREATED',
+      entityType: 'PRODUCT',
+      entityId: new mongoose.Types.ObjectId().toString(),
+      metadata: {},
+    });
+    const conversation = await AIConversation.create({
+      businessId: target.businessId,
+      userId: target.userId,
+      title: 'History that belongs to the tenant',
+    });
+    await AIMessage.create({
+      conversationId: conversation._id,
+      role: 'USER',
+      content: 'How many do I have?',
+    });
+    const bystanderSession = await issueSessionToken(bystander.userId, { deviceLabel: 'test' });
+
+    const res = await api('DELETE', '/api/auth/me', {
+      token: target.token,
+      body: { confirmation: 'DELETE', currentPassword: 'Password123!' },
+    });
+    assert.equal(res.status, 200, JSON.stringify(res.json));
+    assert.equal(res.json.deleted, true);
+
+    // The tenant is GONE — not tombstoned, because there is nobody left to own it.
+    assert.equal(await Business.countDocuments({ _id: target.businessId }), 0);
+    assert.equal(await User.countDocuments({ businessId: target.businessId }), 0);
+    assert.equal(await AuditLog.countDocuments({ businessId: target.businessId }), 0);
+    assert.equal(await AIConversation.countDocuments({ businessId: target.businessId }), 0);
+    assert.equal(await AIMessage.countDocuments({ conversationId: conversation._id }), 0);
+    assert.equal(await Session.countDocuments({ userId: target.userId }), 0);
+
+    // The caller's token grants nothing at all now: its account row no longer exists.
+    const me = await api('GET', '/api/auth/me', { token: target.token });
+    assert.equal(me.status, 401);
+
+    // AND THE OTHER TENANT IS UNTOUCHED — the teardown is anchored on one businessId.
+    assert.ok(await Business.findById(bystander.businessId));
+    const bystanderUser = await User.findById(bystander.userId).lean();
+    assert.equal(bystanderUser.status, 'ACTIVE');
+    assert.equal((await api('GET', '/api/auth/me', { token: bystanderSession })).status, 200);
+  });
+
+  it('refuses while another member remains, and a second owner unlocks the account-only path', async () => {
+    const target = await freshOwner();
+    const member = await createMember(target, 'STAFF');
+
     const res = await api('DELETE', '/api/auth/me', {
       token: target.token,
       body: { confirmation: 'DELETE', currentPassword: 'Password123!' },
     });
 
+    // Somebody else still uses this business, and they are not an owner: deleting this
+    // person would leave it ownerless, which is the one refusal that remains.
     assert.equal(res.status, 409);
     assert.equal(res.json.code, LAST_OWNER_TRANSFER_REQUIRED);
     assert.equal((await User.findById(target.userId)).status, 'ACTIVE');
+    assert.ok(await Business.findById(target.businessId));
 
-    // A SECOND ACTIVE OWNER UNLOCKS IT, which is the whole point of the rule.
+    // A SECOND ACTIVE OWNER UNLOCKS IT, which is the whole point of the rule, and the
+    // business and its staff survive this time.
     const coOwner = await User.create({
       businessId: target.businessId,
       name: uniqueName('CoOwner'),
@@ -215,6 +281,12 @@ dbSuite('account deletion — over a real database', dbOk, () => {
     });
     assert.equal(retry.status, 200, JSON.stringify(retry.json));
     assert.equal(retry.json.deleted, true);
+
+    assert.ok(await Business.findById(target.businessId), 'the business is NOT closed');
+    assert.equal((await User.findById(coOwner._id)).status, 'ACTIVE');
+    assert.equal((await User.findById(member.id)).status, 'ACTIVE');
+    const tombstone = await User.findById(target.userId).lean();
+    assert.equal(tombstone.status, 'DELETED');
   });
 
   it('★ deletes an account as a tombstone, erases its identity and keeps an anonymous trail', async () => {

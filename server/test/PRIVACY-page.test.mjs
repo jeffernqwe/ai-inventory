@@ -177,8 +177,13 @@ unitSuite('privacy policy page', () => {
     assert.match(html, /open <strong>Profile<\/strong>/);
     assert.match(html, /<strong>Delete account<\/strong>/);
     assert.match(html, /<code>DELETE<\/code>/);
-    // The last-owner rule, which is enforced server-side.
-    assert.match(html, /only owner of a business/);
+    // BOTH ownership outcomes, which are enforced server-side: another member remains and
+    // must be made an owner first, or the caller is the only member and the business is
+    // closed with the account (owner decision, 2026-10-24).
+    assert.match(html, /make another member an owner first/);
+    assert.match(html, /only member/);
+    assert.match(html, /closes the business\s*as well/);
+    assert.match(html, /business is deleted with your account/);
     // What is erased, and that the identity provider's copy goes too.
     assert.match(html, /Firebase Authentication identity itself\s*is deleted/);
     assert.match(html, /Every signed-in session on every device/);

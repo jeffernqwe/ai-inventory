@@ -142,7 +142,7 @@ it, the upload came from a build older than that change.
 Both are now **implemented in the code and covered by tests**. What remains for each is a deploy and a
 console entry, and — for deletion — a device run. Neither is a code gap any more.
 
-### 6.1 Privacy policy — implemented, awaiting deploy
+### 6.1 Privacy policy — live
 
 `GET /privacy` exists in the server (`server/src/pages/privacyPolicy.ts`), outside `/api`, and covers
 what §4 lists: the processors by name (Firebase, Brevo, OpenRouter, MongoDB Atlas, Render), what is not
@@ -150,20 +150,24 @@ collected, the camera's barcode-only use, retention, security, 18+, and **how a 
 account and what happens to their data**. It is served from the same place as the code that creates
 the obligation, so it cannot drift into a separate document.
 
+**Measured live (2026-10-24):** `GET https://ai-inventory-l1mi.onrender.com/privacy` answers **200
+text/html** with `default-src 'none'` plus the stylesheet's CSP hash, `no-store`, `no-referrer`,
+`frame-ancestors 'none'` and no `X-Powered-By`; `POST /privacy` is a 404. The page carries no script,
+so it renders the same signed out.
+
 **Still to do, and none of it is code:**
 
-1. **Deploy the server** — until then the URL answers 404 and the listing cannot use it.
-2. **Confirm the contact address** in the page (`CONTACT_EMAIL`, one constant, also used by the
+1. **Confirm the contact address** in the page (`CONTACT_EMAIL`, one constant, also used by the
    deletion page).
-3. Decide whether to add a **legal entity / jurisdiction** line. The draft deliberately claims
+2. Decide whether to add a **legal entity / jurisdiction** line. The draft deliberately claims
    neither; inventing one would be worse than omitting it.
-4. Paste `https://ai-inventory-l1mi.onrender.com/privacy` into the console and check it in a
+3. Paste `https://ai-inventory-l1mi.onrender.com/privacy` into the console and open it in a
    **private browser window** (signed out), because that is how a reviewer opens it.
 
 The page and its guards: `server/src/pages/privacyPolicy.ts`, `server/test/PRIVACY-page.test.mjs`;
 the change record is roadmap §27EV (privacy) and §27EW (deletion).
 
-### 6.2 Account deletion — implemented, awaiting deploy and a device run
+### 6.2 Account deletion — live, and measured on production
 
 Google requires apps that let people create an account to offer **both**:
 
@@ -190,21 +194,36 @@ Sources: [Play's account-deletion policy](https://support.google.com/googleplay/
   | --- | --- |
   | name, real email address, password hash, Firebase identity (deleted at the provider), all sessions, reset + verification records, AI conversations and their messages | the business's stock levels, movements, purchase orders and audit trail, with the person's `userId` set to `null`; the `User` row survives as an anonymous placeholder |
 
-  The last active `OWNER` of a business is refused with `409 LAST_OWNER_TRANSFER_REQUIRED` until
-  another owner exists; that is the one case where deletion cannot complete on its own. A repeat
-  request converges (`changed: false`) instead of repeating the destructive work.
+  Ownership, and therefore the kept-data table above, depends on **who is left**:
+
+  - **Somebody else still uses the business.** Its records stay (the table above). If the caller is
+    its only `OWNER`, the request is refused `409 LAST_OWNER_TRANSFER_REQUIRED` until another member
+    is made an owner.
+  - **Nobody else is left.** The account **and the whole business** are deleted — products, stock,
+    movements, purchase orders, suppliers, locations, audit trail and assistant history — because
+    there is nobody left to own the records or read them. The screen states this before the button.
+
+  A repeat request converges (`changed: false`) instead of repeating the destructive work.
+
+**Measured on production (2026-10-24) with a disposable tenant:** 12/12 checks — registered 201,
+signed in 200, STAFF created 201 and signed in 200, mistyped word 400, wrong password 400
+`INVALID_CURRENT_PASSWORD`, the session still 200 after both refusals, deletion 200
+`{deleted:true,changed:true}`, the dead token 403 `ACCOUNT_DISABLED`, the deleted login 401, the
+owner unaffected 200, and the deleted member absent from `GET /api/users` (0 rows). The probe tenants
+were then removed (leftovers **0**) and no real account was touched.
 
 **Still to do:**
 
-1. **Deploy** the server so both URLs are live.
-2. Open both in a **private window** and confirm they render signed out.
-3. **Device run the in-app flow**: create a throwaway account, delete it, confirm the screen returns
-   to Login, the old password is refused, and the tombstone is anonymized in the database. A
-   disposable account is required — this is the one flow whose test destroys what it touches.
-4. Fill in Data safety with both URLs and the deletion answer, and keep the answer consistent with
-   what §6.2's table says is kept.
+1. **Deploy** the sole-member change (it is committed, not yet live — until then production still
+   answers the 409 for a business's only member, and both public pages still carry the old wording).
+2. **Device run the in-app flow**: create a throwaway account, delete it, confirm the screen returns
+   to Login, the old password is refused, and the profile is gone. A disposable account is required —
+   this is the one flow whose test destroys what it touches.
+3. Fill in Data safety with both URLs and the deletion answer, keeping it consistent with the two
+   ownership cases above.
 
-Implementation record: roadmap §27EW; tests `server/test/ACCOUNT-DELETION.test.mjs` (server) and
+Implementation records: roadmap §27EW (deletion) and §27EX (the sole-member closure and the
+production run); tests `server/test/ACCOUNT-DELETION.test.mjs` (server) and
 `mobile/__tests__/account-deletion.test.tsx` (screen).
 
 ---

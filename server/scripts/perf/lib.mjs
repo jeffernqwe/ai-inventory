@@ -10,23 +10,9 @@
 // that acts when you read it is how a "cleanup" script seeds a database by
 // accident.
 
-import mongoose from 'mongoose';
 
 import { DATABASE_NAMES, classifyNodeEnv, isRecognisedNodeEnv } from '../../src/config/env.ts';
-import AIConversation from '../../src/models/aiConversation.model.ts';
-import AIMessage from '../../src/models/aiMessage.model.ts';
-import AuditLog from '../../src/models/auditLog.model.ts';
 import Business from '../../src/models/business.model.ts';
-import Category from '../../src/models/category.model.ts';
-import Inventory from '../../src/models/inventory.model.ts';
-import InventoryTransaction from '../../src/models/inventoryTransaction.model.ts';
-import Location from '../../src/models/location.model.ts';
-import PasswordResetChallenge from '../../src/models/passwordResetChallenge.model.ts';
-import PasswordResetToken from '../../src/models/passwordResetToken.model.ts';
-import Product from '../../src/models/product.model.ts';
-import PurchaseOrder from '../../src/models/purchaseOrder.model.ts';
-import Session from '../../src/models/session.model.ts';
-import Supplier from '../../src/models/supplier.model.ts';
 import User from '../../src/models/user.model.ts';
 
 /** The confirmation phrase both commands require in the environment. */
@@ -133,31 +119,21 @@ export function assertReadableTarget(
 }
 
 /**
- * Every DATA collection that belongs to a tenant, in the order they must be removed:
- * child rows before the rows they point at, so a partially-completed removal never
- * leaves inventory referencing a product that is already gone.
+ * The tenant teardown lives in application code, not only in this library.
  *
- * There is exactly ONE list. The performance teardown and the demo-data teardown
- * both read it, because a second copy is how a cleanup eventually deletes less than
- * the seed created — which is precisely what happened here: `suppliers` and
- * `purchase_orders` were missing from the original list, harmless only because the
- * performance seeder never wrote those two collections. The demo seeder DOES, so the
- * omission would have left orphaned rows behind on every reset.
+ * `clearTenantData` / `removeTenant` / `countTenantLeftovers` and the collection list
+ * moved to `src/services/tenantTeardown.service.ts` when account deletion needed the
+ * same definition: a business whose last member closes their account is removed with
+ * exactly the rows this tooling removes. They are re-exported here so every script
+ * keeps ONE import site and the project keeps ONE list — a second copy in the service
+ * is how a teardown eventually deletes less than a seed created.
  */
-export const TENANT_DATA_COLLECTIONS = [
-  ['inventory', Inventory],
-  ['inventory_transactions', InventoryTransaction],
-  ['purchase_orders', PurchaseOrder],
-  ['products', Product],
-  ['categories', Category],
-  ['locations', Location],
-  ['suppliers', Supplier],
-  // AI-40 (audit 2026-10-23) — governance rows carry `businessId` too, and the list was
-  // missing them: a tenant teardown left its audit trail behind while reporting a clean
-  // result. They are the tenant's own records (every caller of this module removes a
-  // seeded fixture), so a reset takes them and a removal takes them.
-  ['audit_logs', AuditLog],
-];
+export {
+  TENANT_DATA_COLLECTIONS,
+  clearTenantData,
+  countTenantLeftovers,
+  removeTenant,
+} from '../../src/services/tenantTeardown.service.ts';
 
 /** Every businessId that belongs to the seed tenant, by BOTH fingerprints. */
 export async function findSeedTenantIds() {
@@ -169,101 +145,3 @@ export async function findSeedTenantIds() {
   return [...ids];
 }
 
-/**
- * Delete every DATA document belonging to the given tenants, and NOTHING else.
- *
- * Every filter is `{ businessId: { $in: ids } }`, so no other tenant's data can be
- * reached from here even if this is called with a wrong id — a wrong id simply
- * matches nothing. The account rows (`users`, `businesses`) are deliberately NOT
- * touched here: a caller that means to remove a whole tenant says so by calling
- * `removeTenant`, and a caller that only wants the tenant's data reset (the demo
- * seeder) never risks an account's identity linkage as a side effect.
- */
-export async function clearTenantData(businessIds) {
-  const ids = businessIds.map((id) => new mongoose.Types.ObjectId(String(id)));
-  const filter = { businessId: { $in: ids } };
-  const counts = {};
-  let removed = 0;
-
-  // AI-40 (found 2026-10-23) — the assistant's history belongs to the tenant too, and it
-  // cannot be removed by the list below: a CONVERSATION carries `businessId`, but a
-  // MESSAGE carries only `conversationId`. A production demo teardown therefore printed
-  // "leftovers: 0 — verified over every tenant collection" while three conversations and
-  // eight messages from a device run stayed behind. Resolve the conversations first, then
-  // delete their messages, then the conversations — child before parent, like the list.
-  const conversationIds = await AIConversation.find(filter).distinct('_id');
-  const messages = await AIMessage.deleteMany({ conversationId: { $in: conversationIds } });
-  counts.ai_messages = messages.deletedCount ?? 0;
-  removed += counts.ai_messages;
-  const conversations = await AIConversation.deleteMany(filter);
-  counts.ai_conversations = conversations.deletedCount ?? 0;
-  removed += counts.ai_conversations;
-
-  for (const [name, model] of TENANT_DATA_COLLECTIONS) {
-    const res = await model.deleteMany(filter);
-    counts[name] = res.deletedCount ?? 0;
-    removed += counts[name];
-  }
-  return { removed, counts };
-}
-
-/**
- * Delete a WHOLE tenant: its data, then its users and the business row itself.
- *
- * Returns per-collection counts so a caller can prove the tenant is gone rather
- * than assume it.
- */
-export async function removeTenant(businessIds) {
-  const ids = businessIds.map((id) => new mongoose.Types.ObjectId(String(id)));
-  const filter = { businessId: { $in: ids } };
-
-  const { removed: dataRemoved, counts } = await clearTenantData(businessIds);
-  let removed = dataRemoved;
-
-  // AI-40 (audit 2026-10-23) — the account-scoped rows a tenant owns INDIRECTLY. Sessions,
-  // password-reset tokens and reset challenges carry only `userId`, so neither the
-  // collection list nor `countTenantLeftovers` can reach them by businessId, and deleting
-  // the users first would strand them as rows no query can ever tie to a tenant again.
-  // Resolve the ids while the users still exist, then remove the rows with their owner.
-  const userIds = await User.find(filter).distinct('_id');
-  const userFilter = { userId: { $in: userIds } };
-  for (const [name, model] of [
-    ['sessions', Session],
-    ['password_reset_tokens', PasswordResetToken],
-    ['password_reset_challenges', PasswordResetChallenge],
-  ]) {
-    const res = await model.deleteMany(userFilter);
-    counts[name] = res.deletedCount ?? 0;
-    removed += counts[name];
-  }
-
-  const users = await User.deleteMany(filter);
-  counts.users = users.deletedCount ?? 0;
-  removed += counts.users;
-
-  const businesses = await Business.deleteMany({ _id: { $in: ids } });
-  counts.businesses = businesses.deletedCount ?? 0;
-  removed += counts.businesses;
-  return { removed, counts };
-}
-
-/**
- * Count anything still carrying the given tenant ids — the verification half of a
- * removal, over the SAME collection list the removal uses, so a collection that is
- * deleted is necessarily also verified. Includes the account rows.
- */
-export async function countTenantLeftovers(businessIds) {
-  const ids = businessIds.map((id) => new mongoose.Types.ObjectId(String(id)));
-  const filter = { businessId: { $in: ids } };
-  let total = 0;
-  for (const [, model] of TENANT_DATA_COLLECTIONS) {
-    total += await model.countDocuments(filter);
-  }
-  // Same two-step as the removal, so a collection that is removed is necessarily also
-  // verified — including the messages, which are only reachable through their conversation.
-  const conversationIds = await AIConversation.find(filter).distinct('_id');
-  total += conversationIds.length;
-  total += await AIMessage.countDocuments({ conversationId: { $in: conversationIds } });
-  total += await User.countDocuments(filter);
-  return total;
-}

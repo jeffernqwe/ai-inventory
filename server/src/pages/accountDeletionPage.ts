@@ -11,8 +11,10 @@
  * WHAT IT MUST KEEP IN STEP WITH:
  *
  *   - `server/src/services/accountDeletion.service.ts` — the tombstone semantics, the
- *     re-authentication requirement and the last-owner rule stated below ARE that code.
- *     If the service changes what it erases or keeps, this page changes with it.
+ *     re-authentication requirement and BOTH ownership outcomes stated below ARE that
+ *     code: another member remains (they must be made an owner first), or the caller is
+ *     the only member and the business is closed with the account. If the service
+ *     changes what it erases or keeps, this page changes with it.
  *   - `server/src/pages/privacyPolicy.ts` — the contact address and the retention
  *     paragraph. `CONTACT_EMAIL` is imported rather than copied so the two cannot
  *     disagree.
@@ -137,15 +139,16 @@ holder can delete their own account. There are two ways to do it.</p>
 </ol>
 <p>The account is closed immediately. You are signed out and cannot sign in again.</p>
 
-<p class="note">If you are the only owner of a business, the app will ask you to make another
-member an owner first. A business must always have an owner, so this is the one case where deletion
-cannot complete on its own.</p>
+<p class="note">If other people still use your business and you are its only owner, the app will
+ask you to make another member an owner first — a business must always have an owner. If you are
+the business's only member, there is nobody to hand it to: closing your account closes the business
+as well, and its products, stock, purchase orders and history are deleted with it.</p>
 
 <h2>If you cannot sign in</h2>
 <p>Email <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a> from the address on the account and
 say that you want the account deleted. We will confirm the request with you and complete it. If
-your account is the only owner of a business, we will tell you what is needed before it can be
-closed.</p>
+other people still use your business and you are its only owner, we will tell you what is needed
+before the account can be closed.</p>
 
 <h2>What is deleted</h2>
 <ul>
@@ -158,10 +161,10 @@ closed.</p>
 </ul>
 
 <h2>What is kept, and why</h2>
-<p>The business's own records — products, stock levels, stock movements, suppliers, purchase orders
-and audit entries — belong to the business rather than to one person, and deleting them would
-falsify that business's inventory history for its remaining members. So they stay, with your
-personal details removed from them:</p>
+<p>While other people still use the business, its own records — products, stock levels, stock
+movements, suppliers, purchase orders and audit entries — belong to the business rather than to one
+person, and deleting them would falsify that business's inventory history for its remaining
+members. So they stay, with your personal details removed from them:</p>
 <ul>
   <li>Audit entries that recorded your actions are kept as a governance record of the business, but
   they no longer identify you.</li>
@@ -170,6 +173,10 @@ personal details removed from them:</p>
 </ul>
 <p>Nothing in that placeholder identifies you: it carries no name, no email address, no password,
 no Google sign-in link, and it cannot be signed into.</p>
+
+<p>None of that applies when you are the business's only member. There is then nobody left to own
+its records or to read them, so the business is deleted with your account — products, stock,
+movements, purchase orders, suppliers, locations, audit entries and assistant history.</p>
 
 <h2>More information</h2>
 <p>The <a href="/privacy">privacy policy</a> describes what the app collects, which services process

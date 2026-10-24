@@ -200,12 +200,15 @@ on the account and we will complete the deletion for you.</p>
 sign-in connection, your signed-in sessions, your password-reset and email-verification records, and
 your assistant conversations and their messages. The account is closed and cannot be signed into
 again. The Firebase Authentication identity behind it is deleted as well.</p>
-<p><strong>What remains, and why.</strong> Your business's own records — stock movements, purchase
-orders, stock levels, and audit entries — belong to the business and stay readable by its remaining
-members, because deleting them would falsify that business's inventory history. Audit entries that
-named you are kept but no longer identify you, and the account row itself is kept only as an
-anonymous placeholder that those records can point at. If you are the last owner of a business,
-the app asks you to make another member an owner first.</p>
+<p><strong>What remains, and why.</strong> While a business still has other members, its own
+records — stock movements, purchase orders, stock levels, and audit entries — belong to the
+business and stay readable by those members, because deleting them would falsify that business's
+inventory history. Audit entries that named you are kept but no longer identify you, and the
+account row itself is kept only as an anonymous placeholder that those records can point at. If
+other people still use your business and you are its only owner, the app asks you to make another
+member an owner first. If you are the business's only member, there is nobody left to own those
+records or to read them, so closing your account closes the business and its records are deleted
+with it.</p>
 
 <h2>Children</h2>
 <p>Inventory AI is a business tool and is not intended for anyone under 18. We do not knowingly

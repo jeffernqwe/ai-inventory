@@ -86,7 +86,10 @@ describe('delete account screen', () => {
     expect(screen.getByText(/permanently closes your account/i)).toBeTruthy();
     expect(screen.getByText(/What is deleted/i)).toBeTruthy();
     expect(screen.getByText(/What stays/i)).toBeTruthy();
-    expect(screen.getByText(/only owner/i)).toBeTruthy();
+    expect(screen.getByText('If you are the only member')).toBeTruthy();
+    // The consequence for a sole proprietor is stated BEFORE they commit: closing the
+    // account of a business's only member closes the business too.
+    expect(screen.getByText(/closes the business as well/i)).toBeTruthy();
     expect(screen.getByPlaceholderText('DELETE')).toBeTruthy();
   });
 
@@ -172,7 +175,7 @@ describe('delete account screen', () => {
       new ApiError(
         409,
         'LAST_OWNER_TRANSFER_REQUIRED',
-        'You are the only owner of this business. Make another member an owner before deleting your account.'
+        'Other people still use this business. Make another member an owner before deleting your account.'
       )
     );
     const screen = await renderScreen();
@@ -182,7 +185,7 @@ describe('delete account screen', () => {
     await fireEvent.press(screen.getByText('Delete my account'));
 
     await waitFor(() =>
-      expect(screen.getByText(/only owner of this business/i)).toBeTruthy()
+      expect(screen.getByText(/Other people still use this business/i)).toBeTruthy()
     );
     expect(signOut).not.toHaveBeenCalled();
     expect(router.replace).not.toHaveBeenCalled();

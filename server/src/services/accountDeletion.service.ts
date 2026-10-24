@@ -45,11 +45,24 @@
  * the AI message deletion is scoped by conversation ids that were themselves
  * selected by this user.
  *
- * THE LAST-OWNER RULE. A business must always have an active OWNER, so an OWNER who
- * is the only active one is refused (409 `LAST_OWNER_TRANSFER_REQUIRED`) and told to
- * transfer ownership first. Another OWNER existing is the only thing that unlocks
- * it. The count is scoped by `businessId` and `status: 'ACTIVE'`, so a tombstoned or
- * disabled second owner does not satisfy it.
+ * A BUSINESS WITH NOBODY ELSE LEFT IS CLOSED TOO (owner decision, 2026-10-24). The
+ * inventory history argument above is about OTHER PEOPLE: rows are kept because
+ * somebody else in the business still relies on them. When the caller is the only
+ * active member, there is nobody — so keeping the tenant would retain personal data
+ * for no one's benefit, and, worse, would leave a person permanently unable to close
+ * their account (there was no invitation or ownership-transfer path to satisfy a
+ * refusal). In that one case the whole tenant is removed with the account: products,
+ * stock, movements, purchase orders, suppliers, locations, categories, the audit
+ * trail, the assistant's history, every user row and the business row itself. THE
+ * LIST OF WHAT THAT MEANS IS NOT DEFINED HERE — `tenantTeardown.service` owns it, so
+ * the application and the cleanup tooling cannot drift apart.
+ *
+ * THE LAST-OWNER RULE, WHEN SOMEBODY REMAINS. If another active member exists, the
+ * business must keep an active OWNER, so an OWNER who is the only active one is
+ * refused (409 `LAST_OWNER_TRANSFER_REQUIRED`) and must transfer ownership first.
+ * Another active OWNER existing is what unlocks the account-only deletion in that
+ * case. Every count is scoped by `businessId` and `status: 'ACTIVE'`, so a tombstoned
+ * or disabled second owner does not satisfy it.
  *
  * IDEMPOTENCY. The tombstone update is CONDITIONAL on `status: 'ACTIVE'`; when it
  * matches nothing — a concurrent or repeated request — the destructive work is not
@@ -75,6 +88,7 @@ import AIMessage from '../models/aiMessage.model.ts';
 import { recordAudit } from './audit.service.ts';
 import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../constants/audit.ts';
 import { deleteFirebaseUser, verifyFirebaseIdToken } from './firebase/index.ts';
+import { removeTenant } from './tenantTeardown.service.ts';
 import type { FirebaseTokenError, FirebaseUnavailableError, FirebaseNotConfigured } from './firebase/index.ts';
 import { ApiError } from '../utils/ApiError.ts';
 import {
@@ -112,6 +126,11 @@ export interface DeleteAccountResult {
   changed: boolean;
   /** True when a Firebase identity was removed by this request. */
   firebaseIdentityDeleted: boolean;
+  /**
+   * True when the caller was the business's only active member and the whole tenant
+   * was removed with the account. False for an ordinary person-only deletion.
+   */
+  businessDeleted: boolean;
 }
 
 /**
@@ -181,34 +200,54 @@ async function verifyReauthentication(
   }
 }
 
+/** What happens to the business when this person's account goes. */
+type BusinessFate = 'keep' | 'close';
+
 /**
- * The last-OWNER rule, stated as one query.
+ * Decides whether the tenant survives the caller's deletion, and refuses the one case
+ * that is neither safe nor satisfiable.
  *
- * `$ne` against the caller's own id rather than counting and comparing: the caller
- * is an active OWNER by the time this runs, so "another ACTIVE OWNER exists in this
- * business" is exactly the condition that makes deletion safe.
+ * Three outcomes, in order:
+ *
+ *   1. the caller is not an OWNER — the person goes, the business stays;
+ *   2. another active OWNER exists — the person goes, the business stays with them;
+ *   3. nobody else is an active member — the business goes with the person, because
+ *      there is nobody left to own it and no history that concerns anybody else;
+ *   4. somebody else IS an active member but is not an OWNER — refused with 409, since
+ *      deleting this person would leave the business ownerless. This is the only
+ *      refusal, and it is satisfiable: promote that member first.
+ *
+ * `$ne` against the caller's own id rather than counting and comparing: the caller is
+ * an active user by the time this runs, so "another ACTIVE row exists in this business"
+ * is exactly the question.
  */
-async function assertNotLastOwner(user: {
+async function decideBusinessFate(user: {
   _id: IdLike;
   businessId: IdLike;
   role: string;
-}): Promise<void> {
-  if (user.role !== 'OWNER') return;
+}): Promise<BusinessFate> {
+  if (user.role !== 'OWNER') return 'keep';
 
-  const otherOwner = await User.exists({
+  const anotherOwner = await User.exists({
     _id: { $ne: user._id },
     businessId: user.businessId,
     role: 'OWNER',
     status: 'ACTIVE',
   });
+  if (anotherOwner) return 'keep';
 
-  if (!otherOwner) {
-    throw new ApiError(
-      409,
-      'You are the only owner of this business. Make another member an owner before deleting your account.',
-      LAST_OWNER_TRANSFER_REQUIRED
-    );
-  }
+  const anotherMember = await User.exists({
+    _id: { $ne: user._id },
+    businessId: user.businessId,
+    status: 'ACTIVE',
+  });
+  if (!anotherMember) return 'close';
+
+  throw new ApiError(
+    409,
+    'Other people still use this business. Make another member an owner before deleting your account.',
+    LAST_OWNER_TRANSFER_REQUIRED
+  );
 }
 
 /**
@@ -267,7 +306,7 @@ export async function deleteOwnAccount(input: DeleteAccountInput): Promise<Delet
 
   // Already tombstoned: answer as success without repeating any destructive work.
   if (user.status === 'DELETED') {
-    return { deleted: true, changed: false, firebaseIdentityDeleted: false };
+    return { deleted: true, changed: false, firebaseIdentityDeleted: false, businessDeleted: false };
   }
 
   if (user.status !== 'ACTIVE') {
@@ -275,7 +314,7 @@ export async function deleteOwnAccount(input: DeleteAccountInput): Promise<Delet
   }
 
   await verifyReauthentication(user, input, user.passwordHash ?? null);
-  await assertNotLastOwner(user as { _id: IdLike; businessId: IdLike; role: string });
+  const fate = await decideBusinessFate(user as { _id: IdLike; businessId: IdLike; role: string });
 
   // ★ FIREBASE FIRST. A deleted Inventory AI account must not remain a usable
   //   Firebase identity; see the module comment for why this precedes the write.
@@ -283,6 +322,37 @@ export async function deleteOwnAccount(input: DeleteAccountInput): Promise<Delet
   if (user.firebaseUid) {
     const removal = await deleteFirebaseUser(user.firebaseUid);
     firebaseIdentityDeleted = removal.deleted;
+  }
+
+  // ★ THE WHOLE TENANT, WHEN NOBODY ELSE IS LEFT. Checked again here, immediately
+  //   before the irreversible step: a member created between the decision above and
+  //   this line means the business now has somebody to serve, so it must survive and
+  //   this person's deletion has to be the ordinary account-only kind.
+  if (fate === 'close') {
+    const stillAlone = !(await User.exists({
+      _id: { $ne: user._id },
+      businessId: user.businessId,
+      status: 'ACTIVE',
+    }));
+    if (!stillAlone) {
+      throw new ApiError(
+        409,
+        'Other people still use this business. Make another member an owner before deleting your account.',
+        LAST_OWNER_TRANSFER_REQUIRED
+      );
+    }
+
+    // No tombstone and no audit row in this branch, deliberately: the collection that
+    // would hold them is part of what is being removed, and a row left pointing at a
+    // business that no longer exists is worse than no row. The request itself is
+    // recorded by the structured access log.
+    await removeTenant([user.businessId]);
+    return {
+      deleted: true,
+      changed: true,
+      firebaseIdentityDeleted,
+      businessDeleted: true,
+    };
   }
 
   const now = new Date();
@@ -301,13 +371,15 @@ export async function deleteOwnAccount(input: DeleteAccountInput): Promise<Delet
       },
       $unset: { firebaseUid: '', passwordHash: '' },
     },
-    { new: true }
+    // `returnDocument` rather than the deprecated `new: true`, which Mongoose warns
+    // about on every deletion.
+    { returnDocument: 'after' }
   );
 
   if (!tombstone) {
     // A concurrent request wrote the tombstone between the read and this update. It
     // owns the cleanup; this one only reports the outcome.
-    return { deleted: true, changed: false, firebaseIdentityDeleted: false };
+    return { deleted: true, changed: false, firebaseIdentityDeleted: false, businessDeleted: false };
   }
 
   await deleteOwnedRecords(user as { _id: IdLike; businessId: IdLike; firebaseUid?: string | null });
@@ -323,7 +395,7 @@ export async function deleteOwnAccount(input: DeleteAccountInput): Promise<Delet
     metadata: { role: user.role },
   });
 
-  return { deleted: true, changed: true, firebaseIdentityDeleted };
+  return { deleted: true, changed: true, firebaseIdentityDeleted, businessDeleted: false };
 }
 
 export type AccountDeletionFirebaseError =

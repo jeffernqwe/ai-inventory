@@ -19744,7 +19744,84 @@ destroys the account it is used on, so it needs a disposable account, and the st
 is the only place Play's entry points would be exercised end to end; Play App Signing and upload
 remain unexercised; iOS is untouched (no macOS). Business deletion (as opposed to person deletion)
 is deliberately **not** in scope and would be its own confirmed action, because it destroys history
-other members rely on.
+other members rely on. *(Corrected the same day by §27EX: a business whose **only member** deletes
+their account is now closed with it — the refusal above survives only while somebody else remains.)*
+
+---
+
+# 27EX. A business whose only member leaves closes with them (2026-10-24)
+
+**Server + mobile + documentation — no new route, permission, dependency, schema migration or
+session-model change; one new module, moved rather than invented.** §27EW shipped deletion and
+locked the last-OWNER refusal. Walking the Play requirement end to end exposed that the refusal was
+a **dead end for the product's primary persona**: registration creates an OWNER who is alone in
+their business, and there was **no invitation, no ownership-transfer and no business-deletion
+route** (verified by reading every `router.delete`/`router.patch` and the business routes). A
+reviewer who registers a fresh account and taps *Delete account* would have been told to promote
+somebody who does not exist — and a sole proprietor could never close their account at all.
+
+**1. The owner's decision (2026-10-24): close the business too.** Deletion now has two shapes, and
+the service decides which by reading the business, never the request:
+
+- **Somebody else remains.** The old rule stands: an OWNER with no second active OWNER is refused
+  `409 LAST_OWNER_TRANSFER_REQUIRED` (now worded *"Other people still use this business…"*) and the
+  business keeps its owner. A second OWNER unlocks the ordinary account-only deletion.
+- **Nobody else remains.** The account **and the whole tenant** are removed. Keeping the records
+  served nobody, retained personal data for no one's benefit, and left the account unclosable.
+
+**2. One definition of "the tenant's rows", moved into the application.**
+`services/tenantTeardown.service.ts` now owns `TENANT_DATA_COLLECTIONS`,
+`clearTenantData`/`removeTenant`/`countTenantLeftovers`, which previously lived only in
+`scripts/perf/lib.mjs` — and that script **re-exports them from `src/`**, so `seed:*`, `cleanup:*`,
+the demo seeder and `DEMO-2` all keep one import site. A second copy in the service is how a
+teardown eventually deletes less than a seed created; the collection list already has that scar
+(`suppliers`/`purchase_orders`, then `audit_logs` at AI-40). Module graph **520 modules**, 0 stale
+specifiers.
+
+**3. The order, and why this branch has no tombstone.** Re-authenticate → decide the business's
+fate → **delete the Firebase identity** → **re-check** that the caller is still the only active
+member (a member created in between means the business must survive) → remove the tenant. There is
+no tombstone and no `ACCOUNT_DELETED` audit row in this branch **deliberately**: the collections
+that would hold them are part of what is being removed, and a row pointing at a business that no
+longer exists is worse than no row. The request is still in the structured access log.
+
+**4. The screens and pages say it.** `app/(app)/delete-account.tsx` gained an *If you are the only
+member* paragraph stating that closing the account closes the business, before the button; the
+retained-records paragraph is now qualified with *while other people still use your business*.
+Both public pages were corrected in the same change — `GET /account-deletion` and `GET /privacy`
+both described the old absolute refusal — and `PRIVACY-page.test.mjs` now asserts **both**
+outcomes, so a page cannot quietly re-promise the refusal-only version.
+
+**Verification.** `ACCOUNT-DELETION.test.mjs` — **13 cases, 12 pass, 1 intentionally skipped in DB
+mode, 0 fail**: the old refusal case was replaced by two real ones. ★ *closes the whole business
+when its only member deletes their account*: an audit row, a conversation **and its message** and a
+second tenant's live session exist first; after the call the business row, every user of it, its
+audit rows, its conversations, its messages and the deleted person's sessions are **all gone**, the
+old token answers **401**, and the other tenant's business, user and session are untouched. ★
+*refuses while another member remains, and a second owner unlocks the account-only path*: a STAFF
+member keeps the 409 in force; adding a second OWNER then answers 200 with the business, the
+co-owner and the member all still present and the caller tombstoned. `DEMO-2` **5/5** and the suite
+guard files still pass through the moved module; `PRIVACY-page.test.mjs` **9/9**; server
+**`test:unit` 1343 / 1288 pass / 0 fail / 55 skipped**; mobile **93 suites / 1114 tests / 0
+failures** (the deletion suite's copy assertions updated: 9/9); `tsc`/`eslint`/module-graph clean.
+
+**5. Measured on production, with a disposable tenant (owner-authorised).** The **deployed** server
+was driven through the real flow over HTTPS: owner registered **201**, owner signed in **200**,
+STAFF created **201**, STAFF signed in **200**, mistyped confirmation **400**, wrong password **400
+`INVALID_CURRENT_PASSWORD`**, session still **200** after both refusals, ★ deletion **200
+`{deleted:true,changed:true}`**, the deleted account's token **403 `ACCOUNT_DISABLED`**, its login
+**401**, the owner unaffected **200**, and the deleted member absent from `GET /api/users` (**0
+rows**) — **12/12 checks passed**. The four probe tenants the runs created (two aborted probes
+included) were then removed through the same `removeTenant` definition:
+`2/2/8/8` rows, leftovers before `1/1/6/6` and **`0` after every one**, `0` probe users and `0`
+probe businesses remaining in `inventoryai_prod_db`. No real account, business or Firebase
+identity was touched.
+
+**Not verified:** the new **sole-member closure is not deployed yet** — production still holds the
+`409` for a sole owner until the next server deploy, and `/account-deletion` and `/privacy` still
+serve the corrected wording only after it. The in-app screen has **not been re-run on a device**
+(the handset disconnected from USB before the pass; the 2026-10-24 deletion runs were API-level).
+Play App Signing, an internal-testing install and review are still unexercised; iOS is untouched.
 
 ---
 

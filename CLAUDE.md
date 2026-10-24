@@ -567,10 +567,51 @@ server **`test:unit` 1343 tests / 1288 pass / 0 fail / 55 skipped**; `ACCOUNT-DE
 trail, the freed address, tenant isolation, the last-owner rule, the Firebase ordering and the 429;
 mobile **93 suites / 1114 tests / 0 failures**; `tsc`/`eslint`/both module-graph checks clean. Route
 inventory **77 → 79** (authenticated **13 → 14**, public **17 → 18**), recorded in design §2.6.
-**Not verified:** the pages are **not live** until the next server deploy, and the in-app flow has
-**not been run on a device** — it destroys the account it is used on, so it needs a throwaway
-account; Play App Signing and the store-installed build remain unexercised, and iOS is untouched
-(no macOS). Roadmap §27EW)
+**Not verified at that commit:** the pages were not live until the next server deploy (they have
+been since — §27EX measures them in production), and the in-app flow has **not been run on a
+device** — it destroys the account it is used on, so it needs a throwaway account; Play App Signing
+and the store-installed build remain unexercised, and iOS is untouched (no macOS). Roadmap §27EW)
+
+A business whose only member leaves closes with them (2026-10-24; **not an application phase**;
+server + mobile + docs — **no new route, permission, dependency, schema or session-model change**;
+one module MOVED into `src/`) — walking §27EW's Play requirement end to end found that its
+last-OWNER refusal was a **dead end for the product's primary persona**: registration creates an
+OWNER alone in their business, and there is no invitation, no ownership transfer and no
+business-deletion route, so a sole proprietor could never close their account. **Owner decision:
+close the business too.** Deletion now has two shapes, chosen by reading the business and never the
+request: somebody else remains → the old `409 LAST_OWNER_TRANSFER_REQUIRED` stands (now worded
+*"Other people still use this business…"*) and a second active OWNER unlocks the account-only path;
+**nobody else remains → the account AND the whole tenant are removed**, because keeping the records
+served nobody, retained personal data for no one's benefit, and left the account unclosable. The
+list of "the tenant's rows" is no longer private to the tooling: `services/tenantTeardown.service.ts`
+owns `TENANT_DATA_COLLECTIONS` / `clearTenantData` / `removeTenant` / `countTenantLeftovers`, and
+`scripts/perf/lib.mjs` **re-exports them**, so the seeders, the cleanups, the demo teardown and the
+application cannot drift apart. Order for the closing branch: re-authenticate → decide → **delete
+the Firebase identity** → **re-check** nobody joined meanwhile → remove the tenant; there is no
+tombstone and no `ACCOUNT_DELETED` audit row in that branch on purpose (the collections that would
+hold them are being removed, and a row pointing at a deleted business is worse than no row). The
+screen gained an *If you are the only member* paragraph stating the consequence before the button,
+and **both public pages were corrected** — they had described the refusal-only rule — with
+`PRIVACY-page.test.mjs` now asserting both outcomes. Verified: `ACCOUNT-DELETION.test.mjs` **13
+cases / 12 pass / 1 intentionally skipped / 0 fail**, including ★ the whole business gone with its
+audit rows, conversations, messages and the person's sessions while another tenant's business, user
+and live session are untouched and the old token answers 401, and ★ the STAFF-member 409 then a
+co-owner unlocking it with the business, co-owner and member all kept; `DEMO-2` **5/5** through the
+moved module, `PRIVACY-page` **9/9**, server **`test:unit` 1343 / 1288 pass / 0 fail / 55 skipped**,
+mobile **93 suites / 1114 tests / 0 failures**, `tsc`/`eslint`/module-graph clean (520 modules).
+**Measured on production with a disposable tenant (owner-authorised), 12/12:** owner registered
+201, signed in 200, STAFF created 201, STAFF signed in 200, mistyped word 400, wrong password 400
+`INVALID_CURRENT_PASSWORD`, session still 200 after both refusals, ★ deletion 200
+`{deleted:true,changed:true}`, the deleted account's token 403 `ACCOUNT_DISABLED`, its login 401,
+the owner unaffected 200, the deleted member absent from `GET /api/users` (0 rows); the four probe
+tenants (two aborted probes included) were then removed with leftovers **1/1/6/6 → 0** each and **0**
+probe users or businesses left in `inventoryai_prod_db`; no real account or Firebase identity was
+touched. Also verified live: `GET /privacy` and `GET /account-deletion` both **200 text/html** with
+the CSP hash, `no-store` and `no-referrer`, and `DELETE /api/auth/me` **401** unauthenticated.
+**Not verified:** the sole-member closure is **not deployed yet** — production still answers the 409
+until the next server deploy, and the corrected wording on both pages ships with it; the screen has
+**not** been re-run on a device (the handset left USB before the pass); Play upload, Play App Signing
+and review remain unexercised; iOS untouched. Roadmap §27EX)
 
 AI-28 — The Assistant's Model Is Checked, Not Assumed (2026-10-21; **not** an application phase; server only — no route, permission, schema, dependency, session or mobile change, and **no prompt change**, so a turn's token cost is untouched by construction) — on 2026-10-21 every assistant turn answered `502 AI_UNAVAILABLE` while the log said only `upstream HTTP 404` and `model=unknown`, so neither the answer nor the log could name the model at fault. **Why the previous model stopped working, measured:** the id was never withdrawn — `GET /v1/models` still lists `nvidia/nemotron-3-super-120b-a12b:free`, but `GET /v1/models/{id}/endpoints` reports its single Nvidia endpoint at `status: -5` with `uptime_last_5m: 0`, `uptime_last_30m: 0`, `uptime_last_1d: 60`, while the replacement `nvidia/nemotron-3.5-lightning:free` reports `status: 0` and `100 / 100 / 99.93`; a correct id pointing at an unhealthy upstream is the whole failure, and **nothing on our side is misconfigured** — it is a provider outage, not a bad id, and it clears only when Nvidia's endpoint returns. A **second, independent** cause of "free models are occasionally unavailable" is the account's own `429 free-models-per-day` cap — **50 requests per day, shared by every free model**, measured at `X-RateLimit-Remaining: 0` after a day's turns, which takes **all** free models down together until 00:00 UTC. Shipped: `server/src/services/ai/modelCheck.ts` with two questions kept apart — `checkModelCatalogue` (is the configured id one the gateway lists; sends **no completion**, so it spends **no quota**) and `probeModel` (one tool-shaped request; the check that would have caught this incident, because the gateway still **listed** the broken model) — neither retrying, none mutating a model, none throwing, and **429/402 reported as `quota`, never `unusable`**; `npm run ai:check` with exit **0** VERIFIED / **1** WRONG / **2** NOT VERIFIED (so a pipeline cannot read "could not check" as "checked and fine"), `--probe` adding the one-request proof; a **boot warning** fired unawaited that logs **only** a `missing` model and names it (silent on `unreachable`, because a line that fires when the check could not run trains an operator to ignore it), never able to stop the server, and doing nothing under `NODE_ENV=test`; and `AIProvider.model` (a **getter**, so it reads the environment at call time) seeded into `runAiChat`, so a turn whose every call failed now reports **its model instead of `unknown`**. Verified: **6 of 6 live turns grounded and numerically exact** on `nvidia/nemotron-3.5-lightning:free` (`perf:turns`, 200-product seeded tenant — `200 / 32 / 8`, reorder `32`, a SKU lookup, `8 ÷ 200`, `49,217` units, a per-location table; tools `getReorderNeededProducts`, `getProduct`, `getInventorySummary`, `getLocationBreakdown`; 5.3–15.7 s, no `degraded` mark), and once the allowance ran out the same route answered **429 `AI_QUOTA_EXCEEDED` in 704 ms** with nothing persisted and the turn line naming the model — the fix observed on the failing path it exists for, with mobile's `AI_QUOTA_EXCEEDED` copy still naming the **08:00 Manila** reset. `npm run ai:check` → `ok` exit **0**; `--probe` → `quota (HTTP 429)` exit **2** NOT VERIFIED. Server **1048 tests / 997 pass / 0 fail / 51 skipped** (`AI28-ai-model-config` added, 16 cases; `AI5` strengthened), `tsc`/`eslint`/both module-graph checks clean, mobile assistant-copy suites **57/57**. **Not re-observed live: the model-down 404 itself** (with the allowance spent the gateway answers 429 before it looks at the model) **and a successful in-app turn** (the 6/6 run spent the last free request; the app's success render is covered by §27BG). Roadmap §27DZ)
 

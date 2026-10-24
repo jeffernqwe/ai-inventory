@@ -34,6 +34,7 @@ build is not possible before the Free plan's Android build quota resets (2026-11
 | Ads / analytics / billing SDKs | none in `package.json` |
 | Update channel | `production`, runtime `1.0.0` |
 | Embedded JavaScript | **predates account deletion** — see §1.1. Not uploadable |
+| Next build | **`versionCode` ≥ 4** — a refused `production` build still incremented the remote counter from 3 to 4 |
 
 `targetSdk 36` matters: from **31 August 2026** new apps and updates must target Android 16 (API 36)
 or higher, so this build meets the current requirement rather than needing an exception

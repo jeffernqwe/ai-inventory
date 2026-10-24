@@ -20004,8 +20004,11 @@ than blanket-failing. Raw output: `docs/evidence/device-runs/2026-10-24-release-
 
 **Decision: nothing was uploaded.** Neither existing AAB is uploadable; the store needs a build from
 a current commit, and `eas build` is refused until the Free plan's Android build quota resets
-(**2026-11-01**). The order is now: build from a commit containing the features → `npm run check:aab`
-must answer **0** → upload to **internal testing** → enroll **Play App Signing** → install **from
+(**2026-11-01**). Retried with the `production` profile after the check — the refusal is per
+**account**, not per profile (`This account has used its Android builds from the Free plan this
+month`), and it came **after** `versionCode` was incremented **3 → 4**, so the first successful build
+will be **versionCode 4 or higher**. The order is now: build from a commit containing the features →
+`npm run check:aab` must answer **0** → upload to **internal testing** → enroll **Play App Signing** → install **from
 Play** → repeat the Google chooser, shared-device isolation, account-deletion and offline-launch
 journeys on Play's re-signed artifact.
 

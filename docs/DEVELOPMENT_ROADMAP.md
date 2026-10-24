@@ -19902,7 +19902,8 @@ last account for this client: it does not sign the person out of Google and does
 Firebase session. `phaseC-native-google.test.ts` gains the ★ *clears the saved Google account before
 asking, so the sheet can offer another one* case and a *still signs in when there was no saved Google
 account to clear* case — **19/19**. The change is **JavaScript only**, so it can ship over the air or
-in the next build; it is **not** on the APK used for this run.
+in the next build; the APK's embedded bundle predates it, and item 6 records the over-the-air
+delivery that reached the phone instead.
 
 **3. Registration through Google.** Choosing the disposable account answered the info banner *"This
 sign-in is not linked to an Inventory AI account yet. Create a business account to continue."* (`403
@@ -19935,10 +19936,33 @@ the AUTH-04-F *"We could not reach the verification service"* state (frame 07); 
 on **Login** (frame 08). That is the documented unreachable state doing its job — it shows no cached
 account and mints no session by itself — and it cost the user one tap.
 
+**6. The fix reached the phone over the air, because no build was possible, and was measured there.**
+`eas build --profile preview` **failed before compiling**: *"This account has used its Android builds
+from the Free plan this month, which will reset in 7 days (on Sun Nov 01 2026)."* The installed build
+was already on the **`production`** channel at runtime **1.0.0**, so the fix was published there
+(group `d4582eda-…`) — and the device answered **`CheckCompleteUnavailable`** for half an hour while
+`curl` with the client's own headers received **200** on both channels and the phone could reach
+`u.expo.dev` (ping 2/2, 30–33 ms; Chrome rendered the endpoint's 400). An **`eas update:republish`**
+(group **`2518ccb8-…`**, update `01a16e79-…`) was picked up on the next cold start — `Update
+available` → `NEW_UPDATE_LOADED`, with the logged manifest naming `branchName: production` and
+runtime `1.0.0` — the same refusal-and-republish pattern recorded in §27EP. On that bundle, with two
+disposable Google accounts on one handset: **sugarcane** signed in through the chooser, created its
+owner tenant and signed out; the next *Continue with Google* showed the **chooser again** (frame 09)
+— the exact sequence the old bundle answered silently; **carrots** then got `REGISTRATION_REQUIRED`
+with **no tenant, no dashboard, no session** (frame 10), so a second Google identity on a shared
+device cannot reach the first person's business; and signing back in as sugarcane and deleting it from
+the screen returned the app to **Login** (frames 11–12). Afterwards Firebase answered
+**`auth/user-not-found`** for **both** addresses (carrots' was removed with the Admin SDK after the
+isolation test), Mongo held **no** row for either, **0** `PROBE` businesses remained, the counts were
+back at **3 businesses / 3 users**, and all 12 sessions belonged to live users with **0 live and 0
+orphans**. The `production` branch/channel now serve this update, so a store build of the same runtime
+would receive it on first launch; the rollback is
+`eas update:roll-back-to-embedded --channel production --platform android --runtime-version 1.0.0`.
+
 **Verification.** Mobile `tsc` clean, `eslint` clean, **93 suites / 1116 tests / 0 failures**
 (`phaseC-native-google.test.ts` **19/19**). No server file touched, so the server baselines of §27EX
-stand. **Not verified:** the chooser fix **on hardware** (the installed APK predates it; source and
-suite only), a store-installed build from Play, Play App Signing, Play's review, and iOS.
+stand. **Not verified:** a store-installed build from Play, Play App Signing, Play's review, a
+rollback of *this* update group, and iOS.
 
 ---
 

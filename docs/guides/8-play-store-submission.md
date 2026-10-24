@@ -232,8 +232,12 @@ gone. The evidence, including a 43-check API regression over both ownership case
    returned the app to Login, the provider identity answered `auth/user-not-found`, and **signing in
    again with the same Google account could not get back in** — the same banner, no tenant, no
    session. The run also found and fixed a shared-device defect (a saved Google account was reused
-   with **no account chooser**); that fix is JavaScript only and is **not** on the APK used for the
-   run. Evidence: `docs/evidence/device-runs/2026-10-24-google-sign-in/`.
+   with **no account chooser**); that fix is JavaScript only, was delivered over the air on the
+   `production` channel (no build was possible that day — the Free plan's Android build quota resets
+   2026-11-01), and was then measured on the phone: after signing out, *Continue with Google* showed
+   the **chooser**, a **second** Google account on the same handset got `REGISTRATION_REQUIRED` with
+   no tenant and no session, and deleting the first account returned the app to Login. Evidence:
+   `docs/evidence/device-runs/2026-10-24-google-sign-in/`.
 
 Implementation records: roadmap §27EW (deletion), §27EX (the sole-member closure and the production
 run) and §27EY (the Google account run and the chooser fix); tests

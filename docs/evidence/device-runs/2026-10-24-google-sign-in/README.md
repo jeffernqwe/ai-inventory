@@ -62,11 +62,45 @@ one pins that a clean state still signs in.
 
 **This fix is JavaScript only** — no native module, permission, config or dependency changed — so it
 can be delivered over the air on a channel the installed build listens to, or included in the next
-build. It was **not** on the APK used for this run (which is why the first tap behaved as it did), and
-it has not been re-measured on hardware.
+build. The APK's **embedded** bundle predates it (which is why the 10:27 tap behaved as it did); the
+bundle the phone ran later came from the update below.
+
+## Delivering it: an over-the-air update, because no build was possible
+
+`eas build --profile preview` **failed before it started compiling**: *"This account has used its
+Android builds from the Free plan this month, which will reset in 7 days (on Sun Nov 01 2026)."* With
+no build available, the only delivery path was `expo-updates`, on the channel the installed build
+listens to — which the device itself identified.
+
+| Step | Result |
+| --- | --- |
+| Published to `production`, runtime `1.0.0`, android | group `d4582eda-734f-41ee-a769-4992b9ae68db` |
+| Cold starts over the next half hour | `CheckCompleteUnavailable` every time, while `curl` with the client's own headers got **200** for both channels and the phone could reach `u.expo.dev` (`ping` 2/2, 30–33 ms; Chrome rendered the endpoint's missing-header 400 page) |
+| `eas update:republish` of that group | group `2518ccb8-9c68-4dfa-b341-ccc46e15f8ec`, update `01a16e79-b823-7fe2-99e1-0550acbae662` |
+| Next cold start | `Update available` → `NEW_UPDATE_LOADED`; the logged `downloadedManifest` names `"branchName":"production"` and `runtimeVersion 1.0.0` |
+| Launch after that | `No update available` — it is running the downloaded bundle |
+
+The same manifest refusal (19+ minutes) is recorded in `docs/evidence/device-runs/2026-10-24-preview-ota/`;
+**a republish cleared it again**, and the cause is still not established. The channel now points at
+this update, so a store build of the same runtime would receive it on first launch; the rollback is
+`eas update:roll-back-to-embedded --channel production --platform android --runtime-version 1.0.0`.
+
+## What the phone then did, on the updated bundle (11:15–11:30)
+
+| Phone time | Frame | Observation |
+| --- | --- | --- |
+| 11:15 | `09-chooser-again-after-sign-out.png` | Signed in with **sugarcane** through the chooser, created `PROBE_google_sugarcane`, signed out, tapped *Continue with Google* — **the chooser appeared again**. This is the fix: the previous bundle reused the last account silently, and that is the exact sequence that used to skip the sheet. |
+| 11:23 | `10-second-google-account-cannot-reach-first-tenant.png` | Chose **carrots** on the same handset: `REGISTRATION_REQUIRED`, no dashboard, no session — the second Google identity **cannot reach the first user's tenant**. |
+| 11:28–11:30 | `11-delete-screen-on-the-updated-bundle.png`, `12-back-at-login-after-deletion.png` | Signed back in as sugarcane, Profile → Delete account → `DELETE` + button → **Login**. |
+
+**Checked afterwards:** Firebase answers `auth/user-not-found` for **both** addresses (sugarcane's was
+deleted by the flow; carrots' was removed with the Admin SDK after the isolation test); Mongo holds
+**no** row for either, **0** `PROBE` businesses remain, counts are back at **3 businesses / 3 users**,
+and all **12** session rows belong to live users and are revoked (**0 live, 0 orphans**).
 
 ## Not verified
 
-- The chooser fix **on the device** (source + suite only; the APK predates it).
 - A store-installed build from Play, Play App Signing, and Play's review.
+- A rollback of **this** update group (the command itself was measured on `production` against a
+  marker bundle in §27ER; it was not re-run here, because the phone should keep the fix).
 - iOS (no macOS host).

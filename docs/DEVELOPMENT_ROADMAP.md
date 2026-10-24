@@ -19489,6 +19489,63 @@ host).
 
 ---
 
+# 27ET. The permission review: one unnecessary permission removed, the other eleven attributed (2026-10-24)
+
+**Mobile config and one test suite — no route, permission grant, schema, server, session-model or
+dependency change, and no upload.** §27ES left the permission set as a review note. This entry
+attributed every entry to a real source and removed the single one that no part of the product uses.
+
+**1. The attribution, corrected.** The earlier record listed `BIND_JOB_SERVICE` as *requested* and
+missed `READ_GSERVICES`; both were artefacts of matching any permission-shaped string instead of the
+manifest's declaration elements. Read properly, the 12 declarations are: `CAMERA` (expo-camera, and
+`app/(app)/scan.tsx` really renders `CameraView`), `INTERNET` and `VIBRATE` (Expo's manifest
+template), `ACCESS_NETWORK_STATE` and `WAKE_LOCK` (Expo Updates / Firebase / their AndroidX),
+`USE_BIOMETRIC` + `USE_FINGERPRINT` (`androidx.biometric`, a dependency of `expo-secure-store`),
+`READ/WRITE_EXTERNAL_STORAGE` (template + `expo-file-system`, **capped at `maxSdkVersion 32`**),
+`DUMP` (`androidx.profileinstaller`), `READ_GSERVICES` (Google Play services) and the app's own
+`DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION`. `BIND_JOB_SERVICE` and GMS's `REVOCATION_NOTIFICATION`
+appear only as `android:permission` attributes on components — requirements on callers, not requests.
+`CAMERA` is the only **dangerous** permission, and it is used.
+
+**2. The one removal.** `SYSTEM_ALERT_WINDOW` is not declared by any dependency and not in
+`app.json`: it is one of the "optional permissions" in Expo's generated main-manifest template
+(`@expo/config-plugins`, `withAndroidBaseMods.js`), so every prebuild inherits it. Nothing in
+Inventory AI draws an overlay, and a store listing that asks for "display over other apps" invites a
+review question for a capability the product does not have. `mobile/app.json` now sets
+`android.blockedPermissions: ["android.permission.SYSTEM_ALERT_WINDOW"]`, which Expo applies as
+`tools:node="remove"` at manifest generation. No dependency, plugin or native code was added.
+
+**3. Pinned, not remembered.** `mobile/__tests__/android-permissions.test.ts` (4 cases) asserts the
+block list is exactly that one entry — an array, not a subset, so a future addition is a deliberate
+edit — that nothing the app uses is in it, that `expo-camera` and the `CameraView` import still exist,
+and that the camera permission sentence survives so the prompt explains itself.
+
+**4. Verified on the rebuilt artifact, not just in config.** EAS `4b133d62-30a9-4e18-a7ca-950b06e0cfed`
+(profile `production`, default packaging, `versionCode` **3**, 80,230,207 bytes, SHA-256
+`76740691…`): `SYSTEM_ALERT_WINDOW` **absent**, declared permissions **12 → 11**, and the storage pair
+still capped at 32 (the cap was invisible in the first report, so `verify.py` now prints it per
+permission). **The JavaScript is byte-identical to §27ES's artifact** — `index.android.bundle`,
+2,847,364 bytes, SHA-256 `1156e960…` in both — so only the manifest and the embedded app config
+changed; every other artifact row (package, version name, SDK levels, signature entries, production
+channel, runtime `1.0.0`, 60 debug symbols, production API once, `localhost:4000` never) is unchanged.
+
+**5. Device: deliberately not re-run, recorded as a gap.** The rebuilt artifact carries the same
+JavaScript bytes as the build that was driven on the phone on 2026-10-24 (§27ER/§27EQ/§27EP), and the
+change removes a permission nothing requested at runtime. A re-install would exercise identical code
+with one fewer declaration, so it was not performed; **an install of a build carrying this manifest,
+and `SYSTEM_ALERT_WINDOW` itself, were never exercised either way.**
+
+**Verification.** Mobile **92 suites / 1,103 tests / 0 failures** (`android-permissions` added, 4
+cases), `tsc`/`eslint` clean, `check-build-env --profile production` clean (17 self-test controls).
+Evidence: `docs/evidence/device-runs/2026-10-24-permission-trim/` (attribution table, before/after
+permission lists, bundle hashes, unedited verifier output).
+
+**Not verified:** the AAB is still never installed and **nothing is uploaded**, so Play App Signing,
+the upload-key handover and Play's review remain unexercised; signing is verified as present, not
+cryptographically; iOS remains unverified (no macOS).
+
+---
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

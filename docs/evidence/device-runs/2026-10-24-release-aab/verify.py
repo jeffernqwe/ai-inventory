@@ -62,11 +62,41 @@ print(f"versionCode: {attr(b'versionCode')}")
 print(f"minSdkVersion: {attr(b'minSdkVersion')}")
 print(f"targetSdkVersion: {attr(b'targetSdkVersion')}")
 
-print("permissions:")
-perms = sorted({p.decode() for p in re.findall(rb"android\.permission\.[A-Z_]+", manifest)})
-print(f"  count: {len(perms)}")
-for p in perms:
-    print(f"   {p}")
+def element_attr(block: bytes, attr: bytes = b"\x12\x04name") -> str | None:
+    """Read the value of the first `attr` in a protobuf block (length-prefixed string)."""
+    i = block.find(attr)
+    if i < 0 or block[i + len(attr):i + len(attr) + 1] != b"\x1a":
+        return None
+    start = i + len(attr) + 2
+    return block[start:start + block[i + len(attr) + 1]].decode("utf-8", "replace")
+
+
+# Each `uses-permission` element is one block: the element name, then its attributes. A capped
+# permission carries maxSdkVersion in the same block. A `name` inside a block is that element's
+# own attribute, so this reads the declaration rather than any string that merely looks like one
+# (`android:permission` on a service is a REQUIREMENT on callers, not a request).
+print("declared permissions:")
+declared = []
+for block in manifest.split(b"\x1a\x0fuses-permission")[1:]:
+    name = element_attr(block)
+    if not name:
+        continue
+    cap = re.search(rb"maxSdkVersion\x1a\x02(\d+)", block)
+    declared.append((name, cap.group(1).decode() if cap else None))
+print(f"  count: {len(declared)}")
+for perm, cap in declared:
+    print(f"   {perm}" + (f"  (maxSdkVersion {cap})" if cap else ""))
+
+print("permissions the app DEFINES (granted only to itself, not requested):")
+for block in manifest.split(b"\x1a\npermission")[1:]:
+    name = element_attr(block)
+    print(f"   {name}") if name else None
+
+print("android:permission requirements on components (not requests):")
+for i in [m.start() for m in re.finditer(rb"\x12\npermission\x1a", manifest)]:
+    start = i + len(b"\x12\npermission\x1a") + 1
+    ln = manifest[i + len(b"\x12\npermission\x1a")]
+    print("   " + manifest[start:start + ln].decode("utf-8", "replace"))
 
 print("update meta-data:")
 url = re.search(rb"https://u\.expo\.dev/[0-9a-f-]+", manifest)

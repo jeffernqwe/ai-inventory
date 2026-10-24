@@ -25,20 +25,26 @@ versionName: 1.0.0
 versionCode: 2
 minSdkVersion: 24
 targetSdkVersion: 36
-permissions:
+declared permissions:
   count: 12
-   android.permission.ACCESS_NETWORK_STATE
-   android.permission.BIND_JOB_SERVICE
    android.permission.CAMERA
-   android.permission.DUMP
    android.permission.INTERNET
-   android.permission.READ_EXTERNAL_STORAGE
+   android.permission.READ_EXTERNAL_STORAGE  (maxSdkVersion 32)
    android.permission.SYSTEM_ALERT_WINDOW
+   android.permission.VIBRATE
+   android.permission.WRITE_EXTERNAL_STORAGE  (maxSdkVersion 32)
+   android.permission.WAKE_LOCK
+   android.permission.ACCESS_NETWORK_STATE
    android.permission.USE_BIOMETRIC
    android.permission.USE_FINGERPRINT
-   android.permission.VIBRATE
-   android.permission.WAKE_LOCK
-   android.permission.WRITE_EXTERNAL_STORAGE
+   com.google.android.providers.gsf.permission.READ_GSERVICES
+   com.inventoryai.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION
+permissions the app DEFINES (granted only to itself, not requested):
+   com.inventoryai.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION
+android:permission requirements on components (not requests):
+   com.google.android.gms.auth.api.signin.permission.REVOCATION_NOTIFICATION
+   android.permission.DUMP
+   android.permission.BIND_JOB_SERVICE
 update meta-data:
   EXPO_UPDATE_URL: https://u.expo.dev/607eca05-1175-43ed-86a0-1829e91c9531
   request headers: {'expo-channel-name':'production'}

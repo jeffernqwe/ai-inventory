@@ -67,10 +67,15 @@ cd C:/Users/jeffe/inventory-ai
 python docs/evidence/device-runs/2026-10-24-release-aab/verify.py path/to/app-release.aab
 ```
 
-It reports the package id, version, SDK levels, permissions, signing entries, update channel and
-runtime version, and greps the bundled JavaScript for the API host — enough to catch the two
-mistakes worth catching (a production build pointing at `localhost`, or one carrying the wrong
-channel).
+It reports the package id, version, SDK levels, declared permissions (with any `maxSdkVersion` cap),
+signing entries, update channel and runtime version, and greps the bundled JavaScript for the API
+host — enough to catch the mistakes worth catching (a production build pointing at `localhost`, one
+carrying the wrong channel, or a permission nobody asked for).
+
+If a permission in that list comes from Expo's manifest **template** rather than a dependency —
+`SYSTEM_ALERT_WINDOW` does — it is removed with `android.blockedPermissions` in `app.json`, which
+Expo applies as `tools:node="remove"` at manifest generation. Check the rebuilt artifact afterwards;
+the field alone is not proof.
 
 ---
 

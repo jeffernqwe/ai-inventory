@@ -438,10 +438,11 @@ entries with the manifest protobuf, `resources.pb`, `classes.dex` and four ABIs;
 debug-symbol files; no dev-menu, dev-launcher, `react-native-web`, `.env` or secret-named entry; and
 a Hermes bundle containing `ai-inventory-l1mi.onrender.com` **once**, `localhost:4000` **zero** times
 and the offline-boot key `inventoryai.auth.userSnapshot` — the production API **and** the fixed
-launch behaviour are in the store artifact. **Twelve permissions** are declared and recorded rather
-than silently accepted: `SYSTEM_ALERT_WINDOW` and the storage pair come from React Native / Expo
-libraries, are not granted implicitly on modern Android and are inert at `targetSdk 36`, and removing
-a permission a library may use is a native change needing its own build. The check is reproducible:
+launch behaviour are in the store artifact.**Twelve `uses-permission` declarations** are recorded with their sources rather than silently
+accepted — the dangerous one is `CAMERA`, used by the scanner; the storage pair is capped at
+`maxSdkVersion 32`; `DUMP` and the app's own signature permission never reach a user; and
+`BIND_JOB_SERVICE` is an `android:permission` requirement on a component rather than a request
+(the first version of this record miscounted that, corrected in §27ET). The check is reproducible:
 `docs/evidence/device-runs/2026-10-24-release-aab/verify.py` (standard library only — no Java,
 `bundletool` or Android SDK) re-derives every row and its output is stored beside it in
 `aab-verification.txt`; the guide now states the AAB-vs-APK distinction, the `versionCode` behaviour
@@ -451,6 +452,37 @@ the same source, keystore, channel and environment; **nothing has been uploaded*
 the upload-key handover and Play's own review have not run; signing is verified as *present*, not
 cryptographically; iOS remains unverified (no macOS). Evidence
 `docs/evidence/device-runs/2026-10-24-release-aab/`; guide §7; roadmap §27ES)
+
+Android permission review and trim (2026-10-24; **not an application phase**; mobile config plus one
+test suite — **no route, permission grant, schema, server, session-model or dependency change, and
+no upload**) — every declaration in the store artifact was attributed and one was removed. The
+correction first: `BIND_JOB_SERVICE` had been reported as *requested* and `READ_GSERVICES` missed,
+because permission-shaped strings were matched instead of declaration elements; read properly, the 12
+declarations are `CAMERA` (expo-camera; `app/(app)/scan.tsx` renders `CameraView`), `INTERNET` and
+`VIBRATE` (Expo's manifest template), `ACCESS_NETWORK_STATE` and `WAKE_LOCK` (Expo Updates / Firebase),
+`USE_BIOMETRIC` + `USE_FINGERPRINT` (`androidx.biometric`, a dependency of `expo-secure-store`),
+`READ/WRITE_EXTERNAL_STORAGE` (template + `expo-file-system`, **capped at `maxSdkVersion 32`**),
+`DUMP` (`androidx.profileinstaller`), `READ_GSERVICES` (Google Play services) and the app's own
+`DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION`; `BIND_JOB_SERVICE` and GMS's `REVOCATION_NOTIFICATION`
+are only `android:permission` attributes requiring callers to hold them. **`CAMERA` is the only
+dangerous permission and it is genuinely used.** Removed: **`SYSTEM_ALERT_WINDOW`**, which no
+dependency and no `app.json` entry asks for — it is one of the "optional permissions" in Expo's
+generated main-manifest template, inherited by every prebuild, and nothing here draws an overlay;
+`mobile/app.json` now sets `android.blockedPermissions: ["android.permission.SYSTEM_ALERT_WINDOW"]`
+(applied as `tools:node="remove"`, no dependency, plugin or native code added), pinned by
+`mobile/__tests__/android-permissions.test.ts` (4 cases: the list is exactly that one entry, nothing
+used is in it, `expo-camera`/`CameraView` still exist, and the camera permission sentence survives).
+**Verified on the rebuilt artifact:** EAS `4b133d62…`, profile `production`, default packaging,
+`versionCode` **3**, 80,230,207 bytes, SHA-256 `76740691…` — `SYSTEM_ALERT_WINDOW` absent, declarations
+**12 → 11**, storage caps now printed per permission by `verify.py`, and the **JavaScript byte-identical
+to §27ES's artifact** (`index.android.bundle` 2,847,364 bytes, SHA-256 `1156e960…` in both), so only
+the manifest and embedded config moved. Mobile **92 suites / 1,103 tests / 0 failures**, `tsc`/`eslint`
+clean, `check-build-env --profile production` clean (17 controls). **Not verified:** a build carrying
+this manifest was never installed — the device runs rest on the byte-identical earlier build, so the
+permission change itself and `SYSTEM_ALERT_WINDOW` were never exercised either way — and nothing is
+uploaded, so Play App Signing, the upload-key handover and Play's review remain unexercised; signing
+is present, not cryptographically checked; iOS unverified (no macOS). Evidence
+`docs/evidence/device-runs/2026-10-24-permission-trim/`; roadmap §27ET)
 
 AI-28 — The Assistant's Model Is Checked, Not Assumed (2026-10-21; **not** an application phase; server only — no route, permission, schema, dependency, session or mobile change, and **no prompt change**, so a turn's token cost is untouched by construction) — on 2026-10-21 every assistant turn answered `502 AI_UNAVAILABLE` while the log said only `upstream HTTP 404` and `model=unknown`, so neither the answer nor the log could name the model at fault. **Why the previous model stopped working, measured:** the id was never withdrawn — `GET /v1/models` still lists `nvidia/nemotron-3-super-120b-a12b:free`, but `GET /v1/models/{id}/endpoints` reports its single Nvidia endpoint at `status: -5` with `uptime_last_5m: 0`, `uptime_last_30m: 0`, `uptime_last_1d: 60`, while the replacement `nvidia/nemotron-3.5-lightning:free` reports `status: 0` and `100 / 100 / 99.93`; a correct id pointing at an unhealthy upstream is the whole failure, and **nothing on our side is misconfigured** — it is a provider outage, not a bad id, and it clears only when Nvidia's endpoint returns. A **second, independent** cause of "free models are occasionally unavailable" is the account's own `429 free-models-per-day` cap — **50 requests per day, shared by every free model**, measured at `X-RateLimit-Remaining: 0` after a day's turns, which takes **all** free models down together until 00:00 UTC. Shipped: `server/src/services/ai/modelCheck.ts` with two questions kept apart — `checkModelCatalogue` (is the configured id one the gateway lists; sends **no completion**, so it spends **no quota**) and `probeModel` (one tool-shaped request; the check that would have caught this incident, because the gateway still **listed** the broken model) — neither retrying, none mutating a model, none throwing, and **429/402 reported as `quota`, never `unusable`**; `npm run ai:check` with exit **0** VERIFIED / **1** WRONG / **2** NOT VERIFIED (so a pipeline cannot read "could not check" as "checked and fine"), `--probe` adding the one-request proof; a **boot warning** fired unawaited that logs **only** a `missing` model and names it (silent on `unreachable`, because a line that fires when the check could not run trains an operator to ignore it), never able to stop the server, and doing nothing under `NODE_ENV=test`; and `AIProvider.model` (a **getter**, so it reads the environment at call time) seeded into `runAiChat`, so a turn whose every call failed now reports **its model instead of `unknown`**. Verified: **6 of 6 live turns grounded and numerically exact** on `nvidia/nemotron-3.5-lightning:free` (`perf:turns`, 200-product seeded tenant — `200 / 32 / 8`, reorder `32`, a SKU lookup, `8 ÷ 200`, `49,217` units, a per-location table; tools `getReorderNeededProducts`, `getProduct`, `getInventorySummary`, `getLocationBreakdown`; 5.3–15.7 s, no `degraded` mark), and once the allowance ran out the same route answered **429 `AI_QUOTA_EXCEEDED` in 704 ms** with nothing persisted and the turn line naming the model — the fix observed on the failing path it exists for, with mobile's `AI_QUOTA_EXCEEDED` copy still naming the **08:00 Manila** reset. `npm run ai:check` → `ok` exit **0**; `--probe` → `quota (HTTP 429)` exit **2** NOT VERIFIED. Server **1048 tests / 997 pass / 0 fail / 51 skipped** (`AI28-ai-model-config` added, 16 cases; `AI5` strengthened), `tsc`/`eslint`/both module-graph checks clean, mobile assistant-copy suites **57/57**. **Not re-observed live: the model-down 404 itself** (with the allowance spent the gateway answers 429 before it looks at the model) **and a successful in-app turn** (the 6/6 run spent the last free request; the app's success render is covered by §27BG). Roadmap §27DZ)
 

@@ -26,18 +26,35 @@ Raw output: [`aab-verification.txt`](aab-verification.txt).
 | No development surface | no `expo-dev-menu` / `expo-dev-launcher` / `react-native-web` / `.env` / secret-named entries | PASS |
 | Architectures | `arm64-v8a`, `armeabi-v7a`, `x86`, `x86_64` | PASS |
 | Native debugging | 60 Play upload debug-symbol files under `BUNDLE-METADATA/…debugsymbols/` | PASS |
-| Permissions | 12, listed below | REVIEW NOTE |
+| Permissions | 12 `uses-permission` entries, attributed below | REVIEW NOTE |
 
-**Permissions declared:** `INTERNET`, `ACCESS_NETWORK_STATE`, `CAMERA`, `VIBRATE`, `WAKE_LOCK`,
-`BIND_JOB_SERVICE`, `DUMP`, `USE_BIOMETRIC`, `USE_FINGERPRINT`, `SYSTEM_ALERT_WINDOW`,
-`READ_EXTERNAL_STORAGE`, `WRITE_EXTERNAL_STORAGE`.
+**Declared permissions, with their source and level** (an earlier version of this record listed
+`BIND_JOB_SERVICE` as *requested* and missed `READ_GSERVICES`; this is the corrected reading, taken
+from the element blocks rather than from any string that looks like a permission):
 
-`SYSTEM_ALERT_WINDOW` and the two external-storage permissions arrive from the React Native / Expo
-libraries, not from anything this app asks for in `app.json`; on Android 11+ they are not granted
-implicitly (`SYSTEM_ALERT_WINDOW` needs the user to enable "display over other apps", and the storage
-permissions are effectively no-ops at `targetSdk 36`). They are recorded rather than removed because
-removing a permission a library may rely on is a native change that needs its own build and test.
-They are worth a glance in the Play Console listing before release.
+| Permission | Declared by | Level / effect |
+|---|---|---|
+| `CAMERA` | `expo-camera` — `app/(app)/scan.tsx` renders `CameraView` | **dangerous** — the only one a user ever sees a prompt for |
+| `INTERNET` | Expo template | normal, install-time |
+| `ACCESS_NETWORK_STATE` | `expo-updates`, Firebase | normal, install-time |
+| `WAKE_LOCK` | AndroidX components pulled by Firebase / Expo Updates | normal, install-time |
+| `VIBRATE` | Expo template | normal, install-time |
+| `USE_BIOMETRIC`, `USE_FINGERPRINT` | `androidx.biometric`, a dependency of `expo-secure-store` | normal, install-time |
+| `READ_EXTERNAL_STORAGE`, `WRITE_EXTERNAL_STORAGE` | Expo template + `expo-file-system`, **`maxSdkVersion 32`** | normal, and only on Android 12 and older |
+| `DUMP` | `androidx.profileinstaller`'s receiver | signature-level, never granted to the app by a user |
+| `com.google.android.providers.gsf.permission.READ_GSERVICES` | Google Play services (Firebase) | normal, install-time |
+| `com.inventoryai.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION` | declared **and defined** by the app itself | signature, granted only to this app |
+
+`android.permission.BIND_JOB_SERVICE` and `com.google.android.gms.auth.api.signin.permission.REVOCATION_NOTIFICATION`
+also appear in the manifest as **`android:permission` attributes on components** — requirements on
+whoever calls that component, not requests by this app.
+
+**The one entry worth acting on is `SYSTEM_ALERT_WINDOW`.** It is not declared by any dependency's own
+manifest; it is one of the "optional permissions" in Expo's generated main-manifest template
+(`@expo/config-plugins`, `withAndroidBaseMods.js`), so every prebuild inherits it, and nothing in
+Inventory AI displays an overlay. It was left in this build and then blocked in app config for the
+next one: see
+[2026-10-24-permission-trim](../2026-10-24-permission-trim/README.md).
 
 **How to reproduce:** the checks read the AAB as a ZIP — manifest protobuf fields are found by their
 names and the value adjacent to each, the JS bundle is `base/assets/index.android.bundle`, and the

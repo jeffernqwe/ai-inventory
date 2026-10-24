@@ -115,8 +115,10 @@ export function renderPrivacyPolicyPage(): string {
 <h1>Privacy Policy</h1>
 <p class="dates">Effective ${EFFECTIVE_DATE}. This page describes the app and the service behind it.</p>
 
-<p>Inventory AI is an inventory management app for businesses. This page explains what the app
-collects, why it needs it, which outside services process it, and how to have it deleted.</p>
+<p>Inventory AI is an inventory management app for businesses, operated by Jeffern. This page
+explains what the app collects, why it needs it, which outside services process it, and how to
+have it deleted. It does not limit any right you have under the data-protection law that applies
+where you live.</p>
 
 <h2>What we collect</h2>
 <ul>
@@ -186,7 +188,9 @@ collect data from children.</p>
 
 <h2>Changes to this page</h2>
 <p>If what the app collects or who processes it changes, this page is updated and the effective date
-at the top changes with it. The current version is always the one served at this address.</p>
+at the top changes with it. The current version is always the one served at this address. This
+policy is written to be read on its own; it does not replace the terms shown in the app store or
+any agreement you have with the business whose inventory you use.</p>
 
 <h2>Contact</h2>
 <p>Questions about this policy or your data: <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a>.</p>

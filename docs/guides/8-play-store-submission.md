@@ -42,36 +42,57 @@ or higher, so this build meets the current requirement rather than needing an ex
 
 ### 1.1 The pre-upload gate: is this the app we think we built?
 
-Every other check in the artifact record looks at **packaging** — package id, version, SDK levels,
-signature, channel, permissions. All of them passed on both AABs, and both were still the wrong
+Every check in the artifact record looked at **packaging** — package id, version, SDK levels,
+signature, channel, permissions — and all of them passed on both AABs, which were still the wrong
 artifact: their JavaScript was from a commit that had no account-deletion screen. A store build is
 only as good as the bundle inside it, and the bundle is the one thing a manifest does not describe.
+So the gate has **two layers, and both must pass**.
 
 ```bash
 cd mobile
-npm run check:aab -- /path/to/inventory-ai.aab     # 0 verified · 1 wrong · 2 not verified
+npm run check:aab -- /path/to/inventory-ai.aab          # the file you are about to upload
+npm run check:aab -- --bundle path/to/index.android.bundle   # a bare Metro/Hermes bundle
+npm run check:aab -- --self-test                        # the controls, on their own
+# 0 verified · 1 wrong (each failure named) · 2 not verified (could not read)
 ```
 
-It reads `base/assets/index.android.bundle` out of the AAB (a ZIP inside the ZIP, Hermes bytecode,
-string literals intact) and requires four **user-visible** sentences from features that must be in any
-store build: `Delete my account` and `Type DELETE to confirm` (Play's deletion requirement), 
-`Continue with Google` (the provider entry point) and `Create your workspace` (the onboarding a new
-identity needs). Hermes keeps these verbatim, which is what makes the question cheap; it is a parity
-check against a known list, not a source-map or commit check, and editing that copy means updating the
-list. Its own controls include a negative case, and one that fails if a probe is no longer copy in
-`app/`/`components/`, so a reworded sentence cannot silently disarm it
-(`mobile/__tests__/release-aab-parity-guard.test.ts` runs them).
+**1. Packaging**, compared against the values this repository declares rather than merely printed:
+package `com.inventoryai.app`; `versionName` equal to the embedded config's version; SDK levels
+`minSdk 24` / `targetSdk ≥ 36`; a JAR signature present; channel `production` on the project's own
+`u.expo.dev` URL; runtime version equal to that version; `SYSTEM_ALERT_WINDOW` absent and `CAMERA` /
+`INTERNET` present; the production API host in the bundle and `localhost:4000` absent; and no
+`expo-dev-menu`, `expo-dev-launcher` or `react-native-web` entry. It reads the binary manifest the
+way `aapt2` writes it — each attribute's value sits next to its own name — and counts only
+`uses-permission` **elements**, so an `android:permission` requirement on a component is not mistaken
+for a request (the correction the artifact record needed on 2026-10-24).
+
+**2. Bundle parity**: four **user-visible** sentences from features that must be in any store build —
+`Delete my account` and `Type DELETE to confirm` (Play's deletion requirement), `Continue with
+Google` (the provider entry point) and `Create your workspace` (the onboarding a new identity needs).
+They are read out of `base/assets/index.android.bundle` (a ZIP inside the ZIP, Hermes bytecode, string
+literals intact), which is what makes the question cheap; it is a parity check against a known list,
+not a source-map or commit check, and editing that copy means updating the list. One control fails if
+a probe is no longer copy in `app/`/`components/`, so a reworded sentence cannot silently disarm it
+(`mobile/__tests__/release-aab-parity-guard.test.ts` runs all fifteen controls).
+
+**CI runs the bundle half.** A pipeline has no AAB, because builds happen on EAS — so the `mobile` job
+exports the app's JavaScript with Metro and Hermes and checks those four sentences inside the real
+bundle (`--bundle`). That is not the same claim as the Jest case beside it, which reads source: a
+screen that stopped being bundled would pass the source grep and fail here.
 
 **Measured on the two artifacts that exist (2026-10-24):**
 
-| Artifact | `versionCode` | Bundle bytes | Deletion copy | Verdict |
-|---|---|---|---|---|
-| `09d77d3d…` (rehearsal AAB) | 2 | 2,847,364 | **0 occurrences** | WRONG (exit 1) |
-| `4b133d62…` (permission-trimmed) | 3 | 2,847,364 | **0 occurrences** | WRONG (exit 1) |
+| Artifact | `versionCode` | Packaging | Bundle bytes | Deletion copy | Verdict |
+|---|---|---|---|---|---|
+| `09d77d3d…` (rehearsal AAB) | 2 | passes | 2,847,364 | **0 occurrences** | WRONG (exit 1) |
+| `4b133d62…` (permission-trimmed) | 3 | passes | 2,847,364 | **0 occurrences** | WRONG (exit 1) |
+| Metro export of `HEAD` | — | — | ≈3.46 MB | 4/4 present | VERIFIED (exit 0) |
 
 Their bundles are byte-for-byte the same length because the permission trim changed the **manifest**,
 not the JavaScript — which is exactly why a manifest-level review could not have noticed. Both were
-built before the deletion screen existed. Evidence and raw output:
+built before the deletion screen existed. The third row is the positive control: the JavaScript this
+repository builds *today* passes, so the gate fails the artifacts for being old rather than failing
+everything it is shown. Evidence and raw output:
 [`2026-10-24-release-aab`](../evidence/device-runs/2026-10-24-release-aab/README.md).
 
 ---

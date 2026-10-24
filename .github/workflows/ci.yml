@@ -267,6 +267,23 @@ jobs:
       - name: Test
         run: npx jest .
 
+      # CI HAS NO AAB — builds happen on EAS — so the half of the gate that can run here is the one
+      # that asks what is inside the app's OWN JavaScript. Building it now, with Metro and Hermes on
+      # the runner, is what makes this different from the Jest case next door: that one reads source,
+      # so a screen that stopped being bundled (a deleted route, a copy change, dead-code removal)
+      # would pass it and fail here. The artifact half — package id, versionCode, SDK levels, channel,
+      # permissions, API host, and the same four sentences inside the AAB — needs the file that is
+      # actually being uploaded, and runs at release time: `npm run check:aab -- <file>`.
+      - name: Bundle the app and check the required screens are in the built JavaScript
+        run: |
+          npx expo export --platform android --output-dir "$RUNNER_TEMP/bundle-check"
+          bundle=$(find "$RUNNER_TEMP/bundle-check" -path '*static/js/android/*' \( -name '*.hbc' -o -name '*.js' \) | head -1)
+          if [ -z "$bundle" ]; then
+            echo "FAIL: expo export produced no Android bundle to check"
+            exit 2
+          fi
+          node scripts/check-aab.mjs --bundle "$bundle"
+
       # The label barcode, decoded from bytes. `--html` decodes what the generator produces NOW and
       # checks its geometry against the page (both quiet zones, and a page big enough to hold the
       # label); `--pdf` decodes the artifacts a real device printed (the fixtures record those

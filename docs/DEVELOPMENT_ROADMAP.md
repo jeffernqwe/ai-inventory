@@ -19985,22 +19985,59 @@ test build only by **over-the-air update** (§27EY), which a fresh install recei
 first launch. The two builds were also missing the Google account-chooser fix (`bfc9c6e`), which is
 JavaScript-only and would likewise have arrived late.
 
-**What was added.** `mobile/scripts/check-aab.mjs` — a release gate that reads
-`base/assets/index.android.bundle` out of an AAB (a ZIP inside a ZIP, Hermes bytecode) using only the
-standard library, and requires four **user-visible** sentences: `Delete my account` and
-`Type DELETE to confirm` (the policy requirement), `Continue with Google` (the provider entry point)
-and `Create your workspace` (the onboarding a new identity needs). Exit codes follow the repository
-convention: **0** verified, **1** a required sentence is missing, **2** not verified (no file, no ZIP,
-no bundle). Nine controls run first (`--self-test`): a complete bundle passes, a bundle missing the
-deletion copy is reported **by name**, a missing bundle entry returns `null`, a non-ZIP is refused,
-and **each probe must still be copy that exists in `app/`/`components/`** — so rewording a sentence
-forces the list to be updated instead of silently disarming the gate.
-`mobile/__tests__/release-aab-parity-guard.test.ts` runs the controls and pins the negative case at
-source; `npm run check:aab -- <file>` invokes it.
+**What was added.** `mobile/scripts/check-aab.mjs` — a release gate with **two layers**, both of which
+must pass, using only the standard library.
 
-**Measured.** Both artifacts exit **1**, missing `Delete my account` and `Type DELETE to confirm`,
-with `Continue with Google` and `Create your workspace` present — so the gate discriminates rather
-than blanket-failing. Raw output: `docs/evidence/device-runs/2026-10-24-release-aab/bundle-parity.txt`.
+*Packaging, against the values this repository declares* (not merely printed): package
+`com.inventoryai.app`; `versionName` equal to the embedded config's version; `minSdk 24` and
+`targetSdk ≥ 36`; a JAR signature present; channel `production` on the project's own `u.expo.dev` URL;
+runtime version equal to that version; `SYSTEM_ALERT_WINDOW` absent and `CAMERA`/`INTERNET` present;
+the production API host in the bundle and `localhost:4000` absent; and no `expo-dev-menu`,
+`expo-dev-launcher` or `react-native-web` entry. The binary manifest is read the way `aapt2` writes
+it — each attribute's value sits next to its own name — and only `uses-permission` **elements** are
+counted, so an `android:permission` requirement on a component is not mistaken for a request (the
+correction §27ET needed).
+
+*Bundle parity*: four **user-visible** sentences — `Delete my account` and `Type DELETE to confirm`
+(the policy requirement), `Continue with Google` (the provider entry point) and
+`Create your workspace` (the onboarding a new identity needs) — read out of
+`base/assets/index.android.bundle` (a ZIP inside a ZIP, Hermes bytecode).
+
+Exit codes follow the repository convention: **0** verified, **1** an expectation failed (each printed
+with its reason), **2** not verified (no file, no ZIP, no bundle/config). **Fifteen controls** run
+first (`--self-test`): a complete bundle passes, a bundle missing the deletion copy is reported **by
+name**, a missing bundle entry returns `null`, a non-ZIP is refused, a compliant synthetic manifest
+passes while `SYSTEM_ALERT_WINDOW`, a wrong package id and a development-client entry are each
+refused, and **each probe must still be copy that exists in `app/`/`components/`** — so rewording a
+sentence forces the list to be updated instead of silently disarming the gate.
+`mobile/__tests__/release-aab-parity-guard.test.ts` runs the controls and pins the negative cases at
+source; `npm run check:aab -- <file>` invokes it, and `--bundle <file>` checks a bare bundle.
+
+**CI runs the half it can.** A pipeline has no AAB — builds happen on EAS — so the `mobile` job now
+exports the app's JavaScript (`npx expo export --platform android`, which needs no build secret) and
+runs `--bundle` against the real Metro/Hermes output. That is a different claim from the Jest case
+beside it, which reads source: a screen that stopped being bundled would pass a source grep and fail
+here. The artifact half runs on the file actually being uploaded.
+
+The step was **reproduced locally with a CI-like environment**, not just reasoned about: the export
+was run with every `EXPO_PUBLIC_*` value empty and both Firebase configuration paths pointing at files
+that do not exist, and the resulting **3,455,933**-byte bundle passed all four probes — so the step does
+not depend on a developer's `.env` or on a build secret. **It has not run on the GitHub runner yet**;
+the first push is where that is observed.
+
+**Measured.** Both artifacts pass **packaging** — the JS port reads exactly what the Python record
+read: package `com.inventoryai.app`, `versionCode` 2 and 3, `versionName 1.0.0`, `minSdk 24` /
+`targetSdk 36`, **11** permissions with `SYSTEM_ALERT_WINDOW` gone, four ABIs, signature present,
+channel `production`, runtime `1.0.0`, `ai-inventory-l1mi.onrender.com` ×1, `localhost:4000` ×0 — and
+both exit **1** on the bundle layer, missing `Delete my account` and `Type DELETE to confirm` while
+`Continue with Google` and `Create your workspace` are present. **The positive control is the code
+this repository builds today**: `npx expo export --platform android` (run with the Firebase
+configuration paths pointed at files that do not exist, proving the export needs no build secret)
+produced a **≈3.46 MB** Hermes bundle (3,456,268–3,456,270 bytes across two exports — the byte count
+is not stable, which is why the gate checks content and not size) that passes all four probes, exit
+**0**. So the gate fails
+those artifacts for being old, not because it fails everything it is shown. Raw output:
+`docs/evidence/device-runs/2026-10-24-release-aab/bundle-parity.txt`.
 
 **Decision: nothing was uploaded.** Neither existing AAB is uploadable; the store needs a build from
 a current commit, and `eas build` is refused until the Free plan's Android build quota resets

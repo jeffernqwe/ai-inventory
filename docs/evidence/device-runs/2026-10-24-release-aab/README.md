@@ -89,11 +89,21 @@ the JavaScript. That is the crux: a download that is signed, correctly versioned
 and one permission lighter can still be an artifact of a commit that lacked a Play-required feature,
 and every manifest-level check passes.
 
-Raw output: [`bundle-parity.txt`](bundle-parity.txt). The check is now a gate:
-`mobile/scripts/check-aab.mjs` (`npm run check:aab -- <file>`), with its controls run by
-`mobile/__tests__/release-aab-parity-guard.test.ts`. **Neither artifact is uploadable**; a build from a
-current commit is required, and the Free plan's Android build quota resets 2026-11-01. Guide §1.1,
-roadmap §27EZ.
+Raw output: [`bundle-parity.txt`](bundle-parity.txt). The check is now a gate with **two layers** —
+packaging (package id, `versionName` against the embedded config, SDK levels, signature, `production`
+channel and project URL, runtime version, the permission the trim removed, release API host, no
+development-client entry) and the four bundle sentences — in `mobile/scripts/check-aab.mjs`
+(`npm run check:aab -- <file>`, or `--bundle <file>` for a bare bundle), with all fifteen controls run
+by `mobile/__tests__/release-aab-parity-guard.test.ts`.
+
+On these two artifacts the **packaging layer passes and only the bundle layer fails**, which is the
+point: the manifest of a stale build is a correct manifest. The positive control is the JavaScript this
+repository builds today — `npx expo export --platform android` (run with the Firebase configuration
+paths pointed at files that do not exist, to show the export needs no build secret) produced a
+3,456,270-byte Hermes bundle carrying all four sentences. CI runs that half on every push; the
+artifact half needs the file being uploaded. **Neither artifact is uploadable**; a build from a current
+commit is required, and the Free plan's Android build quota resets 2026-11-01. Guide §1.1, roadmap
+§27EZ.
 
 ## Limits — what this does not prove
 

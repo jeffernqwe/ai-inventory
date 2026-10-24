@@ -1,37 +1,57 @@
-Release-bundle parity check — 2026-10-24, after both AABs had been built and inspected.
-Command: node scripts/check-aab.mjs <file>   (0 verified / 1 wrong / 2 not verified)
+Store-artifact gate — raw output, 2026-10-24 / 2026-10-25.
+Command: node scripts/check-aab.mjs <aab> | --bundle <file> | --self-test   (0 verified / 1 wrong / 2 not verified)
 
-== self-test ==
-release-bundle guard self-test: 9 control(s) passed
+== self-test (15 controls) ==
+store-artifact gate self-test: 15 control(s) passed
 exit=0
 
-== 09d77d3d… (versionCode 2) ==
+== 09d77d3d / versionCode 2 ==
 aab: C:/Users/jeffe/AppData/Local/Temp/app-release.aab
 bytes: 80230212
 sha256: dcbc63231d92307d344859747d1231fbe0a222fd17266d8c90ab87255648f50a
-bundle bytes: 2847364
+package com.inventoryai.app · versionCode 2 · 1.0.0 · minSdk 24 · targetSdk 36
+channel production · runtime 1.0.0 · permissions 12 · ABIs arm64-v8a, armeabi-v7a, x86, x86_64 · signature present
+bundle 2847364 bytes · ai-inventory-l1mi.onrender.com ×1 · localhost:4000 ×0
   MISSING  Delete my account  (Play's account-deletion requirement)
+  MISSING  Type DELETE to confirm  (the accidental-deletion safeguard)
   present  Continue with Google  (the Google sign-in entry point)
   present  Create your workspace  (Firebase registration onboarding)
-  MISSING  Type DELETE to confirm  (the accidental-deletion safeguard)
 
-WRONG: 2 required sentence(s) absent — this AAB predates them.
+WRONG (permission): android.permission.SYSTEM_ALERT_WINDOW is declared; the app never displays an overlay
+
+WRONG (bundle): 2 required sentence(s) absent — this AAB predates them.
 exit=1
 
-== 4b133d62… (versionCode 3, permission-trimmed) ==
+== 4b133d62 / versionCode 3 (permission-trimmed) ==
 aab: C:/Users/jeffe/AppData/Local/Temp/app-release-trimmed.aab
 bytes: 80230207
 sha256: 76740691da0f3e91a47a1959c0724c43b7ec8975d79ef6e51f70fe45893be517
-bundle bytes: 2847364
+package com.inventoryai.app · versionCode 3 · 1.0.0 · minSdk 24 · targetSdk 36
+channel production · runtime 1.0.0 · permissions 11 · ABIs arm64-v8a, armeabi-v7a, x86, x86_64 · signature present
+bundle 2847364 bytes · ai-inventory-l1mi.onrender.com ×1 · localhost:4000 ×0
   MISSING  Delete my account  (Play's account-deletion requirement)
+  MISSING  Type DELETE to confirm  (the accidental-deletion safeguard)
   present  Continue with Google  (the Google sign-in entry point)
   present  Create your workspace  (Firebase registration onboarding)
-  MISSING  Type DELETE to confirm  (the accidental-deletion safeguard)
 
-WRONG: 2 required sentence(s) absent — this AAB predates them.
+WRONG (bundle): 2 required sentence(s) absent — this AAB predates them.
 exit=1
 
-== literal occurrence counts in the embedded bundle ==
+== Metro export of this repository's current source (positive control) ==
+Built with: npx expo export --platform android --output-dir $TMP/export-check
+(the Firebase google-services paths were pointed at files that do not exist, to prove the export
+ needs no build secret; the bundle still builds and carries the copy)
+bundle: C:/Users/jeffe/AppData/Local/Temp/export-check/_expo/static/js/android/entry-0643b9568ddefdc224dda6b6c6bb601c.hbc
+bytes: 3456270
+  present  Delete my account  (Play's account-deletion requirement)
+  present  Type DELETE to confirm  (the accidental-deletion safeguard)
+  present  Continue with Google  (the Google sign-in entry point)
+  present  Create your workspace  (Firebase registration onboarding)
+
+VERIFIED: every required sentence is in this bundle.
+exit=0
+
+== literal occurrence counts in each stored AAB's bundle ==
 
 09d77d3d / versionCode 2
   "Delete account": 0

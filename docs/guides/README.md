@@ -18,6 +18,7 @@ If you are not a programmer, start here and read the guide that matches what you
 | Understand the test accounts and put sample data in | [4. Test accounts and mock data](4-test-accounts-and-mock-data.md) |
 | Look up what any command or script does, and how to run it | [6. Every script, explained](6-scripts-and-commands.md) |
 | Update the installed app without reinstalling it | [7. Updating the app without reinstalling](7-over-the-air-updates.md) |
+| Prepare the Google Play submission | [8. Preparing the Play submission](8-play-store-submission.md) |
 | Know what an unfamiliar word means | [5. Words explained](5-words-explained.md) |
 
 **Brand new here?** Read them in that order — each one is written to stand alone, but they build

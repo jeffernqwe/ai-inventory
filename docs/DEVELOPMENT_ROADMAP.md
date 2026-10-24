@@ -19557,6 +19557,31 @@ cryptographically; iOS remains unverified (no macOS).
 
 ---
 
+# 27EU. The Play submission pack, and the two things that block it (2026-10-24)
+
+**Documentation only — no code, route, permission, schema, server, session-model or dependency
+change, and nothing uploaded.** `docs/guides/8-play-store-submission.md` records, from the artifact
+rather than from intent: the listing fields with a draft short and full description; the app-content
+answers (no ads, 18+ audience, no news/health/financial features, no advertising ID); a data-safety
+mapping of what the code actually handles (name/email, inventory records, assistant questions, and
+their destinations — our MongoDB, Firebase, Brevo, OpenRouter); the permission table a reviewer sees
+(`CAMERA` the only dangerous one, storage capped at API 32, no location/SMS/contacts/microphone); the
+review-account plan; and the upload checklist. It also records that `targetSdk 36` satisfies Play's
+31 August 2026 requirement.
+
+**Two blockers, both owner decisions, were found rather than assumed.** (1) There is **no privacy
+policy** in the repository or on the site, and the console requires a public URL that matches the
+data-safety answers. (2) There is **no account-deletion path** — neither in the app nor a web URL —
+while Play requires both for any app that lets people create an account; the guide sets out the
+smallest honest design (delete the person, refuse the last `OWNER` until ownership moves, delete a
+business only by a separate confirmed action) and the public instructions page it needs. Neither is
+implemented here: each is a phase-sized change and was deliberately left to the owner.
+
+**Not verified:** nothing has been uploaded, so Play App Signing, Play's pre-launch report and the
+store-installed build remain unexercised.
+
+---
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

@@ -221,7 +221,9 @@ policy is written to be read on its own; it does not replace the terms shown in 
 any agreement you have with the business whose inventory you use.</p>
 
 <h2>Contact</h2>
-<p>Questions about this policy or your data: <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a>.</p>
+<p>Questions about this policy or your data: <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a>.
+The <a href="/terms">terms of use</a> describe what the app asks of you and what you can expect
+from it.</p>
 
 <footer>Inventory AI · Privacy Policy · Effective ${EFFECTIVE_DATE}</footer>
 </main>

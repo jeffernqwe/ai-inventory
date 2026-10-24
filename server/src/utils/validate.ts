@@ -9,6 +9,7 @@
 import { NON_OWNER_ROLES } from '../constants/roles.ts';
 import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../constants/audit.ts';
 import { DELETE_CONFIRMATION_PHRASE } from '../constants/accountDeletion.ts';
+import { INVITABLE_ROLES, INVITATION_TOKEN_PATTERN } from '../constants/invitations.ts';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_EMAIL = 254;
@@ -449,19 +450,57 @@ export function validateFirebaseExchange(body: Body) {
  * to the email's local-part so the required field is always populated
  * (Phase 32A §7.3). An empty or absent value is therefore not a problem to report.
  */
+/**
+ * The registration payload, now with ONE optional addition: `invitationToken`.
+ *
+ * WHEN AN INVITATION IS PRESENT, `businessName` STOPS BEING REQUIRED — and that is the
+ * whole of the change. An invited person joins an existing business, so asking them to
+ * name one would either be ignored or, worse, create a second business beside the one
+ * that invited them. Absent an invitation, the field is required exactly as before, so
+ * the ordinary sign-up path is unchanged byte for byte.
+ *
+ * The token is checked HERE for shape only (64 hex characters, the form `randomBytes(32)`
+ * produces). Whether it resolves to a live invitation is a database question, and is
+ * answered in `invitations.service`. A malformed value is a field error rather than a
+ * lookup, so a garbage token cannot be used to probe the collection.
+ *
+ * NOTHING HERE READS A BUSINESS, A ROLE OR A USER ID. Those come from the invitation row
+ * the token resolves to, on the server, which is what makes them un-steerable.
+ */
 export function validateFirebaseRegister(body: Body) {
   const problems = [];
 
   const idToken = requiredString(body?.idToken, 'idToken', MAX_ID_TOKEN);
   problems.push(...idToken.problems);
 
-  const businessName = requiredString(body?.businessName, 'businessName', ACCOUNT_NAME_MAX);
+  const rawInvitation = body?.invitationToken;
+  let invitationToken;
+  if (rawInvitation !== undefined && rawInvitation !== null && rawInvitation !== '') {
+    if (typeof rawInvitation !== 'string' || !INVITATION_TOKEN_PATTERN.test(rawInvitation.trim())) {
+      problems.push({
+        field: 'invitationToken',
+        message: 'must be a valid invitation token',
+      });
+    } else {
+      invitationToken = rawInvitation.trim();
+    }
+  }
+
+  const businessName = invitationToken
+    ? optionalString(body?.businessName, 'businessName', ACCOUNT_NAME_MAX)
+    : requiredString(body?.businessName, 'businessName', ACCOUNT_NAME_MAX);
   problems.push(...businessName.problems);
 
   const name = optionalString(body?.name, 'name', ACCOUNT_NAME_MAX);
   problems.push(...name.problems);
 
-  return { problems, idToken: idToken.value, businessName: businessName.value, name: name.value };
+  return {
+    problems,
+    idToken: idToken.value,
+    businessName: businessName.value,
+    invitationToken,
+    name: name.value,
+  };
 }
 
 /**
@@ -694,6 +733,28 @@ export function validateUserCreate(body: Body) {
     password: body?.password,
     role,
   };
+}
+
+/**
+ * Invitation-create payload: an address and a role, nothing else.
+ *
+ * There is deliberately NO `businessId` field to read: the tenant is the authenticated
+ * actor's, and a body carrying one is inert rather than rejected. The address is
+ * normalized here so the invitation, the uniqueness check and the mail all agree on one
+ * spelling of it.
+ */
+export function validateInvitationCreate(body: Body) {
+  const problems = [];
+
+  const email = normalizeEmail(body?.email);
+  problems.push(...emailProblems(email));
+
+  const role = body?.role;
+  if (typeof role !== 'string' || !(INVITABLE_ROLES as readonly string[]).includes(role)) {
+    problems.push({ field: 'role', message: 'role is required and must be one of ADMIN, MANAGER, STAFF' });
+  }
+
+  return { problems, email, role };
 }
 
 /**

@@ -198,10 +198,33 @@ unitSuite('Phase A (F-1) — the Firebase credential authority (declaration guar
       const file = SOURCES.find(({ rel }) => rel === DELETION_TOMBSTONE);
       assert.ok(file, 'the deletion service must exist for its exception to be meaningful');
 
+      // ── WHAT THIS COUNTS, AND WHY IT IS NOT EVERY `$unset` ────────────────────────────────
+      // The guarantee is that exactly ONE reviewed block can clear the identity link or the
+      // credential. Counting every `$unset` in the file made that guarantee hostage to any
+      // unrelated field cleanup: on 2026-10-25 the file gained a second `$unset` that strips
+      // the name and address a `USER_CREATED` audit row had recorded (so a real deletion is no
+      // longer readable in the audit viewer), and the blade-edge count failed while the
+      // property it exists to protect was intact. The assertion is now the property itself:
+      // one block may name `firebaseUid`/`passwordHash`, and no other block may reach either.
       const unsets = updateBlocks(file.code, '$unset');
-      assert.equal(unsets.length, 1, 'the tombstone must be the only $unset in that file');
-      assert.match(unsets[0], /firebaseUid/, 'the identity link must be unset');
-      assert.match(unsets[0], /passwordHash/, 'the credential must be unset too');
+      const credentialUnsets = unsets.filter(
+        (block) => block.includes('firebaseUid') || block.includes('passwordHash')
+      );
+      assert.equal(
+        credentialUnsets.length,
+        1,
+        'exactly one $unset in the tombstone may clear the identity link or the credential'
+      );
+      assert.match(credentialUnsets[0], /firebaseUid/, 'the identity link must be unset');
+      assert.match(credentialUnsets[0], /passwordHash/, 'the credential must be unset too');
+      for (const block of unsets) {
+        if (block === credentialUnsets[0]) continue;
+        assert.equal(
+          /firebaseUid|passwordHash/.test(block),
+          false,
+          'no other $unset may reach the identity link or the credential: ' + block.slice(0, 120)
+        );
+      }
 
       // The status is what makes it irreversible: no route can set DELETED back to
       // ACTIVE, because the assignable statuses are exactly the two below, so the

@@ -31,13 +31,17 @@
     "PASSWORD_RESET_COMPLETED": "Password reset completed",
     "FIREBASE_IDENTITY_LINKED": "Sign-in identity linked",
     "FIREBASE_IDENTITY_LINK_CONFLICT": "Sign-in identity conflict",
-    "ACCOUNT_DELETED": "Account deleted"
+    "ACCOUNT_DELETED": "Account deleted",
+    "INVITATION_SENT": "Invitation sent",
+    "INVITATION_REVOKED": "Invitation revoked",
+    "INVITATION_ACCEPTED": "Invitation accepted"
   },
   "entityTypes": {
     "PRODUCT": "Product",
     "INVENTORY": "Inventory",
     "INVENTORY_TRANSACTION": "Transaction",
     "USER": "User",
+    "INVITATION": "Invitation",
     "PURCHASE_ORDER": "Purchase order",
     "SUPPLIER": "Supplier",
     "CATEGORY": "Category",

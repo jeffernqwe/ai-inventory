@@ -1999,32 +1999,48 @@ Additional invariants, all enforced server-side and tenant-isolated:
 Disabling a user takes effect immediately: it revokes login and every existing session, because the
 user row is reloaded from the database on each request (§30, *Role Mutation Takes Effect Immediately*).
 
-### Invitation-Based Onboarding (approved direction — not implemented)
+### Invitation-Based Onboarding (implemented 2026-10-25)
 
-Creating a user should eventually use an **invitation-based** flow rather than having the creator
-establish another person's Firebase password:
+Adding a colleague uses an **invitation**, so the person who will use the account chooses its
+credential and the creator never learns it:
 
 ```text
 OWNER / ADMIN
       ↓
-create invitation
+create invitation (address + role, mailed to that address)
       ↓
-invitation bound to the intended business and role
+invitation bound to the intended business and role, 7-day lifetime
       ↓
-invitee authenticates with an allowed Firebase provider
+invitee opens the link and creates a Firebase identity for THAT address
       ↓
-server validates the invitation
+invitee proves the address with the AUTH-04 six-digit code
       ↓
-server creates / activates the Inventory AI user
+server validates the invitation against the VERIFIED identity's address
       ↓
-businessId and role assigned SERVER-SIDE
+server creates the Inventory AI user in the invited business
       ↓
-Inventory AI session created
+businessId and role assigned SERVER-SIDE from the invitation row
+      ↓
+Inventory AI session created by the ordinary Firebase exchange
 ```
 
 The `businessId` and `role` are assigned by the server from the invitation, never accepted from the
-invitee's request. **No invitation model, route, service or screen exists**, and none may be added
-without an approved phase.
+invitee's request — the acceptance payload carries the ID token and the invitation token and nothing
+else that could steer it. **No business is created on this path**: an invited person joins the
+existing tenant. The invitation is not a credential for an account: holding the token proves only that
+somebody received a message, and acceptance additionally requires a verified Firebase identity whose
+address equals the invited one. OWNER is not invitable (a business already has an owner, and the user
+API refuses to create one), and an ADMIN may not invite an ADMIN — the same hierarchy rule as direct
+creation. Because `users.email` is globally unique, an address that already owns an account cannot be
+invited; such a person is refused at invite time rather than merged at acceptance.
+
+Server: `models/invitation.model.ts` (token stored as a SHA-256 digest, never in the clear; one PENDING
+row per business+address; a partial unique index), `services/invitations.service.ts` (create/list/
+revoke/preview/resolve), `routes/invitations.routes.ts` (the three `users.manage` routes),
+`routes/invite.routes.ts` (the public `/invite` landing page), `pages/invitationLink.ts`, and
+`services/mail/templates/invitation.ts`. Invitations are removed with their address on account
+deletion and with the tenant on teardown. Mobile: `app/invite.tsx` (public preview), the invited shape
+of Create Account, and `app/(app)/users/invitations.tsx` (send, list, revoke) reached from Users.
 
 ## Enforcement Guard
 

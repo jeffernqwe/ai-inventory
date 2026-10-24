@@ -156,7 +156,7 @@ set.
 
 ## 2.6 Route inventory
 
-Phase 23 classifies **79 routes**: **47 permission-gated**, **14 authenticated**, **18 public**, **0 role-gated**. The `PUBLIC` and `AUTHENTICATED` buckets are explicit lists that each carry a
+Phase 23 classifies **85 routes**: **50 permission-gated**, **14 authenticated**, **21 public**, **0 role-gated**. The `PUBLIC` and `AUTHENTICATED` buckets are explicit lists that each carry a
 written reason; a route in no bucket fails the guard, and a declared exemption that has stopped being
 true also fails. The guard deliberately asserts **no route count** — a route is *declared* or it is not,
 and the number is derived from the declarations — so the figure above is pinned separately, by
@@ -216,8 +216,31 @@ fails if the two disagree.
 > request), refuses unless the account is re-authenticated and is not a business's last active
 > owner, and answers `{ deleted: true }`. It names no permission for the same reason
 > `POST /api/auth/logout` does not: the subject is the caller's own account, and a capability that
-> governed "what you may do to others" would be the wrong instrument for it. The **gated** tier is
-> still **47**.
+> governed "what you may do to others" would be the wrong instrument for it. The **gated** tier was
+> still **47** at that point.
+>
+> **Terms of Use (2026-10-25) added one public page, `GET /terms`** — 47 + 14 + 19 = **80**. It is
+> the second half of the same store requirement the privacy policy answers: the listing and the app
+> point at a policy describing data handling, and at terms describing what the service asks of the
+> person and what they may expect of it. Mounted outside `/api` and public for the same reason as
+> `/privacy` and `/account-deletion` — an HTML page read in a browser, readable before an account
+> exists. Like those two it reads no request data, performs no I/O and has no branch that can fail,
+> and it is linked from both of them so the three pages cannot describe three different products.
+> The **gated** tier was still **47** at that point.
+>
+> **Invitation-based onboarding (2026-10-25) added three permission-gated routes and two public ones —
+> 80 + 3 gated + 2 public = **85** (50 permission-gated, 14 authenticated, 21 public, 0 role-gated).**
+> `GET` and `POST /api/invitations` and `DELETE /api/invitations/:id` are bound to `users.manage`, the
+> permission that already governs membership: an invitation adds a member, and a separate key would
+> create a role that may invite yet not manage. **This is the first change to the gated tier since the
+> Phase 23 contract was written** (47 → 50); the other four auth, recovery and legal-page increments
+> left it untouched. The two public ones are `GET /api/auth/invitation?token=…` (what an invitation
+> offers, read before any account exists) and `GET /invite` (the page an invitation email's button
+> opens, which forwards the token to the app's own scheme and redeems nothing). The token is a QUERY
+> parameter, never a path segment, so it cannot reach the access log, which records the path only.
+> None of the five designs an authorization input: the tenant and role come from the invitation row,
+> the inviter from `req.user`, and the invitee from a VERIFIED Firebase identity whose address must
+> equal the invited one.
 
 The auth surface (`server/src/routes/auth.routes.ts`):
 

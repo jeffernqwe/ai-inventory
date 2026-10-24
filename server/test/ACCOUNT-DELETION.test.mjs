@@ -392,6 +392,77 @@ dbSuite('account deletion — over a real database', dbOk, () => {
     tracker.trackUser(reuse.json.user.id);
   });
 
+  it('★ erases the name and email an audit row kept ABOUT the person, and only theirs', async () => {
+    // Found by review on 2026-10-25: `users.service.create` records USER_CREATED with
+    // `metadata: { name, email, role }`, and the tombstone only cleared the row's `userId`.
+    // The business's audit viewer therefore still showed the deleted person's real address —
+    // exactly what the deletion screen, the public page and the privacy policy say is removed.
+    // The existing tombstone case could not see it because its audit fixture had no metadata.
+    const owner = await freshOwner();
+    const leaverEmail = uniqueEmail('leaver');
+    const leaver = await User.create({
+      businessId: owner.businessId,
+      name: uniqueName('Leaver'),
+      email: leaverEmail,
+      passwordHash: await bcrypt.hash('Password123!', 4),
+      role: 'STAFF',
+      status: 'ACTIVE',
+    });
+    const colleague = await User.create({
+      businessId: owner.businessId,
+      name: uniqueName('Colleague'),
+      email: uniqueEmail('colleague'),
+      passwordHash: await bcrypt.hash('Password123!', 4),
+      role: 'STAFF',
+      status: 'ACTIVE',
+    });
+
+    for (const [created, role] of [
+      [leaver, 'STAFF'],
+      [colleague, 'STAFF'],
+    ]) {
+      await AuditLog.create({
+        businessId: owner.businessId,
+        userId: owner.userId,
+        action: 'USER_CREATED',
+        entityType: 'USER',
+        entityId: String(created._id),
+        metadata: { name: created.name, email: created.email, role },
+      });
+    }
+
+    const result = await deleteOwnAccount({
+      userId: String(leaver._id),
+      confirmation: DELETE_CONFIRMATION_PHRASE,
+      currentPassword: 'Password123!',
+    });
+    assert.equal(result.changed, true);
+
+    const aboutLeaver = await AuditLog.findOne({
+      businessId: owner.businessId,
+      entityType: 'USER',
+      entityId: String(leaver._id),
+    }).lean();
+    assert.ok(aboutLeaver, 'the creation row survives as a governance record of the business');
+    assert.equal(aboutLeaver.metadata?.email, undefined, 'the deleted address must not stay readable');
+    assert.equal(aboutLeaver.metadata?.name, undefined, 'the deleted name must not stay readable');
+    assert.equal(aboutLeaver.metadata?.role, 'STAFF', 'the non-personal fact is kept');
+    assert.equal(
+      String(aboutLeaver.userId),
+      String(owner.userId),
+      'the actor of that row is somebody else and must not be anonymized'
+    );
+
+    // Over-reach control: the colleague's row is about a different person and is untouched.
+    const aboutColleague = await AuditLog.findOne({
+      businessId: owner.businessId,
+      entityType: 'USER',
+      entityId: String(colleague._id),
+    }).lean();
+    assert.equal(aboutColleague.metadata.email, colleague.email);
+    assert.equal(aboutColleague.metadata.name, colleague.name);
+  });
+
   it('converges on a repeat deletion instead of failing or repeating the work', async () => {
     const target = await deletableOwner();
     const first = await deleteOwnAccount({

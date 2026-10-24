@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { router } from 'expo-router';
-import { StyleSheet, Text, View } from 'react-native';
+import { Linking, StyleSheet, Text, View } from 'react-native';
 
 import Badge from '../../components/Badge';
 import Banner from '../../components/Banner';
@@ -11,6 +11,7 @@ import ListRow from '../../components/ListRow';
 import Screen from '../../components/Screen';
 import SectionHeader from '../../components/SectionHeader';
 import { useSession } from '../../lib/auth';
+import { API_URL } from '../../lib/config';
 import { confirm } from '../../lib/confirm';
 import { formatDateTime } from '../../lib/format';
 import { roleLabel, defaultHomePath } from '../../lib/permissions';
@@ -44,6 +45,33 @@ export default function ProfileScreen() {
   const [connectBusy, setConnectBusy] = useState(false);
   const [connectError, setConnectError] = useState<string | null>(null);
   const [connectNotice, setConnectNotice] = useState<string | null>(null);
+  const [legalError, setLegalError] = useState<string | null>(null);
+
+  /**
+   * The two legal pages live on our own server, not in the app bundle, for the same reason
+   * Google Play asks for a URL: they must be readable without signing in, and they must be
+   * CORRECTABLE without shipping a build. So the app opens them in the browser instead of
+   * rendering a copy that could go stale.
+   *
+   * The address is derived from `API_URL`, never written out here: a build pointed at the
+   * development server opens the development pages, and a production build opens production. A
+   * hand-typed domain would be the one thing that silently kept pointing somewhere else.
+   *
+   * `canOpenURL` is checked first because a phone with no browser (or a locked-down profile)
+   * would otherwise throw after the tap and look like nothing happened; the failure is stated
+   * instead. Nothing here is a security control — the pages are public and carry no data about
+   * this account.
+   */
+  async function openLegal(path: '/privacy' | '/terms'): Promise<void> {
+    setLegalError(null);
+    const url = `${API_URL}${path}`;
+    try {
+      if (!(await Linking.canOpenURL(url))) throw new Error('no handler');
+      await Linking.openURL(url);
+    } catch {
+      setLegalError('Could not open the page on this device. Check your connection and try again.');
+    }
+  }
 
   /**
    * Phase 32M — Add Google sign-in, from the Sign-in methods card.
@@ -271,6 +299,33 @@ export default function ProfileScreen() {
         />
       </Card>
 
+      {/*
+       * The legal pages, kept at the quiet end of the screen: they are reference material a
+       * person reads once, not an action. Both are PUBLIC pages on the server, so this card
+       * works for an account that is signed in and says nothing about it — no token, no id and
+       * no address travels with the tap.
+       */}
+      <SectionHeader title="Legal" style={styles.section} />
+      <Card>
+        <Text style={styles.securityText}>
+          The privacy policy describes what the app collects and which outside services process it.
+          The terms of use describe what the service asks of you and what you can expect from it.
+        </Text>
+        <Banner type="error" text={legalError} style={styles.legalError} />
+        <Button
+          title="Privacy policy"
+          variant="secondary"
+          style={styles.editName}
+          onPress={() => void openLegal('/privacy')}
+        />
+        <Button
+          title="Terms of use"
+          variant="secondary"
+          style={styles.spaced}
+          onPress={() => void openLegal('/terms')}
+        />
+      </Card>
+
       <Button title="Refresh account" variant="secondary" style={styles.spaced} onPress={() => refresh()} />
       <Button title="Back to home" variant="secondary" style={styles.spaced} onPress={() => router.replace(defaultHomePath(user))} />
       <Button title="Sign out" variant="danger" style={styles.spaced} onPress={onSignOut} />
@@ -305,6 +360,9 @@ const createStyles = (colors: Palette) => StyleSheet.create({
   },
   avatarText: { ...type.h1, color: colors.textOnPrimary },
   name: { ...type.h2, color: colors.text, marginBottom: spacing.xs },
+  // The legal banner sits between the explanatory copy and the two buttons; the banner's own
+  // bottom margin is larger than this card wants, so it is trimmed here.
+  legalError: { marginTop: spacing.sm, marginBottom: 0 },
   // Badge sets alignSelf:'flex-start' for list rows; centre it under the name.
   headerBadge: { alignSelf: 'center' },
   section: { marginTop: spacing.xxl },

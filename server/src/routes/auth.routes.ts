@@ -8,6 +8,9 @@ import {
   passwordResetCodeConfirm,
 } from '../controllers/passwordResetCode.controller.ts';
 import { firebaseExchange, firebaseRegister, firebaseLink, credentialsChanged, renew } from '../controllers/firebaseAuth.controller.ts';
+import { invitationsController } from '../controllers/invitations.controller.ts';
+
+const invitationPreview = invitationsController.preview;
 import { emailVerificationRequest, emailVerificationConfirm } from '../controllers/emailVerification.controller.ts';
 import requireAuth, { requireAuthForRenewal } from '../middlewares/authenticate.ts';
 import {
@@ -27,6 +30,7 @@ import {
   createFirebaseLinkLimiter,
   createCredentialsChangedLimiter,
   createAccountDeletionLimiter,
+  createInvitationPreviewLimiter,
   resetLoginAccountBucketOnSuccess,
 } from '../middlewares/rateLimit.ts';
 import type { AuthRateConfig } from '../middlewares/rateLimit.ts';
@@ -164,6 +168,21 @@ export function createAuthRouter({ limits }: AuthRouterOptions = {}) {
     createEmailVerificationConfirmLimiter(limits),
     emailVerificationConfirm
   );
+
+  // Invitation preview (2026-10-25) — PUBLIC, and public for the ordinary reason: the
+  // person holding an invitation link has not signed in yet, and the whole point of the
+  // token is to let them see what they were offered before they create anything. It reads
+  // ONE value, the token, and returns the invited address, role, business name and expiry.
+  //
+  // The token travels as a QUERY parameter rather than a path segment because the access
+  // log records `req.path` and never the query: a token in the path would sit in every log
+  // line, and one leaked log would be a working invitation for a week. Per-IP limited
+  // before any database work.
+  //
+  // It is mounted on the auth router rather than beside the invitation management routes
+  // because it must be reachable with NO session, while everything in
+  // `routes/invitations.routes.ts` requires `users.manage`.
+  router.get('/invitation', createInvitationPreviewLimiter(limits), invitationPreview);
 
   // Protected
   router.get('/me', requireAuth, me);

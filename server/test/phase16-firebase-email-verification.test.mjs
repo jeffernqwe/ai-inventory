@@ -193,15 +193,30 @@ unitSuite('Phase 16 — enforcement is at registration, and only there (no datab
     );
   });
 
-  it('★ a refusal cannot write an audit row — the path reaches no audit write', () => {
-    // The registration path writes no AuditLog row on ANY outcome, the success path
-    // included, so a refusal cannot leave a false trail. Asserted structurally rather
-    // than by counting rows: the DB suites share one database and run in parallel, so a
-    // count is not a guard.
+  it('★ a refusal cannot write an audit row — every audit write follows its account write', () => {
+    // The ordinary registration path writes no AuditLog row on ANY outcome, so a refusal
+    // cannot leave a false trail. Asserted structurally rather than by counting rows: the
+    // DB suites share one database and run in parallel, so a count is not a guard.
+    //
+    // ONE audit write now exists in this file — `INVITATION_ACCEPTED` on the invited path
+    // (2026-10-25). The property this guard protects is unchanged and is what is asserted:
+    // every `recordAudit(` comes AFTER a `User.create(`, so the earliest refusal point
+    // (before the identity is verified, before the invitation resolves, before the row is
+    // written) has no audit call it could reach, and a failed create throws before the
+    // audit line rather than after it.
+    const firstAudit = registerBody.indexOf('recordAudit(');
+    const firstUserCreate = registerBody.indexOf('User.create(');
+    assert.notEqual(firstUserCreate, -1, 'the path still creates the user row');
+    assert.ok(
+      firstAudit === -1 || firstAudit > firstUserCreate,
+      'no audit write is reachable before the account it records exists'
+    );
+    // …and the invitation audit is the only one, so this cannot quietly become a trail of
+    // refusal events: it is written once, inside the invited branch, after `User.create`.
     assert.equal(
-      registerBody.includes('recordAudit('),
-      false,
-      'the registration path contains no audit write for a refusal to reach'
+      registerBody.split('recordAudit(').length - 1,
+      1,
+      'exactly one audit write (the accepted invitation) is reachable here'
     );
   });
 });

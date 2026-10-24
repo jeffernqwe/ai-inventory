@@ -1,15 +1,17 @@
 import { useMemo, useState } from 'react';
 import { Link, Redirect } from 'expo-router';
-import { StyleSheet, Text } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
 import AuthLayout from '../components/AuthLayout';
 import Banner from '../components/Banner';
 import Button from '../components/Button';
+import Card from '../components/Card';
 import Input from '../components/Input';
 import { fieldErrorsFrom } from '../lib/authCopy';
 import { useSession } from '../lib/auth';
-import { defaultHomePath } from '../lib/permissions';
-import { type } from '../lib/theme';
+import { getPendingInvite } from '../lib/pendingInvite';
+import { defaultHomePath, roleLabel } from '../lib/permissions';
+import { spacing, type } from '../lib/theme';
 import type { Palette } from '../lib/theme';
 import { useTheme } from '../lib/theme-context';
 import { emailProblem, passwordProblem, passwordRuleHint, passwordStrengthProblem } from '../lib/validation';
@@ -25,15 +27,42 @@ const createStyles = (colors: Palette) =>
       textAlign: 'center',
     },
     link: { color: colors.link, fontWeight: '700' },
+    inviteRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      alignItems: 'baseline',
+      gap: spacing.sm,
+      paddingVertical: spacing.sm,
+    },
+    inviteLabel: { ...type.body, color: colors.textMuted },
+    inviteValue: { ...type.body, color: colors.text, fontWeight: '600', flexShrink: 1 },
   });
 
+/**
+ * Create Account, in two shapes.
+ *
+ * ORDINARY: a person starts a business, so the form asks for its name and the server
+ * creates a Business with them as its OWNER.
+ *
+ * INVITED (2026-10-25): `app/invite.tsx` has already stored the invitation in memory and
+ * sent the person here. The business and the role come from that invitation row, so the
+ * form asks for neither — it names what they are joining instead. The email is PREFILLED
+ * AND LOCKED, because the server checks the invited address against the verified
+ * Firebase identity: letting it be edited would only produce a refusal after a six-digit
+ * code had been typed. Everything else — the password, the confirmation, the name — is
+ * the person's own, which is the point of an invitation: nobody else chooses their
+ * credential.
+ */
 export default function RegisterScreen() {
   const { status, user, signUp, firebaseOnboarding } = useSession();
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  // Read once, at mount: the value is in-memory module state that only this journey sets,
+  // and re-reading it on every render would make the form re-key itself for no reason.
+  const [invite] = useState(() => getPendingInvite());
   const [businessName, setBusinessName] = useState('');
   const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(invite?.email ?? '');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -79,7 +108,8 @@ export default function RegisterScreen() {
     // and on an unconfigured build it travelled to the server's validator, the only
     // place that shape rule then existed.
     const next: Record<string, string> = {};
-    if (!businessName.trim()) next.businessName = 'Business name is required';
+    // Invited registrations have no business to name — the invitation already holds one.
+    if (!invite && !businessName.trim()) next.businessName = 'Business name is required';
     if (!name.trim()) next.name = 'Name is required';
     const emailIssue = emailProblem(email);
     if (emailIssue) next.email = emailIssue;
@@ -115,7 +145,7 @@ export default function RegisterScreen() {
       // so sending the raw one made the validation and the request disagree). The
       // password is deliberately NOT trimmed: spaces are legitimate password characters.
       await signUp({
-        businessName: businessName.trim(),
+        businessName: invite ? undefined : businessName.trim(),
         name: name.trim(),
         email: email.trim(),
         password,
@@ -131,11 +161,15 @@ export default function RegisterScreen() {
 
   return (
     <AuthLayout
-      title="Create your workspace"
-      subtitle="You'll get a new business and an Owner account."
+      title={invite ? `Join ${invite.businessName ?? 'the business'}` : 'Create your workspace'}
+      subtitle={
+        invite
+          ? `Create your account to join as ${roleLabel(invite.role).toLowerCase()}.`
+          : "You'll get a new business and an Owner account."
+      }
       footer={
         <Text style={styles.footerText}>
-          Already have an account?{' '}
+          {invite ? 'Not you? ' : 'Already have an account? '}
           <Link href="/login" style={styles.link}>
             Sign in
           </Link>
@@ -143,19 +177,32 @@ export default function RegisterScreen() {
       }
     >
       <Banner type="error" text={formError} />
-      <Input
-        name="businessName"
-        label="Business name"
-        value={businessName}
-        onChangeText={editField('businessName', setBusinessName)}
-        placeholder="Acme Retail"
-        // A business name is a name: the keyboard should capitalise it. `Input`
-        // defaults to `none` for the code/barcode fields this app is full of.
-        autoCapitalize="words"
-        returnKeyType="next"
-        error={fieldErrors.businessName}
-        required
-      />
+      {invite ? (
+        <Card>
+          <View style={styles.inviteRow}>
+            <Text style={styles.inviteLabel}>Business</Text>
+            <Text style={styles.inviteValue}>{invite.businessName ?? 'Not available'}</Text>
+          </View>
+          <View style={styles.inviteRow}>
+            <Text style={styles.inviteLabel}>Role</Text>
+            <Text style={styles.inviteValue}>{roleLabel(invite.role)}</Text>
+          </View>
+        </Card>
+      ) : (
+        <Input
+          name="businessName"
+          label="Business name"
+          value={businessName}
+          onChangeText={editField('businessName', setBusinessName)}
+          placeholder="Acme Retail"
+          // A business name is a name: the keyboard should capitalise it. `Input`
+          // defaults to `none` for the code/barcode fields this app is full of.
+          autoCapitalize="words"
+          returnKeyType="next"
+          error={fieldErrors.businessName}
+          required
+        />
+      )}
       <Input
         name="name"
         label="Your name"
@@ -179,6 +226,10 @@ export default function RegisterScreen() {
         placeholder="you@company.com"
         error={fieldErrors.email}
         required
+        // The invited address is the identity the server compares against, so it is shown
+        // and not editable — the invitation was sent to it.
+        editable={!invite}
+        helper={invite ? 'This invitation was sent to this address.' : undefined}
         // What the field HOLDS, so the phone's password manager can fill it instead of
         // asking the person to retype an address they already saved.
         autoComplete="email"

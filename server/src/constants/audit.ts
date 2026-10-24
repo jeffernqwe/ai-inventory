@@ -69,6 +69,16 @@ export const AUDIT_ACTIONS = Object.freeze({
   // business's governance record still shows that an account was closed, when, and
   // under which role, without identifying the person afterwards.
   ACCOUNT_DELETED: 'ACCOUNT_DELETED',
+  // Invitation-based onboarding (2026-10-25). Three events, one per transition the
+  // admin or the invitee can cause. They are separate rather than a single
+  // INVITATION_UPDATED because the trail's value here is telling a grant that was
+  // declined from one that was used: a REVOKED row is somebody withdrawing an offer,
+  // an ACCEPTED row is a new member. The address is NOT in any metadata — the same
+  // rule the account-deletion work established, so a later deletion cannot leave a
+  // readable address in the trail.
+  INVITATION_SENT: 'INVITATION_SENT',
+  INVITATION_REVOKED: 'INVITATION_REVOKED',
+  INVITATION_ACCEPTED: 'INVITATION_ACCEPTED',
 });
 
 export const AUDIT_ENTITY_TYPES = Object.freeze({
@@ -81,6 +91,9 @@ export const AUDIT_ENTITY_TYPES = Object.freeze({
   INVENTORY_TRANSACTION: 'INVENTORY_TRANSACTION',
   USER: 'USER',
   SESSION: 'SESSION',
+  // The invitation itself — the entityId is the Invitation row, which is why this is
+  // not filed under USER: the invitation exists before any user does.
+  INVITATION: 'INVITATION',
 });
 
 export default { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES };

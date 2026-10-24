@@ -23,6 +23,7 @@ import {
   signOutOfFirebase,
 } from './firebase-auth';
 import type { ConfirmSignInOutcome, FirebaseConfirmMethod } from './firebase-auth';
+import { clearPendingInvite, getPendingInvite } from './pendingInvite';
 import {
   nativeForceIdToken,
   nativeReloadUser,
@@ -98,8 +99,11 @@ const NO_FIREBASE_IDENTITY_MESSAGE = 'Your sign-in has expired. Please sign in a
  * credential or an authorization claim, and no navigation parameter does either.
  */
 export interface FirebaseRegistrationInput {
-  businessName: string;
+  /** Absent when an invitation supplies the business. */
+  businessName?: string;
   name?: string;
+  /** The invitation this registration is accepting, when there is one. */
+  invitationToken?: string;
 }
 
 /** True for the one server refusal that arms the Firebase onboarding route. */
@@ -322,8 +326,17 @@ export type FirebaseOnboarding =
 
 /** The profile details an identity awaiting verification will need to register. */
 export interface PendingFirebaseRegistration {
-  businessName: string;
+  businessName?: string;
   name?: string;
+  /**
+   * The invitation this registration will accept, remembered across the verification step.
+   *
+   * It is the value from `lib/pendingInvite`, copied here for the duration of one journey so
+   * the confirm step does not have to re-read a module a screen could have cleared. It still
+   * authorizes nothing: the server checks it against a VERIFIED identity for the invited
+   * address and reads the tenant and role from its own row.
+   */
+  invitationToken?: string;
 }
 
 /** The informational code a verification refusal carries; the route is already armed. */
@@ -1416,6 +1429,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // identity behind it is gone. Either way the offer must not outlive the state.
     setHasResumableFirebaseIdentity(false);
     setFirebaseAccountEmail(null);
+    // An invitation is a JOURNEY TOWARD A SESSION, so a session — whether it was just
+    // opened by accepting one or by an ordinary sign-in — ends it. Clearing here rather
+    // than only on the accepting path is what stops a pending invitation from lingering
+    // in memory after somebody signs in to a DIFFERENT account and later opens Create
+    // Account, which would offer a join the server has already spent.
+    clearPendingInvite();
     setToken(nextToken);
     setUser(nextUser);
     setStatus(nextToken && nextUser ? 'signedIn' : 'signedOut');
@@ -1765,8 +1784,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    */
   const signUp = useCallback(
     async ({ businessName, name, email, password }: RegisterPayload): Promise<AuthUser | null> => {
+      // The invitation being accepted, if any. Read from the in-memory store rather than
+      // taken from the screen, so the token never travels in a route parameter, and copied
+      // into the verification context below so the confirm step still has it.
+      const invite = getPendingInvite();
       if (!isFirebaseConfigured()) {
-        await api.register({ businessName, name, email, password });
+        // Invitations are a server-side flow: the invitation decides the tenant, and the
+        // legacy password route has no way to carry one. Saying so is better than sending a
+        // request the server will refuse for a different reason.
+        if (invite) {
+          throw new Error(
+            'Accepting an invitation needs a build connected to Firebase. Ask an administrator for a new invitation in the app.'
+          );
+        }
+        await api.register({ businessName: businessName as string, name, email, password });
         return signIn({ email, password });
       }
 
@@ -1804,10 +1835,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // `Retry-After` stays authoritative and "Wrong account? Sign out" is immediately
         // reachable. No tenant, no exchange and no session can appear on this path; the
         // registration context is the SAME in-memory value the success path passes.
-        armVerificationRequired({ businessName, name }, verificationSendFailureMessage(err));
+        armVerificationRequired(
+          { businessName, name, ...(invite ? { invitationToken: invite.token } : {}) },
+          verificationSendFailureMessage(err)
+        );
         return null;
       }
-      armVerificationRequired({ businessName, name }, null, codeIssuedAt);
+      armVerificationRequired(
+        { businessName, name, ...(invite ? { invitationToken: invite.token } : {}) },
+        null,
+        codeIssuedAt
+      );
       return null;
     },
     [armVerificationRequired, signIn]
@@ -1840,14 +1878,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * correct outcome and this function only propagates it.
    */
   const completeFirebaseRegistration = useCallback(
-    async ({ businessName, name }: FirebaseRegistrationInput): Promise<AuthUser> => {
+    async ({ businessName, name, invitationToken }: FirebaseRegistrationInput): Promise<AuthUser> => {
       const idToken = await currentFirebaseIdToken();
       if (!idToken) {
         throw new FirebaseAuthError(NO_FIREBASE_IDENTITY, NO_FIREBASE_IDENTITY_MESSAGE);
       }
 
       if (!firebaseAccountRegisteredRef.current) {
-        await api.firebaseRegister({ idToken, businessName, name });
+        await api.firebaseRegister({ idToken, businessName, name, invitationToken });
         // Only a RESOLVED call sets this. A refusal leaves it false so the user can
         // correct the input; a network fault leaves it false so the attempt is
         // genuinely repeatable.
@@ -2432,6 +2470,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             idToken,
             businessName: pendingRegistration.businessName,
             name: pendingRegistration.name,
+            // Absent on the ordinary path, present when this journey is accepting an
+            // invitation. The server reads the tenant and role from that row.
+            invitationToken: pendingRegistration.invitationToken,
           });
           firebaseAccountRegisteredRef.current = true;
         }

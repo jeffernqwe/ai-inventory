@@ -26,9 +26,18 @@
  * order matters: Firebase is the identity provider, so leaving the identity alive
  * would keep accepting the person's password and land them on
  * `REGISTRATION_REQUIRED` — a deleted account that is still a usable identity.
- * Writing the tombstone last also makes the whole operation converge on retry: a
- * crash after the Firebase delete leaves an ACTIVE row that a second request can
+ * A crash after the Firebase delete leaves an ACTIVE row that a second request can
  * still tombstone, and the second Firebase delete is answered as already-gone.
+ *
+ * THAT RECOVERY HAS ONE NARROW HOLE, stated rather than papered over: a
+ * Firebase-ONLY account (no `passwordHash`) whose identity was deleted by a request
+ * that then failed before the tombstone cannot re-authenticate, because the only
+ * credential it has is the token the provider will no longer mint. The account is
+ * then still ACTIVE with its data, and closing it needs an operator. The window is
+ * two writes wide (Firebase delete, then the tombstone update); nothing in the
+ * application can shrink it further without either weakening the re-authentication
+ * requirement or deferring the provider delete, and both were rejected for reasons
+ * this comment already gives.
  *
  * WHAT IS DELETED OUTRIGHT. Everything that holds personal content and is not part
  * of the business's inventory record: the person's sessions (all devices), their
@@ -48,10 +57,12 @@
  * A BUSINESS WITH NOBODY ELSE LEFT IS CLOSED TOO (owner decision, 2026-10-24). The
  * inventory history argument above is about OTHER PEOPLE: rows are kept because
  * somebody else in the business still relies on them. When the caller is the only
- * active member, there is nobody — so keeping the tenant would retain personal data
- * for no one's benefit, and, worse, would leave a person permanently unable to close
- * their account (there was no invitation or ownership-transfer path to satisfy a
- * refusal). In that one case the whole tenant is removed with the account: products,
+ * active member AND its OWNER, there is nobody — so keeping the tenant would retain
+ * personal data for no one's benefit, and, worse, would leave a person permanently
+ * unable to close their account (there was no invitation or ownership-transfer path
+ * to satisfy a refusal). A non-owner who is the only active member is NOT that case:
+ * the business still has an owner by construction (the role rules keep one), so the
+ * tenant survives with its owner. In that one case the whole tenant is removed with the account: products,
  * stock, movements, purchase orders, suppliers, locations, categories, the audit
  * trail, the assistant's history, every user row and the business row itself. THE
  * LIST OF WHAT THAT MEANS IS NOT DEFINED HERE — `tenantTeardown.service` owns it, so
@@ -83,6 +94,7 @@ import AuditLog from '../models/auditLog.model.ts';
 import PasswordResetToken from '../models/passwordResetToken.model.ts';
 import PasswordResetChallenge from '../models/passwordResetChallenge.model.ts';
 import EmailVerificationChallenge from '../models/emailVerificationChallenge.model.ts';
+import Invitation from '../models/invitation.model.ts';
 import AIConversation from '../models/aiConversation.model.ts';
 import AIMessage from '../models/aiMessage.model.ts';
 import { recordAudit } from './audit.service.ts';
@@ -207,9 +219,10 @@ type BusinessFate = 'keep' | 'close';
  * Decides whether the tenant survives the caller's deletion, and refuses the one case
  * that is neither safe nor satisfiable.
  *
- * Three outcomes, in order:
+ * Four outcomes, decided in this order:
  *
- *   1. the caller is not an OWNER — the person goes, the business stays;
+ *   1. the caller is not an OWNER — the person goes, the business stays (it still has
+ *      its owner, which the role rules guarantee, so nothing is left unowned);
  *   2. another active OWNER exists — the person goes, the business stays with them;
  *   3. nobody else is an active member — the business goes with the person, because
  *      there is nobody left to own it and no history that concerns anybody else;
@@ -262,12 +275,38 @@ async function decideBusinessFate(user: {
 async function deleteOwnedRecords(user: {
   _id: IdLike;
   businessId: IdLike;
+  email?: string | null;
   firebaseUid?: string | null;
 }): Promise<void> {
   await Session.deleteMany({ userId: user._id });
+
+  // ★ AN INVITATION TO THIS ADDRESS IS PERSONAL DATA AND A LIVE TOKEN. It holds the address
+  //   in the clear and can create an account, so it must not outlive the person it names —
+  //   the tombstone frees the address for reuse, and a leftover pending invitation would
+  //   then be addressed to whoever takes that address next. Invitations the person SENT are
+  //   deliberately left alone: they belong to the business's onboarding, name somebody
+  //   else, and the `invitedBy` reference now points at a tombstone, which is fine.
+  if (user.email) {
+    await Invitation.deleteMany({ email: user.email });
+  }
   await PasswordResetToken.deleteMany({ userId: user._id });
   await PasswordResetChallenge.deleteMany({ userId: user._id });
   await AuditLog.updateMany({ userId: user._id }, { $set: { userId: null } });
+
+  // ★ ANONYMISING THE ACTOR IS NOT ENOUGH. `users.service.create` records a USER_CREATED row
+  //   whose `metadata` holds the created person's NAME and EMAIL. Clearing `userId` leaves
+  //   that row readable by every owner and admin of the business — a real deletion that still
+  //   shows the deleted address in the audit viewer. Measured on 2026-10-25: the tombstone
+  //   test could not see it because its own audit fixture carried no metadata.
+  //
+  //   Scoped twice, deliberately: `entityType: 'USER'` and `entityId: this account` mean only
+  //   rows ABOUT this person are touched. Rows they merely PERFORMED carry no personal fields
+  //   in metadata and are only dereferenced above; a product or supplier name is never read
+  //   here, so nothing that is not this person's can be removed.
+  await AuditLog.updateMany(
+    { entityType: AUDIT_ENTITY_TYPES.USER, entityId: String(user._id) },
+    { $unset: { 'metadata.name': '', 'metadata.email': '' } }
+  );
 
   if (user.firebaseUid) {
     await EmailVerificationChallenge.deleteMany({ uid: user.firebaseUid });
@@ -382,7 +421,14 @@ export async function deleteOwnAccount(input: DeleteAccountInput): Promise<Delet
     return { deleted: true, changed: false, firebaseIdentityDeleted: false, businessDeleted: false };
   }
 
-  await deleteOwnedRecords(user as { _id: IdLike; businessId: IdLike; firebaseUid?: string | null });
+  await deleteOwnedRecords(
+    user as {
+      _id: IdLike;
+      businessId: IdLike;
+      email?: string | null;
+      firebaseUid?: string | null;
+    }
+  );
 
   // `userId: null` ON PURPOSE: naming the caller would immediately re-point the
   // trail at the account whose identifiers this operation just removed.

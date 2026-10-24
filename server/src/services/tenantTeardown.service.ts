@@ -35,6 +35,7 @@ import Business from '../models/business.model.ts';
 import Category from '../models/category.model.ts';
 import Inventory from '../models/inventory.model.ts';
 import InventoryTransaction from '../models/inventoryTransaction.model.ts';
+import Invitation from '../models/invitation.model.ts';
 import Location from '../models/location.model.ts';
 import PasswordResetChallenge from '../models/passwordResetChallenge.model.ts';
 import PasswordResetToken from '../models/passwordResetToken.model.ts';
@@ -74,6 +75,10 @@ export const TENANT_DATA_COLLECTIONS: Array<[string, TenantModel]> = [
   ['locations', Location],
   ['suppliers', Supplier],
   ['audit_logs', AuditLog],
+  // Invitation-based onboarding (2026-10-25). An invitation carries a real address and a
+  // working token, so it is data, not history: closing a tenant without removing its
+  // pending invitations would leave emails that promise a business that no longer exists.
+  ['invitations', Invitation],
 ];
 
 function toIds(businessIds: Array<IdLike>): mongoose.Types.ObjectId[] {

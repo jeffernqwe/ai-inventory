@@ -20055,6 +20055,205 @@ change. **Not verified:** Play App Signing, an internal-testing install, Play's 
 
 ---
 
+# 27FA. The Terms of Use — and the personal data that outlived the tombstone (2026-10-25)
+
+**Server + mobile + documentation — one PUBLIC page (`GET /terms`), one mobile card, one deletion-service
+fix and three guard updates; no new dependency, permission, schema, index, session-model or environment
+variable, and no change to who may do what.** §27EU recorded the two Play blockers. The privacy policy
+shipped (§27ET, corrected by §27EW) and account deletion shipped in the app and on the web (§27EW), but
+there was **no terms of use at all** — nowhere, in the app or on a URL, to say what the service asks of
+the person or what they may expect from it. Reading the deletion service again to write them found a
+defect the tombstone test could not see.
+
+**1. The page.** `GET /terms` (`server/src/pages/termsOfUse.ts`, `server/src/routes/terms.routes.ts`),
+mounted **outside `/api`** and **public**, for the same reason as `/privacy` and `/account-deletion`: it is
+an HTML page a person or a reviewer reads in a browser, and terms behind a sign-in wall cannot be read
+by somebody deciding whether to create an account. It reads no request data, performs no I/O and has no
+branch that can fail. No script, an inline stylesheet authorized by a **CSP hash computed from the bytes
+served**, and `no-store` / `no-referrer` / `nosniff` / `frame-ancestors 'none'` on every response.
+
+**2. What it says, and why each sentence is there.** Three behaviours a person would otherwise be
+surprised by, all of them the software's actual behaviour rather than legal boilerplate: the assistant
+is **read-only** *and* **can be wrong** (a read-only claim without a fallibility claim is a promise the
+model cannot keep, and an answer is not accounting, tax, legal or safety advice); a **sole member's
+business is deleted with the account**, which is what the server decided on 2026-10-24 and what the
+deletion page already states; and **nothing in these terms limits a consumer right** that applies where
+the person lives, so the liability paragraph cannot be read as taking one away. The operator (Jeffern)
+is named, the contact address is the one the other two pages use, the effective date is 25 October 2026,
+and the page carries **no placeholder** — asserted, not assumed.
+
+**3. The three pages link to one another.** A privacy policy, a deletion page and a terms page that do not
+reference each other are three descriptions of three different products. `/terms` links to `/privacy` and
+`/account-deletion`; `/privacy` now links to `/terms` and `/account-deletion`; `/account-deletion` links
+to both. `TERMS-page.test.mjs` asserts the whole link set, so **removing any one of the six links fails a
+test** rather than leaving a page quietly orphaned.
+
+**4. In the app.** Profile gained a **Legal** card with *Privacy policy* and *Terms of use*. The address is
+built from **`API_URL`**, never typed out: a build pointed at the development server opens the development
+pages, and a production build opens production — a hand-written domain is the one thing that keeps working
+on the machine it was written on. `Linking.canOpenURL` is asked first, and a device that cannot open a
+browser gets a sentence instead of a tap that does nothing. Five cases in
+`mobile/__tests__/legal-pages-in-app.test.tsx`, including the URL asserted against the imported constant
+and a session-is-untouched case.
+
+**5. THE DEFECT THE TERMS WRITING FOUND — a deletion that still left the person readable.**
+`users.service.create` records a `USER_CREATED` audit row whose `metadata` holds the created person's
+**name and email address**, so that an owner can see who joined. The tombstone set that row's `userId` to
+`null` and stopped there — which left **the deleted address and name visible in the audit viewer to every
+owner and admin of the business**. The existing tombstone case could not see it because its own audit
+fixture carried `metadata: {}`; the new case writes the real shape the service writes. The fix is a second,
+narrowly scoped update: `$unset` `metadata.name` and `metadata.email` on **`entityType: 'USER'` rows whose
+`entityId` is this account** — nothing else. The person's **role stays**, because it says something about
+the business rather than about them, and a **colleague's** `USER_CREATED` row is asserted untouched, so the
+test proves the scope rather than only the erasure.
+
+**6. The guard that failed for the wrong reason.** `phaseA-credential-authority` asserted that the deletion
+service contained **exactly one `$unset`**, because that operator is how the Firebase link and the password
+hash are cleared and the file is a reviewed exception to the "nothing may clear `firebaseUid`" rule. The
+metadata fix is a second `$unset`, so the guard failed while the property it exists to protect was intact —
+a blade-edge count standing in for a property. It now counts the property: **exactly one block may name
+`firebaseUid` or `passwordHash`, and no other block may reach either.**
+
+**7. The one hole that remains, stated rather than papered over.** If a **Firebase-only** account's identity
+is deleted by the provider and the request then dies before the tombstone is written, that account is still
+`ACTIVE`, and it can no longer re-authenticate — its only credential is the token the provider will not
+mint again — so closing it needs an operator. The window is **two writes wide**. Nothing in the application
+can shrink it without either weakening the re-authentication requirement or deferring the provider delete;
+both were rejected, and the service header now records the hole beside the recovery it qualifies.
+
+**8. Route inventory 79 → 80** (**47 permission-gated, 14 authenticated, 19 public, 0 role-gated**), with a
+dated note in design §2.6. The gated tier is unchanged, as it has been through every auth, recovery and
+legal-page increment.
+
+**Verification.** Server `test:unit` **1349 tests / 1294 pass / 0 fail / 55 skipped** (the new
+`TERMS-page` suite, 6 cases; `PRIVACY-page` 9 cases passing with the new cross-link assertions);
+`node --test test/ACCOUNT-DELETION.test.mjs` with `TEST_MODE=db` **13 pass / 0 fail / 1 skipped** over the
+real database, which includes the new audit-metadata case; `tsc`, `eslint` and both module-graph checks
+clean. Mobile **95 suites / 1122 tests / 0 failures**, `tsc` and `eslint` clean. **Not verified:** the page
+is **not live** — it ships with the next server deploy, so the Play listing cannot point at `/terms` yet;
+**no device pass** was run for the Legal card (it is suite-proven, and it opens the same host the app
+already talks to); the full `test:db` mode was not re-run this pass, only the deletion suite it touches; and
+iOS remains unverified (no macOS).
+
+---
+
+# 27FB. Invitations — the first way to join a business you did not create (2026-10-25)
+
+**Server + mobile + documentation — one new collection, five new routes, one new mail template, one
+public landing page, two new mobile screens and the invited shape of Create Account; no new dependency,
+increment of an existing permission, session-model, index-on-existing-collection or environment
+variable.** Since Phase 14A the only way to add a colleague was `POST /api/users`, which made an
+administrator invent a password for somebody else and hand it over — a credential known to two people,
+and the single structural reason legacy password login could not be retired (`users.service.create`
+writes a `passwordHash` and no `firebaseUid`). An invitation moves the credential decision to the person
+who will use it: the admin names an address and a role, the invitee proves the address with the AUTH-04
+six-digit code and creates their own Firebase identity, and the server reads the tenant and role from
+the invitation rather than from anything the invitee sends.
+
+**1. The invitation is not a credential for an account.** The token is 32 bytes of CSPRNG output, mailed
+to the invited address, and the collection stores **only its SHA-256 digest** — so a database reader
+cannot reconstruct a working link, exactly as the reset flows store digests rather than codes. Holding
+the link proves only that somebody received a message addressed to a particular email; acceptance
+additionally requires a **verified Firebase identity whose address equals the invited one**, compared by
+the server in `resolvePendingForRegistration` (not only by its caller). A leaked link therefore grants
+nothing on its own, which is why it can be a plain random value rather than a second managed secret. The
+address IS stored in the clear here, unlike the reset challenges, and deliberately: an invitation cannot
+function without knowing who it is for, and the mail is sent to it. It is consequently the one field the
+deletion path must not retain — see §5.
+
+**2. The tenant and the role come from the row, never from the request.** `POST
+/api/auth/firebase/register` gained exactly one optional input, `invitationToken`, and no field for a
+business id, a role, a uid or a user id exists to send. When a token is present, `businessName` becomes
+optional **because no business is created**: the person joins the inviting tenant, the role is the
+invited one, the address is the verified claim, and the uid is the verified token's. `OWNER` is not
+invitable (the user API already refuses to mint one, so an invitation must not be a quieter route to
+the same grant), an `ADMIN` may not invite an `ADMIN` (the same hierarchy rule as direct creation), and
+because `users.email` is globally unique an address that already owns an account is refused **at invite
+time** with `INVITATION_EMAIL_IN_USE` rather than merged at acceptance — matching the Phase 32C/32H
+position that two tenants are never joined by an address match.
+
+**3. One pending invitation per business and address, seven days long.** Re-inviting an address
+**replaces** the pending row and rotates its token, which is what makes a resent link the revocation of
+the previous one; expired, revoked and already-accepted all answer the **same** generic 404
+`INVITATION_INVALID`, so a holder learns the link is unusable and not which of the three happened. The
+partial unique index catches two admins pressing send at once, and the duplicate-key path re-reads and
+rotates rather than failing a request that achieved the invariant. **A mail failure withdraws the row**: an
+invitation nobody can receive must not sit in the pending list, and its token must not stay redeemable —
+the mail is sent after the write and the row is deleted if delivery fails (`503
+INVITATION_MAIL_NOT_CONFIGURED` when mail is unconfigured, `502 INVITATION_MAIL_FAILED` when the provider
+refused it).
+
+**4. The three management routes sit behind `users.manage`, and the two public ones disclose nothing.**
+`GET`/`POST /api/invitations` and `DELETE /api/invitations/:id` require authentication **and**
+`requirePermission(USERS_MANAGE)` — the permission that already governs membership, because an
+invitation adds a member and a separate key would create a role that may invite yet not manage. **This is
+the first change to the gated tier since the Phase 23 contract** (47 → 50), and the Phase 22/23/24 guards
+were extended rather than loosened. `GET /api/auth/invitation?token=…` is public because the person
+holding an invitation has not signed in yet; it returns the invited address, role, business name and
+expiry and nothing else, and it is per-IP rate limited. **The token travels as a QUERY parameter, never a
+path segment**, because the access log records the path and never the query — a token in the path would
+sit in every log line and every intermediary's record for a week. `GET /invite` is the page an invitation
+email's button opens: mounted outside `/api` like the three legal pages, it validates the token's SHAPE
+against an allow-list and writes it into a constant `inventoryai://invite?...` address, resolving and
+redeeming nothing; `no-store`, `no-referrer`, no script, and a crafted token is refused rather than
+reflected. Send is limited per ACCOUNT (20 / hour) and preview per IP (60 / hour), both **after** the
+authentication and permission gates.
+
+**5. Deletion and teardown know about invitations.** An invitation is **personal data and a live token**,
+so closing an account deletes the invitations addressed to that person — otherwise the tombstone frees the
+address for reuse and a pending invitation would then be addressed to whoever takes it next; invitations
+the person **sent** are left alone, because they belong to the business's onboarding and name somebody
+else. The tenant teardown gained the collection too: closing a business must not leave emails promising a
+tenant that no longer exists. Three audit actions (`INVITATION_SENT`, `INVITATION_REVOKED`,
+`INVITATION_ACCEPTED`) and one entity type (`INVITATION`) were added, with **no address in any metadata**
+— the same rule the account-deletion work established, and the labels were added to
+`mobile/lib/auditLabels.ts` so the viewer renders words rather than identifiers.
+
+**6. Mobile.** `app/invite.tsx` is the public screen the link reaches: one public preview, then the four
+facts the invitee already knows, then *Create your account*. The token is held in **memory**
+(`lib/pendingInvite.ts`) for the length of the journey — never a route parameter, never persisted, since
+the email is still there after a cold start and a stored invitation would be a seven-day secret on the
+device for no benefit. Create Account in its invited shape **asks for no business name** (the field is
+absent, not optional) and **locks the email** to the invited address, because letting it be edited would
+only produce a refusal after a six-digit code had been typed; the form names the business and role
+instead. The Firebase-onboarding screen (`register-firebase.tsx`, the `REGISTRATION_REQUIRED` path, which
+a Google sign-in can reach) has the same invited shape. `app/(app)/users/invitations.tsx` is the
+management surface — send, list, revoke with a confirmation — reached from a new **Invite** button on
+Users, and it never receives or displays a token. A signed-in device opening an invitation is told that
+an invitation creates an account instead of being shown a form the server would refuse.
+
+**7. A test defect the full run found.** The accepting case asserted `Business.countDocuments()` was
+unchanged, and **passed alone while failing in a four-file run**: `node:test` runs test FILES
+concurrently, so a global collection count is decided by whatever another suite is doing at that instant.
+It now asserts on the business this test owns — the inviting tenant holds exactly two members after the
+join — which is the property the global count was standing in for.
+
+**8. Route inventory 80 → 85** (**50 permission-gated, 14 authenticated, 21 public, 0 role-gated**), with
+§2.6 corrected as well: the two 2026-10-25 notes had been written out of order and one sum was wrong,
+which the route-inventory guard could not see because it reads the canonical sentence at §2.6's head.
+
+**Verification.** Server `test:unit` **1359 tests / 1303 pass / 0 fail / 56 skipped**; `test:db` **909
+tests / 814 pass / 0 fail / 95 skipped** (the whole mode re-run this pass, against Atlas); the new
+`INVITATIONS.test.mjs` carries **18 cases** (8 unit: payload rules, the mail's two links and its escaping,
+the landing page's forwarding and non-reflection; 10 over the real app: create + mailed + digest stored,
+supersede-on-resend, preview's four fields, expiry as the same generic refusal, tenant-scoped revoke,
+delivery failure withdrawing the row, role/address refusals, acceptance by a verified identity for the
+invited address joining that business and creating none, replay refusal, and the invitation dying with
+the account). `tsc`, `eslint` and both module-graph checks clean. **The public surface was also exercised
+over HTTP** on a local boot of this tree: `GET /invite` answers **200** for a well-formed token and emits
+the constant `inventoryai://invite?token=…` link, **400** for a malformed one with **no** request value
+reflected; `GET /api/auth/invitation` answers **404 `INVITATION_INVALID`** for an unknown token and
+**400** for a malformed one; all three management routes answer **401** unauthenticated; and `/privacy`,
+`/terms` and `/account-deletion` each answer **200 text/html**. Mobile **96 suites / 1138 tests / 0
+failures** — `mobile/__tests__/invitations.test.tsx` adds **13 cases**, including the token reaching the
+real `AuthProvider`'s registration request and being forgotten once a session exists. **Not verified:**
+**no device pass** — the invited journey has not been walked on the phone (the link, the registration, a
+real inbox) and is suite-proven only; **the server change is not deployed at the time of writing**, so
+`/invite` and the three management routes are not live yet; a **real inbox** was not used (the suite
+reads the token out of the recorded message); and iOS remains unverified (no macOS).
+
+---
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

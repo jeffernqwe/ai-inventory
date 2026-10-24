@@ -2552,6 +2552,54 @@ schema, index, dependency, session model or mobile change was made.**
 
 ---
 
+## 53. INVITATION-BASED ONBOARDING (2026-10-25)
+
+**An invitation adds a member without an administrator ever knowing their password.** Shipped server and
+mobile, with the tenant and role read from the invitation row and the invitee's address taken from a
+**verified** Firebase claim. This is the prerequisite for retiring legacy password login recorded in
+§8 of this document; retiring that login itself still needs the existing admin-created accounts
+migrated, which is unchanged.
+
+### Security properties, and where each is enforced
+
+| Property | Enforced in |
+| --- | --- |
+| The link is not a credential | `services/invitations.service.ts` — acceptance requires a verified identity whose address equals the invited one; the token alone resolves a row and creates nothing |
+| No plaintext token at rest | `models/invitation.model.ts` — only the SHA-256 digest is stored or queried; the token exists in the mail and in the invitee's memory |
+| The tenant and role cannot be steered | `firebaseAuth.service.ts` — `businessId`/`role` come from the invitation document; the registration payload has no field for either |
+| An invitation cannot escalate | `constants/invitations.ts` + `invitations.service.assertAssignableRole` — `OWNER` is not invitable, and an `ADMIN` may not invite an `ADMIN` (mirrors `users.service`) |
+| One live link per address | partial unique index on `(businessId, email)` for `status: 'PENDING'`; a resend rotates the digest, which revokes the previous link |
+| Refusals are not an oracle | expiry, revocation and prior acceptance all answer **404 `INVITATION_INVALID`**; a wrong address answers **403 `INVITATION_EMAIL_MISMATCH`** without disclosing the tenant or role |
+| The token cannot reach the access log | `GET /api/auth/invitation` takes it as a **query** parameter; the Phase 08A log records the path only (re-proved for the reset page) |
+| Two public surfaces disclose nothing usable | the preview returns four fields; `/invite` validates the token's shape and writes a constant `inventoryai://` address, with a crafted value refused rather than reflected |
+| Mail failure leaves no orphan grant | the row is written, the mail sent, and the row **deleted** if delivery fails; `503 INVITATION_MAIL_NOT_CONFIGURED` / `502 INVITATION_MAIL_FAILED` |
+| Abuse budgets | send **per account** 20/hour after `requireAuth` + `users.manage`; preview **per IP** 60/hour before any lookup |
+| Personal data does not outlive the person | account deletion removes invitations **addressed to** the closed account; the tenant teardown deletes the collection; audit metadata carries the role and never the address |
+
+### Route and permission surface
+
+- `GET` / `POST /api/invitations`, `DELETE /api/invitations/:id` — `requireAuth` +
+  `requirePermission(USERS_MANAGE)`. **The gated tier moves 47 → 50**, the first change since Phase 23;
+  no new permission was introduced, because an invitation adds a member and a separate key would create
+  a role that may invite yet not manage.
+- `GET /api/auth/invitation?token=…` and `GET /invite` — the two public additions; the second is mounted
+  outside `/api` because it is HTML read in a browser.
+- Route inventory **80 → 85** (**50** permission-gated, **14** authenticated, **21** public,
+  **0** role-gated).
+
+### Verification
+
+- Server `test:unit` **1359 / 1303 pass / 0 fail / 56 skipped**; `test:db` **909 / 814 pass / 0 fail /
+  95 skipped** against Atlas; `INVITATIONS.test.mjs` **18 cases** (8 unit, 10 over the real app,
+  including acceptance only by a verified identity for the invited address, replay refusal, tenant-scoped
+  revocation, mail-failure withdrawal and the invitation dying with the account).
+- `tsc`, `eslint` and both module-graph checks clean. Mobile **96 suites / 1138 tests / 0 failures**
+  (`mobile/__tests__/invitations.test.tsx`, 13 cases).
+- **Not externally verified:** no device pass (link → registration → real inbox), and the server change
+  was **not deployed** at the time of writing, so neither public surface is live yet. iOS unverified.
+
+---
+
 > **MAINTENANCE.** This is a living navigation document. On any authentication/security change:
 > reconcile against evidence, update only evidence-supported statuses, record newly completed and
 > remaining work, preserve unresolved decisions and deferred items, update external-verification

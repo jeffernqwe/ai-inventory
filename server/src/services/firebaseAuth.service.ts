@@ -61,6 +61,9 @@ import { assertActiveBusiness } from './business.service.ts';
 import { createSessionForToken, newSessionId } from './session.service.ts';
 import { verifyFirebaseIdToken } from './firebase/index.ts';
 import { EMAIL_NOT_VERIFIED } from '../constants/firebase.ts';
+import { invitationsService } from './invitations.service.ts';
+import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../constants/audit.ts';
+import { recordAudit } from './audit.service.ts';
 
 const OWNER_ROLE = 'OWNER';
 const ACTIVE_STATUS = 'ACTIVE';
@@ -118,8 +121,14 @@ type ExchangePayload = {
 
 type RegisterPayload = {
   idToken: unknown;
-  businessName: string;
+  /** Required on the ordinary path; optional when an invitation decides the business. */
+  businessName?: string;
   name?: unknown;
+  /**
+   * The invitation being accepted, when there is one. This is the ONLY new input on this
+   * path, and it names no tenant, role or user — those come from the row it resolves to.
+   */
+  invitationToken?: string;
 };
 
 /**
@@ -246,7 +255,49 @@ export async function exchangeFirebaseSession({ idToken, deviceLabel }: Exchange
  * cannot be an account-takeover vector, and it matches what today's register
  * route already answers for the same email.
  */
-export async function registerBusinessFromFirebase({ idToken, businessName, name }: RegisterPayload) {
+/**
+ * The answer for a failed `User` write, shared by the ordinary and the invited path.
+ *
+ * Phase 32A §7.4's hard-error rule is preserved verbatim for a `firebaseUid` collision:
+ * "Treat as a hard error and audit it — this is the signature of a compromised or
+ * misconfigured mapping, never something to auto-resolve." Deliberately NOT EMAIL_IN_USE:
+ * the two mean opposite things, and answering the ordinary code would hide the security
+ * event. `email` colliding is the ordinary 409 a race can produce.
+ *
+ * The disposition differs from §7.4 in one respect, and it is deliberate: the record is a
+ * structured SERVER LOG rather than an AuditLog row, because the only business in scope
+ * on the ordinary path is the one being rolled back, and attributing a security event to
+ * a tenant that never existed would put a false trail in front of the ADMIN-readable
+ * audit viewer. The uid is included because the log is server-side and the uid is what an
+ * operator needs to trace the collision; it is an identifier, not a credential, and no
+ * token material reaches this line.
+ */
+function throwRegistrationWriteError(err: unknown, uid: string): never {
+  if (duplicateKeyField(err) === 'firebaseUid') {
+    logError({
+      type: 'firebase_identity_collision',
+      message: `[firebase] registration refused: the verified identity is already linked to a MongoDB user (uid ${uid})`,
+    });
+    // The underlying driver error is attached as `cause` so the operator can still see the
+    // E11000 that produced this. It is safe to carry: the global error handler reads
+    // `status`, `code`, `message`, `fields` and `applied` and never `cause`, so nothing
+    // about it reaches the client.
+    throw new Error('The verified Firebase identity is already linked to another account', {
+      cause: err,
+    });
+  }
+  if (duplicateKeyField(err) === 'email') {
+    throw new ApiError(409, EMAIL_IN_USE_MESSAGE, 'EMAIL_IN_USE');
+  }
+  throw err;
+}
+
+export async function registerBusinessFromFirebase({
+  idToken,
+  businessName,
+  name,
+  invitationToken,
+}: RegisterPayload) {
   const identity = await verifyFirebaseIdToken(idToken);
 
   // `email` is nullable in the verified identity (a phone-auth token carries
@@ -289,6 +340,76 @@ export async function registerBusinessFromFirebase({ idToken, businessName, name
     throw new ApiError(409, EMAIL_IN_USE_MESSAGE, 'EMAIL_IN_USE');
   }
 
+  // ---------------------------------------------------------------------------
+  // INVITED REGISTRATION (2026-10-25)
+  //
+  // The person proved an address through AUTH-04 and now PROVES IT AGAIN with a
+  // verified Firebase identity; the invitation says which business and role that
+  // address was offered. Everything security-relevant comes from the row or the
+  // token, never from the request:
+  //
+  //   tenant  -> invitation.businessId
+  //   role    -> invitation.role
+  //   email   -> the verified claim, already equal to invitation.email
+  //   uid     -> the verified token's uid
+  //
+  // NO BUSINESS IS CREATED on this path, which is the point: an invited person is
+  // joining somebody else's business rather than starting one beside it. The
+  // ordinary path below is untouched.
+  // ---------------------------------------------------------------------------
+  if (invitationToken) {
+    const invitation = await invitationsService.resolvePendingForRegistration(
+      invitationToken,
+      email
+    );
+    // An invitation into a suspended or closed business must not mint a member, for
+    // the same reason the exchange refuses to mint a session for one.
+    await assertActiveBusiness(invitation.businessId);
+
+    let invitedUser;
+    try {
+      invitedUser = await User.create({
+        businessId: invitation.businessId,
+        name: resolveDisplayName(name, email),
+        email,
+        firebaseUid: identity.uid,
+        emailVerified: identity.emailVerified,
+        role: invitation.role,
+        status: ACTIVE_STATUS,
+      });
+    } catch (err) {
+      throwRegistrationWriteError(err, identity.uid);
+    }
+
+    // Marked spent AFTER the account exists. If this write failed, the retry would hit
+    // EMAIL_IN_USE above — which is why the acceptance is additionally idempotent at the
+    // row level (`status: 'PENDING'`) rather than relying on this ordering alone.
+    await invitationsService.markAccepted(invitation._id, invitedUser._id);
+
+    await recordAudit({
+      businessId: invitation.businessId,
+      userId: invitedUser._id,
+      action: AUDIT_ACTIONS.INVITATION_ACCEPTED,
+      entityType: AUDIT_ENTITY_TYPES.INVITATION,
+      entityId: invitation._id,
+      metadata: { role: invitation.role },
+    });
+
+    const invitedBusiness = await Business.findById(invitation.businessId);
+    if (!invitedBusiness) {
+      // The tenant was deleted between `assertActiveBusiness` and this read. The user row
+      // is now the only member of a business that no longer exists, which is not a state
+      // the app can render; refusing is honest and the next exchange answers
+      // REGISTRATION_REQUIRED for the identity, so retrying is a supported path.
+      throw new ApiError(
+        409,
+        'The business that invited you is no longer available.',
+        'BUSINESS_NOT_ACTIVE'
+      );
+    }
+    return { user: invitedUser, business: invitedBusiness };
+  }
+
   const business = await Business.create({ name: businessName });
 
   let user;
@@ -311,39 +432,7 @@ export async function registerBusinessFromFirebase({ idToken, businessName, name
     // is what the caller must see, and an orphaned business is the lesser failure.
     await Business.deleteOne({ _id: business._id }).catch(() => {});
 
-    if (duplicateKeyField(err) === 'firebaseUid') {
-      // Phase 32A §7.4: "Treat as a hard error and audit it — this is the
-      // signature of a compromised or misconfigured mapping, never something to
-      // auto-resolve." Deliberately NOT EMAIL_IN_USE: the two mean opposite
-      // things, and answering the ordinary code would hide the security event.
-      //
-      // The disposition differs from §7.4 in one respect, and it is deliberate:
-      // the record is a structured SERVER LOG rather than an AuditLog row.
-      // `recordAudit` requires a businessId, and the only business in scope is
-      // the one being rolled back above — attributing a security event to a
-      // tenant that never existed would put a false trail in front of the
-      // ADMIN-readable audit viewer, which is worse than the missing row. The
-      // uid is included because the log is server-side and the uid is the value
-      // an operator needs to trace the collision; it is an identifier, not a
-      // credential, and no token material reaches this line.
-      logError({
-        type: 'firebase_identity_collision',
-        message: `[firebase] registration refused: the verified identity is already linked to a MongoDB user (uid ${identity.uid}, business ${String(business._id)} rolled back)`,
-      });
-      // The underlying driver error is attached as `cause` so the operator can
-      // still see the E11000 that produced this. It is safe to carry: the global
-      // error handler reads `status`, `code`, `message`, `fields` and `applied`
-      // and never `cause`, so nothing about it reaches the client.
-      throw new Error('The verified Firebase identity is already linked to another account', {
-        cause: err,
-      });
-    }
-
-    if (duplicateKeyField(err) === 'email') {
-      // A race with a concurrent registration that passed the pre-check above.
-      throw new ApiError(409, EMAIL_IN_USE_MESSAGE, 'EMAIL_IN_USE');
-    }
-    throw err;
+    throwRegistrationWriteError(err, identity.uid);
   }
 
   return { user, business };

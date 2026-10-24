@@ -40,6 +40,10 @@ import type { NextFunction, Request, Response } from 'express';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 
 import { EMAIL_VERIFICATION_RATE_LIMITED } from '../constants/emailVerification.ts';
+import {
+  INVITATION_PREVIEW_RATE_LIMITED,
+  INVITATION_SEND_RATE_LIMITED,
+} from '../constants/invitations.ts';
 import { normalizeEmail } from '../utils/validate.ts';
 
 /**
@@ -80,6 +84,10 @@ export type AuthRateConfig = {
   credentialsChangedMax: number;
   accountDeletionWindowMs: number;
   accountDeletionMax: number;
+  invitationSendWindowMs: number;
+  invitationSendMax: number;
+  invitationPreviewWindowMs: number;
+  invitationPreviewMax: number;
 };
 
 function positiveInt(raw: string | undefined, fallback: number): number {
@@ -244,6 +252,23 @@ export function authRateConfig(overrides: Partial<AuthRateConfig> = {}): AuthRat
       60 * 60 * 1000
     ),
     accountDeletionMax: positiveInt(process.env.AUTH_ACCOUNT_DELETION_RATE_LIMIT_MAX, 5),
+    // Invitation-based onboarding (2026-10-25). Sending is AUTHENTICATED and gated by
+    // users.manage, but each request posts mail to an address the caller chooses, so the
+    // endpoint is a mail amplifier if it is unbounded. Twenty an hour leaves room for a
+    // real onboarding batch and makes bulk use uninteresting.
+    invitationSendWindowMs: positiveInt(
+      process.env.AUTH_INVITATION_SEND_RATE_LIMIT_WINDOW_MS,
+      60 * 60 * 1000
+    ),
+    invitationSendMax: positiveInt(process.env.AUTH_INVITATION_SEND_RATE_LIMIT_MAX, 20),
+    // Previewing is PUBLIC and keyed per IP: the caller has not signed in yet. Sixty an
+    // hour is far above what a person needs (a link is opened a handful of times) and
+    // stops a caller sweeping the token space — which is already infeasible at 256 bits.
+    invitationPreviewWindowMs: positiveInt(
+      process.env.AUTH_INVITATION_PREVIEW_RATE_LIMIT_WINDOW_MS,
+      60 * 60 * 1000
+    ),
+    invitationPreviewMax: positiveInt(process.env.AUTH_INVITATION_PREVIEW_RATE_LIMIT_MAX, 60),
     ...overrides,
   };
 }
@@ -804,6 +829,48 @@ export function createCredentialsChangedLimiter(overrides: Partial<AuthRateConfi
 }
 
 /**
+ * Invitation-send limiter — per account.
+ *
+ * Mounted AFTER `requireAuth` and `requirePermission(users.manage)`, so an anonymous or
+ * unprivileged caller is refused before a bucket is touched. Keyed on the account for the
+ * same reason the other authenticated limiters are: rotating addresses must not buy a
+ * fresh mail budget for the same admin.
+ */
+export function createInvitationSendLimiter(overrides: Partial<AuthRateConfig> = {}) {
+  const { invitationSendWindowMs, invitationSendMax } = authRateConfig(overrides);
+  return rateLimit({
+    windowMs: invitationSendWindowMs,
+    limit: invitationSendMax,
+    keyGenerator: authenticatedAccountKey,
+    ...limitResponse(
+      INVITATION_SEND_RATE_LIMITED,
+      'Too many invitations have been sent from this account. Please wait before sending more.'
+    ),
+  });
+}
+
+/**
+ * Invitation-preview limiter — per IP, for the PUBLIC `GET /api/auth/invitations/:token`.
+ *
+ * The token is 256 bits, so guessing is not a realistic attack; the budget exists so the
+ * public lookup cannot be used as a cheap database probe or as a way to enumerate
+ * responses at volume. It counts every attempt, including misses, because a miss is the
+ * request an enumeration would make.
+ */
+export function createInvitationPreviewLimiter(overrides: Partial<AuthRateConfig> = {}) {
+  const { invitationPreviewWindowMs, invitationPreviewMax } = authRateConfig(overrides);
+  return rateLimit({
+    windowMs: invitationPreviewWindowMs,
+    limit: invitationPreviewMax,
+    keyGenerator: (request: Request) => ipKeyGenerator(clientIp(request)),
+    ...limitResponse(
+      INVITATION_PREVIEW_RATE_LIMITED,
+      'Too many requests. Please wait a moment and try again.'
+    ),
+  });
+}
+
+/**
  * Account-deletion limiter — per account.
  *
  * Mounted AFTER `requireAuth`, so an anonymous caller is refused with 401 and never
@@ -825,6 +892,8 @@ export default {
   authRateConfig,
   createChangePasswordLimiter,
   createAccountDeletionLimiter,
+  createInvitationSendLimiter,
+  createInvitationPreviewLimiter,
   createChangePasswordIpLimiter,
   createFirebaseLinkLimiter,
   createCredentialsChangedLimiter,

@@ -13,7 +13,7 @@
  * It classifies the **declarations** in `server/src/routes/*.ts` plus the routes registered directly
  * on the app in `server/src/app.ts`. The Phase 23 guard classifies the **same set** from the mounted
  * router stacks at runtime (`router.stack`). Two different layers, two different techniques, one
- * number: 72 = 47 permission-gated + 13 authenticated + 12 public + 0 role-gated. If the two ever
+ * number (85 on 2026-10-25): 50 permission-gated + 14 authenticated + 21 public + 0 role-gated. If the two ever
  * disagree, one of them is wrong and this file says so rather than quietly passing.
  *
  * WHAT IT IS NOT. It asserts nothing about authorization. The classification is deliberately a

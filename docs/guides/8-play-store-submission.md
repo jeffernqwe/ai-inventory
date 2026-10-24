@@ -107,6 +107,7 @@ everything it is shown. Evidence and raw output:
 | Contact email | the owner's Play account email |
 | Privacy policy URL | `https://ai-inventory-l1mi.onrender.com/privacy` — **live and measured**; see §6.1 |
 | Account deletion URL | `https://ai-inventory-l1mi.onrender.com/account-deletion` — **live and measured**; see §6.2 |
+| Terms of use URL | `https://ai-inventory-l1mi.onrender.com/terms` — **ships with the next server deploy**; there is no console field for it, so it is linked from the privacy policy; see §6.3 |
 
 **Full description (draft, 4,000 max).** Adjust the tone, keep the facts:
 
@@ -233,6 +234,28 @@ so it renders the same signed out.
 
 The page and its guards: `server/src/pages/privacyPolicy.ts`, `server/test/PRIVACY-page.test.mjs`;
 the change record is roadmap §27EV (privacy) and §27EW (deletion).
+
+### 6.3 Terms of use — in the server, not yet deployed
+
+`GET /terms` (`server/src/pages/termsOfUse.ts`) is the second half of the same requirement: the policy
+says what happens to a person's data, and the terms say what the service asks of them and what they may
+expect. Play's console has **no field** for terms, so the page is reached from the privacy policy, from
+the account-deletion page and from **Profile → Legal** in the app — all three links are asserted by
+tests, so none of them can be quietly removed.
+
+The page states three things the app actually does, rather than boilerplate: the assistant is
+**read-only and can be wrong** (and is not accounting, tax, legal or safety advice), a **sole member's
+business is deleted with their account**, and **no consumer right is limited** by the liability
+paragraph. It names the operator, uses the same contact address as the other two pages, and carries no
+placeholder.
+
+**To do once it is deployed:** open `https://ai-inventory-l1mi.onrender.com/terms` in a private
+window, and confirm the two links on it resolve (`/privacy`, `/account-deletion`). Until then the URL
+is **not live** — it is code in the repository, so do not put it on the store listing yet.
+
+The page and its guards: `server/src/pages/termsOfUse.ts`, `server/test/TERMS-page.test.mjs`, and
+`mobile/__tests__/legal-pages-in-app.test.tsx` for the in-app entry point; the change record is
+roadmap §27FA.
 
 ### 6.2 Account deletion — live, and measured on production
 

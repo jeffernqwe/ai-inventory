@@ -180,7 +180,8 @@ movements, purchase orders, suppliers, locations, audit entries and assistant hi
 
 <h2>More information</h2>
 <p>The <a href="/privacy">privacy policy</a> describes what the app collects, which services process
-it, and how long it is kept. Questions about a deletion: 
+it, and how long it is kept; the <a href="/terms">terms of use</a> set out the rules of the service.
+Questions about a deletion: 
 <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a>.</p>
 
 <footer>Inventory AI · Account deletion · Effective ${EFFECTIVE_DATE}</footer>

@@ -239,7 +239,7 @@ unitSuite('Phase 32C — Firebase exchange and registration payloads (no databas
     );
   });
 
-  it('★ returns ONLY idToken, businessName and name', () => {
+  it('★ returns ONLY idToken, businessName, invitationToken and name', () => {
     const { problems, ...rest } = validateFirebaseRegister({
       idToken: ID_TOKEN,
       businessName: 'Attacker Biz',
@@ -251,8 +251,42 @@ unitSuite('Phase 32C — Firebase exchange and registration payloads (no databas
     });
 
     assert.deepEqual(problems, []);
-    assert.deepEqual(Object.keys(rest).sort(), ['businessName', 'idToken', 'name']);
+    assert.deepEqual(Object.keys(rest).sort(), [
+      'businessName',
+      'idToken',
+      'invitationToken',
+      'name',
+    ]);
     assert.equal(rest.name, undefined, 'no name was sent');
+    // 2026-10-25: `invitationToken` is the one field added, and it names no tenant, role or
+    // user — the service reads those from the row it resolves to. A body-supplied
+    // `businessId`, `role`, `email` or `firebaseUid` still has no field to travel through,
+    // which is the property this case has always asserted.
+    assert.equal(rest.invitationToken, undefined, 'no invitation was sent');
+  });
+
+  it('★ an invitation makes businessName optional, and never the other way round', () => {
+    const token = 'a'.repeat(64);
+
+    const invited = validateFirebaseRegister({ idToken: ID_TOKEN, invitationToken: token });
+    assert.deepEqual(invited.problems, []);
+    assert.equal(invited.businessName, undefined);
+    assert.equal(invited.invitationToken, token);
+
+    // Absent an invitation the field is still required — the ordinary sign-up path is
+    // unchanged, including its message.
+    assert.equal(validateFirebaseRegister({ idToken: ID_TOKEN }).problems.length, 1);
+
+    // Shape-checked before any lookup: a malformed token is a field error, not a query. It
+    // also does NOT buy the invited path's exemption — `businessName` falls back to being
+    // required, so a caller cannot skip it by sending a token-shaped lie. Two problems is
+    // therefore the correct answer, and the token one is what the client shows first.
+    const malformed = validateFirebaseRegister({ idToken: ID_TOKEN, invitationToken: 'nope' });
+    assert.deepEqual(
+      malformed.problems.map((p) => p.field).sort(),
+      ['businessName', 'invitationToken']
+    );
+    assert.equal(malformed.invitationToken, undefined);
   });
 
   it('the key-set assertions above can actually fail — negative controls', () => {

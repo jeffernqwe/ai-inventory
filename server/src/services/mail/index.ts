@@ -48,6 +48,7 @@ import { passwordResetEmail } from './templates/passwordReset.ts';
 import { emailVerificationEmail } from './templates/emailVerification.ts';
 import { passwordResetCodeEmail } from './templates/passwordResetCode.ts';
 import { operationalAlertEmail } from './templates/operationalAlert.ts';
+import { invitationEmail } from './templates/invitation.ts';
 import { MailNotConfigured, MailDeliveryError, isMailError } from './mailErrors.ts';
 
 export { MailNotConfigured, MailDeliveryError, isMailError };
@@ -210,6 +211,61 @@ interface OperationalAlertEmailRequest {
  * when the provider fails. The watchdog catches both and falls back to its log — an alert
  * that cannot be delivered must still be recorded.
  */
+/**
+ * Everything `sendInvitationEmail` needs. `to` and `inviteUrl` are required: the caller
+ * has resolved the address and minted the token, so neither has a sensible default.
+ * `appUrl` is the same invitation in the app's own scheme, and is optional for a caller
+ * that has no scheme to offer.
+ */
+interface InvitationEmailRequest {
+  to: string;
+  inviteUrl: string;
+  businessName: string;
+  inviterName: string;
+  role: string;
+  appUrl?: string;
+  expiresInDays?: number;
+}
+
+/**
+ * Renders the invitation email and sends it through the configured provider.
+ *
+ * AWAITED BY ITS CALLER, unlike the password-reset sends. An invitation is not an
+ * anti-enumeration surface: the admin already knows whether the address exists, and an
+ * admin who is told "sent" for a message that never left would wait a week for a member
+ * who was never asked. So a delivery failure propagates, and the caller withdraws the
+ * invitation row it just wrote.
+ *
+ * Throws MailNotConfigured when mail is disabled or misconfigured, and
+ * MailDeliveryError when the provider fails — both MAIL_* codes, neither of which is an
+ * authentication error.
+ */
+export async function sendInvitationEmail({
+  to,
+  inviteUrl,
+  businessName,
+  inviterName,
+  role,
+  appUrl,
+  expiresInDays,
+}: InvitationEmailRequest) {
+  const provider = selectProvider();
+  const { appName } = mailConfig();
+  const { subject, text, html } = invitationEmail({
+    businessName,
+    inviterName,
+    role,
+    inviteUrl,
+    appUrl,
+    expiresInDays,
+    appName,
+  });
+
+  const result = await provider.send({ to, subject, text, html });
+
+  return { id: result?.id ?? null, provider: provider.name };
+}
+
 export async function sendOperationalAlertEmail({ to, subject, text }: OperationalAlertEmailRequest) {
   const provider = selectProvider();
   const { appName } = mailConfig();

@@ -110,7 +110,29 @@ function UsersList() {
         <Chip label="Disabled" selected={status === STATUS_DISABLED} onPress={() => setStatus(STATUS_DISABLED)} />
       </View>
       {manage ? (
-        <Button title="New User" icon="add" onPress={() => router.push('/users/new')} full style={styles.newBtn} />
+        <>
+          {/*
+            * Invitations rather than a password handed over by an administrator (2026-10-25).
+            * Both buttons are here on purpose: direct creation still exists for the legacy
+            * password path, and the invitation is the route that lets somebody choose their
+            * own credential — the one that makes retiring that path possible.
+            */}
+          <Button
+            title="New User"
+            icon="add"
+            onPress={() => router.push('/users/new')}
+            full
+            style={styles.newBtn}
+          />
+          <Button
+            title="Invite"
+            icon="people"
+            variant="secondary"
+            onPress={() => router.push('/users/invitations')}
+            full
+            style={styles.newBtn}
+          />
+        </>
       ) : null}
     </View>
   );

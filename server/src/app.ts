@@ -11,8 +11,11 @@ import healthRoutes from './routes/health.routes.ts';
 import { createAuthRouter } from './routes/auth.routes.ts';
 import authActionRoutes from './routes/authAction.routes.ts';
 import privacyRoutes from './routes/privacy.routes.ts';
+import termsRoutes from './routes/terms.routes.ts';
+import inviteRoutes from './routes/invite.routes.ts';
 import accountDeletionRoutes from './routes/accountDeletion.routes.ts';
 import userRoutes from './routes/users.routes.ts';
+import invitationRoutes from './routes/invitations.routes.ts';
 import categoryRoutes from './routes/categories.routes.ts';
 import locationRoutes from './routes/locations.routes.ts';
 import supplierRoutes from './routes/suppliers.routes.ts';
@@ -148,6 +151,15 @@ export function createApp({
   // policy requires. Outside `/api` for the same reason: it is an HTML page, and it is public
   // because somebody who cannot sign in is exactly one of the people who needs to read it.
   app.use('/account-deletion', accountDeletionRoutes);
+  // The public Terms of Use (2026-10-25). Same rules as the two pages above: outside `/api`, an
+  // HTML page rather than JSON, and public because the terms that govern an account have to be
+  // readable before one exists.
+  app.use('/terms', termsRoutes);
+  // The landing page an invitation email opens (2026-10-25). Outside `/api` and public for
+  // the same reasons as the three pages above, with one of its own: the person following an
+  // invitation does not have an account yet. It forwards the token to the app and redeems
+  // nothing, so opening this URL on the wrong device costs nothing.
+  app.use('/invite', inviteRoutes);
 
   // 2026-10-23 security audit — NO AUTH RESPONSE MAY BE STORED BY AN INTERMEDIARY.
   //
@@ -171,6 +183,10 @@ export function createApp({
 
   app.use('/api/auth', createAuthRouter({ limits: authLimits }));
   app.use('/api/users', userRoutes);
+  // Invitation management (2026-10-25). A separate mount rather than a sub-path of
+  // `/api/users` because an invitation is not a user yet: it has its own lifecycle, its
+  // own collection and its own list. Bound to the same `users.manage` permission.
+  app.use('/api/invitations', invitationRoutes);
   app.use('/api/categories', categoryRoutes);
   app.use('/api/locations', locationRoutes);
   app.use('/api/suppliers', supplierRoutes);

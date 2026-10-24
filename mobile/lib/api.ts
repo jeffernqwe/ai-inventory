@@ -58,7 +58,15 @@ export function deleteAccount(token: string, payload: DeleteAccountPayload): Pro
 }
 
 export interface RegisterPayload {
-  businessName: string;
+  /**
+   * The new business's name — REQUIRED on the ordinary path.
+   *
+   * Optional here because an invited registration joins an existing business, and the
+   * server then makes the field optional too. The legacy password route (taken only on a
+   * build with no Firebase configuration) still requires it and answers a field error
+   * naming it, which is the correct outcome: that route has no way to carry an invitation.
+   */
+  businessName?: string;
   name: string;
   email: string;
   password: string;
@@ -332,8 +340,17 @@ export function firebaseExchange({ idToken, deviceLabel }: FirebaseExchangePaylo
 
 export interface FirebaseRegisterPayload {
   idToken: string;
-  businessName: string;
+  /** Absent when an invitation supplies the business — the server makes the field optional then. */
+  businessName?: string;
   name?: string;
+  /**
+   * The invitation being accepted, when there is one.
+   *
+   * It names no tenant and no role: the server resolves it, checks that the VERIFIED
+   * identity's address is the invited one, and reads both from its own row. A wrong or
+   * stale value can only be refused.
+   */
+  invitationToken?: string;
 }
 
 /**
@@ -345,12 +362,49 @@ export interface FirebaseRegisterPayload {
  * Inventory AI account — the server refuses to link the two rather than merging
  * them, so this is a real dead end and not a transient one.
  */
-export function firebaseRegister({ idToken, businessName, name }: FirebaseRegisterPayload): Promise<ApiResponse> {
+export function firebaseRegister({
+  idToken,
+  businessName,
+  name,
+  invitationToken,
+}: FirebaseRegisterPayload): Promise<ApiResponse> {
   return apiFetch('/api/auth/firebase/register', {
     method: 'POST',
-    body: { idToken, businessName, name },
+    // Absent keys are omitted by `JSON.stringify`, so an ordinary sign-up sends exactly
+    // the body it always did.
+    body: { idToken, businessName, name, invitationToken },
   });
 }
+
+// ---------------------------------------------------------------------------
+// Invitations (2026-10-25)
+// ---------------------------------------------------------------------------
+
+/**
+ * GET /api/auth/invitation?token=… -> { email, role, businessName, expiresAt }.
+ *
+ * PUBLIC, and the token travels in the QUERY STRING on purpose: the server's access log
+ * records the path only, so a token in a path segment would sit in every log line. This is
+ * a read — it redeems nothing, creates nothing and issues no session.
+ *
+ * 404 `INVITATION_INVALID` for unknown, expired, revoked or already-accepted alike, so the
+ * client cannot tell those apart and neither can a caller probing for live links.
+ */
+export function previewInvitation(token: string): Promise<ApiResponse> {
+  return apiFetch('/api/auth/invitation', { params: { token } });
+}
+
+/** The invitation management surface — OWNER/ADMIN (`users.manage`), never a client id. */
+export const invitationsApi = {
+  /** Live (unexpired, pending) invitations for the caller's business. */
+  list: (token: string): Promise<ApiResponse> => apiFetch('/api/invitations', { token }),
+  /** Invite an address at ADMIN/MANAGER/STAFF. 201; 409 already a member; 400 bad role. */
+  create: (token: string, payload: { email: string; role: string }): Promise<ApiResponse> =>
+    apiFetch('/api/invitations', { token, method: 'POST', body: payload }),
+  /** Withdraw a pending invitation. 204. */
+  revoke: (token: string, id: string): Promise<void> =>
+    apiFetch(`/api/invitations/${id}`, { token, method: 'DELETE' }),
+};
 
 /**
  * AUTH-04-F — the custom 6-digit email-verification code flow. Both endpoints are

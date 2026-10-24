@@ -269,6 +269,10 @@ const PUBLIC_ROUTES = [
     why: 'AUTH-04-C: PRE-SESSION Firebase-authenticated — the caller presents a verified Firebase ID token, which the service verifies with checkRevoked, and holds NO Inventory AI session by definition (a session is minted only by the exchange above, and this flow exists precisely for an identity that is verified but has no tenant yet). That is why there is no requireAuth and no permission to name: every role in this application would be unknown here, and the identity is the uid of the VERIFIED token inside the service, never a body field. PUBLIC is the no-requireAuth classification, not a claim the endpoint is unauthenticated. Rate-limited per IP',
   },
   {
+    route: 'GET /api/auth/invitation',
+    why: 'invitation-based onboarding: reads ONE invitation by its emailed token, before the person has any account — that is what an invitation is for. It issues no session, writes nothing, and returns only the invited address, role, business name and expiry; the address is the invitee’s own, and holding the 256-bit token is the only way to read it. The token travels as a query parameter so the access log (which records the path only) never contains it. Rate-limited per IP',
+  },
+  {
     route: 'POST /api/auth/email-verification/confirm',
     why: 'AUTH-04-C: PRE-SESSION Firebase-authenticated — the same boundary as the request route (a verified Firebase ID token is checked inside the service with checkRevoked; no Inventory AI session exists and no requireAuth applies), and confirmation CREATES no session and issues no JWT: it sets Firebase emailVerified and nothing else, so the session is still created only by the exchange above. The submitted code is the only caller-supplied value the validator reads, and it is never shape-checked here. PUBLIC is the no-requireAuth classification, not a claim the endpoint is unauthenticated. Rate-limited per IP',
   },

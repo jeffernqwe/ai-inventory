@@ -4,6 +4,7 @@ import Session from './session.model.ts';
 import PasswordResetToken from './passwordResetToken.model.ts';
 import PasswordResetChallenge from './passwordResetChallenge.model.ts';
 import EmailVerificationChallenge from './emailVerificationChallenge.model.ts';
+import Invitation from './invitation.model.ts';
 import Location from './location.model.ts';
 import Category from './category.model.ts';
 import Supplier from './supplier.model.ts';
@@ -22,6 +23,7 @@ export {
   PasswordResetToken,
   PasswordResetChallenge,
   EmailVerificationChallenge,
+  Invitation,
   Location,
   Category,
   Supplier,
@@ -42,6 +44,7 @@ export const models = [
   PasswordResetToken,
   PasswordResetChallenge,
   EmailVerificationChallenge,
+  Invitation,
   Location,
   Category,
   Supplier,

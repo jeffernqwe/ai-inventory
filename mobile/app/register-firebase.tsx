@@ -10,8 +10,9 @@ import { fieldErrorsFrom } from '../lib/authCopy';
 import { ApiError } from '../lib/client';
 import { useSession } from '../lib/auth';
 import { FirebaseAuthError } from '../lib/firebase-auth';
-import { defaultHomePath } from '../lib/permissions';
-import { type } from '../lib/theme';
+import { getPendingInvite } from '../lib/pendingInvite';
+import { defaultHomePath, roleLabel } from '../lib/permissions';
+import { spacing, type } from '../lib/theme';
 import type { Palette } from '../lib/theme';
 import { useTheme } from '../lib/theme-context';
 
@@ -106,6 +107,7 @@ const createStyles = (colors: Palette) =>
       textAlign: 'center',
     },
     actionRow: { ...type.bodySmall, alignSelf: 'stretch', textAlign: 'center' },
+    inviteNote: { ...type.bodySmall, color: colors.textMuted, marginBottom: spacing.lg },
     link: { color: colors.link, fontWeight: '700' },
   });
 
@@ -113,6 +115,9 @@ export default function FirebaseRegisterScreen() {
   const { status, user, firebaseRegistrationRequired, completeFirebaseRegistration } = useSession();
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  // Read once at mount, like `register.tsx`: the invitation is in-memory state that only
+  // this journey sets, and a re-read per render would re-key the form.
+  const [invite] = useState(() => getPendingInvite());
   const [businessName, setBusinessName] = useState('');
   const [name, setName] = useState('');
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -159,10 +164,14 @@ export default function FirebaseRegisterScreen() {
 
   async function submit(): Promise<void> {
     // UX validation only — the client guard saves a round trip, and the backend
-    // remains authoritative (`validateFirebaseRegister` requires `businessName` and
-    // bounds it to the same length this form does not exceed).
+    // remains authoritative (`validateFirebaseRegister` requires `businessName` on the
+    // ordinary path and makes it optional when an invitation supplies the tenant).
+    //
+    // AN INVITED REGISTRATION ASKS FOR NO BUSINESS NAME AT ALL: the invitation already
+    // names the business and the role, and this screen must not offer a field whose value
+    // the server would ignore.
     const trimmedBusinessName = businessName.trim();
-    if (!trimmedBusinessName) {
+    if (!invite && !trimmedBusinessName) {
       setFieldErrors({ businessName: 'Business name is required' });
       return;
     }
@@ -173,11 +182,12 @@ export default function FirebaseRegisterScreen() {
     setSignInInstead(false);
     try {
       await completeFirebaseRegistration({
-        businessName: trimmedBusinessName,
+        businessName: invite ? undefined : trimmedBusinessName,
         // Omitted rather than sent empty: the server treats an absent name as
         // "provider supplied none" and falls back to the email's local part, while
         // an empty string would be a value a reader has to interpret.
         name: name.trim() || undefined,
+        invitationToken: invite?.token,
       });
       // Navigation: on success the signedIn guard above redirects this screen away,
       // so the new owner lands in the app without a second sign-in.
@@ -204,8 +214,12 @@ export default function FirebaseRegisterScreen() {
 
   return (
     <AuthLayout
-      title="Create your workspace"
-      subtitle="Your sign-in is verified. Name your business to finish."
+      title={invite ? `Join ${invite.businessName ?? 'the business'}` : 'Create your workspace'}
+      subtitle={
+        invite
+          ? `Your sign-in is verified. Create your account to join as ${roleLabel(invite.role).toLowerCase()}.`
+          : 'Your sign-in is verified. Name your business to finish.'
+      }
       footer={
         <Text style={styles.footerText}>
           Already have an account?{' '}
@@ -223,15 +237,22 @@ export default function FirebaseRegisterScreen() {
           </Link>
         </Text>
       ) : null}
-      <Input
-        name="businessName"
-        label="Business name"
-        value={businessName}
-        onChangeText={setBusinessName}
-        placeholder="Acme Retail"
-        error={fieldErrors.businessName}
-        required
-      />
+      {invite ? (
+        <Text style={styles.inviteNote}>
+          This invitation is for {invite.email} at {invite.businessName ?? 'their business'}. The
+          business and your role come from it.
+        </Text>
+      ) : (
+        <Input
+          name="businessName"
+          label="Business name"
+          value={businessName}
+          onChangeText={setBusinessName}
+          placeholder="Acme Retail"
+          error={fieldErrors.businessName}
+          required
+        />
+      )}
       <Input
         name="name"
         label="Your name"

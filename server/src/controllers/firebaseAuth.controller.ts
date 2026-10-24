@@ -393,12 +393,21 @@ export async function renew(req: AuthenticatedRequest, res: Response) {
  */
 export async function firebaseRegister(req: Request, res: Response) {
   const body = req.body ?? {};
-  const { problems, idToken, businessName, name } = validateFirebaseRegister(body);
+  const { problems, idToken, businessName, invitationToken, name } = validateFirebaseRegister(body);
   if (problems.length > 0) throwValidation(problems);
 
   let result;
   try {
-    result = await registerBusinessFromFirebase({ idToken, businessName: businessName!, name });
+    // `businessName` is undefined only when an invitation supplies the tenant, and the
+    // validator is what decides which of the two fields is required. The assertion is
+    // erased at runtime and does not soften the ordinary path: without an invitation the
+    // validator still reports a missing or over-long name before this line.
+    result = await registerBusinessFromFirebase({
+      idToken,
+      businessName: businessName as string,
+      invitationToken,
+      name,
+    });
   } catch (err) {
     throw mapFirebaseFailure(err);
   }

@@ -19375,6 +19375,68 @@ cause of the one failed *Try again*, recorded as observed.
 
 ---
 
+# 27ER. The production profile on the phone: build, journeys, OTA and a measured rollback (2026-10-24)
+
+**Mobile build configuration only (temporarily), one test case added — no route, permission, schema,
+server, session-model or dependency change.** The previous entry proved the *preview* profile. This
+run did the same for the **production** profile, and closed the rollback item that had been recorded
+as untested since the update runtime shipped.
+
+**1. The build is the production profile, honestly described.** EAS `12829e5d-fb93-4ae4-858d-7f58e962f495`,
+profile `production`, signed with the project's production keystore (`Build Credentials 84JNqqnITp`),
+`versionName 1.0.0` / `versionCode 1`, `minSdk 24` / `targetSdk 36`, runtime `1.0.0`, channel
+`production`, `EXPO_PUBLIC_API_URL` = the production API. Two settings were changed **for the run and
+restored in the same commit series**: `android.buildType: apk` (a Play artifact is an AAB and cannot
+be installed with `adb`) and `autoIncrement: false` (to keep the version equal to the publishes).
+**The AAB path was not built**, so Play packaging and Play App Signing remain unproven; the release
+*code path* and the release *update channel* are what this run proves. `adb install -r` over the
+preview APK succeeded, which also proves both profiles share one signing key.
+
+**2. Every journey passed on it, against production.** Create Account → *Verify your email* (inbox
+named, 8m 49s) → six digits with **no press of Verify** → new tenant dashboard; production rows
+`OWNER`/`ACTIVE`/`emailVerified`, one session, one audit row. Aeroplane mode + force-stop + cold
+launch stayed **signed in** with the dashboard's offline state; network restored, the **first** *Try
+again* loaded the dashboard. Reset: code screen → code verified (`attempts=1`, `verifiedAt`,
+authorization minted) → password step → *Password changed* (`usedAt`) → **old password refused** →
+**new password signed in** to the same tenant.
+
+**3. The old "first Try again failed" finding is explained, not waved away.** The client's budgets are
+`REQUEST_TIMEOUT_MS = 15 s` once the server has answered recently and `COLD_START_TIMEOUT_MS = 60 s`
+while it has not. The 2026-10-24 preview run screenshot the failure **12 s** after the tap, so it was
+not a timeout — the request had failed immediately, which is what a radio that has not yet attached
+produces. This run waited **20 s** after aeroplane mode was switched off and the **first** tap worked.
+The app behaved correctly in both runs (error state, session kept, retry available).
+
+**4. OTA delivery to a release build, and the rollback that had never been exercised.** The
+`production` channel did not exist (manifest 404). A marker publish (`197d0367…`, manifest
+`01a16cfb…`) was applied by the phone, changing the Login tagline; then
+`eas update:roll-back-to-embedded --channel production --platform android --runtime-version 1.0.0`
+(`5516d353…`, manifest `01a16cfe…`) returned it to the **embedded** tagline after two cold launches,
+proving the rollback path on an installed release build. The CLI **requires `--runtime-version`** in
+non-interactive mode — a fact the guide now states. The channel and branch were then deleted and the
+404 returned, so production currently offers no updates.
+
+**5. The 5xx gap is closed at the client rule, not pretended closed on a device.**
+`auth-offline-boot.test.tsx` gains one case: a **500** at boot keeps the session, restores the stored
+profile, marks the phase `degraded` and does **not** end the Firebase session — a server fault is not
+a refusal. A live injected 5xx on the handset was still not performed, and is recorded as such.
+
+**6. Cleanup.** The probe tenant, user, sessions, reset challenge, 5 audit rows and Firebase identity
+were removed (0 leftovers); the phone was left signed out on the release build's Login screen; helper
+scripts were deleted.
+
+**Verification.** Mobile `tsc`/`eslint` clean, **91 suites / 1099 tests / 0 failures**;
+`node scripts/check-build-env.mjs --profile production --live` clean before the build
+(17 controls passed); production configuration restored (`autoIncrement: true`, no `buildType`).
+Artifacts: `docs/evidence/device-runs/2026-10-24-release-build/` (twelve frames and the README with
+the measurements above).
+
+**Not verified, stated rather than implied:** the **AAB** and its upload/Play signing; iOS (no macOS
+on this host); a live injected 5xx; a real inbox in this run; and `update:rollback <group-id>`,
+which remains unexercised.
+
+---
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

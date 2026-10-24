@@ -18,6 +18,9 @@
  *   2. With no profile stored, nothing is invented — the old signed-out outcome stands.
  *   3. A REFUSED session signs out and deletes the profile with the token.
  *   4. A healthy launch refreshes the profile, so the next offline launch is current.
+ *   5. A SERVER FAULT (5xx) is treated exactly like an unreachable network — it says nothing
+ *      about the session, so the session survives it. Added 2026-10-24, after the release
+ *      rehearsal named "an induced 5xx" as the one untested error path.
  */
 
 /// <reference types="node" />
@@ -189,6 +192,23 @@ describe('a launch with no network', () => {
     const view = await renderHook(() => useSession(), { wrapper });
     await waitFor(() => expect(view.result.current.status).toBe('signedOut'));
     expect(view.result.current.user).toBeNull();
+  });
+});
+
+describe('a server fault', () => {
+  it('★ keeps the session for a 500, because an outage is not a refusal', async () => {
+    mockStore.set(TOKEN_KEY, APP_TOKEN);
+    mockStore.set(SNAPSHOT_KEY, JSON.stringify(STORED_USER));
+    mockMe.mockRejectedValue(new ApiError(500, 'INTERNAL_ERROR', 'Something went wrong'));
+
+    const view = await renderHook(() => useSession(), { wrapper });
+    await waitFor(() => expect(view.result.current.status).toBe('signedIn'));
+
+    expect(view.result.current.user).toEqual(STORED_USER);
+    expect(view.result.current.token).toBe(APP_TOKEN);
+    expect(mockStore.get(TOKEN_KEY)).toBe(APP_TOKEN);
+    expect(view.result.current.authPhase).toBe('degraded');
+    expect(mockSignOutOfFirebase).not.toHaveBeenCalled();
   });
 });
 

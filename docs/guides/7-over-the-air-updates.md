@@ -202,6 +202,19 @@ refresh, which is faster than any update.
 Rolling back does **not** remove the update from installs that already downloaded it; they move to
 the rolled-back version on their next launch, exactly like a normal update.
 
+**The embedded rollback needs `--runtime-version` when run non-interactively.** Without it the CLI
+refuses with *"--runtimeVersion is required in non-interactive mode"*:
+
+```bash
+npx eas-cli update:roll-back-to-embedded --channel production --platform android \
+  --runtime-version 1.0.0 --message "Back to the embedded bundle" --non-interactive
+```
+
+This was exercised on a **production-profile release build** on 2026-10-24: a visible marker was
+published, the phone ran it, and after the rollback command and two cold launches the phone was back
+on the bundle it was installed with. See
+[2026-10-24-release-build](../evidence/device-runs/2026-10-24-release-build/README.md).
+
 ---
 
 ## 9. Security and cost
@@ -275,5 +288,12 @@ then an aeroplane-mode cold start that kept the session — all against the prod
 production database checked afterwards and the probe tenant removed. Frames, measurements and the
 limits: [2026-10-24-preview-journeys](../evidence/device-runs/2026-10-24-preview-journeys/README.md).
 
-**Not yet verified:** a store-signed production build, iOS (no macOS on this host), and automated
-rollback after a genuinely crashing update (the rollback commands exist but were not exercised).
+**Verified on a release build (2026-10-24).** The **production profile** — release variant, production
+keystore, production channel and environment — was installed over the preview APK and received a
+published update; `update:roll-back-to-embedded` then returned it to the embedded bundle on the next
+launches. The rehearsal built an **APK** (an AAB cannot be installed with `adb`) and restored the
+store packaging afterwards, so it does not prove Play Store packaging or Play App Signing. Frame and
+measurements: [2026-10-24-release-build](../evidence/device-runs/2026-10-24-release-build/README.md).
+
+**Not yet verified:** a store-signed **AAB** and its upload path, iOS (no macOS on this host), and
+`update:rollback <group-id>` (re-publishing an earlier group), which remains unexercised.

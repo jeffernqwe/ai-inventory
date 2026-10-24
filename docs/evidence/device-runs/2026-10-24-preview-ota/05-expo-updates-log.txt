@@ -1,0 +1,31 @@
+Excerpt of `adb logcat -d | grep dev.expo.updates` captured during the run on the OPPO CPH1969
+(Android 11). Long `latestManifest`/`downloadedManifest` payloads are elided with `…`; every other
+character is as captured. Times are the handset's local clock (UTC+8).
+
+--- BEFORE THE PUBLISH EXISTS (14:08, 14:10, 14:14) ------------------------------
+14:10:09.807  Updates state change: StartStartup, context = {isStartupProcedureRunning=true, …}
+14:10:09.884  Updates state change: Check, context = {… isChecking=true, …}
+14:10:10.091  Updates state change: CheckCompleteUnavailable, context = {… isUpdateAvailable=false, …}
+14:10:10.117  UpdatesController onBackgroundUpdateFinished: No update available
+14:10:10.132  Updates state change: EndStartup, context = {… isUpdateAvailable=false, …}
+
+--- AFTER `eas update:republish` (14:25) ------------------------------------------
+14:25:29.143  Updates state change: Download, context = {… latestManifest={"id":"01a16c95-a110-7570-b654-b6bd48886949",
+               "createdAt":"2026-10-24T06:25:07.856Z","runtimeVersion":"1.0.0", …} …}
+14:25:29.308  UpdatesController onBackgroundUpdateFinished: Update available
+14:25:29.310  Updates state change: DownloadCompleteWithUpdate, context = {… isUpdateAvailable=true,
+               isUpdatePending=true, downloadProgress=1.0, latestManifest={"id":"01a16c95-…",
+               "runtimeVersion":"1.0.0", …} …}
+14:25:29.321  Updates state change: EndStartup, context = {… isUpdateAvailable=true, isUpdatePending=true, …}
+
+--- THE NEXT LAUNCH RUNS THE DOWNLOADED BUNDLE --------------------------------
+14:26:13.710  Updates state change: StartStartup, context = {isStartupProcedureRunning=true, …}
+14:26:13.771  Updates state change: Check, context = {… isChecking=true, …}
+14:26:14.220  Updates state change: CheckCompleteUnavailable, context = {… isUpdateAvailable=false, …}
+14:26:14.235  UpdatesController onBackgroundUpdateFinished: No update available
+14:26:14.248  Updates state change: EndStartup, context = {… isUpdateAvailable=false, …}
+
+NOTE ON THE LAST BLOCK. "No update available" on the second launch is correct and expected: the
+device has already downloaded the latest bundle, so there is nothing newer to fetch. The proof that
+the downloaded bundle is the one RUNNING is the offline screen in
+`03-offline-launch-still-signed-in.png`, which only the new JavaScript can produce.

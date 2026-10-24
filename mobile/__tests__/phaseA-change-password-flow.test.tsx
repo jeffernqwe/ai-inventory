@@ -267,8 +267,12 @@ describe('changeFirebasePassword — the credential change itself', () => {
       order.push('credentialsChanged');
       return { changedAt: '2026-01-01T00:00:00.000Z' };
     });
-    mockPersistToken.mockImplementation(async () => {
-      order.push('applySession');
+    // ONLY THE TOKEN WRITE IS AN `applySession` STEP. The provider also stores the
+    // account snapshot beside the token now; that write is bookkeeping for an offline
+    // launch, not part of this ordering contract, and counting it would make the
+    // sequence assert a second session application that did not happen.
+    mockPersistToken.mockImplementation(async (key: string) => {
+      if (key === 'inventoryai.auth.token') order.push('applySession');
     });
 
     await act(async () => {
@@ -425,10 +429,13 @@ describe('changeFirebasePassword — success', () => {
     expect(view.result.current.user?.role).toBe(USER.role);
     // The temporary session is never persisted, so a crash between the two exchanges
     // cannot leave the app holding a token the bridge has already revoked.
-    expect(mockPersistToken).toHaveBeenCalledTimes(1);
-    // Two arguments: the storage key, then the token — the bridge's temporary token must
-    // never be the one that lands here.
-    expect(mockPersistToken).toHaveBeenCalledWith(expect.any(String), FINAL_APP_TOKEN);
+    // Filtered by KEY: the same store now also holds the account snapshot, and the
+    // property under test is which TOKEN was persisted — not how many entries a session
+    // writes. One token write, and it is the final token.
+    const tokenWrites = mockPersistToken.mock.calls.filter(
+      ([key]) => key === 'inventoryai.auth.token',
+    );
+    expect(tokenWrites).toEqual([['inventoryai.auth.token', FINAL_APP_TOKEN]]);
     // The bridge revoked every session server-side, so a logout here would be a guaranteed
     // 401 that the client's session-loss rule would then act on.
     expect(mockLogout).not.toHaveBeenCalled();

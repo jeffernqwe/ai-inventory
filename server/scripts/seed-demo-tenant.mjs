@@ -77,7 +77,8 @@ async function main() {
   const result = await seedDemoTenant();
   console.log(
     `[${COMMAND}] identity : uid ${String(result.identity.uid).slice(0, 10)}… ` +
-      `(${result.identity.created ? 'CREATED now' : 'already existed'})`,
+      `(${result.identity.created ? 'CREATED now' : 'already existed'})` +
+      `${result.identity.passwordRefreshed ? ', password refreshed from DEMO_ACCOUNT_PASSWORD' : ''}`,
   );
   console.log(
     `[${COMMAND}] tenant   : ${result.businessCreated ? 'CREATED' : 'reused'} ${result.businessId}` +

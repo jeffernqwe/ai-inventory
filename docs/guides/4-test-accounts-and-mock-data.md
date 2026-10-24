@@ -233,6 +233,12 @@ is always refused. And the teardown removes MongoDB rows **only**: the Firebase 
 place, because deleting an identity whose MongoDB record survives is the lockout described in Part 4.
 Re-seeding simply reuses it.
 
+**The password you pass is the password it ends up with, every time.** When the identity already
+exists, re-seeding sets its password to `DEMO_ACCOUNT_PASSWORD` and reports *"password refreshed from
+DEMO_ACCOUNT_PASSWORD"*; before 2026-10-24 it kept whatever password the FIRST run chose, so a second
+test cycle had a login nobody could sign in as and no message saying why. (The identity is also left
+`emailVerified`, because this is a reserved test credential, not a person.)
+
 To target production, state the environment and the environment's database explicitly — the config
 refuses a production database from a development process:
 

@@ -90,12 +90,25 @@ export async function insertChunked(model, docs, chunkSize = DEFAULT_CHUNK_SIZE)
 }
 
 /**
- * Resolve the Firebase identity for an email, creating it only if it is absent.
+ * Resolve the Firebase identity for an email, creating it only if it is absent — and
+ * REFRESHING the password when one was supplied.
  *
  * The application joins Firebase to MongoDB on `firebaseUid` ONLY (never email), so
  * the honest way to hand an existing login a seeded tenant is to read the uid from
  * FIREBASE — the identity authority — and then create or reuse the MongoDB User that
  * carries it. Nothing in this module looks a user up by email in MongoDB.
+ *
+ * WHY AN EXISTING IDENTITY'S PASSWORD IS SET RATHER THAN IGNORED (found 2026-10-24). The
+ * original version read the existing row and returned, so a second seeding run silently
+ * kept whatever password the FIRST run chose — and since that password is supplied in the
+ * environment and never written down, the next person to test a preview build had an
+ * identity they could not sign in as, with no message saying why. The identity is reused
+ * across test cycles precisely to avoid accumulating addresses, so refreshing its credential
+ * is the behaviour that makes the documented `DEMO_ACCOUNT_PASSWORD` mean what it says.
+ *
+ * `emailVerified` is set true alongside it, for the reason the create path already gives:
+ * this is a reserved demo credential (`…@example.invalid`), not a person, and the preview
+ * test asserts the app's post-verification behaviour rather than re-testing Firebase.
  *
  * This never DELETES an identity. `docs/DEVELOPMENT_ROADMAP.md` §27BB records what
  * happens when the two stores are cleaned in the wrong relationship: a MongoDB user
@@ -107,14 +120,24 @@ export async function resolveIdentity(email) {
   const { getAuth } = await import('firebase-admin/auth');
   const auth = getAuth(getFirebaseAdminApp());
 
+  const password = process.env.DEMO_ACCOUNT_PASSWORD;
+
   try {
     const existing = await auth.getUserByEmail(email);
-    return { uid: existing.uid, created: false, emailVerified: existing.emailVerified };
+    if (!password) {
+      return {
+        uid: existing.uid,
+        created: false,
+        emailVerified: existing.emailVerified,
+        passwordRefreshed: false,
+      };
+    }
+    await auth.updateUser(existing.uid, { password, emailVerified: true });
+    return { uid: existing.uid, created: false, emailVerified: true, passwordRefreshed: true };
   } catch (err) {
     if (err?.code !== 'auth/user-not-found') throw err;
   }
 
-  const password = process.env.DEMO_ACCOUNT_PASSWORD;
   if (!password) {
     throw new SeedSafetyError(
       `no Firebase identity exists for ${email}, and DEMO_ACCOUNT_PASSWORD is not set. ` +
@@ -122,7 +145,9 @@ export async function resolveIdentity(email) {
     );
   }
   const created = await auth.createUser({ email, password, emailVerified: true });
-  return { uid: created.uid, created: true, emailVerified: true };
+  // NOT a refresh: the identity did not exist, so creation is what set the credential.
+  // Saying otherwise in the console line would report a change that did not happen.
+  return { uid: created.uid, created: true, emailVerified: true, passwordRefreshed: false };
 }
 
 /**

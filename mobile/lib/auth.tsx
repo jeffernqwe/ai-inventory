@@ -902,6 +902,63 @@ async function readStoredToken(): Promise<string | null> {
 }
 
 /**
+ * The last account the server confirmed, kept beside the token so a launch that
+ * cannot reach the server is still a SIGNED-IN launch.
+ *
+ * WHY THIS EXISTS (measured 2026-10-24, preview build on the OPPO CPH1969). With
+ * the phone in aeroplane mode, a cold start dropped the person to the Login
+ * screen. The token was still stored — the next online launch restored it — but
+ * the app could not name the account (`api.me` is what supplies `user`), so the
+ * boot path treated "could not ask" as "not signed in", exactly the rule AUTH-03
+ * removed from `refresh()`. The visible effect was a session that looked lost
+ * whenever the network was missing at start-up.
+ *
+ * WHAT IT IS: the same public profile the API already returned for this device
+ * (`toPublicUser`), so nothing arrives here that the app did not already hold in
+ * memory. No token, password, hash or provider credential is included. It is
+ * written only from a server-confirmed `user` and deleted whenever the session is
+ * cleared, so it cannot outlive the token it belongs to.
+ *
+ * WHAT IT IS NOT: an authority. The role, status and permissions it carries are
+ * what the server said LAST TIME; every request is still authorized server-side,
+ * and the first successful `me`/renewal replaces it with the current answer.
+ */
+const USER_SNAPSHOT_KEY = 'inventoryai.auth.userSnapshot';
+
+const memUserSnapshot: { user: AuthUser | null } = { user: null };
+
+/** A stored profile is used only if it has the two fields every screen reads. */
+function isUserSnapshot(value: unknown): value is AuthUser {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as { id?: unknown; role?: unknown };
+  return typeof candidate.id === 'string' && typeof candidate.role === 'string';
+}
+
+async function persistUserSnapshot(user: AuthUser | null): Promise<void> {
+  memUserSnapshot.user = user;
+  if (Platform.OS === 'web') return;
+  try {
+    if (user) await SecureStore.setItemAsync(USER_SNAPSHOT_KEY, JSON.stringify(user));
+    else await SecureStore.deleteItemAsync(USER_SNAPSHOT_KEY);
+  } catch {
+    // Non-fatal: the in-memory copy keeps this launch working, and a launch that
+    // cannot persist simply behaves as it did before this change.
+  }
+}
+
+async function readUserSnapshot(): Promise<AuthUser | null> {
+  if (Platform.OS === 'web') return memUserSnapshot.user;
+  try {
+    const raw = await SecureStore.getItemAsync(USER_SNAPSHOT_KEY);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    return isUserSnapshot(parsed) ? parsed : null;
+  } catch {
+    return memUserSnapshot.user;
+  }
+}
+
+/**
  * D-E1 — the marker that says a durable Firebase sign-out FAILED and must be
  * retried. A second key rather than a field on the token, because the two facts
  * have different lifetimes: the token is cleared BY the sign-out, and this marker
@@ -1332,6 +1389,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   ): Promise<void> => {
     const { tokenExpiresAt = null, sessionExpiresAt = null, bumpEpoch = true } = options;
     await persistToken(nextToken);
+    // The profile travels WITH the token, so a later launch that cannot reach the
+    // server still knows whose session it holds (see `USER_SNAPSHOT_KEY`). Clearing
+    // the session clears both, which is why this is the only write site.
+    await persistUserSnapshot(nextUser);
     tokenRef.current = nextToken;
     userRef.current = nextUser;
     if (nextToken) sessionLostRef.current = false;
@@ -2215,6 +2276,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // lower bound (renewing early never hurts).
           tokenExpiresAtRef.current = tokenExpiryMsFromJwt(stored);
           setAuthHorizonMs(tokenExpiresAtRef.current);
+          // A launch that DID reach the server is the moment the snapshot is
+          // refreshed, so the next offline launch has the current profile (a role
+          // change made elsewhere arrives here rather than going stale on the phone).
+          await persistUserSnapshot(fresh);
           setToken(stored);
           setUser(fresh);
           setStatus('signedIn');
@@ -2222,6 +2287,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } catch (err) {
         if (isSessionError(err)) {
           await persistToken(null);
+          // A refused session takes its profile with it, or a later offline launch
+          // would restore an account the server has already disowned.
+          await persistUserSnapshot(null);
           // D-E2 — the boot path ends the durable Firebase session EXPLICITLY rather
           // than relying on which React effect happened to run first. It calls the one
           // consumer unconditionally: for a 401/403 that travelled through
@@ -2231,6 +2299,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // `endFirebaseSession` rather than in a condition here, so there is one rule
           // to reason about instead of two.
           await endFirebaseSession();
+        }
+        // A NON-SESSION refusal is not evidence about the session. `refresh()` has
+        // held this rule since AUTH-03; the boot path did not, so an unreachable
+        // server — no signal, aeroplane mode, a backend restart — presented Login
+        // for a session that was still perfectly valid. The stored token survives
+        // either way; what was missing was the account's name, and that is what the
+        // snapshot supplies.
+        if (!isSessionError(err)) {
+          const snapshot = await readUserSnapshot();
+          if (active && snapshot) {
+            tokenRef.current = stored;
+            userRef.current = snapshot;
+            sessionLostRef.current = false;
+            firebaseEndedRef.current = false;
+            // The same horizon the healthy path takes from the token's own `exp`,
+            // so a later foreground can renew as soon as the network returns.
+            tokenExpiresAtRef.current = tokenExpiryMsFromJwt(stored);
+            setAuthHorizonMs(tokenExpiresAtRef.current);
+            setToken(stored);
+            setUser(snapshot);
+            setStatus('signedIn');
+            // DEGRADED, not idle: nothing has confirmed this session yet in this
+            // launch, and the phase is the app's own word for exactly that.
+            setAuthPhase('degraded');
+            return;
+          }
         }
         if (active) {
           tokenRef.current = null;

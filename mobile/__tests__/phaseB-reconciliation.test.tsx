@@ -226,9 +226,12 @@ describe('session loss ends the durable Firebase session too, and second', () =>
   it('★ clears the Inventory AI session before the Firebase one', async () => {
     // THE ORDER IS THE PROPERTY. Clearing first is what makes the guarantee hold if
     // the Firebase call hangs or fails: the user is already signed out here.
+    // Recorded by KEY, because ending a session now deletes two entries — the token
+    // and the account snapshot that lets an offline launch stay signed in. Both must
+    // be gone before Firebase is touched, and the token is the first of the two.
     const order: string[] = [];
-    mockDeleteItemAsync.mockImplementation(async () => {
-      order.push('inventoryai.clear');
+    mockDeleteItemAsync.mockImplementation(async (key: string) => {
+      order.push(`inventoryai.clear:${key}`);
     });
     mockSignOutOfFirebase.mockImplementation(async () => {
       order.push('firebase.signOut');
@@ -243,7 +246,11 @@ describe('session loss ends the durable Firebase session too, and second', () =>
     });
 
     await waitFor(() => expect(view.result.current.status).toBe('signedOut'));
-    expect(order).toEqual(['inventoryai.clear', 'firebase.signOut']);
+    expect(order).toEqual([
+      'inventoryai.clear:inventoryai.auth.token',
+      'inventoryai.clear:inventoryai.auth.userSnapshot',
+      'firebase.signOut',
+    ]);
     expect(view.result.current.token).toBeNull();
     expect(view.result.current.user).toBeNull();
   });

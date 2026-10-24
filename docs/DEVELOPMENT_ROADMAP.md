@@ -19210,6 +19210,103 @@ invitation-based onboarding as the prerequisite for retiring legacy password log
 
 ---
 
+# 27EP. The installed app updates itself, and a launch without a network stays signed in (2026-10-24)
+
+**Mobile only — no route, permission, schema, index, session-model or server change; one new direct
+dependency (`expo-updates`, SDK-pinned) and one new documentation guide.** Two things that had been
+asked for and never measured: an installed build that can receive new JavaScript **without being
+rebuilt and reinstalled**, and a cold start with no network that does not throw the session away.
+The second was found *during* the first, by doing it.
+
+**1. The update runtime is configured, and every rule that could send the wrong bundle is pinned.**
+`expo-updates` is installed at the SDK's own version (`~58.0.17`) and added to Dependabot's
+SDK-pinned ignore list, because a dependency Expo owns is taken with the SDK, not on its own. Each
+build profile has its own channel (`development`, `preview`, `production`) — the channel is compiled
+into the APK, so a preview publish physically cannot reach a production install — and
+`runtimeVersion` is `{ policy: "appVersion" }`, so the compatibility label is derived from
+`expo.version` rather than typed by hand. `checkAutomatically: ON_LOAD` with
+`fallbackToCacheTimeout: 0` means a launch never waits on the update host: the download completes in
+the background and is used on the next launch. `mobile/__tests__/ota-update-config.test.ts` (10
+cases) pins all of it, including a positive control for the channel resolver and a scan that no two
+profiles share a channel.
+
+**2. The `fingerprint` policy was tried first and FAILED, measured.** It was the more attractive
+policy because it derives the label automatically. Build `71d63d16-c6f2-403e-8f62-eadcdf6f8f5e`
+aborted in the `Configure expo-updates` phase, before compiling anything, with
+`Runtime version calculated on local machine: e32953a7894593a4e41d1ca76592f3df00d5eeae` against
+`Runtime version calculated on EAS: 6217b878d4238c37f68b848c2649d2a2c617181f`. The cause is this
+project's dynamic config: `app.config.js` resolves the Firebase configuration **file paths** from EAS
+*file* environment variables, and the files they name exist only on the build runner, so the laptop
+cannot reproduce the project EAS hashes. The sources EAS reported were `expoConfigExternalFile` and
+`bareNativeDir`. `appVersion` removes that class of mismatch at the price of one manual rule, now
+written down in the guide: **a change that alters native code must bump `expo.version`.**
+
+**3. Delivery was measured on the phone, not just configured.** Preview build
+`ea941bb7-95f0-4e8e-88be-4c5af08aa73e` (channel `preview`, runtime `1.0.0`) was installed over the
+previous preview APK and signed in to the **production** API with the reserved demo tenant —
+dashboard **3 in stock / 3 low / 1 out / 6 active / 112 on hand**, matching `seed:demo-tenant`'s
+fixture. An update was published (`9e3936aa-b502-4b41-8e8d-b71a80ffe752`, runtime `1.0.0`,
+Android) containing the boot fix below. **The bundle was inspected before upload**: the export
+contains `ai-inventory-l1mi.onrender.com` once, `localhost:4000` **zero** times, and the new
+`inventoryai.auth.userSnapshot` key — so the publish carried both the right server and the new code.
+
+**4. The first publish was not served to the device, and that is recorded rather than smoothed
+over.** For at least 19 minutes the installed app answered `CheckCompleteUnavailable` / "No update
+available" while the manifest endpoint returned the update to `curl` with the same platform, runtime
+and channel headers. `eas update:republish --group 9e3936aa…` (group `6e14b317-2729-465b-9746-449f8b3c272a`)
+was picked up on the very next launch: `DownloadCompleteWithUpdate`, `isUpdateAvailable=true`,
+`isUpdatePending=true`, manifest `01a16c95-…`, runtime `1.0.0`. **The cause is not established**, so
+the guide records the observation and the one-command remedy rather than a theory. Also measured:
+`eas update` **without `--platform android` fails** while building the web bundle (`expo-router` →
+`react-native-web`); this project ships Android and iOS, so publishes are Android-only.
+
+**5. The update fixed a real defect the same run had exposed: a launch with no network threw the
+session away.** With the phone in aeroplane mode, a cold start landed on **Login** although the
+stored Inventory AI token was still valid. The boot restore asks `api.me` for the account, and a
+network failure fell through to the signed-out state — exactly the rule AUTH-03 removed from
+`refresh()` and left in place here. The fix stores the **server-confirmed profile** beside the token
+(`inventoryai.auth.userSnapshot`, written only from a `user` the API returned, never from a
+login form) and, when the boot request fails for a **non-session** reason, restores that profile with
+status `signedIn` and phase `degraded`. A **session** refusal still signs out and deletes the
+profile with the token, so a disowned account cannot be resurrected offline; a missing or corrupt
+profile falls back to the old signed-out outcome rather than inventing an account; and a healthy
+launch rewrites the profile, so a role change made elsewhere does not go stale. `auth-offline-boot.test.ts`
+adds **6 cases** (keep on network failure, do not invent, corrupt profile, refused boot, refused live
+session, healthy refresh), and two existing guards were updated to count **token writes by key**
+rather than "how many entries a session writes".
+
+**6. Verified on hardware after the update.** The downloaded bundle ran on the next launch; with
+**aeroplane mode on** and the app force-stopped, the cold start showed the **signed-in app shell** —
+*INVENTORY AI · Demo Tester · Owner* — and the dashboard's own offline state
+(*Couldn't load the dashboard — Cannot reach the server…* + *Try again*). Before the update the same
+sequence produced Login, so this single frame proves delivery **and** behaviour. Network restored,
+*Try again* returned the same production figures (3 / 3 / 1 / 6 / 112). The demo tenant was then
+removed with `cleanup:demo-tenant` (**0 leftovers**; the Firebase identity is left in place by that
+script's design) and the temporary password file deleted.
+
+**7. The seeder now sets the password it was given, every time.** Found while preparing the run: an
+existing demo identity kept whatever password the FIRST seeding run chose, so a second test cycle had
+a login nobody could sign in as and no message saying why. `resolveIdentity` now updates an existing
+identity's password to `DEMO_ACCOUNT_PASSWORD` (and leaves it `emailVerified`, because this is a
+reserved test credential), reporting *"password refreshed from DEMO_ACCOUNT_PASSWORD"*; a newly
+created identity reports creation and does not claim a refresh that did not happen. Guide 4 states
+the behaviour.
+
+**Verification.** Mobile `tsc` and `eslint` clean, **91 suites / 1098 tests / 0 failures**;
+`check-build-env` clean for all four profiles; `npx expo config --type public --json` resolves the
+runtime policy, update URL, `ON_LOAD` and a zero fallback; the APK's own manifest confirms
+`EXPO_RUNTIME_VERSION` = `1.0.0`, channel header `preview`, and the update URL for this project. No
+server source file changed, so the server baselines stand. Artifacts:
+`docs/evidence/device-runs/2026-10-24-preview-ota/` (four frames plus the `expo-updates` log
+excerpt); operator guide `docs/guides/7-over-the-air-updates.md`.
+
+**Not verified, stated rather than implied:** a store-signed production build, iOS (no macOS on this
+host), code signing (available and deliberately off until a public release owns the key), and the
+rollback commands (`update:roll-back-to-embedded`, `update:rollback`), which exist but were not
+exercised. The first-publish refusal above remains unexplained.
+
+---
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

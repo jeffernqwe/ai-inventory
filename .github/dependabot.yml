@@ -102,6 +102,10 @@ updates:
       # 24 and Kotlin 2.4.0). The SDK pins it like the rest, so the pin guard compared it and failed
       # until it was listed here — which is the guard doing exactly what it exists for.
       #
+      # WHY ONE MORE WAS ADDED (2026-10-24, over-the-air updates). `expo-updates` became a direct
+      # dependency when the app gained its update runtime. The SDK pins it like the rest, so the pin
+      # guard compared it and failed until it was listed here — the same guard doing the same job.
+      #
       # THE FOUR THAT STAY OPEN: `@react-native-firebase/app`, `@react-native-firebase/auth`,
       # `@react-native-google-signin/google-signin` and `expo` itself are not pinned this way — the
       # first three are version choices this project makes and Dependabot may still propose them.
@@ -123,6 +127,7 @@ updates:
       - dependency-name: expo-sharing
       - dependency-name: expo-status-bar
       - dependency-name: expo-system-ui
+      - dependency-name: expo-updates
       - dependency-name: jest-expo
       - dependency-name: react
       - dependency-name: react-dom

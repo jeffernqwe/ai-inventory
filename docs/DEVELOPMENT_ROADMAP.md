@@ -19849,11 +19849,27 @@ the user row, the business row and the old password were all gone (login **401
 future store build — same `appVersion`, therefore same runtime — can pick up a test update, and
 the manifest answers 404 again.
 
-**Not verified:** the **Firebase re-authentication branch was not driven on the device** — the probe
-account is a legacy password account, so the screen showed the password field and the server checked
-`currentPassword`; the `idToken` branch is covered by `ACCOUNT-DELETION.test.mjs` and the mobile
-suite. Play App Signing, an internal-testing install and review are still unexercised; iOS is
-untouched (no macOS).
+**8. The Firebase branch, on the same handset.** Every run above used a **password** account; this one
+used an identity with **no password at all**, so the screen had to ask the provider instead of asking
+the person. The fixture was a **real Firebase identity** created through the Admin SDK in the project
+the server uses (`emailVerified: true`), taken through the app's own onboarding — sign-in answered
+`403 REGISTRATION_REQUIRED`, Login said *"This sign-in is not linked to an Inventory AI account
+yet"*, and **Create your workspace** made the tenant — so the stored user was `OWNER`/`ACTIVE` with a
+`firebaseUid` and **no `passwordHash`**. On the delete screen there was **no password field**, and the
+card said *"We will confirm this with your sign-in"*, because the screen read `authMethods.firebase`
+from the session rather than guessing from the address. `DELETE` + **Delete my account** refreshed the
+provider token, the server confirmed the uid, and the app returned to **Login**; signing in again with
+the same address answered **Invalid email or password on the phone**. Afterwards an Admin SDK lookup
+by that address answered **`auth/user-not-found`** — the half the password branch cannot demonstrate,
+and the one that matters, since an account deleted locally but still able to authenticate is not
+deleted. The user row, the business row, its one session and its one audit row were gone; counts
+returned to baseline and no `probe.*` user or `PROBE-*` business remained. Evidence:
+`docs/evidence/device-runs/2026-10-24-account-deletion/` (frames 05 and 06).
+
+**Not verified:** the Firebase branch was driven with an **Admin-SDK-created identity onboarded through
+the app**, not with **Google Sign-In** — the same `firebaseUid` check serves both, and the Google path
+is not separately measured here. Play App Signing, an internal-testing install and review are still
+unexercised; iOS is untouched (no macOS).
 
 ---
 

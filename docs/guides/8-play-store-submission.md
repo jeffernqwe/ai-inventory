@@ -226,10 +226,11 @@ gone. The evidence, including a 43-check API regression over both ownership case
 
 1. Fill in Data safety with both URLs and the deletion answer, keeping it consistent with the two
    ownership cases above.
-2. Deleting an account **linked to Firebase** has not been run on a device — the screen asks the
-   provider to confirm instead of asking for a password. That branch is covered by the server and
-   mobile suites; the probe account used here was a password account, so the field on screen was the
-   password one.
+2. **Google Sign-In** reaching the same branch has not been measured separately. The Firebase path
+   itself *has*: an Admin-SDK-created identity onboarded through the app, signed in on the phone and
+   deleted from the screen — no password field, the provider identity gone (`auth/user-not-found`),
+   and the old address refused at Login. The same `firebaseUid` check serves a Google account, but
+   that sign-in surface is not in this evidence.
 
 Implementation records: roadmap §27EW (deletion) and §27EX (the sole-member closure and the
 production run); tests `server/test/ACCOUNT-DELETION.test.mjs` (server) and

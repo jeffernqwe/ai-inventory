@@ -6,7 +6,8 @@ Build: the production-profile APK from EAS `12829e5d-…` (`versionName 1.0.0`,
 during this run — see *The bundle the screen came from* below.
 Backend: `https://ai-inventory-l1mi.onrender.com`, commit **`a5a8b10`** (deployed 21:23 local).
 Data: throwaway accounts on `example.invalid` (RFC 2606 — an address that can never receive mail),
-created through the public API and removed by the flow itself. No real account or business was
+created through the public API — and, for the Firebase run, through the Admin SDK — and removed by the
+flow itself. No real account or business was
 touched; every direct database statement was a read filtered by that run's stamp.
 
 ## What this run had to prove
@@ -55,6 +56,35 @@ minutes earlier answers **401 `INVALID_CREDENTIALS`**. Production counts returne
 pre-run values (businesses 3, users 3, sessions 8, audit 27, conversations 1, messages 8,
 categories 5, locations 5).
 
+## The Firebase branch, on the same handset
+
+Every run above used a **password** account. This one used an identity that has **no password at all**, so
+the screen had to ask the provider instead of asking the person.
+
+**The fixture was a real Firebase identity, not a row edited by hand.** Created through the Admin SDK in
+the project the server itself uses (`emailVerified: true`, a throwaway password for the first sign-in,
+address on `example.invalid`), then taken through the app's own onboarding: signing in with it answered
+`403 REGISTRATION_REQUIRED`, the Login screen said *"This sign-in is not linked to an Inventory AI
+account yet"*, and **Create your workspace** created the tenant. In `inventoryai_prod_db` the user was
+`OWNER`/`ACTIVE` with a `firebaseUid` and **no `passwordHash`** — a genuinely Firebase-only account.
+
+| Step | Observation | Frame |
+|---|---|---|
+| Profile → **Delete account**, signed in as that account | **No password field.** The card says *"We will confirm this with your sign-in. You do not need to type your password."* — the screen read `authMethods.firebase` from the session, it did not guess from the address | `05-firebase-delete-screen-no-password.png` |
+| `DELETE` typed, **Delete my account** pressed | The app refreshed the provider token itself and the server confirmed the uid; the app returned to **Login** | — |
+| Signing in again with the same address and password | **Invalid email or password** on the phone | `06-deleted-account-cannot-sign-in.png` |
+
+What was true afterwards, measured rather than inferred:
+
+- **The provider identity is gone** — an Admin SDK lookup by that address answers `auth/user-not-found`.
+  This is the half the password branch cannot demonstrate, and it is the one that matters: an account
+  that is deleted locally but still able to authenticate is an account that is not deleted.
+- The `users` row and the `PROBE-acc4-firebase` `businesses` row are **gone**, along with the one session
+  and one audit row the business held before the call (1 and 1, measured while signed in).
+- The deleted account's Login attempt is refused **on the device**, so the refusal is the shipped client
+  plus the live server, not a script.
+- Counts are back at their pre-run values and `probe.*` users and `PROBE-*` businesses are **0**.
+
 ## The live API regression — 43 checks, 0 failures
 
 Run twice against production (stamp `acc2`; the first attempt, `acc1`, failed 9 assertions because
@@ -93,10 +123,9 @@ retention paragraph says the same. `POST /account-deletion` is still a 404.
 
 - **Not a Play-signed build**, and nothing is uploaded: Play App Signing, the upload-key handover and
   review remain unexercised.
-- **The Firebase re-authentication branch was not driven on the device.** The probe account is a
-  legacy password account, so the screen showed the password field and the server checked
-  `currentPassword`. The `idToken` branch (a linked account confirming with a forced-refresh Firebase
-  token) is covered by `ACCOUNT-DELETION.test.mjs` and the mobile suite, not by this run.
+- The Firebase branch is device-verified (see *The Firebase branch, on the same handset*), but with an
+  identity created by the **Admin SDK** and onboarded through the app — not by Google Sign-In. A Google account reaching the same server path is
+  covered by the same `firebaseUid` check and is not separately measured here.
 - **A tombstoned member is not a "remaining member" for the last-owner rule.** Scenario B measures
   that: after the STAFF left, the OWNER's own deletion took the whole business, tombstone included.
   A business with a live non-owner member is a different case and is covered by the suite.

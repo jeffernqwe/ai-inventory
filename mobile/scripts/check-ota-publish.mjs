@@ -37,6 +37,14 @@
  *      legitimate, and so is a local commit that has not been pushed. But both change what the
  *      commit hash in this output means six months from now, so they are printed next to it
  *      instead of being assumed.
+ *   4. THE NATIVE RUNTIME IS THE ONE THAT WAS BUILT. `runtimeVersion` is `appVersion`, so a native
+ *      change has to travel with a new app version and a new binary — but nothing in EAS enforces
+ *      that while the version is bumped in a commit and the build does not exist yet. On
+ *      2026-10-25 an SDK patch moved `expo-modules-core` 58.0.23 → 58.0.26 while every installed
+ *      build still carried 58.0.23; a publish from that tree would have served JavaScript to
+ *      binaries that cannot run it, and EAS would have accepted it. A committed record
+ *      (`ota-native-runtime.json`), written after a build, is compared against the installed tree;
+ *      a mismatch fails unless `--allow-native-change` says the exception out loud.
  *
  * WHAT IT DOES NOT DO. It does not publish, does not run the test suite (that is a separate,
  * slower gate — `npm test`), and does not check the EAS environment's variables
@@ -44,16 +52,17 @@
  * One command, one question: *is this tree a release?*
  *
  * USAGE
- *   node scripts/check-ota-publish.mjs                       # production
+ *   node scripts/check-ota-publish.mjs                          # production
  *   node scripts/check-ota-publish.mjs --channel preview
- *   node scripts/check-ota-publish.mjs --allow-dirty         # emergency only; says so
+ *   node scripts/check-ota-publish.mjs --allow-dirty            # emergency only; says so
+ *   node scripts/check-ota-publish.mjs --allow-native-change    # emergency only; says so
  *
  * Exit codes: 0 ready to publish, 1 not ready, 2 could not run.
  */
 
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const mobileRoot = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -90,12 +99,108 @@ function readExpoConfig() {
   return config;
 }
 
+/** The installed version of a package in this workspace, or null when it is not installed. */
+function installedVersion(name) {
+  try {
+    return JSON.parse(readFileSync(join(mobileRoot, 'node_modules', name, 'package.json'), 'utf8')).version;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The committed native-runtime record, or null when there is none.
+ *
+ * Deliberately not defaulted: a missing record means no build has claimed this runtime, which is a
+ * finding rather than a reason to assume the tree is publishable.
+ */
+function readNativeRecord() {
+  try {
+    return JSON.parse(readFileSync(join(mobileRoot, 'ota-native-runtime.json'), 'utf8'));
+  } catch (err) {
+    if (err.code === 'ENOENT') return null;
+    throw new Error(`ota-native-runtime.json is not readable JSON: ${err.message}`);
+  }
+}
+
+/** The three packages whose versions decide whether a binary can run a bundle. */
+const NATIVE_FIELDS = [
+  ['expo', 'expo'],
+  ['expoModulesCore', 'expo-modules-core'],
+  ['reactNative', 'react-native'],
+];
+
+/**
+ * Does this tree's native runtime match the last build somebody recorded?
+ *
+ * Pure over its inputs, so the rule can be driven by the tests without a git repository or a build.
+ * The version check and the native check answer different questions: the first says "there is no
+ * binary for this runtime yet", the second says "there is one, but these modules are newer".
+ */
+export function compareNativeRuntime({ recorded, installed, appVersion, allowNativeChange }) {
+  const findings = [];
+  const warn = [];
+
+  if (recorded === null || recorded === undefined) {
+    findings.push({
+      rule: 'native-record-missing',
+      message:
+        'ota-native-runtime.json does not exist, so no build has claimed this runtime — build and ' +
+        'install it first, then record the versions it was compiled with',
+    });
+    return { findings, warn };
+  }
+
+  const missing = ['appVersion', 'expo', 'expoModulesCore', 'reactNative'].filter(
+    (key) => typeof recorded[key] !== 'string',
+  );
+  if (missing.length > 0) {
+    findings.push({
+      rule: 'native-record-incomplete',
+      message: `ota-native-runtime.json is missing ${missing.join(', ')}`,
+    });
+    return { findings, warn };
+  }
+
+  if (recorded.appVersion !== appVersion) {
+    findings.push({
+      rule: 'native-version-mismatch',
+      message:
+        `the recorded build is ${recorded.appVersion} but this tree is ${appVersion} — a ${appVersion} ` +
+        'bundle has no installed binary to serve, so build and install it before publishing',
+    });
+  }
+
+  const moved = NATIVE_FIELDS.filter(([field]) => recorded[field] !== installed[field]).map(
+    ([field, name]) => `${name} ${recorded[field]} → ${installed[field] ?? '(not installed)'}`,
+  );
+  if (moved.length > 0) {
+    const message =
+      `the native modules moved since the recorded build (${moved.join(', ')}) — JavaScript built ` +
+      'against these versions would reach binaries compiled for the recorded ones';
+    if (allowNativeChange) warn.push(`${message} [--allow-native-change]`);
+    else findings.push({ rule: 'native-runtime-moved', message });
+  }
+
+  return { findings, warn };
+}
+
 /**
  * Every way this repository is not a release, as `{ rule, message }`.
  *
  * Pure over its inputs so the rules can be reasoned about (and driven) without a git repository.
  */
-export function auditPublish({ tree, branch, ahead, config, profiles, channel, allowDirty }) {
+export function auditPublish({
+  tree,
+  branch,
+  ahead,
+  config,
+  profiles,
+  channel,
+  allowDirty,
+  native,
+  allowNativeChange,
+}) {
   const findings = [];
   const warn = [];
 
@@ -174,12 +279,24 @@ export function auditPublish({ tree, branch, ahead, config, profiles, channel, a
     });
   }
 
+  if (native) {
+    const nativeResult = compareNativeRuntime({
+      recorded: native.recorded,
+      installed: native.installed,
+      appVersion: config.version,
+      allowNativeChange,
+    });
+    findings.push(...nativeResult.findings);
+    warn.push(...nativeResult.warn);
+  }
+
   return { findings, warn, profile, runtime: config.version };
 }
 
 function main() {
   const args = process.argv.slice(2);
   const allowDirty = args.includes('--allow-dirty');
+  const allowNativeChange = args.includes('--allow-native-change');
   const channelIndex = args.indexOf('--channel');
   const channel = channelIndex >= 0 ? args[channelIndex + 1] : 'production';
   if (typeof channel !== 'string' || !/^[a-z0-9-]{1,40}$/.test(channel)) {
@@ -193,6 +310,7 @@ function main() {
   let ahead = null;
   let config;
   let profiles;
+  let native;
   try {
     tree = git(['status', '--porcelain']).split(/\r?\n/).filter(Boolean);
     branch = git(['rev-parse', '--abbrev-ref', 'HEAD']).trim();
@@ -204,6 +322,14 @@ function main() {
     }
     config = readExpoConfig();
     profiles = readJson('eas.json').build ?? {};
+    native = {
+      recorded: readNativeRecord(),
+      installed: {
+        expo: installedVersion('expo'),
+        expoModulesCore: installedVersion('expo-modules-core'),
+        reactNative: installedVersion('react-native'),
+      },
+    };
   } catch (err) {
     console.log(`::error::check-ota-publish could not read the repository: ${err.message}`);
     return 2;
@@ -218,18 +344,26 @@ function main() {
     profiles,
     channel,
     allowDirty,
+    native,
+    allowNativeChange,
   });
 
   console.log(`check-ota-publish: ${channel} · runtime ${result.runtime} · profile ${result.profile ?? '(none)'}`);
   const aheadLabel = ahead === null ? '' : ahead > 0 ? ` (+${ahead} unpushed)` : '';
   console.log(`check-ota-publish: HEAD ${head} on ${branch}${aheadLabel}`);
+  const record = native?.recorded;
+  console.log(
+    `check-ota-publish: native record ${
+      record ? `${record.appVersion} · expo-modules-core ${record.expoModulesCore}` : '(none)'
+    }`,
+  );
   for (const entry of result.warn) console.log(`check-ota-publish: note — ${entry}`);
   for (const finding of result.findings) console.log(`::error::${finding.rule} ${finding.message}`);
 
   if (result.findings.length > 0) {
     console.log('');
     console.log(`check-ota-publish: ${result.findings.length} finding(s) — NOT ready to publish.`);
-    console.log('Commit first (`git status`), re-run this, and only then:');
+    console.log('Resolve the findings above, re-run this, and only then:');
     console.log(
       `  npx eas-cli update --channel ${channel} --environment ${channel} --platform android -m "<what changed>"`,
     );
@@ -244,4 +378,7 @@ function main() {
   return 0;
 }
 
-process.exitCode = main();
+// Imported by the tests for its pure rules; executed only when invoked as a script.
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  process.exitCode = main();
+}

@@ -31,6 +31,9 @@ Two things are worth saying plainly, because they are the two that surprise peop
 2. **The app you installed decides what it can receive.** The channel (`preview` or `production`)
    and the runtime version (`1.0.0`) are compiled into the APK. An update published to another
    channel, or built for another runtime, is invisible to that install — by design.
+3. **Nothing tells the person it happened.** There is no banner, dialog or "new version" screen.
+   The new words simply appear the next time they open the app. §7A is about that, and about how
+   to add a notice if you want one.
 
 ---
 
@@ -420,6 +423,103 @@ installs picked it up.
 
 ---
 
+## 7A. What the person holding the phone sees
+
+This is the part people ask about first, so it is worth being blunt: **by default, nothing.**
+
+If you change a sentence on the login screen and a heading on Create Account, then publish, the app
+on the phone is unchanged for one launch, and after the next launch the words are simply different.
+No banner, no toast, no "a new version is available", no restart prompt. `expo-updates` is a
+download-and-swap client; it ships no user interface at all. Neither Facebook nor TikTok announce
+copy changes either — a silent update is the normal behaviour people already expect from an app.
+
+**What the `--message` is, and is not.** `eas update --message "Fixed the welcome copy"` is stored
+with the update group and shown in `eas update:list` and the Expo dashboard. It is a note **to the
+team** — for audits, rollbacks and later questions. It never reaches the phone and no user can see it.
+
+**The app currently shows no version anywhere.** There is no Settings row with `1.0.0`, and no code
+that reads `Updates.updateId` (verified by searching `mobile/`). So a user cannot tell you which
+bundle they are running, and you cannot ask them to check. If supporting real users is the next step,
+an *About* line on Profile is the cheapest useful addition — `expo-constants` is already a dependency.
+
+### The three ways to tell people something changed
+
+| Approach | Effort | When it is right |
+|---|---|---|
+| **Say nothing** | none | Copy tweaks, layout fixes, a corrected word. This is the default and it is usually correct. |
+| **A "What's new" card** shown once per update | one screen + ~20 lines | A change people would otherwise hunt for: a moved button, a new field, a renamed tab. |
+| **"Restart to apply" prompt** | ~15 lines | Rare — only when someone is waiting on a fix and cannot be asked to relaunch twice. |
+
+**The card, and why it fits this system.** The note lives **inside the new bundle**, so the publish
+carries its own announcement and no server or database is involved:
+
+```tsx
+import * as React from 'react';
+import * as Updates from 'expo-updates';
+import * as SecureStore from 'expo-secure-store';
+
+const SEEN = 'inventoryai.updates.seenUpdateId';
+
+export function useWhatsNew() {
+  const [visible, setVisible] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!Updates.isEnabled) return;          // Expo Go, or a build without the client
+    if (Updates.isEmbeddedLaunch) return;    // first run: nothing to announce yet
+    const id = Updates.updateId;
+    if (!id) return;
+    SecureStore.getItemAsync(SEEN).then((seen) => setVisible(seen !== id));
+  }, []);
+
+  const dismiss = async () => {
+    setVisible(false);
+    if (Updates.updateId) await SecureStore.setItemAsync(SEEN, Updates.updateId);
+  };
+
+  return { visible, dismiss };
+}
+```
+
+Render it where a **signed-in** person lands first — the dashboard — not on Login. Login and Create
+Account are seen by people who are signed out, and a "what changed" card shown before sign-in is
+noise at the worst moment.
+
+**The restart prompt, and its catch.** A `downloadComplete` listener only helps if a download happens
+*while the app is open*. This project checks at launch (`ON_LOAD`), so by the time a screen is
+interactive the download is usually already done, and the event has already fired. A real in-session
+prompt therefore has to ask explicitly:
+
+```ts
+const check = async () => {
+  const result = await Updates.checkForUpdateAsync();   // a network call, on demand
+  if (result.isAvailable) {
+    await Updates.fetchUpdateAsync();                   // then offer the button
+    setReady(true);
+  }
+};
+// the button: await Updates.reloadAsync();
+```
+
+Caveats worth knowing before adding it: `reloadAsync()` restarts the JavaScript, so **anything typed
+and not saved is lost** — never trigger it automatically while a form is open; and it makes the app
+feel like it restarts itself, which some people read as a crash. `ON_LOAD` plus a silent swap is the
+calmer default.
+
+### What is not possible
+
+You cannot change the notice's wording from a dashboard or a server without publishing JavaScript.
+There is no remote-config channel here: the app's text is the bundle. If the wording had to change
+independently of a release, that would be a new backend endpoint serving copy — a backend change, not
+an update feature, and not something this project has or needs today.
+
+### What Play Store users see
+
+Nothing different. An OTA publish is invisible to Play Console: no new version, no "What's new"
+entry, no review. The Play listing's *What's new* text belongs to a **store release**, so it only
+changes when a new AAB is uploaded — which is one more reason a copy change should not need one.
+
+---
+
 ## 8. How the app behaves when something goes wrong
 
 | Situation | What actually happens |
@@ -535,7 +635,7 @@ fraction of installs rather than all of them.
 ## 12. Current gaps, and what to change
 
 These are the honest gaps between "the feature works" and "the feature is operated well". None of them
-is a code defect; three are decisions.
+is a code defect; most are decisions about how the feature is operated.
 
 1. **No preview build is installed right now.** The handset runs the **production-profile APK**
    (channel `production`, runtime `1.0.0`), because it was used for the release rehearsal. Until a
@@ -555,6 +655,10 @@ is a code defect; three are decisions.
    `expo-updates` inside it — the same mechanism, but it depends on the AAB actually being uploaded
    and installed from Play, which is the open release gate recorded elsewhere. Play App Signing does
    not interfere with EAS Update.
+7. **The user is told nothing, and cannot check a version.** There is no "What's new" card, no
+   restart prompt and no version row anywhere in the app (§7A). Fine for copy changes; worth one
+   small screen before real users arrive, so a support conversation can start with "which build are
+   you on?" instead of a guess.
 
 ---
 

@@ -17,7 +17,7 @@ If you are not a programmer, start here and read the guide that matches what you
 | See my phone's screen on this laptop | [3. Mirroring the phone to a laptop](3-see-your-phone-on-your-laptop.md) |
 | Understand the test accounts and put sample data in | [4. Test accounts and mock data](4-test-accounts-and-mock-data.md) |
 | Look up what any command or script does, and how to run it | [6. Every script, explained](6-scripts-and-commands.md) |
-| Update the installed app without reinstalling it | [7. Updating the app without reinstalling](7-over-the-air-updates.md) |
+| Update the installed app without reinstalling it — the full reference for the update system | [7. Updating the app without reinstalling](7-over-the-air-updates.md) |
 | Prepare the Google Play submission | [8. Preparing the Play submission](8-play-store-submission.md) |
 | Know what an unfamiliar word means | [5. Words explained](5-words-explained.md) |
 

@@ -1,6 +1,6 @@
 # 7. Updating the app without reinstalling (EAS Update)
 
-Checked against the installed CLI (`eas-cli/24.7.0`, `expo-updates ~58.0.17`, Expo SDK 58).
+Checked against the installed CLI (`eas-cli/24.7.0`, `expo-updates ~58.0.18`, Expo SDK 58).
 `eas update:list` takes `--branch` (not `--channel`), and `eas update:rollback` takes a **group id**.
 
 ## 0. The short answer

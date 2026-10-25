@@ -20879,9 +20879,41 @@ admitted by its consumer as must-fire in **both** advisory shapes — with a pub
 vulnerable range*. `SECURITY.md`'s known-open row was corrected from the stale four-advisory text it
 carried since 2026-10-16 to the two that are actually open.
 
-**No dependency was upgraded, so no mobile build or test run was owed by this change** — and per the
-owner's instruction, nothing was published to EAS for a documentation and tooling commit. Both alerts
-stay **open**, undispositioned by suppression, until the gate says `READY`.
+**No dependency was upgraded by that commit, so no mobile build or test run was owed by it** — and per
+the owner's instruction, nothing was published to EAS for a documentation and tooling commit. Both
+alerts stay **open**, undispositioned by suppression, until the gate says `READY`.
+
+## The patch bump this entry led to, and the gates it did not move (2026-10-25, same session)
+
+`expo install --fix` was then run against the sanctioned pin table and took the family from
+**`expo@58.0.16` to `expo@58.0.19`**: camera 58.0.12, constants 58.0.13, dev-client 58.0.15, font
+58.0.10, linking 58.0.14, router 58.0.26, sharing 58.0.20, status-bar 58.0.4, updates 58.0.18 and
+jest-expo 58.0.12 — **47 lockfile entries**, every one of them inside the Expo chain (the widest
+sideways move being `xcode` 3.0.1 → 4.0.0, which also let `uuid` leave the tree entirely, so the
+§27CJ override is now inert). `--fix` exits **1** here by design of this project's own config:
+`app.config.js` is dynamic, so the CLI cannot append the `expo-sharing` / `expo-status-bar` plugins
+it suggests, and it stops after installing. The three ranges it left behind were set by hand from
+`bundledNativeModules.json`, and the SDK-pin guard (`mobile/__tests__/expo-sdk-pins.test.ts`)
+**caught a fourth**: `expo-updates` was declared `~58.0.17` while the new SDK pins `~58.0.18` — the
+guard doing the job it exists for, not a test to relax. `expo install --check` now answers
+**Dependencies are up to date**.
+
+**The advisory gates did not move**, which is the measured answer to the question the bump was for:
+`@expo/cli` is now **58.1.15** and still declares **`zod ^3.25.76`**, so that watch stays `DEFERRED`,
+and node-forge is still **1.4.0** — its newest release — with no patched version to take. The bump
+neither closes nor worsens either alert.
+
+**The native side did move, and that has an operational consequence.** `bundledNativeModules.json`
+changed **36 entries** and `expo-modules-core` went **58.0.23 → 58.0.26**, with `expo-modules-jsi`
+and `expo-modules-macros` alongside it. The installed `1.0.0` builds on the phone were compiled
+against the **previous** native modules, and `runtimeVersion` is `appVersion`, which does not
+change — so **an OTA published from this tree would deliver JavaScript expecting native modules
+those binaries do not have.** Per the standing rule, **a new build is required before the next
+OTA**; nothing was published, built or installed by this entry.
+
+Verification: mobile **97 suites / 1172 tests / 0 failures**, `tsc` and `eslint` clean,
+`expo install --check` clean, no invalid or missing entries in `node_modules`, and the watch
+self-test unchanged at **23 controls**.
 
 ---
 

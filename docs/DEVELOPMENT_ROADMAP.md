@@ -20458,9 +20458,24 @@ makes every later render in that file commit nothing.
 **Verification.** Mobile **97 suites / 1162 tests / 0 failures**, `tsc` clean, `eslint` clean. No server
 file was touched, so its baselines stand unchanged.
 
-**Not verified:** nothing on a device yet — the card and the screen have not been seen on the handset,
-and the first real proof will be the OTA publish that carries them (JavaScript only, so **no new build is
-needed**). iOS unverified. Guide §7A.1 is the operating record.
+**Published, and measured on the phone (2026-10-25, 14:44 local).**
+`eas update --channel production --environment production --platform android` published group
+`f8ca02a3-5b4e-4f2c-948f-c53825736301` at commit `4c0a60a` (runtime `1.0.0`, Android update
+`01a171cd-8fa4-70ff-ae3f-b13e9fd48bb1`) — JavaScript only, no build, no install. On the OPPO CPH1969 the
+next launch logged `UpdatesController onBackgroundUpdateFinished: Update available` →
+`DownloadCompleteWithUpdate` (`isUpdatePending=true`) → `ErrorRecovery: remote load status changed:
+NEW_UPDATE_LOADED`; the force-stop and relaunch after it ran the bundle with **no `FATAL EXCEPTION` and
+no JavaScript error**, and the app rendered normally. **The new route is in the running bundle and its
+guard holds:** the handset was signed out (its old session had ended — this change writes only its own
+marker and never touches the token, so it cannot have caused that), and `inventoryai://whats-new`
+answered **Login**; a bundle without this screen would have rendered the unmatched-route page instead.
+
+**Still not seen: the card itself.** The dashboard needs a signed-in session, and this host resolves **no
+MongoDB database** (`config/env.ts` reports no URI), so the documented `seed:demo-tenant` route to a
+demo sign-in was unavailable and no production record was touched. Everything below the screen — the
+marker, the card, both actions, the list, the dashboard wiring — is covered by the **21 cases** above; the
+one sentence this entry cannot yet write is "the card appeared on the handset". iOS unverified. Guide
+§7A.1 is the operating record.
 
 ---
 

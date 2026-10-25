@@ -21065,11 +21065,12 @@ current meaning. **A new-device sign-in email remains open** (§27EN/§27EO) —
 ## Verification
 
 New suite `server/test/AUTH02-session-cap.test.mjs`, classified PURE_DB in `scripts/run-tests.mjs`
-(which refuses an unclassified suite): **6 cases**, each a direction that matters — the full cap is
+(which refuses an unclassified suite): **8 cases** (6 at first, 2 added on deployment day — see the
+amendment below), each a direction that matters — the full cap is
 held without revoking anything (positive control); crossing it revokes the **oldest** and keeps the
 new one; an already-revoked row does not consume a slot; a row past its own cap does not either; the
 rule is per account; and the eviction is written to the audit trail with its reason. Against the real
-test database, **6 pass / 0 fail**.
+test database, **8 pass / 0 fail**.
 
 **The suite was proved able to fail**: with `enforceSessionCap` commented out it answers
 `✖ revokes the OLDEST session …` and `fail 1`; the file was then restored and the call re-asserted
@@ -21078,6 +21079,21 @@ suite is DB-only), `tsc` and `eslint` clean, and the four auth suites most expos
 (`phaseAUTH03-session-renewal`, `phase03-auth`, `phase07b-auth-security`, `ACCOUNT-DELETION`) ran
 **73 tests / 71 pass / 0 fail / 2 skipped**.
 
+**Amended 2026-10-25, on deployment.** Two properties the record above had left as prose are now
+pinned as tests: the literal `20` (so changing the bound has to reach the specification's prose too)
+and the cleanup-failure path (a simulated write timeout leaves the sign-in working, its session
+usable, and the bound exceeded until the next login tries again). That took the suite to **8 cases,
+8 pass / 0 fail**.
+
+The commit was then pushed to `main` (`11a9c49`), CI run **40212286545 passed in 5m4s**, and Render
+deployed that exact commit — `/api/health` reports `commit: 11a9c498…`, `environment: production`,
+`db: connected`, and `/api/health/ready` answers **200**. After the auth-surface probes (`401`
+without a token, `400 VALIDATION_ERROR` on an empty body, a uniform `401 INVALID_CREDENTIALS`) the
+counters read **0 5xx and no server error**. The rule therefore applies at every session creation
+from that moment: it needs no migration, and because a session is a row in MongoDB, the restart
+that carried it signed nobody out. What is still **not** verified: a signed-in production session
+under the new build — no production credential is held here, so that check needs the owner.
+
 ## Limits, recorded rather than rounded off
 
 * **Two concurrent sign-ins can overshoot by one.** Both read the count before either row is written,
@@ -21085,7 +21101,8 @@ suite is DB-only), `tsc` and `eslint` clean, and the four auth suites most expos
   can observe here.
 * **Not on hardware.** No phone run: the change is server-side and invisible in the UI, and the
   runtime that would have carried a client change is the one blocked by the build quota (§27FK).
-* **Not deployed.** The rule reaches production users when the server is deployed; nothing was pushed.
+* **Deployed 2026-10-25** — see the amendment below. The rule is live in production; until that
+  deploy it reached nobody.
 
 ---
 

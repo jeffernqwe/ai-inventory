@@ -20337,6 +20337,81 @@ three residual V1 security items recorded in checklist §52 are unchanged by thi
 
 ---
 
+# 27FD. The invitation, sent by an admin and received in a real inbox (2026-10-25)
+
+**Verification only — no code, route, permission, schema, index, dependency, session or environment
+change; the only files this entry adds are an evidence directory and this record.** §27FC closed by
+naming two gaps it could not close: *an admin sending the invitation from the Users screen on a device*
+and *a real inbox receiving the mail*, because the token and the code were minted for that run. Both are
+closed here, on the same handset and the same production server, with the same APK — **nothing was
+rebuilt, published or installed**, so the bytes under test are the bytes already on the phone.
+
+**1. The admin half, driven on the phone.** Signed in as the demo tenant's **OWNER**, `inventoryai://users/invitations`
+opened the Invitations screen; a colleague's address and the **Staff** role produced *Invitation sent to
+…*, an emptied form, and a pending row carrying the role, *Pending*, the expiry and a **Revoke** button.
+The row was written to the production database with a `PENDING` status and a `tokenHash` that is the
+SHA-256 of the token the recipient was mailed.
+
+**2. The mail reached a real inbox, and the link worked from it.** The recipient was a throwaway mailbox
+at `guerrillamailblock.com`, read through that provider's API, and this time nothing was hand-minted. The
+invitation arrived **34 seconds** after the tap — `You have been invited to join DEMO PREVIEW — safe to
+delete on Inventory AI` — and the message's button resolved `302` from Brevo's click host to
+`https://ai-inventory-l1mi.onrender.com/invite?token=…`, which answered **200** and forwarded to the
+constant `inventoryai://invite?token=…`. The mailed token's SHA-256 equals the stored `tokenHash`, so the
+link in the inbox is the link for that row. **Two facts this made visible for the first time:** Brevo
+**rewrites the link** onto its own click host, so the token exists inside a third party's click URL for as
+long as that provider keeps it (it resolves correctly, but the exposure was previously unstated); and the
+sender is whatever `MAIL_FROM` holds, which is today a Brevo-branded address that delivers but does not
+look like Inventory AI — a domain-verified sender belongs on the store-readiness list.
+
+**3. Revoking removes the capability, not just the row.** A second invitation (role **Manager**) was sent
+to a second real inbox and then revoked from the same screen through its confirmation dialog. Afterwards
+`GET /api/auth/invitation?token=<revoked>` answered **404 `INVITATION_INVALID`** while the untouched
+pending token still answered **200** with its address, role, business name and expiry — the revoked link
+stops resolving for anyone who kept a copy, which is what the token-digest rotation in `revoke` is for.
+
+**4. The mailed invitation was accepted end to end.** Signed out, the emailed token opened the invitation
+screen naming the address, business, **Staff** and the expiry; *Create your account* opened the invited
+registration shape — **no business-name field**, the address prefilled and locked, the person choosing
+their own password (18 characters, the live rule hint counting it); `Create Account` created the Firebase
+identity and requested the AUTH-04 code; the code mail arrived in the same inbox (*Your Inventory AI
+verification code … 855806*); six digits typed **with no press of Verify** auto-verified, the invitation
+was accepted, and the app landed on **the inviting tenant's own Inventory** — not a new workspace — with
+the profile showing **Staff** and *member since Oct 25, 2026 · 12:53*.
+
+**5. Measured afterwards, in the production database.** The new user's `businessId` is the inviting
+tenant, role `STAFF`, status `ACTIVE`, `firebaseUid` set, `emailVerified` true and **no `passwordHash`**;
+the invitation is `ACCEPTED` with `acceptedBy`/`acceptedAt`; and the trail holds `INVITATION_SENT`,
+`INVITATION_SENT`, `INVITATION_REVOKED` and `INVITATION_ACCEPTED`, every one of whose metadata is
+`{ role }` with **no address** in it. The invited member then deleted their own account from the app
+(the Firebase-only path, no password prompt): the row is the tombstone with `firebaseUid` gone, **0**
+sessions, **0** invitations for the address, `ACCOUNT_DELETED` with `userId: null`, Firebase
+`auth/user-not-found`, and the business still standing with its owner — §27FA's fate rule holding for a
+member who arrived through an invitation.
+
+**6. Cleanup, and what production looks like now.** `cleanup:demo-tenant` removed the tenant with **0
+leftovers** over every collection carrying the `businessId`; production reads **5 users / 4 businesses /
+1 invitation**, all of them the owner's pre-existing accounts and an earlier `ACCEPTED` invitation that
+this run did not touch, with **0** demo businesses and **0** probe addresses. The throwaway inboxes and
+every token, code and password generated for the run were deleted from the laptop afterwards.
+
+**The one thing this run exposed about its own method, recorded because it is a real exposure.** Checking
+the Firebase identity with a throwaway script printed the `FIREBASE_SERVICE_ACCOUNT_JSON` value into the
+local terminal log, because the variable holds **base64** rather than the JSON the check assumed and the
+parse error echoed its input. The value is a local credential — it lives in `server/.env`, never entered
+the repository and is not in any committed file — but it has now been displayed in a local transcript, so
+**rotating that service-account key is the recommended follow-up** (Google Cloud → IAM → the Firebase
+Admin service account → new key → replace it in the deployment and in `server/.env`). No application
+change is required, and nothing else in the project was affected.
+
+**Still not verified:** **Play App Signing and an internal-testing install** (this is a production-profile
+APK); **Google Sign-In converging on an invitation** (suite-covered); an **ADMIN** sending and the
+ADMIN-cannot-invite-ADMIN refusal on a device (suite-covered); and **iOS**, which stays environment-blocked.
+The three residual V1 security items in checklist §52 are unchanged. Evidence, frames and the full
+measurement table: `docs/evidence/device-runs/2026-10-25-invitations-admin/`. Roadmap §27FB, §27FC.
+
+---
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

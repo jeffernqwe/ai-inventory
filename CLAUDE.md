@@ -989,6 +989,40 @@ were retried successfully and wrote nothing; guide 6 Part 9 records the symptom.
 modules). Guide 6 G.1/G.2, Part 3G, Part 4 and Part 9; guide 4's production routes; evidence
 `docs/evidence/production-ai-scale-2026-10-25/`. Roadmap §27FI)
 
+Dependency advisories triaged — two high, neither fixable here (2026-10-25; **not an
+application phase**; documentation and tooling — one watch script changed, **no dependency
+upgraded, no code, route, permission, schema, session-model, mobile or environment change, and
+nothing published**) — the alerts API was re-read and the two open highs on
+`mobile/package-lock.json` are **zod** GHSA-mrhx-c7xc-m3w5 (3.25.76 under `@expo/cli`, patched
+only at 4.6.6+ while the CLI declares `^3.25.76`) and **node-forge** GHSA-86w9-cpqp-85rv (1.4.0
+under `@expo/code-signing-certificates`, **no patched release exists at all**). Neither is in a
+shipped bundle — `expo-updates`' runtime JavaScript never references the signing package, and zod
+is reached only by the CLI's DevTools-plugin schema — so both alerts are **left open, not
+dismissed**, and no override was applied: forcing a major into a build tool's declared range
+would break its dependency contract to silence an alert about code that never runs in the app.
+`scripts/check-upgrade-watches.mjs` gained a generic advisory gate that reports `READY` only when
+a published release is **both** outside the advisory range **and** admitted by the consumer's own
+range; the `decode-uri-component` watch was **retired**, because that alert closed on 2026-10-24
+when `expo-router` 58 dropped `query-string` and the package left the lockfile. Controls **23**
+(4 must-fire), and `SECURITY.md`'s stale four-advisory row was corrected to the two actually
+open. Roadmap §27FJ)
+
+The mobile runtime label moved, and the OTA preflight now enforces it (2026-10-25; **not an
+application phase**; mobile tooling and documentation — one preflight rule plus one test file, **no
+route, permission, schema, server behaviour or dependency change, and no build or publish**) —
+§27FJ's SDK patch moved `expo-modules-core` 58.0.23 → 58.0.26 under an `appVersion` runtime label
+that stayed `1.0.0`, so a publish from that tree would have reached binaries compiled for the older
+modules and EAS would have accepted it. The version is now **1.0.1** (`app.json` and
+`package.json`), and `npm run check:ota` compares the installed tree against a committed record of
+the runtime the last build was compiled with — `mobile/ota-native-runtime.json`, deliberately absent
+until a build exists — refusing on a moved module, a missing or incomplete record, or a version with
+no binary; `--allow-native-change` warns instead but never excuses an unbuilt version. **No build
+was produced:** the EAS free plan's Android builds for October are exhausted (reset 2026-11-01), the
+attempt incremented remote `versionCode` 4 → 5 without creating an artifact, and a local build is
+not a substitute because the Firebase config files are EAS-injected. Server `test:unit` **1399 /
+1343 pass / 0 fail / 56 skipped**, mobile **97 suites / 1172 tests**, `tsc`/`eslint` clean, CI green
+on `a47b129`. Roadmap §27FK)
+
 **Records are proportional:** a security, architecture, authorization, schema, route,
 dependency-policy or phase-level change gets a dated record; a routine feature or fix is
 documented by its pull request description, its tests and the code. Do not restate what the

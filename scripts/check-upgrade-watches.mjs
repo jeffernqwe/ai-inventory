@@ -24,6 +24,12 @@
  *                             never on the parser directly, while `mobile/` gets its parser from
  *                             `eslint-config-expo`, itself SDK-pinned. Measured 2026-10-11: both lines
  *                             read `>=4.8.4 <6.1.0`, so no published 9.x admits 7 on either path.
+ *   4. `zod` (advisory)    — GHSA-mrhx-c7xc-m3w5 is inside the 3.x line `@expo/cli` declares and only
+ *                             4.6.6+ is patched, so a fix is one Expo release away (§27FJ). `READY`
+ *                             means a patched release the CLI's own range admits exists: a plain bump.
+ *   5. `node-forge` (advisory) — GHSA-86w9-cpqp-85rv has **no patched release at all** — 1.4.0 is both
+ *                             the newest and inside the range — so `READY` is the day one is published
+ *                             and the code-signing consumer's range admits it (§27FJ).
  *
  * HOW TO RUN. `node scripts/check-upgrade-watches.mjs` (add `--json` for machine output, `--self-test`
  * to run the controls alone). It needs the network and is deliberately NOT part of CI: a pipeline that
@@ -290,33 +296,32 @@ function decideJestExpo({ pin, installedReactNative, inLineVersion, inLineManife
 }
 
 // ---------------------------------------------------------------------------
-// The decode-uri-component gate (§27CL) — the one advisory that is inside a shipped bundle
+// Advisory gates (§27FJ) — a patch a bump cannot take, because the consumer will not admit it
 // ---------------------------------------------------------------------------
 //
-// WHY THIS IS A WATCH AND NOT A FIX. `decode-uri-component`'s only patched release is 0.5.0, and it is
-// **ESM-only** while its consumer here — `query-string@7.1.3`, reached by expo-router — is CommonJS and
-// calls the module's export directly, so applying the fix breaks the app's own deep-link query parsing
-// (`TypeError: decodeComponent is not a function`, measured in §27CJ). Nothing in this repository can
-// close it today, and the Dependabot alert deliberately stays open. What CAN be automated is the
-// question "has upstream moved yet?", which is otherwise a manual re-read of a web page.
+// WHY THESE ARE WATCHES AND NOT OVERRIDES. Two high advisories sit inside Expo's build tooling:
+// zod@3.25.76 under expo → @expo/cli (GHSA-mrhx-c7xc-m3w5 — patched only in 4.6.6+, while the CLI
+// declares ^3.25.76), and node-forge@1.4.0 under expo-updates → @expo/code-signing-certificates and
+// @expo/cli (GHSA-86w9-cpqp-85rv — no patched release published at all). Neither is in a shipped
+// bundle, and that was measured rather than assumed: expo-updates' own runtime JS never references the
+// code-signing package, the only importer of node-forge outside itself is @expo/cli's iOS signing
+// path, and zod is reached by @expo/cli only through its DevTools-plugin schema. An overrides entry
+// could force a version past each consumer's declared range — and that is exactly the unreviewed
+// upgrade this project refuses: it would silence two alerts by breaking a build tool's dependency
+// contract, for code that never runs in the app.
 //
-// THE GATE IS CONJUNCTIVE, and both halves are read from a source rather than remembered:
-//   1. a release that is **patched** — the floor comes from the advisory's own `first_patched_version`
-//      (GitHub's public advisory API), so the watch follows the advisory instead of a copied constant;
-//   2. a release a **CommonJS consumer can require** — decided from the published manifest's own shape
-//      (`exports` with a `require` condition, or a `main` on a package that does not declare
-//      `"type": "module"`).
-//
-// A patched-but-ESM-only release is therefore DEFERRED and says so by name — which is exactly the state
-// §27CJ measured, so the watch reproduces it rather than describing it.
+// The honest question is narrower and mechanical: is there a published release outside the advisory's
+// range that the consumer itself admits? When both hold, a plain bump closes the alert with no
+// override. Until then the alert stays open — not dismissed — and this line says why.
 
 /**
  * Is `version` inside a vulnerable range? The inverse is "patched".
  *
- * Needed because the public advisory API does **not** always carry `first_patched_version` — measured on
- * this advisory, which returns `null` for it while Dependabot's own alert reports `0.5.0` from the same
- * database. The range it does carry is authoritative and exact (`<= 0.4.2` here), so the floor is derived
- * from it instead: a release is patched when the advisory's own range does not admit it.
+ * Needed because the public advisory API does **not** always carry `first_patched_version` — measured
+ * on both advisories this file now watches: Dependabot's alert for zod reports `4.6.6` while the public
+ * advisory answers `null`, and node-forge has no patched release to report at all. The range it does
+ * carry is authoritative and exact, so the floor is derived from it instead: a release is patched when
+ * the advisory's own range does not admit it.
  *
  * Handles the forms npm advisories publish for this (`<= A`, `< A`, `>= A`, `> A`, and space-separated
  * compounds). Anything else answers `{ known: false }`, and the caller reports UNREADABLE rather than
@@ -331,8 +336,8 @@ function vulnerableAdmits(range, version) {
 
   for (const clause of clauses) {
     // Operator and version are TIGHTENED from a single expression rather than split on whitespace: the
-    // first version of this read `<= 0.4.2` as the bounds `<=` and `0.4.2`, gave the operator an empty
-    // version, and reported the whole range unparsed — which the controls below caught, not the report.
+    // first version of this split a `<=` bound on whitespace, gave the operator an empty version, and
+    // reported the whole range unparsed — which the controls below caught, not the report.
     const bounds = [...clause.matchAll(/(<=|>=|<|>)\s*([0-9][^\s]*)/g)];
     if (!bounds.length) return { known: false, clause };
     const consumed = bounds.map(([, op, bound]) => `${op}${bound}`).join('');
@@ -353,66 +358,112 @@ function vulnerableAdmits(range, version) {
 }
 
 /**
- * How `require()` of a published package resolves, when the answer is "a value you can call".
- *
- * Deliberately conservative: a `require` condition or a CJS `main` on a non-`type: module` package is
- * accepted, and anything else is reported as not-requireable. The limit is stated rather than hidden —
- * a package with an `exports` map that omits `require` while leaving a stale `main` would be called
- * requireable here even if Node resolved the `exports` map first. It is a watch, not a resolver, and
- * the conservative direction is the one that keeps an alert open instead of closing it wrongly.
+ * The newest stable (three-part) release in a packument, or null.
  */
-function cjsEntry(manifest) {
-  const exported = manifest?.exports;
-  if (exported && typeof exported === 'object' && !Array.isArray(exported)) {
-    const root = exported['.'] && typeof exported['.'] === 'object' ? exported['.'] : exported;
-    if (root && typeof root === 'object' && typeof root.require === 'string') return `exports.require=${root.require}`;
-  }
-  if (manifest?.type === 'module') return null;
-  if (typeof manifest?.main === 'string') return `main=${manifest.main}`;
-  return null;
+function newestStableRelease(packument) {
+  const versions = Object.keys(packument?.versions ?? {}).filter((version) => /^\d+\.\d+\.\d+$/.test(version));
+  return versions.reduce((best, version) => (best && compareSemver(version, best) <= 0 ? best : version), null);
 }
 
-function decideDecodeUriComponent({ newestPublished, newestManifest, firstPatchedVersion, vulnerableRange }) {
-  if (!newestPublished || !newestManifest) {
-    return { status: 'UNREADABLE', detail: 'no published release could be read, so there is nothing to judge' };
-  }
+/**
+ * One advisory, one gate, as a pure function so the controls can drive it without the network.
+ *
+ * first_patched_version is preferred when the advisory carries one; when it does not (measured: it is
+ * null for node-forge) the vulnerable range decides, and a release the range no longer admits counts
+ * as patched. READY needs the second half as well — a release the CONSUMER's own declared range
+ * admits — because that is the half an override would have to fake.
+ */
+function decideAdvisoryUpgrade({ newestPublished, firstPatchedVersion, vulnerableRange, consumerName, consumerRange }) {
+  if (!newestPublished) return { status: 'UNREADABLE', detail: 'no published release could be read' };
 
-  // Two sources for the same fact, in order of how explicit they are: the advisory's own
-  // `first_patched_version`, then the advisory's vulnerable range with the version tested against it.
-  const floor = firstPatchedVersion ?? null;
-  const admits = floor ? null : vulnerableAdmits(vulnerableRange ?? '', newestPublished);
-  if (!floor && !admits?.known) {
+  const byRange = firstPatchedVersion ? null : vulnerableAdmits(vulnerableRange ?? '', newestPublished);
+  if (!firstPatchedVersion && !byRange?.known) {
     return {
       status: 'UNREADABLE',
-      detail: `the advisory carries neither a patched version nor a usable vulnerable range (${vulnerableRange ?? '(none)'}), so there is no floor to watch against — newest published: ${newestPublished}`,
+      detail: `the advisory carries neither a patched version nor a usable range (${vulnerableRange ?? '(none)'}) — newest published: ${newestPublished}`,
     };
   }
-  const patched = floor ? compareSemver(newestPublished, floor) >= 0 : admits.admitted === false;
-  const floorWhy = floor ? `>= ${floor}` : `outside the advisory range ${vulnerableRange}`;
+  const patched = firstPatchedVersion
+    ? compareSemver(newestPublished, firstPatchedVersion) >= 0
+    : byRange.admitted === false;
+  const floorWhy = firstPatchedVersion ? `patched floor ${firstPatchedVersion}` : `outside advisory range ${vulnerableRange}`;
 
-  const entry = cjsEntry(newestManifest);
-  const shape = newestManifest.type === 'module' ? 'type=module' : `type=${newestManifest.type ?? '(absent)'}`;
-
-  if (patched && entry) {
-    return {
-      status: 'READY',
-      detail: `${newestPublished} is patched (${floorWhy}) AND requireable from CommonJS (${entry}) — an overrides entry can be applied`,
-    };
-  }
-  if (patched) {
+  if (!patched) {
     return {
       status: 'DEFERRED',
-      detail: `${newestPublished} is patched (${floorWhy}) but ESM-only (${shape}, no require condition), so a CommonJS consumer's require() yields a namespace — the break §27CJ measured`,
+      detail: `the newest published release ${newestPublished} is still inside the vulnerable range (${floorWhy})`,
+    };
+  }
+  if (!consumerRange) {
+    return {
+      status: 'UNREADABLE',
+      detail: `${newestPublished} is patched (${floorWhy}) but ${consumerName} declares no dependency on it, so there is nothing to bump against`,
+    };
+  }
+
+  const verdict = rangeAdmits(consumerRange, newestPublished);
+  if (verdict.unparsed) {
+    return {
+      status: 'UNREADABLE',
+      detail: `${newestPublished} is patched (${floorWhy}) but ${consumerName} declares ${consumerRange}, which this file cannot parse`,
+    };
+  }
+  if (!verdict.ok) {
+    return {
+      status: 'DEFERRED',
+      detail: `${newestPublished} is patched (${floorWhy}) but ${consumerName} declares ${consumerRange} — a bump cannot reach it; closing it would need an override`,
     };
   }
   return {
-    status: 'DEFERRED',
-    detail: `the newest published release ${newestPublished} is still inside the advisory's vulnerable range (${floor ? `patched floor ${floor}` : String(vulnerableRange)})`,
+    status: 'READY',
+    detail: `${newestPublished} is patched (${floorWhy}) AND ${consumerName} declares ${consumerRange} — a plain bump closes the alert`,
   };
 }
 
-/** The public advisory for this package — the floor is read from it, never copied from the roadmap. */
-const DECODE_URI_ADVISORY = 'GHSA-vcc3-ghjq-m6fr';
+const ZOD_ADVISORY = 'GHSA-mrhx-c7xc-m3w5';
+const NODE_FORGE_ADVISORY = 'GHSA-86w9-cpqp-85rv';
+
+/**
+ * Read the advisory and the registry, then judge against the range the INSTALLED consumer declares.
+ * The first manifest that declares the package wins, so the answer describes the tree this workspace
+ * would actually install.
+ */
+async function readAdvisoryGate(packageName, advisoryId, consumerManifestPaths, consumerPackage) {
+  const advisory = await getJson(`https://api.github.com/advisories/${advisoryId}`);
+  const npmEntry = (advisory.vulnerabilities ?? []).find(
+    (v) => v.package?.ecosystem === 'npm' && v.package?.name === packageName
+  );
+  const newestPublished = newestStableRelease(await getJson(`${REGISTRY}/${scoped(packageName)}`));
+
+  let consumerRange = null;
+  let consumerName = consumerPackage;
+  for (const relativePath of consumerManifestPaths) {
+    const manifest = readJsonIfPresent(join(REPO_ROOT, relativePath));
+    const range = manifest?.dependencies?.[packageName] ?? null;
+    if (range) {
+      consumerRange = range;
+      consumerName = `${consumerPackage}@${manifest.version ?? '(unreadable)'}`;
+      break;
+    }
+  }
+
+  const firstPatchedVersion = npmEntry?.first_patched_version?.identifier ?? null;
+  const vulnerableRange = npmEntry?.vulnerable_version_range ?? null;
+  const { status, detail } = decideAdvisoryUpgrade({
+    newestPublished,
+    firstPatchedVersion,
+    vulnerableRange,
+    consumerName,
+    consumerRange,
+  });
+  return {
+    detail: `${detail} | advisory range: ${vulnerableRange ?? '(unreadable)'}, firstPatched: ${firstPatchedVersion ?? '(none published)'}`,
+    ready: status === 'READY',
+    unparsed: status === 'UNREADABLE',
+    unblocks: `closing ${advisoryId} in mobile/ without an override`,
+  };
+}
+
 
 async function getJson(url) {
   const res = await fetch(url, { headers: { accept: 'application/json' } });
@@ -505,38 +556,33 @@ const WATCHES = [
     },
   },
   {
-    name: 'decode-uri-component',
-    gate: `${DECODE_URI_ADVISORY} — a release that is BOTH patched (>= the advisory's first patched version) AND requireable from CommonJS must exist; today's patched release is ESM-only against a CommonJS consumer (§27CJ)`, 
+    name: 'zod (advisory)',
+    gate: `${ZOD_ADVISORY} — a release outside the vulnerable range that @expo/cli itself admits; only 4.6.6+ is patched and the CLI declares ^3.25.76`,
     async read() {
-      const advisory = await getJson(`https://api.github.com/advisories/${DECODE_URI_ADVISORY}`);
-      const npmEntry = (advisory.vulnerabilities ?? []).find(
-        (v) => v.package?.ecosystem === 'npm' && v.package?.name === 'decode-uri-component'
+      return readAdvisoryGate(
+        'zod',
+        ZOD_ADVISORY,
+        [
+          'mobile/node_modules/expo/node_modules/@expo/cli/package.json',
+          'mobile/node_modules/@expo/cli/package.json',
+        ],
+        '@expo/cli'
       );
-      const firstPatchedVersion = npmEntry?.first_patched_version?.identifier ?? null;
-
-      const packument = await getJson(`${REGISTRY}/decode-uri-component`);
-      const versions = Object.keys(packument.versions ?? {});
-      const stable = versions.filter((version) => /^\d+\.\d+\.\d+$/.test(version));
-      const newestPublished = stable.reduce(
-        (best, version) => (best && compareSemver(version, best) <= 0 ? best : version),
-        null
+    },
+  },
+  {
+    name: 'node-forge (advisory)',
+    gate: `${NODE_FORGE_ADVISORY} — a patched release must be published (none is: 1.4.0 is both the newest and inside the range) AND admitted by the code-signing consumer`,
+    async read() {
+      return readAdvisoryGate(
+        'node-forge',
+        NODE_FORGE_ADVISORY,
+        [
+          'mobile/node_modules/@expo/code-signing-certificates/package.json',
+          'mobile/node_modules/@expo/cli/package.json',
+        ],
+        '@expo/code-signing-certificates'
       );
-      const newestManifest = newestPublished
-        ? await getJson(`${REGISTRY}/decode-uri-component/${newestPublished}`)
-        : null;
-
-      const { status, detail } = decideDecodeUriComponent({
-        newestPublished,
-        newestManifest,
-        firstPatchedVersion,
-        vulnerableRange: npmEntry?.vulnerable_version_range ?? null,
-      });
-      return {
-        detail: `${detail} | advisory range: ${npmEntry?.vulnerable_version_range ?? '(unreadable)'}, firstPatched: ${firstPatchedVersion ?? '(null in the advisory)'}`,
-        ready: status === 'READY',
-        unparsed: status === 'UNREADABLE',
-        unblocks: 'the decode-uri-component override in mobile/ — the one open advisory that reaches a shipped bundle',
-      };
     },
   },
 ];
@@ -743,128 +789,112 @@ const TYPESCRIPT7_CONTROLS = [
 ];
 
 /**
- * The third control set, for the decode-uri-component gate. Its must-fire case is the one that matters:
- * a patched release a CommonJS consumer can require turns READY — without it, the rule would be a switch
- * that can only ever say DEFERRED. The pair beside it is the state measured in §27CJ: patched BUT
- * ESM-only must not fire, because applying that release is what breaks the app.
+ * The advisory gates' controls. The must-fire pair is the point: a patched release the consumer admits
+ * turns READY in BOTH shapes — a published first_patched_version (zod) and a range-only advisory
+ * (node-forge) — so the rule is not a switch that can only ever say DEFERRED. The live shapes sit
+ * beside them as must-not-fire.
  */
-const DECODE_URI_CONTROLS = [
+const ADVISORY_CONTROLS = [
   {
-    name: 'the only patched release is ESM-only — the state §27CJ measured (must not fire)',
+    name: 'the live zod shape — patched 4.6.x exists, @expo/cli declares ^3.25.76 (must not fire)',
     run: () =>
-      decideDecodeUriComponent({
-        newestPublished: '0.5.0',
-        newestManifest: { version: '0.5.0', type: 'module', exports: { default: './index.js' } },
-        firstPatchedVersion: '0.5.0',
+      decideAdvisoryUpgrade({
+        newestPublished: '4.6.7',
+        firstPatchedVersion: '4.6.6',
+        vulnerableRange: '< 4.6.6',
+        consumerName: '@expo/cli@58.1.13',
+        consumerRange: '^3.25.76',
       }),
     expect: 'DEFERRED',
   },
   {
-    name: 'a patched release with a require condition (must fire)',
+    name: 'Expo moves to zod 4 and admits the patched release (must fire)',
     run: () =>
-      decideDecodeUriComponent({
-        newestPublished: '0.6.0',
-        newestManifest: { version: '0.6.0', exports: { '.': { require: './index.cjs', default: './index.mjs' } } },
-        firstPatchedVersion: '0.5.0',
+      decideAdvisoryUpgrade({
+        newestPublished: '4.6.7',
+        firstPatchedVersion: '4.6.6',
+        vulnerableRange: '< 4.6.6',
+        consumerName: '@expo/cli@58.2.0',
+        consumerRange: '^4.6.6',
       }),
     expect: 'READY',
   },
   {
-    name: 'a patched release with a CommonJS main and no type field (must fire)',
+    name: 'the live node-forge shape — no patched release, 1.4.0 is inside the range (must not fire)',
     run: () =>
-      decideDecodeUriComponent({
-        newestPublished: '0.5.1',
-        newestManifest: { version: '0.5.1', main: 'index.js' },
-        firstPatchedVersion: '0.5.0',
-      }),
-    expect: 'READY',
-  },
-  {
-    name: 'a patched release whose ESM shape hides behind exports (must not fire)',
-    run: () =>
-      decideDecodeUriComponent({
-        newestPublished: '0.5.0',
-        newestManifest: { version: '0.5.0', type: 'module', exports: { '.': { import: './index.js' } }, main: 'index.js' },
-        firstPatchedVersion: '0.5.0',
-      }),
-    expect: 'DEFERRED',
-  },
-  {
-    name: 'still inside the vulnerable range, however requireable (must not fire)',
-    run: () =>
-      decideDecodeUriComponent({
-        newestPublished: '0.4.1',
-        newestManifest: { version: '0.4.1', main: 'index.js' },
-        firstPatchedVersion: '0.5.0',
-      }),
-    expect: 'DEFERRED',
-  },
-  {
-    name: 'no patched version AND no usable range is reported, never passed',
-    run: () =>
-      decideDecodeUriComponent({
-        newestPublished: '0.4.1',
-        newestManifest: { version: '0.4.1', main: 'index.js' },
+      decideAdvisoryUpgrade({
+        newestPublished: '1.4.0',
         firstPatchedVersion: null,
-        vulnerableRange: 'workspace:*',
+        vulnerableRange: '<= 1.4.0',
+        consumerName: '@expo/code-signing-certificates@0.0.7',
+        consumerRange: '^1.4.0',
+      }),
+    expect: 'DEFERRED',
+  },
+  {
+    name: 'node-forge publishes 1.4.1 into the consumer range (must fire)',
+    run: () =>
+      decideAdvisoryUpgrade({
+        newestPublished: '1.4.1',
+        firstPatchedVersion: null,
+        vulnerableRange: '<= 1.4.0',
+        consumerName: '@expo/code-signing-certificates@0.0.7',
+        consumerRange: '^1.4.0',
+      }),
+    expect: 'READY',
+  },
+  {
+    name: 'patched, but the consumer range cannot reach it (must not fire)',
+    run: () =>
+      decideAdvisoryUpgrade({
+        newestPublished: '2.0.0',
+        firstPatchedVersion: '2.0.0',
+        vulnerableRange: '< 2.0.0',
+        consumerName: 'consumer@1.0.0',
+        consumerRange: '^1.0.0',
+      }),
+    expect: 'DEFERRED',
+  },
+  {
+    name: 'patched, but the consumer range is unparseable — reported, never passed',
+    run: () =>
+      decideAdvisoryUpgrade({
+        newestPublished: '4.6.7',
+        firstPatchedVersion: '4.6.6',
+        vulnerableRange: '< 4.6.6',
+        consumerName: 'consumer@1.0.0',
+        consumerRange: 'workspace:*',
       }),
     expect: 'UNREADABLE',
   },
   {
-    name: 'an unreadable release manifest is reported, never passed',
+    name: 'no patched version and no usable range — reported, never passed',
     run: () =>
-      decideDecodeUriComponent({ newestPublished: null, newestManifest: null, firstPatchedVersion: '0.5.0' }),
+      decideAdvisoryUpgrade({
+        newestPublished: '1.0.0',
+        firstPatchedVersion: null,
+        vulnerableRange: null,
+        consumerName: 'consumer@1.0.0',
+        consumerRange: '^1.0.0',
+      }),
     expect: 'UNREADABLE',
   },
-  // The floor path the LIVE advisory takes: it returns no `first_patched_version`, so the range decides.
   {
-    name: 'the real advisory shape — no patched version, range `<= 0.4.2`, newest 0.5.0 requireable (must fire)',
+    name: 'patched, but no consumer declares the package — reported, never passed',
     run: () =>
-      decideDecodeUriComponent({
-        newestPublished: '0.5.0',
-        newestManifest: { version: '0.5.0', main: 'index.js' },
-        firstPatchedVersion: null,
-        vulnerableRange: '<= 0.4.2',
+      decideAdvisoryUpgrade({
+        newestPublished: '4.6.7',
+        firstPatchedVersion: '4.6.6',
+        vulnerableRange: '< 4.6.6',
+        consumerName: 'consumer',
+        consumerRange: null,
       }),
-    expect: 'READY',
-  },
-  {
-    name: 'the same range against the newest release the range still admits (must not fire)',
-    run: () =>
-      decideDecodeUriComponent({
-        newestPublished: '0.4.2',
-        newestManifest: { version: '0.4.2', main: 'index.js' },
-        firstPatchedVersion: null,
-        vulnerableRange: '<= 0.4.2',
-      }),
-    expect: 'DEFERRED',
-  },
-  {
-    name: 'an open-ended range admits every release (must not fire)',
-    run: () =>
-      decideDecodeUriComponent({
-        newestPublished: '99.0.0',
-        newestManifest: { version: '99.0.0', main: 'index.js' },
-        firstPatchedVersion: null,
-        vulnerableRange: '>= 0.0.0',
-      }),
-    expect: 'DEFERRED',
-  },
-  {
-    name: 'a compound range is judged on both bounds (must not fire while the newer one holds)',
-    run: () =>
-      decideDecodeUriComponent({
-        newestPublished: '0.9.0',
-        newestManifest: { version: '0.9.0', main: 'index.js' },
-        firstPatchedVersion: null,
-        vulnerableRange: '< 1.0.0 >= 0.5.0',
-      }),
-    expect: 'DEFERRED',
+    expect: 'UNREADABLE',
   },
 ];
 
 /** Everything the controls assert, in one list, so the summary counts are read from one place. */
-const ALL_STATE_CONTROLS = [...CONTROLS, ...TYPESCRIPT7_CONTROLS, ...DECODE_URI_CONTROLS];
+const ALL_STATE_CONTROLS = [...CONTROLS, ...TYPESCRIPT7_CONTROLS, ...ADVISORY_CONTROLS];
 
 const render = (value) => (value === null ? 'null' : JSON.stringify(value));
 

@@ -20796,6 +20796,210 @@ signed in to this production tenant (it is gone now), a store-signed build, and 
 
 ---
 
+# 27FJ. Two advisories that cannot be fixed here, and the watch that says when they can (2026-10-25)
+
+**Dependency triage and documentation — no route, permission, schema, index, session-model, environment
+or application-code change. No package was upgraded, no build or OTA publish was made, and both
+alerts remain open.**
+
+GitHub reported two high Dependabot alerts on `mobile/package-lock.json` after the documentation push
+(§27FE–§27FI). This entry is the triage the owner asked for: what each advisory is, whether the
+vulnerable code can run here, and what the safest upgrade path is. The answer to the last question is
+**there is no safe upgrade today**, and the work is therefore to prove that rather than to install
+something.
+
+## What the two alerts are, measured rather than summarised
+
+The alerts API was re-read on **2026-10-25**: **two open**, `0` dismissed, `0` auto-dismissed, `8`
+fixed. Both rows below come from that API and from the installed tree, not from a scanner summary.
+
+| Alert | Advisory | Sev / CVSS | Installed | Consumer (declared range) | Patched release |
+| --- | --- | --- | --- | --- | --- |
+| #10 (opened 2026-10-24) | **GHSA-mrhx-c7xc-m3w5** — `zod` exhausts memory validating an oversized array against a length-unconstrained array schema (CWE-770) | high / **7.5** | `3.25.76`, at `mobile/node_modules/expo/node_modules/zod` | `expo@58.0.16 → @expo/cli@58.1.13`, declares **`^3.25.76`** — and the newest published CLI, 58.1.15, declares the same | **4.6.6** (all 3.x is inside the advisory's `< 4.6.6`) |
+| #5 (opened 2026-10-09) | **GHSA-86w9-cpqp-85rv** — `node-forge` accepts extra nested `DigestAlgorithm` elements when verifying RSA PKCS#1 v1.5 signatures (CWE-347); an incomplete fix for CVE-2026-33894 | high / **7.5** | `1.4.0` | `expo-updates@58.0.18 → @expo/code-signing-certificates@0.0.7`, declares **`^1.4.0`**; `@expo/cli` declares the same | **none exists** — 1.4.0 is both the newest release (2026-03-24) and inside `<= 1.4.0` |
+
+**Neither package is in a shipped bundle**, and that was measured rather than assumed:
+
+- `expo-updates`' own runtime JavaScript (`node_modules/expo-updates/build/**.js`) contains **no
+  reference** to `@expo/code-signing-certificates` or `node-forge`; its dependency on the former is
+  used by the CLI-side signing tooling.
+- The only files that `require()` node-forge outside the package itself are
+  `@expo/code-signing-certificates/build/main.js` and
+  `@expo/cli/build/src/run/ios/codeSigning/Security.js` — certificate generation and iOS keychain
+  signing, both on a developer's machine.
+- `zod` is reached by `@expo/cli` from exactly two files, `DevToolsPlugin.schema.js` and
+  `createMCPDevToolsExtensionSchema.js`: the **dev-server** plugin-manifest validator. Its input is a
+  developer's own local plugin descriptor, not attacker-supplied data, and it never runs inside the
+  app, the API server or an EAS build.
+
+Both advisories also need a precondition this repository does not supply: the zod one needs an
+application to validate a large attacker-controlled array, and the node-forge one needs an application
+that **verifies** an untrusted RSA signature — here the package only generates certificates and reads
+Apple-signed ones from the keychain.
+
+## Why no override, and what `READY` will mean
+
+An `overrides` entry can force either version past its consumer's declared range. It was refused, for
+the reason the owner's instruction names: that is an unreviewed upgrade of build tooling, and it would
+buy a silenced alert rather than a fixed risk.
+
+- **zod** — 4.6.7 is patched, but `@expo/cli` declares `^3.25.76`. Forcing zod 4 into a v3 consumer is
+  a major-version substitution inside a dependency Expo owns; the failure mode would land in `expo
+  start`'s plugin validation or, worse, in an EAS build, for code that never runs in the product. The
+  fix belongs to Expo, and it is a one-line range change upstream.
+- **node-forge** — there is **nothing to upgrade to**. No release outside `<= 1.4.0` has been
+  published, so no bump, override or patch can close it. This is the same state §27AK recorded, now
+  re-measured five weeks later.
+
+What can be automated is the question "has upstream moved yet?". `scripts/check-upgrade-watches.mjs`
+gained a **generic advisory gate** — `decideAdvisoryUpgrade` — that answers `READY` only when a
+published release is **both** outside the advisory's range **and** admitted by the consumer's own
+declared range, which is precisely the condition under which a plain bump closes the alert with no
+override. Two watches now use it (`zod (advisory)`, `node-forge (advisory)`), reading the advisory from
+GitHub's public API and the consumer range from the **installed** manifests.
+
+## One watch retired, and a prediction that came true
+
+While re-reading the alerts, `decode-uri-component` was found **fixed** — `fixed_at
+2026-10-24T14:39:37Z` — and the package is now **absent from the lockfile entirely** (`0` occurrences).
+The route was the one §27AK predicted: `expo-router` 58 no longer depends on `query-string`, so the
+CommonJS consumer that made 0.5.0 unusable is gone. The watch that tracked it, its CJS-requireability
+decider and its eleven controls were **retired** rather than left printing `DEFERRED` about a package
+that is no longer installed; the history stays in §27AK/§27CJ and in git. `braces` (3.0.3) and
+`sprintf-js` (1.0.3) are still installed and are no longer flagged by the alerts API.
+
+## Verification
+
+The controls are the proof that the new gate can fail in both directions: **23 pass** (`4` must-fire,
+`17` must-not-fire, `2` range), including the two live shapes as must-not-fire and a patched release
+admitted by its consumer as must-fire in **both** advisory shapes — with a published
+`first_patched_version` (zod) and range-only (node-forge). The live report prints both watches
+**`DEFERRED`** with the reason in the line: *4.6.7 is patched … but @expo/cli@58.1.13 declares
+^3.25.76 — a bump cannot reach it*, and *the newest published release 1.4.0 is still inside the
+vulnerable range*. `SECURITY.md`'s known-open row was corrected from the stale four-advisory text it
+carried since 2026-10-16 to the two that are actually open.
+
+**No dependency was upgraded by that commit, so no mobile build or test run was owed by it** — and per
+the owner's instruction, nothing was published to EAS for a documentation and tooling commit. Both
+alerts stay **open**, undispositioned by suppression, until the gate says `READY`.
+
+## The patch bump this entry led to, and the gates it did not move (2026-10-25, same session)
+
+`expo install --fix` was then run against the sanctioned pin table and took the family from
+**`expo@58.0.16` to `expo@58.0.19`**: camera 58.0.12, constants 58.0.13, dev-client 58.0.15, font
+58.0.10, linking 58.0.14, router 58.0.26, sharing 58.0.20, status-bar 58.0.4, updates 58.0.18 and
+jest-expo 58.0.12 — **47 lockfile entries**, every one of them inside the Expo chain (the widest
+sideways move being `xcode` 3.0.1 → 4.0.0, which also let `uuid` leave the tree entirely, so the
+§27CJ override is now inert). `--fix` exits **1** here by design of this project's own config:
+`app.config.js` is dynamic, so the CLI cannot append the `expo-sharing` / `expo-status-bar` plugins
+it suggests, and it stops after installing. The three ranges it left behind were set by hand from
+`bundledNativeModules.json`, and the SDK-pin guard (`mobile/__tests__/expo-sdk-pins.test.ts`)
+**caught a fourth**: `expo-updates` was declared `~58.0.17` while the new SDK pins `~58.0.18` — the
+guard doing the job it exists for, not a test to relax. `expo install --check` now answers
+**Dependencies are up to date**.
+
+**The advisory gates did not move**, which is the measured answer to the question the bump was for:
+`@expo/cli` is now **58.1.15** and still declares **`zod ^3.25.76`**, so that watch stays `DEFERRED`,
+and node-forge is still **1.4.0** — its newest release — with no patched version to take. The bump
+neither closes nor worsens either alert.
+
+**The native side did move, and that has an operational consequence.** `bundledNativeModules.json`
+changed **36 entries** and `expo-modules-core` went **58.0.23 → 58.0.26**, with `expo-modules-jsi`
+and `expo-modules-macros` alongside it. The installed `1.0.0` builds on the phone were compiled
+against the **previous** native modules, and `runtimeVersion` is `appVersion`, which does not
+change — so **an OTA published from this tree would deliver JavaScript expecting native modules
+those binaries do not have.** Per the standing rule, **a new build is required before the next
+OTA**; nothing was published, built or installed by this entry.
+
+Verification: mobile **97 suites / 1172 tests / 0 failures**, `tsc` and `eslint` clean,
+`expo install --check` clean, no invalid or missing entries in `node_modules`, and the watch
+self-test unchanged at **23 controls**.
+
+---
+
+# 27FK. The runtime boundary made mechanical, and the build that could not run (2026-10-25)
+
+**Mobile tooling and documentation — no route, permission, schema, server behaviour or dependency
+change.** `expo.version` and `mobile/package.json` move to **1.0.1**, `check:ota` gains a
+native-runtime rule with its own controls, and one new test file (11 cases) pins it. **No build was
+produced:** the EAS free plan's Android builds for October are exhausted, and that is recorded here
+rather than worked around.
+
+## Why the label had to move
+
+§27FJ's patch bump took `expo-modules-core` **58.0.23 → 58.0.26** under `runtimeVersion: {"policy":
+"appVersion"}`, whose label was still `1.0.0`. Every binary on the phone and every artifact in EAS had
+been compiled against the old modules. `eas update` would have accepted a publish from that tree — the
+label matched — and the incompatibility would have surfaced as a crash *after* the update had already
+been installed. The label is the only protection the mechanism offers, so it moves when the native
+side does. `1.0.1` rather than `1.1.0`: this is a patch-level SDK refresh, and nothing has been
+uploaded to Play, so 1.0.1 becomes the first store version rather than an upgrade to a nonexistent
+1.0.0 line.
+
+## What the preflight now refuses
+
+`mobile/scripts/check-ota-publish.mjs` reads a committed record — `mobile/ota-native-runtime.json` — of
+the versions the **last build** was compiled with, and compares it with the installed tree:
+
+| Condition | Verdict |
+| --- | --- |
+| No record file | **fail** — no build has claimed this runtime |
+| Record missing a version field | **fail** — an incomplete record is not evidence |
+| Recorded `appVersion` ≠ `expo.version` | **fail** — a bundle with no installed binary to serve |
+| `expo`, `expo-modules-core` or `react-native` moved | **fail**, unless `--allow-native-change` says so out loud |
+| All equal | pass, and the publish command is printed |
+
+The record is **deliberately absent** until a build exists; that is why the committed tree refuses to
+publish with one finding rather than passing on an assumption. `--allow-native-change` downgrades the
+native comparison to a warning but never excuses an unbuilt version — the two questions are different,
+and the controls keep them apart.
+
+## The build attempt, and the quota that stopped it
+
+`npx eas-cli build --platform android --profile production --non-interactive --no-wait --json` reached
+the upload and fingerprint, incremented the remote `versionCode` **4 → 5**, and then answered:
+
+```
+This account has used its Android builds from the Free plan this month, which will reset in 6 days
+(on Sun Nov 01 2026). …
+    Error: build command failed.
+```
+
+No build record was created, so there is no build id to poll; `eas build:version:get` confirms the
+remote counter now reads **5**, which means the next successful production build takes **6** and
+`versionCode` 5 has no artifact. A gap is harmless to Play (the counter only has to increase), and
+rewriting remote versioning to reclaim it would be a risk taken for cosmetics.
+
+**A local Gradle build is not a substitute.** The Android SDK and Android Studio's JDK are on this
+laptop, but `google-services.json` and `GoogleService-Info.plist` are **not** (owner decision P-1: they
+are injected by EAS as file environment variables), so `expo prebuild` would fail inside the Firebase
+plugin; and an APK signed with a debug key cannot install over the EAS-signed app that is already on
+the phone. The build waits for the quota to reset or for the plan to change — an owner decision, not a
+repository one.
+
+## Verification
+
+Server `test:unit` **1399 tests / 1343 pass / 0 fail / 56 skipped** (11 new; the new file is classified
+in `scripts/run-tests.mjs`, which refuses an unclassified suite). Mobile **97 suites / 1172 tests / 0
+failures**, `tsc` and `eslint` clean. `check:build-env --profile production --live` and `--profile
+preview --live`: no findings. `check:ota` on the committed tree: runtime `1.0.1`, one finding
+(`native-record-missing`), exit **1** — the refusal the guard exists for.
+
+CI failed once on the way, honestly recorded: run on `b517657` failed the **server lint** step over an
+unused binding in the new test's incomplete-record fixture. The fixture was rebuilt explicitly in
+`a47b129`, and run **40199460249** is green on all four jobs (`server`, `mobile`, `secret-guard`,
+`attribution-guard`).
+
+## What is still open
+
+The **build** (production AAB + preview APK) once quota allows, the **phone pass** on the `1.0.1`
+runtime, then the **record file** written from that build — only after which `check:ota` passes and an
+OTA may be published. Code signing before the public build, and Dependabot **PR #95** (server-only
+minor/patch, green on its branch, needs an update from `main`) remain theirs. Nothing was published to
+EAS and no store artifact was produced by this entry.
+
+---
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

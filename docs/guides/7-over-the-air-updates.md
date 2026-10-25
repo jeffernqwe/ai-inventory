@@ -1,6 +1,6 @@
 # 7. Updating the app without reinstalling (EAS Update)
 
-Checked against the installed CLI (`eas-cli/24.7.0`, `expo-updates ~58.0.17`, Expo SDK 58).
+Checked against the installed CLI (`eas-cli/24.7.0`, `expo-updates ~58.0.18`, Expo SDK 58).
 `eas update:list` takes `--branch` (not `--channel`), and `eas update:rollback` takes a **group id**.
 
 ## 0. The short answer
@@ -110,11 +110,15 @@ npx eas-cli update:list --branch production --limit 5
 | Branch | `preview` | `production` |
 | Newest group | `6e14b317-…` | `62654350-…` |
 | Runtime | `1.0.0` | `1.0.0` |
-| Android `versionCode` (remote) | — | **4** |
+| Android `versionCode` (remote) | — | **5** (no artifact: a quota-refused attempt incremented it) |
 | Installs | side-loaded preview APKs | store builds and the production-profile APK on the test phone |
 
 Older groups remain as history; installs always move **forward** to the newest group for their runtime.
 Unprotected means code signing is off; enabling it is a **build-time** change (§10).
+
+**The installed binaries are still runtime `1.0.0`.** The tree moved to **`1.0.1`** on 2026-10-25 with
+an SDK patch that changed `expo-modules-core` (58.0.23 → 58.0.26), so no `1.0.1` binary exists yet and
+`npm run check:ota` refuses a publish until one does — see §10 and §12.
 
 ## 4. EAS environments
 
@@ -364,9 +368,32 @@ listing "What's new" entry. That text belongs to a store release.
 | Server routes, permissions, mail templates, database rules | No — deploy the server |
 
 Rule of thumb: **native dependencies or native `app.json` fields changed → build; only `.ts`/`.tsx`
-and images → publish.** A native change **must bump `expo.version`** (`1.0.0` → `1.1.0`); without it
+and images → publish.** A native change **must bump `expo.version`** (`1.0.0` → `1.0.1`); without it
 the new binary keeps runtime `1.0.0` and accepts updates built for the old native code, which crashes
 after install. With it, the new build stops listening to `1.0.0` — the point.
+
+### The native-runtime record (added 2026-10-25)
+
+`npm run check:ota` also reads [`mobile/ota-native-runtime.json`](../../mobile/ota-native-runtime.json),
+a committed record of the versions the **last build** was compiled with. It refuses to publish when
+`expo`, `expo-modules-core` or `react-native` differ from that record, because EAS labels a bundle by
+`appVersion` and cannot see which native modules the phone actually has. Write the file after a build:
+
+```json
+{
+  "appVersion": "1.0.1",
+  "expo": "58.0.19",
+  "expoModulesCore": "58.0.26",
+  "reactNative": "0.88.0",
+  "recordedAt": "2026-11-01",
+  "builds": { "preview": "<build id>", "production": "<build id>" }
+}
+```
+
+`--allow-native-change` turns that refusal into a warning for a mismatch that is understood and
+deliberate; it never excuses a version with no binary. This closes the hole measured on 2026-10-25: an
+SDK patch moved `expo-modules-core` while every installed build still carried the old modules, and
+nothing in EAS would have stopped the publish.
 
 ## 11. Security
 
@@ -405,6 +432,10 @@ None of it has been done here; treat it as required before the public store buil
    `expo-updates`, which depends on the AAB being uploaded. Play App Signing does not interfere.
 7. **`update:list` cannot be joined to git** — hence the clean-tree preflight.
 8. **No restart prompt, no bundle id on screen.**
+9. **The `1.0.1` build is pending** — the account's free Android builds for October are used, so the
+   production AAB and preview APK could not be created on 2026-10-25. The next build (quota resets
+   2026-11-01, or the plan is upgraded) is the one that carries runtime `1.0.1`; until then `check:ota`
+   refuses, by design.
 
 ## 13. Limits
 

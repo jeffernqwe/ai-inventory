@@ -119,6 +119,139 @@ export function assertReadableTarget(
 }
 
 /**
+ * The confirmation phrases for the PRODUCTION-CAPABLE performance tenant.
+ *
+ * Distinct from `seed:perf`'s `seed-perf-ai` on purpose: that phrase belongs to a tool that refuses
+ * production, and reusing it here would let a shell history entry reach the wrong database.
+ */
+export const PERF_TENANT_SEED_CONFIRM = 'seed:perf-tenant';
+export const PERF_TENANT_CLEANUP_CONFIRM = 'cleanup:perf-tenant';
+
+/**
+ * The phrase `perf:turns` requires before it measures against a database that is not development
+ * or test — production above all. A measurement spends the shared AI allowance and reads real
+ * rows, so the target is named and confirmed rather than inferred from `--base`.
+ */
+export const PERF_TURNS_PROD_CONFIRM = 'perf-turns:production';
+
+/**
+ * Target check for the production-capable performance tenant (`seed:perf-tenant`,
+ * `cleanup:perf-tenant`).
+ *
+ * WHY PRODUCTION IS ALLOWED HERE AT ALL. `assertSafeTarget` refuses it deliberately, because
+ * `seed:perf` writes tens of thousands of documents for query measurement on a developer's
+ * machine. But the only database a store build can reach is the production one, so a large
+ * dataset the phone can actually be signed into has to be seedable there. Rather than weaken
+ * that guard for its existing callers, this one states its own terms, and every term is about
+ * making the target DELIBERATE rather than merely permitted:
+ *
+ *   * `--database=<name>` is required and must equal the database `config/env.ts` resolved;
+ *     the connection's `dbName` comes from config, never from the URI's path segment, so this
+ *     is the only way to name what will actually be touched.
+ *   * the test database is refused outright, because `npm test` clears it.
+ *   * a phrase unique to these two commands is required.
+ *   * nothing is removed outside the tenant the fingerprints identify — see `findSeedTenantIds`.
+ */
+export function assertNamedDatabaseTarget({
+  mongodbUri,
+  resolvedDbName,
+  requestedDatabase,
+  confirm,
+  confirmPhrase,
+  confirmEnvVar = 'SEED_CONFIRM',
+  command,
+  what = 'written or deleted',
+}) {
+  const resolved = String(resolvedDbName ?? '').trim();
+  const requested = String(requestedDatabase ?? '').trim();
+
+  if (!mongodbUri) {
+    throw new SeedSafetyError(`MONGODB_URI is not set [${command}]. Nothing was ${what}.`);
+  }
+  if (!resolved) {
+    throw new SeedSafetyError(`the resolved database name is empty [${command}]. Nothing was ${what}.`);
+  }
+  if (!requested) {
+    throw new SeedSafetyError(
+      `--database=<name> is required and must name the database this run targets ("${resolved}") ` +
+        `[${command}]. Naming it is what makes the target deliberate. Nothing was ${what}.`,
+    );
+  }
+  if (requested !== resolved) {
+    throw new SeedSafetyError(
+      `--database is "${requested}" but the resolved database is "${resolved}" [${command}]. ` +
+        `Refusing to touch a database the run is not connected to. Nothing was ${what}.`,
+    );
+  }
+  if (resolved === DATABASE_NAMES.test) {
+    throw new SeedSafetyError(
+      `the resolved database is the test database "${DATABASE_NAMES.test}", which "npm test" ` +
+        `clears [${command}]. Nothing was ${what}.`,
+    );
+  }
+  if (String(confirm ?? '').trim() !== confirmPhrase) {
+    throw new SeedSafetyError(
+      `set ${confirmEnvVar}='${confirmPhrase}' to proceed [${command}]. Nothing was ${what}.`,
+    );
+  }
+  return resolved;
+}
+
+/**
+ * Target check for a MEASUREMENT that may point at production (`perf:turns`).
+ *
+ * A measurement against production reads real rows and spends the shared AI allowance, so the
+ * question "which database is this?" must be answerable before the first request. Development and
+ * the test database are allowed as before. Anything else — production included — must be NAMED on
+ * the command line and confirmed with a phrase, because `--base=https://…` alone does not say which
+ * database the ground truth in this process is being read from.
+ */
+export function assertMeasurementTarget({
+  mongodbUri,
+  resolvedDbName,
+  requestedDatabase,
+  confirm,
+  confirmPhrase,
+  confirmEnvVar = 'PERF_TURNS_CONFIRM',
+  command,
+  allowed = [DATABASE_NAMES.development, DATABASE_NAMES.test],
+}) {
+  const resolved = String(resolvedDbName ?? '').trim();
+  const requested = String(requestedDatabase ?? '').trim();
+
+  if (!mongodbUri) {
+    throw new SeedSafetyError(`MONGODB_URI is not set [${command}]. Nothing was read or spent.`);
+  }
+  if (!resolved) {
+    throw new SeedSafetyError(
+      `the resolved database name is empty [${command}]. Nothing was read or spent.`,
+    );
+  }
+  if (allowed.includes(resolved)) {
+    if (requested && requested !== resolved) {
+      throw new SeedSafetyError(
+        `--database is "${requested}" but the resolved database is "${resolved}" [${command}]. ` +
+          'Nothing was read or spent.',
+      );
+    }
+    return { database: resolved, production: false };
+  }
+  if (requested !== resolved) {
+    throw new SeedSafetyError(
+      `the resolved database is "${resolved}", which these measurements do not use by default ` +
+        `[${command}]. Name it with --database=${resolved} to proceed. Nothing was read or spent.`,
+    );
+  }
+  if (String(confirm ?? '').trim() !== confirmPhrase) {
+    throw new SeedSafetyError(
+      `measuring against "${resolved}" needs ${confirmEnvVar}='${confirmPhrase}' [${command}]. ` +
+        'Nothing was read or spent.',
+    );
+  }
+  return { database: resolved, production: resolved === DATABASE_NAMES.production };
+}
+
+/**
  * The tenant teardown lives in application code, not only in this library.
  *
  * `clearTenantData` / `removeTenant` / `countTenantLeftovers` and the collection list

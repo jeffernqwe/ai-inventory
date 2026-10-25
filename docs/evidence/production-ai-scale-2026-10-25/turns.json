@@ -1,0 +1,110 @@
+[
+ {
+  "question": "How is my inventory doing? Give me the headline numbers.",
+  "why": "dashboard summary: active products / low stock / out of stock (13500 / 2109 / 848, read now)",
+  "status": 201,
+  "ms": 5938,
+  "degraded": null,
+  "model": "nvidia/nemotron-3.5-lightning:free",
+  "toolsUsed": [
+   "getInventorySummary"
+  ],
+  "usage": {
+   "inputTokens": 1135,
+   "outputTokens": 309
+  },
+  "answerChars": 380,
+  "missingFacts": [],
+  "answer": "Here are the headline numbers for your inventory (as of 2026‑10‑25):\n\n- **13,500** active products  \n- **3,330,619** total units on hand  \n- **2,109** products are low‑stock (available at or below their minimum)  \n- **11,391** products are in‑stock (above their minimum)  \n- **848** products are out‑of‑stock (available ≤ 0)  \n\nThat gives a quick snapshot of overall stock health."
+ },
+ {
+  "question": "Which products need restocking, and how many are there in total?",
+  "why": "reorder list total (2109, read now)",
+  "status": 201,
+  "ms": 7366,
+  "degraded": null,
+  "model": "nvidia/nemotron-3.5-lightning:free",
+  "toolsUsed": [
+   "getReorderNeededProducts"
+  ],
+  "usage": {
+   "inputTokens": 1416,
+   "outputTokens": 342
+  },
+  "answerChars": 516,
+  "missingFacts": [],
+  "answer": "**2109 products need restocking; the 5 most urgent are below.**\n\n| Product | SKU | Stock status |\n|---------|-----|--------------|\n| Pro Kettle 23488 | SEEDSKU‑13488 | Out of stock |\n| Classic Mug 23454 | SEEDSKU‑13454 | Out of stock |\n| Mini Gloves 23444 | SEEDSKU‑13444 | Out of stock |\n| Eco Detergent 23423 | SEEDSKU‑13423 | Out of stock |\n| Premium Clips 23412 | SEEDSKU‑13412 | Out of stock |\n\nThese five are the first items on the “Restock” screen, which lists every product that is low‑stock or out‑of‑stock."
+ },
+ {
+  "question": "What is the current stock of the product with SKU SEEDSKU-0? Tell me its name and quantity.",
+  "why": "product lookup (name Compact Kettle 10000, on hand across locations 301, read now)",
+  "status": 201,
+  "ms": 3380,
+  "degraded": null,
+  "model": "nvidia/nemotron-3.5-lightning:free",
+  "toolsUsed": [
+   "getProduct"
+  ],
+  "usage": {
+   "inputTokens": 1197,
+   "outputTokens": 197
+  },
+  "answerChars": 138,
+  "missingFacts": [],
+  "answer": "**Product:** Compact Kettle 10000 (SKU SEEDSKU‑0)  \n**Total on‑hand quantity:** **301 units** (151 at Shop Front + 150 at Main Warehouse)."
+ },
+ {
+  "question": "How many products are completely out of stock, and what percentage of the active catalogue is that?",
+  "why": "the out-of-stock count (848) and the percentage base (13500) it is quoted against (§27BG Q4)",
+  "status": 201,
+  "ms": 4220,
+  "degraded": null,
+  "model": "nvidia/nemotron-3.5-lightning:free",
+  "toolsUsed": [
+   "getInventorySummary"
+  ],
+  "usage": {
+   "inputTokens": 1618,
+   "outputTokens": 146
+  },
+  "answerChars": 93,
+  "missingFacts": [],
+  "answer": "**Out‑of‑stock products:** 848  \n**Percentage of the active catalogue:** 848 ÷ 13 500 ≈ 6.3 %"
+ },
+ {
+  "question": "How many total units do we have?",
+  "why": "total on-hand units across the tenant (3330619, read now — the figure the dashboard shows)",
+  "status": 201,
+  "ms": 3275,
+  "degraded": null,
+  "model": "nvidia/nemotron-3.5-lightning:free",
+  "toolsUsed": [
+   "getInventorySummary"
+  ],
+  "usage": {
+   "inputTokens": 1683,
+   "outputTokens": 90
+  },
+  "answerChars": 48,
+  "missingFacts": [],
+  "answer": "**3,330,619** total units are currently on hand."
+ },
+ {
+  "question": "How many products does each of my locations hold, and which holds the most?",
+  "why": "the two biggest locations' product counts (Main Warehouse: 13500, Shop Front: 9092, read now — one lookup should answer this)",
+  "status": 201,
+  "ms": 13321,
+  "degraded": null,
+  "model": "nvidia/nemotron-3.5-lightning:free",
+  "toolsUsed": [
+   "getLocationBreakdown"
+  ],
+  "usage": {
+   "inputTokens": 1241,
+   "outputTokens": 840
+  },
+  "answerChars": 444,
+  "missingFacts": [],
+  "answer": "Your six active locations hold the following product counts and units:\n\n- **Main Warehouse** – 13,500 products, 2,009,144 units  \n- **Shop Front** – 9,092 products, 939,299 units  \n- **Overflow Store** – 4,608 products, 382,176 units  \n- **Cold Room** – 0 products, 0 units  \n- **Returns Bay** – 0 products, 0 units  \n- **Transit Hub** – 0 products, 0 units  \n\n**Main Warehouse** holds the most products (13,500) and the most units (2,009,144)."
+ }
+]

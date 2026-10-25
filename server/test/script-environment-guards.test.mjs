@@ -22,7 +22,12 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 
 import {
+  PERF_TENANT_CLEANUP_CONFIRM,
+  PERF_TENANT_SEED_CONFIRM,
+  PERF_TURNS_PROD_CONFIRM,
   SeedSafetyError,
+  assertMeasurementTarget,
+  assertNamedDatabaseTarget,
   assertReadableTarget,
   assertSafeTarget,
 } from '../scripts/perf/lib.mjs';
@@ -170,6 +175,130 @@ describe('a measurement refuses the wrong database before it reads or spends', (
 });
 
 /**
+ * The production-capable tenant (2026-10-25). `assertSafeTarget` refuses production, and that is
+ * correct for its callers. A tenant a store build can be signed into has to be seedable THERE, so
+ * this guard allows it — and replaces the refusal with the requirement that the target be NAMED.
+ * These cases pin both halves: production is reachable, and it is unreachable by accident.
+ */
+describe('the production-capable tenant names its target instead of being refused', () => {
+  const named = (over = {}) => ({
+    mongodbUri: 'mongodb://127.0.0.1:27017/unused',
+    resolvedDbName: 'inventoryai_prod_db',
+    requestedDatabase: 'inventoryai_prod_db',
+    confirm: PERF_TENANT_SEED_CONFIRM,
+    confirmPhrase: PERF_TENANT_SEED_CONFIRM,
+    command: 'seed:perf-tenant',
+    ...over,
+  });
+
+  it('accepts the production database when it is named and confirmed', () => {
+    assert.equal(assertNamedDatabaseTarget(named()), 'inventoryai_prod_db');
+  });
+
+  it('refuses an unnamed target, even though production is allowed', () => {
+    for (const requestedDatabase of [undefined, '', '   ']) {
+      const message = messageOf(() => assertNamedDatabaseTarget(named({ requestedDatabase })));
+      assert.match(message, /--database=<name> is required/);
+      assert.match(message, /Nothing was written or deleted/);
+    }
+  });
+
+  it('refuses a name that is not the database this process resolved', () => {
+    const message = messageOf(() =>
+      assertNamedDatabaseTarget(named({ requestedDatabase: 'inventoryai_dev_db' })),
+    );
+    assert.match(message, /but the resolved database is "inventoryai_prod_db"/);
+  });
+
+  it('refuses the test database, which npm test clears', () => {
+    const message = messageOf(() =>
+      assertNamedDatabaseTarget(named({ resolvedDbName: 'inventoryai_test_db', requestedDatabase: 'inventoryai_test_db' })),
+    );
+    assert.match(message, /test database/);
+  });
+
+  it('refuses a missing or wrong phrase, and names the variable to set', () => {
+    for (const confirm of [undefined, '', 'seed-perf-ai', PERF_TENANT_CLEANUP_CONFIRM]) {
+      const message = messageOf(() => assertNamedDatabaseTarget(named({ confirm })));
+      assert.match(message, /SEED_CONFIRM='seed:perf-tenant'/);
+    }
+  });
+
+  it('refuses a missing URI before saying anything about the database', () => {
+    const message = messageOf(() => assertNamedDatabaseTarget(named({ mongodbUri: '' })));
+    assert.match(message, /MONGODB_URI is not set/);
+  });
+});
+
+/**
+ * A measurement against production (2026-10-25). The probe reads real rows and spends the shared AI
+ * allowance, so "which database is this?" has to be answered before the first request — `--base=`
+ * names a server, not a database.
+ */
+describe('a measurement reaches production only by naming it', () => {
+  const measurement = (over = {}) => ({
+    mongodbUri: 'mongodb://127.0.0.1:27017/unused',
+    resolvedDbName: 'inventoryai_prod_db',
+    requestedDatabase: 'inventoryai_prod_db',
+    confirm: PERF_TURNS_PROD_CONFIRM,
+    confirmPhrase: PERF_TURNS_PROD_CONFIRM,
+    command: 'perf:turns',
+    ...over,
+  });
+
+  it('leaves the development and test databases needing no naming at all', () => {
+    for (const db of ['inventoryai_dev_db', 'inventoryai_test_db']) {
+      assert.deepEqual(
+        assertMeasurementTarget(
+          measurement({ resolvedDbName: db, requestedDatabase: undefined, confirm: undefined }),
+        ),
+        { database: db, production: false },
+      );
+    }
+  });
+
+  it('refuses production when it is not named', () => {
+    for (const requestedDatabase of [undefined, '', 'inventoryai_dev_db']) {
+      const message = messageOf(() => assertMeasurementTarget(measurement({ requestedDatabase })));
+      assert.match(message, /Name it with --database=inventoryai_prod_db/);
+    }
+  });
+
+  it('refuses production without its own phrase', () => {
+    for (const confirm of [undefined, '', 'seed-perf-ai', PERF_TENANT_SEED_CONFIRM]) {
+      const message = messageOf(() => assertMeasurementTarget(measurement({ confirm })));
+      assert.match(message, /PERF_TURNS_CONFIRM='perf-turns:production'/);
+    }
+  });
+
+  it('accepts production when it is named and confirmed, and says so', () => {
+    assert.deepEqual(assertMeasurementTarget(measurement()), {
+      database: 'inventoryai_prod_db',
+      production: true,
+    });
+  });
+
+  it('refuses a database it does not recognise unless that database is named too', () => {
+    const message = messageOf(() =>
+      assertMeasurementTarget(
+        measurement({ resolvedDbName: 'some_other_db', requestedDatabase: undefined, confirm: undefined }),
+      ),
+    );
+    assert.match(message, /Name it with --database=some_other_db/);
+  });
+
+  it('keeps every phrase distinct, so one cannot be pasted into another command', () => {
+    const phrases = [
+      'seed-perf-ai',
+      PERF_TENANT_SEED_CONFIRM,
+      PERF_TENANT_CLEANUP_CONFIRM,
+      PERF_TURNS_PROD_CONFIRM,
+    ];
+    assert.equal(new Set(phrases).size, phrases.length);
+  });
+});
+
+/**
  * The scripts themselves, read from source. A guard that some path never calls is the failure mode
  * this pins: the next script added must opt in, and the old comparison must not grow back.
  */
@@ -185,6 +314,8 @@ describe('every data-touching script calls one of the guards', () => {
     'seed-accounts.mjs',
     'seed-role-accounts.mjs',
     'cleanup-role-accounts.mjs',
+    'seed-perf-tenant.mjs',
+    'cleanup-perf-tenant.mjs',
     'restore-db.mjs',
   ];
 
@@ -197,7 +328,7 @@ describe('every data-touching script calls one of the guards', () => {
       // the command line, refuses the test database and refuses a re-run over another business.
       assert.match(
         source,
-        /assertSafeTarget\(|assertRestoreTarget\(|assertDemoTarget\(/,
+        /assertSafeTarget\(|assertRestoreTarget\(|assertDemoTarget\(|assertNamedDatabaseTarget\(/,
         `${name} has no target guard`,
       );
     }
@@ -205,7 +336,11 @@ describe('every data-touching script calls one of the guards', () => {
 
   it('every measurement checks the database it is about to read', () => {
     for (const name of MEASUREMENTS) {
-      assert.match(read(name), /assertReadableTarget\(/, `${name} has no readable-target guard`);
+      assert.match(
+        read(name),
+        /assertReadableTarget\(|assertMeasurementTarget\(/,
+        `${name} has no readable-target guard`,
+      );
     }
   });
 

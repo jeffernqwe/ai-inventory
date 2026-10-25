@@ -20560,6 +20560,87 @@ states that a dismissal is final in both directions, §9 gained the "a note you 
 phone" row, and §12/§15 were reconciled. Nothing was written to production to manufacture a demo
 session: the corrective publish is the only production write in this entry.
 
+# 27FG. A large tenant in production, and the assistant measured there (2026-10-25)
+
+**Server tooling and documentation — two new commands (plus one sign-in helper module), one shared
+guard, one probe flag, one test-guard extension, and the evidence folder. No route, permission, permission matrix, schema, index, dependency,
+session-model, mobile, environment variable or deployment change.** The owner asked for the
+development seeders' production equivalent, and for the assistant to be exercised against a large
+production dataset from the deployed server.
+
+**The gap, stated exactly.** `seed:perf` is the query-measurement tool. It refuses production by
+design (`assertSafeTarget`), writes no suppliers or purchase orders, and **creates no login** — so its
+tenant can never be opened in the app. The only database a store build reaches is
+`inventoryai_prod_db`, and the assistant a phone talks to is the deployed one. A "large dataset on the
+phone, answered in production" therefore could not be built from the existing commands without
+weakening the guard their other callers rely on.
+
+**New commands, with guards that make the target deliberate rather than merely permitted.**
+`npm run seed:perf-tenant` and `npm run cleanup:perf-tenant` resolve through a new
+`assertNamedDatabaseTarget` in `server/scripts/perf/lib.mjs`: `--database=<name>` is **required** and
+must equal the database `config/env.ts` actually resolved (the URI's path segment never decides it),
+the **test** database is refused outright, and each command requires a phrase **of its own**
+(`seed:perf-tenant` / `cleanup:perf-tenant`) rather than `seed:perf`'s `seed-perf-ai` — so a shell
+history entry cannot reach the wrong tool. Production is allowed here on purpose, because that is the
+only place the deployed assistant can be given a dataset; everything else keeps refusing it.
+
+**What the seeder does.** It creates the fingerprinted tenant (`PERF SEED — AI assistant stress test
+(do not use)`) and one verified `OWNER` identity (`perf-seed-ai@example.invalid`, a reserved domain
+that cannot receive mail) **in that tenant only**, attaching the uid through the same `resolveIdentity`
+helper `seed:demo` uses — which is also why a re-run **refreshes** the password from
+`DEMO_ACCOUNT_PASSWORD` instead of silently keeping the first run's. It writes through the same
+`seedTenant` core as `seed:demo` (categories, locations, suppliers, products, inventory, purchase
+orders with real receipt movements) and then, before printing OK, **re-counts every collection,
+re-checks the arithmetic of every stock movement and asserts the `SEEDSKU-0` anchor** the probe asks
+about. The cleanup deletes only the `businessId` both fingerprints agree on, **refuses** when they
+disagree (the one state in which it could reach a stranger's business), **re-queries to prove 0
+documents remain**, and **keeps the Firebase identity** — F-50, because the reverse direction is the
+unrecoverable one. It is not, and cannot become, `cleanup:prod-mongodb`.
+
+**New probe capability: `perf:turns --login`.** A deployed server's `JWT_SECRET` is not on a laptop
+(correctly), so the locally minted session the probe used was refused there. `scripts/perf/firebaseLogin.mjs`
+now signs in through Firebase's REST password endpoint and exchanges the ID token at the
+application's own `POST /api/auth/firebase/exchange` — the production authentication path itself, not
+a copy of it. The public web API key is passed in (`EXPO_PUBLIC_FIREBASE_API_KEY` or
+`--firebase-api-key=`), no token is printed, and no credential is written to a file. Because the
+probe also reads its ground truth from the database, anything outside development/test must be
+**named** with `--database=` and confirmed with `PERF_TURNS_CONFIRM=perf-turns:production`
+(`assertMeasurementTarget`), before a session is minted or a request spent.
+
+**Measured on production, 2026-10-25.** `--size=60000` wrote 18 categories, 6 locations, 240
+suppliers, **13,500 products**, 27,200 inventory rows, 17,836 movements and 1,200 purchase orders in
+**110 s**, and the read-back found no problems. `perf:turns --login` against
+`https://ai-inventory-l1mi.onrender.com` then **answered 6/6 and grounded 6/6**: 3,275 / 3,380 /
+4,220 / 5,938 / 7,366 / **13,321 ms** (slowest 13.3 s), one tool call per question
+(`getInventorySummary` ×3, `getReorderNeededProducts`, `getProduct`, `getLocationBreakdown`),
+`nvidia/nemotron-3.5-lightning:free`, no degraded mark, with the allowance at 43/50 before the run.
+Evidence: `docs/evidence/production-ai-scale-2026-10-25/` (the seed output and the probe's own
+`turns.json`, checked to contain no token or credential field).
+
+**Verification.** `server/test/script-environment-guards.test.mjs` gained the new refusals — a missing
+`--database=`, one the run is not connected to, the test database, a wrong phrase — the measurement
+path's two production terms (un-named or unconfirmed refused; named and confirmed allowed), and the two
+new scripts joined the "every data-touching script calls a guard" scan, which now reads **11** rather
+than keeping its old list. Documentation: guide 6 gained **Part 3G** (the production pair, both guards,
+the `NODE_ENV=production` + `MONGODB_DB_NAME` interaction and the measured timings) and the
+**Measuring the deployed assistant** section in Part 4, with both tables and the command tables
+updated; guide 4 now points at 3G from its throwaway-tenant section. `server/.env.example` was not
+touched: these commands read the existing `MONGODB_URI`, `DEMO_ACCOUNT_PASSWORD` and
+`EXPO_PUBLIC_FIREBASE_API_KEY`, and add no variable of their own.
+
+**Verified this pass.** Server `test:unit` **1371 tests / 1315 pass / 0 fail / 56 skipped**,
+`typecheck`, `eslint`, both module-graph checks (549 modules) and the repository secret guard
+(**853 files**) clean; the two production runs above; and a read-only production probe confirming the
+tenant's product and stock counts and its linked, verified `OWNER` before the measurement.
+
+**Still open, recorded rather than rounded off.** The seeded tenant is **left in place** so the owner
+can sign in to it; `cleanup:perf-tenant` removes it and proves 0 remaining, and the Firebase identity
+survives by design. The probe's password was generated for the run, never printed and not stored, so
+signing in from the phone needs a re-run with a password the owner chooses (which also resets the
+tenant's data). **What is not proven:** a phone signed in to this production tenant (the OPPO runs are
+separate evidence), the same latency spread above ~13,500 products, and provider behaviour on a day
+with less allowance. The run is one sample, not a benchmark.
+
 ---
 
 # 28. Phase Gate System

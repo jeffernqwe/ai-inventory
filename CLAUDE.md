@@ -906,6 +906,34 @@ the one patch that exists breaks its own consumer. The runtime floor is unchange
 Node `>= 18`, below this project's `>= 24`), and the install step is unchanged (`npm ci` ⇒ exit 0, the
 lockfile being in sync being the thing that check proves).
 
+Production-scale seeding, and the assistant measured on the deployed server (2026-10-25; **not an
+application phase**; server tooling + documentation — two new commands plus a sign-in helper, one
+shared guard, one probe flag and one test-guard extension; **no route, permission, permission matrix, schema, index,
+dependency, session-model, mobile or environment change**) — `seed:perf` refuses production by design
+and creates no login, while the only database a store build reaches is `inventoryai_prod_db`, so a
+large dataset the phone could sign into and the deployed assistant could answer against could not be
+built from the existing commands without weakening a guard their other callers rely on. **New:**
+`npm run seed:perf-tenant` / `cleanup:perf-tenant`, both through `assertNamedDatabaseTarget`
+(`--database=<name>` required and equal to the resolved database, the test database refused, a phrase
+unique to each — production allowed deliberately, which is the one thing that changed). The seeder
+creates the fingerprinted tenant plus **one verified `OWNER` Firebase identity in it only**, refreshes
+that password from `DEMO_ACCOUNT_PASSWORD` on every run, writes through the same `seedTenant` core as
+`seed:demo`, and **re-counts every collection, re-checks every movement's arithmetic and asserts the
+`SEEDSKU-0` anchor** before it prints OK; the cleanup is scoped to the `businessId` both fingerprints
+agree on, refuses when they disagree, proves 0 remaining and **keeps the Firebase identity** (F-50).
+**`perf:turns --login`** now measures a deployed server: a laptop does not hold its `JWT_SECRET`, so
+the probe signs in through Firebase's REST endpoint and exchanges the ID token at
+`POST /api/auth/firebase/exchange` — the production path itself — requiring `--database=` and
+`PERF_TURNS_CONFIRM=perf-turns:production` because the ground truth is read from that database.
+**Measured on production:** `--size=60000` wrote 13,500 products / 27,200 stock rows / 17,836 movements
+/ 1,200 purchase orders in **110 s** with no read-back problems, and the probe then **answered 6/6 and
+grounded 6/6** in **3.3–13.3 s** (`nvidia/nemotron-3.5-lightning:free`, one tool call per question).
+Docs: guide 6 Part 3G and *Measuring the deployed assistant*, guide 4's throwaway-tenant section,
+evidence `docs/evidence/production-ai-scale-2026-10-25/`. **Still open:** the seeded tenant was left
+in place for the owner to sign in to; the probe's password was generated for the run and not stored,
+so a phone sign-in needs a re-run with an owner-chosen password; a phone signed in to this production
+tenant is not measured, and one run is a sample rather than a benchmark. Roadmap §27FG)
+
 **Records are proportional:** a security, architecture, authorization, schema, route,
 dependency-policy or phase-level change gets a dated record; a routine feature or fix is
 documented by its pull request description, its tests and the code. Do not restate what the

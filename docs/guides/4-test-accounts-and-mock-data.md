@@ -67,9 +67,13 @@ Three consequences, all of which look like bugs until you know them:
 | **The development database** — `inventoryai_dev_db` | This laptop's backend (`npm start`), the phone app, and both seeding tools. **This is where your real account and its seeded data live.** | Whole-database delete is **⚠️ destructive**; the per-tenant tools below are safe |
 | **The test database** — `inventoryai_test_db` | The automated tests (`npm test`). Rebuilt on every run | ✅ Yes — it is throwaway by design |
 | **A disposable seeded tenant** inside the development database | The performance-seeding tools. It is self-contained, clearly named, and never your own work | ✅ Yes — `cleanup:perf` removes exactly it |
+| **A production database** — `inventoryai_prod_db` | The deployed server and the shipped app. No ordinary seeding or cleanup command may touch it | ⚠️ Only via the named-database pair in [Guide 6, Part 3G](6-scripts-and-commands.md) |
 
-There is a third database, `inventoryai_prod_db`, for a real deployment. **You should never need to
-touch it**, and the cleanup commands require an extra, deliberate phrase to go anywhere near it.
+There is a third database, `inventoryai_prod_db`, for a real deployment. **Nothing in a normal working
+session should touch it**, and every cleanup command requires an extra, deliberate phrase to go
+anywhere near it. The one sanctioned exception is `seed:perf-tenant` / `cleanup:perf-tenant`
+(2026-10-25), which write exactly one clearly-named test tenant there and remove exactly it — the
+database must be **named** on the command line and each has a phrase of its own.
 
 ### The safety net that is already built in
 
@@ -80,6 +84,10 @@ right place. Before it opens a connection or writes anything, it checks:
 - the database it resolved is **the development database** (or, for cleanup, an explicitly
   named one) — never "whatever the shell happened to say";
 - the correct **confirmation phrase** was supplied.
+
+The production-capable pair is the exception that proves those rules: instead of refusing production
+it requires the database to be **named** (`--database=`), refuses the test database, and asks for a
+phrase unique to itself — so the target is deliberate rather than merely permitted.
 
 If any check fails it stops, prints why, and exits without touching anything. This is why the
 commands below include a phrase such as `SEED_CONFIRM=seed-perf-ai` — that is not ceremony, it is
@@ -160,6 +168,13 @@ SEED_CONFIRM=seed-perf-ai npm run cleanup:perf                  # remove exactly
 `0 remaining`. It is safe to run when nothing was ever seeded — it says so and exits cleanly.
 Nothing else in the database can be reached from it, even if it were handed the wrong identifier.
 
+> **When the data has to be in production** — because the app on a phone can only reach the deployed
+> database — use `seed:perf-tenant` instead (2026-10-25). It writes the same shape into a database you
+> must **name** (`--database=inventoryai_prod_db`), creates a verified OWNER login so the tenant can be
+> signed into on the handset, verifies every collection and the ledger arithmetic before it reports OK,
+> and is removed by `cleanup:perf-tenant` with the same scoping and proof. [Guide 6, Part 3G](6-scripts-and-commands.md)
+> has the commands, the two phrases, and the measured timings (60,000 documents in 110 s, 13,500 products).
+
 ### D. The optional measurement tools
 
 These answer "how fast is it, really?" without spending much of the AI provider's limited quota.
@@ -170,6 +185,7 @@ They are read-only against the database.
 | `npm run perf:measure` | How long each of the assistant's data queries takes at your current data size — **no AI calls at all** |
 | `npm run perf:golden` | Records the exact answers the assistant's queries produce, so a later change can be proven not to alter them |
 | `npm run perf:turns -- --only=2` | One or two **real** assistant conversations, timed end to end |
+| `npm run perf:turns -- --login --base=https://…` | The same turns against the **deployed** server, signed in through Firebase (see Guide 6, Part 4) |
 
 ### E. Cleanup commands — read before using
 

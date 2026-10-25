@@ -218,13 +218,15 @@ a mystery.
 
 ## Part 3 — Putting sample data in (and taking it out)
 
-There are **two different seeding tools**. They do genuinely different things, and one of them can
-also create a brand-new signable account. Pick by the outcome you want:
+There are **three seeding tools**, and they do genuinely different things — one can also create a
+brand-new signable account, and one is the only command pair here that can write to a named database,
+**production included**. Pick by the outcome you want:
 
 | You want | Use | Login needed? |
 |---|---|---|
 | **Data inside the account you sign in with** | `seed:demo` | Yes — it uses your existing login |
 | **A throwaway test tenant you measure against** | `seed:perf` | No — it never signs in |
+| **A large tenant you can sign into, in a database you NAME** (production included) | `seed:perf-tenant` — Part 3G | It creates the login |
 | **A small, fully known demo tenant** (6 products / 3 locations / 112 units) | `seed:demo-tenant` | It creates the login — sign in as `demo-preview@example.invalid` |
 | **Removing that demo tenant** | `cleanup:demo-tenant` | No — it deletes the tenant's rows only |
 | **A brand-new signable test account** | `seed:demo` with a new email + a password setting | Yes, and it creates the login |
@@ -295,7 +297,10 @@ personal account have **completely separate data** — they are two different bu
 
 **The other kind of test account — data only, no login.** `seed:perf` (next section) creates a tenant
 whose owner is `perf-seed-ai@example.invalid`. It has **no Firebase identity**, so it can never be
-signed into from the app. It exists purely to be measured against. Do not confuse the two.
+signed into from the app. It exists purely to be measured against. Its sibling
+**`seed:perf-tenant`** (Part 3G) writes the same tenant **with** a verified identity, so the one thing
+that separates them is exactly the thing you choose: whether the tenant can be opened on a phone.
+Do not confuse the two.
 
 ### C. Check that the seed really did what it claimed
 
@@ -453,13 +458,87 @@ too, but only after the database is gone and only after re-checking that nothing
 
 ---
 
+### G. The production database — a large tenant you can sign in to (2026-10-25)
+
+Every command above refuses production on purpose, and that is still true of all of them. This pair is
+the single deliberate exception: it writes **one new tenant** into the **deployed** database, with its
+own sign-in, so the assistant can be exercised against the real deployment and a real phone without
+shipping a demo tenant or touching a customer's rows. It never accepts a `--business=` to write into
+and never resets an account it did not create.
+
+```bash
+cd C:/Users/jeffe/inventory-ai/server
+
+# the production database is NAMED, because server/.env sets MONGODB_DB_NAME to the development one
+NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
+  DEMO_ACCOUNT_PASSWORD='choose-a-password' SEED_CONFIRM=seed:perf-tenant \
+  npm run seed:perf-tenant -- --database=inventoryai_prod_db --size=60000
+
+# remove exactly that tenant (the Firebase login is kept, deliberately)
+NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
+  CLEANUP_CONFIRM=cleanup:perf-tenant \
+  npm run cleanup:perf-tenant -- --database=inventoryai_prod_db
+```
+
+**Why it is a different command from `seed:perf`.** `seed:perf` is the query-measurement tool: it
+refuses production (`assertSafeTarget`) and creates **no login**, so its tenant cannot be opened in
+the app. That guard is relied on by its callers, so rather than weaken it this pair states its own
+terms (`assertNamedDatabaseTarget`):
+
+| Term | What it means |
+|---|---|
+| `--database=<name>` **required** | must equal the database the process actually resolved. Nothing is inferred from `--base=` or from the URI's path |
+| the test database is refused | `npm test` clears it, so seeded rows there vanish mid-experiment |
+| its own phrase | `SEED_CONFIRM=seed:perf-tenant` / `CLEANUP_CONFIRM=cleanup:perf-tenant` — not `seed-perf-ai`, so a shell-history entry cannot reach the wrong tool |
+| `DEMO_ACCOUNT_PASSWORD` required | the credential the seeded login is given, **refreshed on every run**, never written to a file and never printed |
+
+**`NODE_ENV=production` alone is not enough here.** `server/.env` sets `MONGODB_DB_NAME` to
+`inventoryai_dev_db`, and the config refuses production-with-the-development-database outright, so
+the variable is set per command as above. That refusal is the point: it is what stops a
+`NODE_ENV=production` run from writing six figures of rows into the development database.
+
+**What it creates.** A tenant named `PERF SEED — AI assistant stress test (do not use)` and one
+verified OWNER login, `perf-seed-ai@example.invalid` in that tenant and no other. `--size` is
+**documents** across every collection, 50–60,000, default 4,000; products are roughly 22 % of it.
+Intended for QA only: the address is in the reserved `.invalid` domain, so nothing can ever be
+delivered to it. The dataset is deterministic (`--seed`, default 1), the same `seed/lib.mjs` core
+`seed:demo` uses, and SKUs are `SEEDSKU-…` — which is the SKU the assistant probe asks about.
+
+**It verifies before it says OK.** Every collection is counted again, the ledger arithmetic of every
+stock movement is re-checked, and the `SEEDSKU-0` anchor the measurement needs must exist. A run that
+wrote an inconsistent dataset fails loudly instead of leaving a fixture the probe would then report
+as a model defect.
+
+**Measured 2026-10-25, on production:** `--size=60000` wrote **18 categories, 6 locations, 240
+suppliers, 13,500 products**, **27,200** inventory rows, **17,836** movements and **1,200** purchase
+orders in **110 s** (a second run took **126 s**), and the read-back found no problems. The same
+command on a re-run resets only that tenant's documents (it removed 6,008 of its own previous rows
+first), which is also how a password is changed: the credential is refreshed on every run.
+
+**The command it prints is paste-able.** The suggested `perf:turns` and `cleanup:perf-tenant` lines
+carry `NODE_ENV=production MONGODB_DB_NAME=<database>`, because this machine's `server/.env` names the
+development database and both commands refuse a `--database=` value that is not what the process
+resolved. Without the prefix the next step would be rejected by the guard it is meant to satisfy.
+
+**`cleanup:perf-tenant` removes it and proves it.** It re-queries and reports `0 remaining`, and it
+**keeps the Firebase identity** — the reverse direction is the harmless one, because a database
+record whose login is gone can never sign in again (F-50). If the business name and the owner
+address point at two different businesses it refuses rather than guessing, which is the only state
+in which this command could otherwise reach a stranger's tenant. Running it when nothing was ever
+seeded says so and exits cleanly.
+
+> **What this pair is not.** It is not `cleanup:prod-mongodb`, and it can never become it: every
+> delete is scoped to the single `businessId` both fingerprints agree on. Whole-database commands
+> remain in Part 6, where they are two phrases deep.
+
 ---
 
 ## Part 4 — Measuring the assistant
 
 These answer *"how fast is it, really?"* and *"how much of the allowance is left?"*. The three that
 ask the database need a `businessId`, and they refuse without one — the throwaway tenant's is printed
-by `seed:perf`, and your own account's is printed by `verify:demo`. All of them are **read-only
+by `seed:perf` (or by `seed:perf-tenant` for the sign-in-able one, Part 3G), and your own account's is
+printed by `verify:demo`. All of them are **read-only
 against the database**, and only `perf:turns` spends AI quota.
 
 | Command | What it measures |
@@ -473,6 +552,56 @@ against the database**, and only `perf:turns` spends AI quota.
 | `npm run ai:models -- --check=<id>` | That model's live endpoint health, then whether ONE id answers a tool-shaped request, before you add it — **one request** |
 | `npm run ai:check` | The configured primary (and chain) verified against the provider's catalogue — free; `-- --probe` proves each with one tool-shaped request |
 | `npm run ai:health` | One scheduled model-health check, in the terminal — quota-free endpoint GETs; exit 0 healthy, 1 unavailable/degraded, 2 could not check; `-- --alert` sends the alert |
+
+### Measuring the deployed assistant (production included)
+
+`perf:turns` normally mints its own session, which works only against a **local** server because it
+shares that server's database and `JWT_SECRET`. The deployed server's secret is not (and should not
+be) on a laptop, so against it the probe takes the route the phone takes: Firebase sign-in over REST,
+then `POST /api/auth/firebase/exchange`. That is `--login`.
+
+```bash
+cd C:/Users/jeffe/inventory-ai/server
+
+# 1. is there allowance left today? free, no log, no database
+npm run ai:usage -- --provider-only
+
+# 2. measure the deployed server, with the ground truth read from the database it writes to
+NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
+  PERF_TURNS_CONFIRM=perf-turns:production \
+  PERF_ACCOUNT_PASSWORD='the password the seed was run with' \
+  EXPO_PUBLIC_FIREBASE_API_KEY='the project\'s web API key' \
+  npm run perf:turns -- \
+    --base=https://ai-inventory-l1mi.onrender.com \
+    --database=inventoryai_prod_db \
+    --business=<the businessId seed:perf-tenant printed> \
+    --login --only=1,2,3,4,5,6
+```
+
+| Piece | Why it is there |
+|---|---|
+| `--login` | sign in as the seeded owner and exchange the ID token; without it the run tries to mint a local session, which a deployed server refuses |
+| `PERF_ACCOUNT_PASSWORD` | the credential the seed set. `DEMO_ACCOUNT_PASSWORD` is accepted as a fallback; neither is printed |
+| `EXPO_PUBLIC_FIREBASE_API_KEY` | Firebase's REST sign-in needs the project's **public** web key — the same one that ships inside every build. `--firebase-api-key=` does the same job; neither is secret, and neither is logged |
+| `--database=` + `PERF_TURNS_CONFIRM` | the probe reads its expectations from this database, so it must be the one the server writes to. Omitting either is a refusal, before a token is minted or a request spent |
+| `--only=` | which of the six questions to ask. Each turn costs one or more provider requests against the shared daily allowance |
+
+Questions 1–6 are: the dashboard headline numbers; the reorder total; one product by SKU
+(`SEEDSKU-0`); the out-of-stock count and its percentage; total units on hand; and products per
+location. Every expectation is read from the database **at run time** through the same services the
+assistant's tools call, so the check cannot describe a different dataset than the one being answered.
+
+**How to read the output.** `grounded` is the number of successful turns whose answer contained all
+expected facts. `MISSING …` is a real disagreement between the model and the database. `NOT CHECKED`
+means the turn did not succeed (`status` not 201) — that is a transport, quota or server problem, not
+a wrong answer, and the server's own `[ai] turn outcome=…` line says which.
+
+**Measured 2026-10-25 against production**, with 13,500 products and 60,000 documents seeded by
+Part 3G: **6/6 answered, 6/6 grounded**, `3275, 3380, 4220, 5938, 7366, 13321` ms, one tool call per
+question, model `nvidia/nemotron-3.5-lightning:free`. The full answers are in
+`docs/evidence/production-ai-scale-2026-10-25/`. **It cost 13 provider requests for the six
+questions** (43 → 30 of the day's 50), so budget roughly **two requests per question** whenever an
+answer has to look something up — and check the allowance first on a day that has already been used.
 
 ### Changing the AI models yourself
 
@@ -909,6 +1038,15 @@ non-production environment **and** a resolved database that is the development o
 before the first query. They need no confirmation phrase — measuring is not destructive — but a run
 that cannot say which database it read is not a measurement.
 
+**The two exceptions, and why they are exceptions.** `perf:turns` may measure a **deployed** server
+(Part 4, "Measuring the deployed assistant"): the deployed `JWT_SECRET` is not on a laptop, so the
+probe has to sign in the way the phone does, and the ground truth it checks the answers against can
+only come from the database that server actually writes to. It therefore accepts production when
+the database is NAMED (`--database=`) **and** confirmed (`PERF_TURNS_CONFIRM=perf-turns:production`).
+Likewise `seed:perf-tenant` / `cleanup:perf-tenant` (Part 3G) name their database and use a phrase
+unique to themselves instead of the development-only guard. A wrong `--database=` value is a
+refusal in all four, never a no-op that looks like success.
+
 **Why `cleanup:test-firebase` is the dangerous one.** Delete a login while its database record still
 exists and that address can **never sign in again** — and the app will not let you register it afresh
 either, because it can see a record for that address already. The application has no way to repair
@@ -1016,10 +1154,13 @@ not replace.
 | `npm run cleanup:roles` | remove the role fixture tenant (Firebase logins kept unless `--delete-firebase`) | ⚠️ scoped delete, verified afterwards |
 | `npm run verify:demo -- --email=…` | read the data back and check it | ✅ reads only |
 | `npm run seed:perf -- --size=N` | create the throwaway test tenant | ⚠️ writes that tenant only |
+| `npm run seed:perf-tenant -- --database=… --size=N` | create the **sign-in-able** tenant in a **named** database, production included (Part 3G) | ⚠️ production-capable; own phrase; that tenant only |
 | `npm run cleanup:perf` | remove the throwaway tenant | ⚠️ scoped delete |
+| `npm run cleanup:perf-tenant -- --database=…` | remove the sign-in-able tenant and **prove 0 remain**; keeps the login | ⚠️ production-capable; scoped delete |
 | `npm run perf:measure -- --business=…` | time the assistant's queries (no AI cost) | ✅ reads only |
 | `npm run perf:golden -- --business=…` | fingerprint the assistant's answers | ✅ reads only |
 | `npm run perf:turns -- --business=…` | real assistant turns | ⚠️ spends AI quota |
+| `npm run perf:turns -- --login --database=… --base=https://…` | real turns against the **deployed** server, signed in through Firebase | ⚠️ spends AI quota; needs `PERF_TURNS_CONFIRM` |
 | `npm run ai:usage -- --log=…` | turns, failures and the allowance left | ✅ reads only (offline with `--no-provider`) |
 | `npm run ai:usage -- --db --days=30` | what was **answered**, and its degraded rate | ✅ reads only |
 | `npm run ai:usage -- --provider-only` | the free-model requests **left today** (AI-27: run it before `perf:turns`) | ✅ reads only |

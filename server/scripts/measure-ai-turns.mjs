@@ -1,6 +1,12 @@
 // `npm run perf:turns -- --business=<id>` — measure REAL assistant turns over HTTP,
 // against a seeded tenant, and check each answer against known ground truth.
 //
+// DEPLOYED SERVER (production included):
+//   PERF_TURNS_CONFIRM=perf-turns:production PERF_ACCOUNT_PASSWORD='…' \
+//     EXPO_PUBLIC_FIREBASE_API_KEY='…' npm run perf:turns -- \
+//       --base=https://ai-inventory-l1mi.onrender.com \
+//       --database=inventoryai_prod_db --business=<id> --login --only=1,2
+//
 // WHY THIS EXISTS. `perf:measure` times the tools in isolation, with zero model
 // calls, which is the right instrument for a query cost but says nothing about what
 // a member actually experiences: the provider's own latency, how many tool
@@ -32,11 +38,19 @@
 // compared after stripping thousands separators, because a model writes 1,492 as
 // often as 1492.
 //
-// AUTH. It does NOT create a password for the seed user (no credential belongs in a
-// script). It mints a session exactly the way a successful login does — a `jti`, a
-// signed access token, and the server-side session row the token names — using the
-// application's own functions, so `requireAuth` is exercised for real and the probe
+// AUTH, TWO WAYS. Against a LOCAL server it does NOT create a password for the seed user
+// (no credential belongs in a script): it mints a session exactly the way a successful login
+// does — a `jti`, a signed access token, and the server-side session row the token names —
+// using the application's own functions, so `requireAuth` is exercised for real and the probe
 // holds a token the server would have issued itself.
+//
+// A DEPLOYED server cannot be reached that way: its `JWT_SECRET` is not on a laptop (correctly),
+// so a locally minted token is refused there. `--login` therefore signs in over Firebase's REST
+// endpoint with the seeded account's password and exchanges the ID token at
+// `POST /api/auth/firebase/exchange` — the production authentication path itself, not a copy of
+// it. The database must then be NAMED (`--database=<name>`) and confirmed with
+// `PERF_TURNS_CONFIRM=perf-turns:production`, because `--base=https://…` alone says which server
+// to call but not which database the ground truth in this process is read from.
 //
 // COST. Every turn spends provider quota (the deployed free tier allows roughly 50
 // requests a day IN TOTAL, roadmap §27BF), and a turn with tool iterations spends
@@ -73,7 +87,13 @@ import { createSessionForToken, newSessionId } from '../src/services/session.ser
 // disagreeing about the same day's budget.
 import { DEFAULT_BASE_URL, allowanceLine, readProviderUsage, shortfall } from './ai-usage.mjs';
 import { factPresent } from './perf/factCheck.mjs';
-import { SeedSafetyError, assertReadableTarget } from './perf/lib.mjs';
+import { exchangeForAccessToken, signInWithPassword } from './perf/firebaseLogin.mjs';
+import {
+  PERF_TURNS_PROD_CONFIRM,
+  SEED_OWNER_EMAIL,
+  SeedSafetyError,
+  assertMeasurementTarget,
+} from './perf/lib.mjs';
 
 function argValue(flag) {
   const hit = process.argv.find((a) => a.startsWith(`${flag}=`));
@@ -94,14 +114,27 @@ async function main() {
 
   // This run WRITES conversation rows and spends the shared free-model allowance, so the
   // database is decided before a connection exists and before a single turn is authorised.
+  // Development and test need no naming; anything else — production above all — must be named
+  // with `--database=` and confirmed, because this process also reads the ground truth from it.
+  const login = process.argv.includes('--login');
+  let target;
   try {
-    assertReadableTarget(env, 'perf:turns');
+    target = assertMeasurementTarget({
+      mongodbUri: env.mongodbUri,
+      resolvedDbName: env.mongodbDbName,
+      requestedDatabase: argValue('--database'),
+      confirm: process.env.PERF_TURNS_CONFIRM,
+      confirmPhrase: PERF_TURNS_PROD_CONFIRM,
+      command: 'perf:turns',
+    });
   } catch (err) {
     if (!(err instanceof SeedSafetyError)) throw err;
     console.error(`[turns] ${err.message}`);
     process.exit(1);
   }
-  console.log(`[turns] database     : ${env.mongodbDbName} (environment ${env.nodeEnv})`);
+  console.log(
+    `[turns] database     : ${target.database} (environment ${env.nodeEnv})${target.production ? '   (PRODUCTION)' : ''}`,
+  );
 
   await mongoose.connect(env.mongodbUri, { dbName: env.mongodbDbName });
   const business = await Business.findById(businessId).select('name status').lean();
@@ -228,20 +261,45 @@ async function main() {
     process.exit(2);
   }
 
-  // Mint a session the way login does, then let go of the database entirely: the
-  // probe must measure the SERVER's turn, not share its connection pool.
-  const jti = newSessionId();
-  const token = signAccessToken(owner._id, jti);
-  await createSessionForToken({
-    userId: owner._id,
-    businessId,
-    token,
-    deviceLabel: 'perf:turn probe',
-  });
+  // Authenticate, then let go of the database entirely: the probe must measure the SERVER's turn,
+  // not share its connection pool. A local run mints its own session; `--login` uses the app's own
+  // Firebase sign-in and exchange, which is the only path a deployed server accepts.
+  let token;
+  let authLabel;
+  if (login) {
+    const email = argValue('--email') ?? SEED_OWNER_EMAIL;
+    const password = process.env.PERF_ACCOUNT_PASSWORD || process.env.DEMO_ACCOUNT_PASSWORD;
+    const apiKey = argValue('--firebase-api-key') ?? process.env.EXPO_PUBLIC_FIREBASE_API_KEY;
+    if (!password) {
+      throw new Error(
+        '--login needs PERF_ACCOUNT_PASSWORD (or DEMO_ACCOUNT_PASSWORD) in the environment — ' +
+          'the credential the seed set on the account it created',
+      );
+    }
+    const signedIn = await signInWithPassword({ apiKey, email, password });
+    const exchanged = await exchangeForAccessToken({
+      baseUrl: base,
+      idToken: signedIn.idToken,
+      deviceLabel: 'perf:turn probe (firebase login)',
+    });
+    token = exchanged.token;
+    authLabel = `firebase login as ${email}`;
+  } else {
+    const jti = newSessionId();
+    token = signAccessToken(owner._id, jti);
+    await createSessionForToken({
+      userId: owner._id,
+      businessId,
+      token,
+      deviceLabel: 'perf:turn probe',
+    });
+    authLabel = `local session for user ${String(owner._id)}`;
+  }
   await mongoose.disconnect();
 
   console.log(`[turns] tenant ${business.name}`);
   console.log(`[turns] base   ${base}`);
+  console.log(`[turns] auth   ${authLabel}`);
   console.log('');
 
   const results = [];

@@ -403,7 +403,11 @@ nothing in EAS would have stopped the publish.
   `requireAuth` are enforced per request.
 - **Who can publish:** anyone with access to the Expo account/organisation — treat it as a deployment
   credential.
-- **Code signing is off** (channels report *Unprotected*). Enabling it is a build-time change:
+- **Code signing is off** (channels report *Unprotected*), and it cannot be turned on for free:
+  Expo allows it on the **Production ($199/month)** or Enterprise plans only. A binary that carries a
+  certificate **rejects every unsigned publish**, so enabling the config before the plan exists would
+  freeze every install on its current bundle while the channel advertised a newer one. Treat the
+  steps below as the procedure for the day the plan allows it — not as a switch to flip now.
 
 ```bash
 cd C:/Users/jeffe/inventory-ai/mobile
@@ -417,14 +421,18 @@ npx eas-cli update --channel production --environment production --platform andr
   --private-key-path ../keys/private-key.pem --message "Signed release"
 ```
 
-None of it has been done here; treat it as required before the public store build. Staged releases
-(`--rollout-percentage`) are the other safety lever.
+None of it has been done (§27FN measured the plan gate). When it is done, the certificate is compiled
+in with a build at a **new runtime version**, and the private key is **not** uploaded to EAS: it signs
+on the publishing machine, so it has to be backed up somewhere that is not this repository, and a new
+machine needs it provisioned before it can publish. Staged releases (`--rollout-percentage`) are the
+other safety lever.
 
 ## 12. Current gaps
 
 1. **No preview build installed** — the handset runs the production-profile APK, so testing on it
    means publishing to production. Build one: `npx eas-cli build --platform android --profile preview`.
-2. **Code signing off** — turn on before the public build; later costs a release.
+2. **Code signing off, and blocked by plan** — Expo allows it on Production/Enterprise only, so it
+   waits on a paid-plan decision, not on work (§27FN).
 3. **CLI a major version behind** (`24.7.0`; `25.3.0` available) — re-read `--help` after upgrading.
 4. **`EXPO_PUBLIC_API_URL` in two places** — harmless while identical.
 5. **Nothing prunes old groups** — `eas update:delete <group-id>` if the list becomes noise.
@@ -432,10 +440,13 @@ None of it has been done here; treat it as required before the public store buil
    `expo-updates`, which depends on the AAB being uploaded. Play App Signing does not interfere.
 7. **`update:list` cannot be joined to git** — hence the clean-tree preflight.
 8. **No restart prompt, no bundle id on screen.**
-9. **The `1.0.1` build is pending** — the account's free Android builds for October are used, so the
-   production AAB and preview APK could not be created on 2026-10-25. The next build (quota resets
-   2026-11-01, or the plan is upgraded) is the one that carries runtime `1.0.1`; until then `check:ota`
-   refuses, by design.
+9. **The `1.0.1` build is pending** — the free plan allows **15 Android builds a month** and October's
+   are used, so the production AAB and preview APK could not be created on 2026-10-25. The next build
+   (quota resets at the start of the month, or the plan is upgraded) carries runtime `1.0.1`; until
+   then `check:ota` refuses, by design.
+10. **Two earlier production build records were deleted** (`09d77d3d…`, `4b133d62…`) and their
+    artifacts answer 400, so they cannot be re-downloaded (§27FN). Record a new build id only after
+    `eas build:view <id>` resolves, and download the artifact somewhere durable in the same pass.
 
 ## 13. Limits
 
@@ -446,8 +457,9 @@ shipped UI are the ordinary use. iOS is unverified here (no macOS).
 
 ## 14. Cost
 
-Included in the Expo account: **1,000 monthly active users** and **15 Android / 15 iOS builds a
-month**, no per-update charge. Beyond 1,000 MAU the next plan is $19/month.
+Included in the free account: **1,000 monthly active users** and **15 Android / 15 iOS builds a
+month**, no per-update charge. Beyond 1,000 MAU the next plan is $19/month; **code signing needs the
+$199/month Production plan**, which is the only reason it is off.
 
 ## 15. Evidence
 

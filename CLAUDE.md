@@ -277,6 +277,13 @@ below has the measurement.
   network failure must degrade, not discard the token.
 - **`seed:*` and `cleanup:*` scripts refuse a production target without `SEED_CONFIRM`.** Read the
   refusal rather than working around it.
+- **OTA code signing is plan-gated**, not a config switch: Expo allows it on the Production ($199/mo)
+  or Enterprise plans only. A binary carrying a certificate **rejects** any unsigned publish, so
+  enabling `codeSigningCertificate` before the plan exists would freeze every install on its old
+  bundle while the channel claims a newer one. See Guide 7 §11.
+- **A build id is a pointer, not a copy.** Two production builds were deleted from EAS and their
+  artifacts now answer 400. Record an id only after `eas build:view <id>` resolves, and treat a
+  published AAB that is not downloaded and kept as gone. See §27FN.
 
 ## Open items (2026-10-25)
 
@@ -289,7 +296,11 @@ below has the measurement.
   `https://ai-inventory-l1mi.onrender.com/auth/reset`. No code can set it, and it gates only the
   AUTH-05 hosted-link path.
 - **The Play release has not been made.** The AAB exists and was inspected; nothing has been uploaded,
-  so Play App Signing and the store-installed build are unproven.
+  so Play App Signing and the store-installed build are unproven. **Both production build records
+  (`09d77d3d…`, `4b133d62…`) were later deleted from EAS and their artifacts are gone** (§27FN), so the
+  next build, not those, is the authoritative store artifact.
+- **OTA code signing is blocked by plan, not by code** (§27FN). Channels are `Unprotected`; enabling
+  signing needs EAS Production ($199/mo). Do not enable it on the free plan.
 - **iOS is `[EXTERNAL VERIFICATION REQUIRED]`** — no macOS on the development host.
 - **Legacy login cannot be retired yet**: existing admin-created accounts hold a password hash and no
   `firebaseUid`.
@@ -467,6 +478,7 @@ anchor (`§27…`) in that file.
 - **§27FK** — The runtime boundary made mechanical, and the build that could not run (2026-10-25)
 - **§27FL** — The session cap the roadmap had twice recommended and never built (2026-10-25)
 - **§27FM** — The whole V1 surface re-verified, and the front door cut to a page (2026-10-25)
+- **§27FN** — Three EAS questions answered: the vanished production builds, the quota, and the plan gate on signing (2026-10-26)
 
 ---
 

@@ -8,7 +8,7 @@ of truth for *what actually happened*, and it is why this file is long.
 
 **How to read it.** Do not read it top to bottom. Either find a record by number (§27FJ, §27DM — the
 numbers are cited from `CLAUDE.md` and from source comments), or use the index: `CLAUDE.md` §7 lists
-all **167** records by the title each gives itself.
+all **168** records by the title each gives itself.
 
 **Current state:** V1 complete and in production testing. The records that answer *where are we now*
 are §27FM (the V1 re-verification), §27FK (the runtime boundary and the blocked build), §27FJ (the two
@@ -21231,10 +21231,73 @@ deliberately not a device policy a member cannot see.
 
 ## What is still open
 
-The **167 record bodies** in this file are still 234 000 words. Their value is in their measurements,
+The **167 record bodies** written up to this point are still 234 000 words. Their value is in their measurements,
 so compressing them is per-record editorial work done in guard-verified batches, not a sweep; it has
 not been started. Everything else the owner asked of this pass — the baseline, the isolation scan, the
 front door, the instruction file, the drift guard — is recorded above with its measurement.
+
+---
+
+# 27FN. Three EAS questions answered: the vanished production builds, the quota, and the plan gate on signing (2026-10-26)
+
+**Documentation and read-only verification — no build, no publish, no key generated, no plan change.**
+The owner asked whether the production build records were really missing, when the build quota returns,
+and how OTA code signing is enabled. Two of the three answers changed what the project should do next.
+
+## 1. The two production builds no longer exist on EAS
+
+| Measurement | Result |
+|---|---|
+| Builds in the project, all filters cleared (`build:list`, limit 50, 26 returned) | 26, every one `INTERNAL`; **0 `STORE` builds** |
+| `build:view 09d77d3d-0f1c-4f8e-948f-7a99ccaa2a56` (the §27ES AAB) | **does not exist** |
+| `build:view 4b133d62-30a9-4e18-a7ca-950b06e0cfed` (the §27ET store artifact) | **does not exist** |
+| Its artifact URL `…/3sCYPhYme…aab` followed | **HTTP 400** |
+| A build from the same day and account `ea941bb7…`, same request | **HTTP 206, bytes served** |
+
+Same project id, same owner, same account, same day — so this is not filtering, pagination, retention
+or a transfer: the two records **and their artifacts** were deleted. Nothing in this repository deletes
+builds (no `build:delete` in its scripts, docs or workflows), and the CLI exposes no audit trail, so
+*which* action removed them cannot be observed from here. What can be stated: the AAB that §27ES inspected cannot be downloaded
+again, and a recorded build id is a pointer, not a copy.
+
+**Consequence for the next build.** The build id goes into `mobile/ota-native-runtime.json` and the
+evidence record, and it is checked to resolve (`eas build:view <id>`) in the same pass that records it.
+
+## 2. The quota is a calendar month, and October's is spent
+
+Expo's pricing page: the Free plan includes **15 Android and 15 iOS builds a month**. The CLI said on
+2026-10-25 that the month's Android builds were used and would reset in six days. No build was
+attempted to test that boundary — an attempt that succeeds spends a build, and this pass is not
+building anything.
+
+## 3. Code signing is plan-gated, so it cannot be enabled for free
+
+Expo's code-signing guide states it plainly: *"EAS Update Code Signing is only available to accounts
+subscribed to the EAS Production or Enterprise plans."* Production is listed at **$199/month**. That
+conflicts with the standing constraint — free services only — so signing is **not** being turned on.
+
+The dangerous half-state is worth recording: `codeSigningCertificate` in the app config is compiled
+into the binary (CNG regenerates the native project with it). A binary carrying a certificate verifies
+every update against it, so a publish that is not signed is **rejected on the device** — the installed
+app would keep running its old bundle while the channel claims a newer one. Enabling the config is
+therefore not a switch to flip before the plan exists; it is the second half of a build-and-publish
+pair. Guide 7 §11 now says so, and §12 no longer recommends doing it "before the public build".
+
+## 4. The preflight, run rather than described
+
+`npm run check:ota` (mobile) answers with exactly one finding — `native-record-missing`: no build has
+claimed runtime `1.0.1`, so publishing is refused. That is the guard working as designed, and it stays
+in place. Both channels are still `Unprotected`; that is now an accepted residual risk with a named
+condition (the plan), not an unfinished task.
+
+## Verification
+
+The four documentation guards (section integrity, route inventory, fact drift, issue records) pass;
+the record count and the `CLAUDE.md` index move together to **168**. No test suite was affected: no
+server or mobile source changed.
+
+**Not done, deliberately:** no build (quota), no publish (guard), no key pair generated (it would sit
+unused and must be backed up by the owner), no plan change (owner decision).
 
 ---
 

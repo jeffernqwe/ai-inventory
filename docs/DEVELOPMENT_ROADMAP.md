@@ -20479,6 +20479,89 @@ one sentence this entry cannot yet write is "the card appeared on the handset". 
 
 ---
 
+# 27FF. A publish that no commit described, and a dismissal that was not final (2026-10-25)
+
+**Mobile and documentation — no route, permission, schema, index, dependency, session-model,
+environment or server change.** This entry is a review of the update workflow, requested by the owner
+after the first live over-the-air publish (§27FE), and it records two defects the publish exposed, both
+of which are now fixed, plus the corrective publish that is serving production today.
+
+**What the owner did, and what it proved.** On the production-profile build on the OPPO, the owner
+drove the What's New card end to end **without USB, without mirroring and without building or
+installing anything**: the note appeared, the app had changed, and the change had arrived over the air.
+That is the first confirmation of the OTA path from the person holding the phone rather than from a
+logcat read, and it is the strongest evidence this guide has that "silent JavaScript update" is real
+here and not just configured.
+
+The same run also published a second note — *A small test update* — to `production` (group
+`48f7bbcc-64d6-46f4-8475-8aabe1b09f7a`, runtime `1.0.0`, update `01a17205-70d2-73d9-9125-1908e22d59ed`,
+created `2026-10-25T07:45:21Z`) together with one sentence on the login screen. Both edits were then
+**undone on the laptop, and nothing was published again**. The repository was clean and `main` was
+committed. The channel was not: production kept serving the test note to every install.
+
+**The workflow defect, stated exactly.** `eas update` publishes the **working tree**, not a commit,
+and this CLI gives an operator no way to notice afterwards: `update:list --json` returns `branch`,
+`message`, `runtimeVersion`, `group` and `platforms`, and **no commit hash at all** (checked against
+`eas-cli/24.7.0`, installed here). So a bundle that no commit describes is undetectable downstream —
+`eas update` prints the commit when it publishes, but nothing later can be joined back to git. A save
+is a draft; only a commit is a release, and nothing enforced that sentence.
+
+**The code defect it exposed, which is the more serious of the two.** The release-note marker was a
+**single stored id**, and `seenId !== latest.id` cannot distinguish "a newer note arrived" from "this
+bundle is older than the last one". A rollback, a republish of an earlier group, or simply deleting
+the newest note from `RELEASE_NOTES` makes `latest` go **backwards**, and the note somebody had already
+dismissed announced itself again. The remedy for a bad publish is exactly one of those actions, so the
+one moment the marker mattered most was the moment it was wrong. It is now the **set of acknowledged
+ids** (`lib/releaseNotesSeen.ts`), capped at **100** with the newest kept, read through the single id
+the old build wrote under `…releaseNotes.seenId` so an upgrade loses nothing; the hook tests
+membership (`!seenIds.includes(latest.id)`) and **refuses to write before the stored list has been
+read**, because writing in that window would replace every earlier dismissal with one id. Fail-open is
+preserved in both directions: an unreadable marker still shows the card, and a device that never
+acknowledged a note is still told about it.
+
+**The workflow fix.** New `mobile/scripts/check-ota-publish.mjs`, run as `npm run check:ota`. It
+refuses any modified or untracked path in the repository (with `--allow-dirty` for the genuine
+emergency, printed as a warning), re-checks the contract that decides delivery at the moment somebody
+is about to reach every phone — `runtimeVersion.policy === "appVersion"`, `updates.enabled`,
+`checkAutomatically: "ON_LOAD"`, `fallbackToCacheTimeout: 0`, a project URL, and a build profile whose
+channel is the one being published to — and prints the exact publish command, so `--platform android`
+stops being the flag that is forgotten. It **warns** rather than fails on a non-`main` branch and on
+commits absent from `origin/main`: both are legitimate, and both change what the printed commit hash
+means later. It does not run the tests and does not read the EAS environment store; those are
+`npm test` and `check:build-env --live`.
+
+**Verification.** `mobile/__tests__/release-notes.test.tsx` is now **31 cases** (10 new): the two
+rollback directions (a newer note acknowledged before an older bundle suppresses it; a note never
+acknowledged still appears), merge-on-write, the unread-window refusal, and six marker-file cases
+(list read, legacy single-id migration, dedupe, the 100-id cap, a read failure, a write failure). The
+two `*rollback*` cases fail against the old `seenId !== latest.id` rule. Mobile **97 suites / 1172
+tests / 0 failures**, `tsc` and `eslint` clean; the docs-integrity and route-inventory guards **16/16**,
+the secret guard clean over **852 files**, `check:build-env` clean for all four profiles. The preflight
+was proven **both ways**: on the dirty tree it exited **1** with six findings naming the five paths, and
+after the commit it printed `ready` and exited **0**.
+
+**The corrective publish, and how it was verified without a phone.** `0547569` published
+`production` group **`62654350-7268-487f-8518-8ca7b6a8dfc9`** (update `01a17222-d4c1-718f-8b0f-f1f07bef4275`,
+created `2026-10-25T08:17:27Z`), which withdraws the test note. The channel's own manifest now reports
+`"updateGroup":"62654350-…"`, so the served bundle is the committed one — a check that needs no device
+and is now written into the guide (§7), including its two measured constraints: `accept:
+multipart/mixed` is mandatory (the host answers **406** without it) and the bundle/asset URLs answer
+**403** to a plain `curl`, so the command proves **which group** is served, not its contents. For the
+contents, the export the publish had just made was read: `A small test update` **absent**, the three
+real notes **present**, and a control string (`Hello`) absent, which is what makes the first two
+readings mean anything.
+
+**Still open, recorded rather than rounded off.** There is **no preview install** on the handset, so
+every OTA still goes to `production` first and the phone is the only staging environment (§12.1);
+**code signing is off** (§12.2); `update:list` still cannot be joined to git (§12.7); and the app shows
+its **version** but not `Updates.updateId` (§12.8), so a support conversation can establish the build but
+not the bundle. The guide's §6 now carries the incident as the reason its first step is a tool, §7A.1
+states that a dismissal is final in both directions, §9 gained the "a note you deleted is still on the
+phone" row, and §12/§15 were reconciled. Nothing was written to production to manufacture a demo
+session: the corrective publish is the only production write in this entry.
+
+---
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

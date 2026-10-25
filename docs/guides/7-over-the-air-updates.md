@@ -183,14 +183,15 @@ At the time of writing:
 |---|---|---|
 | Channel | exists, active, **unprotected** (no code signing) | exists, active, **unprotected** |
 | Branch | `preview` | `production` |
-| Newest group | `6e14b317-…` | `936e1e55-…` — *Invitations, terms of use and the deletion audit scrub* |
+| Newest group | `6e14b317-…` | `62654350-…` — *Withdraw the test note, and stop a dismissed note returning* |
 | Runtime version | `1.0.0` | `1.0.0` |
 | Android `versionCode` (remote) | — | **4** |
 | What installs there | preview APKs you side-load | store builds, and the production-profile APK on the test phone |
 
 Older production groups still exist (`d4582eda-…`, `2518ccb8-…`, the Google Sign-In fixes). They are
 history and evidence; nothing prunes them automatically, and installs always move **forward** to the
-newest group for their runtime.
+newest group for their runtime. `48f7bbcc-…` is the test note of 2026-10-25, published and then
+withdrawn by `62654350-…`; it stays in the list as history, and no install moves back to it.
 
 **"Unprotected" means code signing is off.** It is available in this toolchain (the `expo-updates`
 CLI here offers `codesigning:generate` and `codesigning:configure`) but it is **not enabled**, and
@@ -359,8 +360,10 @@ npx expo-updates runtimeversion:resolve       # the runtime label for this tree
 The rule this project follows: **nothing is published that has not been verified, and nothing reaches
 production before it has been proven somewhere else.**
 
-1. **Be on the commit you mean to ship.** `git status` clean, `git log -1` is the intended commit.
-   EAS records the commit in the update, so this is what makes a later rollback explainable.
+1. **Be on the commit you mean to ship.** Run `npm run check:ota` from `mobile/`. It refuses any
+   uncommitted path in the repository, re-checks the runtime and channel contract, prints the commit
+   and the runtime the publish will carry, and prints the exact command. This is a tool rather than a
+   reminder because `eas update` publishes the **working tree**, not a commit — see below.
 2. **Run the checks.** From `mobile/`: `npm run typecheck`, `npm run lint`, `npm test`,
    `npm run check:build-env`. From `server/` if the change touches the API: `npm run test:unit`.
 3. **Confirm the config still says what you think:**
@@ -376,6 +379,35 @@ production before it has been proven somewhere else.**
    observed. The measured runs in §10 are the template.
 9. **If something is wrong:** roll back (or publish a corrected update), then investigate. Both are
    one command and neither needs the store.
+
+### Why step 1 is a tool, not a reminder (2026-10-25)
+
+On 2026-10-25 a release note was published to `production` to test the new card. The two files behind
+it — the note and one sentence on the login screen — were then undone on the laptop, and nothing was
+published again. `git status` was clean and `main` was committed. The **channel** was not: it kept
+serving a bundle whose newest note read *A small test update*, and no commit contained that text.
+Nothing in the repository could reveal it, because the repository was right.
+
+The cause is a property of the tool rather than a mistake in it: `eas update` uploads the working
+tree. A save is a draft; only a commit is a release. And this CLI cannot help afterwards —
+`update:list --json` returns branch, message, runtime, group and platforms, and **no commit hash at
+all**, so there is nothing to join a live group back to git. (`eas update` does print the commit when
+it publishes; `update:list` simply does not show it.)
+
+`npm run check:ota` closes the gap from the publish side, which is the only side it can be closed
+from:
+
+| It refuses | Because |
+|---|---|
+| Any modified or untracked path | The bundle would contain JavaScript that no commit describes. `--allow-dirty` overrides it and says so in the output. |
+| `runtimeVersion` that is not `appVersion` | The runtime label decides which installs an update can reach. |
+| `checkAutomatically` not `ON_LOAD`, or `fallbackToCacheTimeout` not `0` | An install would stop looking for updates at launch, or a launch would wait on EAS. |
+| `updates.enabled: false`, or a missing project URL | The app would ignore every publish. |
+| A channel with no build profile | No install listens there, so the publish reaches nobody. |
+
+It **warns but does not fail** when the branch is not `main`, and when the commit is not yet on
+`origin/main`: publishing from a branch is legitimate, and so is a local commit, but both change what
+that commit hash means six months later, so both are printed beside it.
 
 For a larger audience, stage the production publish instead of going straight to everyone:
 
@@ -422,6 +454,29 @@ Release builds log far less than this; for those, use the behaviour plus
 `npx eas-cli update:insights <group-id>` — launches and unique users per group tell you whether
 installs picked it up.
 
+### Which group is `production` serving right now?
+
+The channel's own answer, without a phone:
+
+```bash
+curl -sS -H "expo-platform: android" -H "expo-runtime-version: 1.0.0" \
+  -H "expo-channel-name: production" -H "accept: multipart/mixed" \
+  -H "expo-protocol-version: 1" \
+  https://u.expo.dev/607eca05-1175-43ed-86a0-1829e91c9531 \
+  | grep -o '"updateGroup":"[^"]*"'
+```
+
+```text
+"updateGroup":"62654350-7268-487f-8518-8ca7b6a8dfc9"
+```
+
+Two details, both measured. `accept: multipart/mixed` is **mandatory** — the host answers **406**
+*"EAS Update clients must accept multipart/mixed responses"* without it. And the bundle and asset
+URLs it returns answer **403** to a plain `curl` (*"Unauthorized asset request"*), so this command
+proves **which group** a channel serves, not what is inside it. For the contents, read the phone
+(step 4 above) or grep the export the publish just made:
+`mobile/dist/_expo/static/js/android/*.hbc`.
+
 ---
 
 ## 7A. What the person holding the phone sees
@@ -462,8 +517,8 @@ pieces are:
 | File | What it is |
 |---|---|
 | `mobile/lib/releaseNotes.ts` | The notes themselves — the only file you edit to announce something. |
-| `mobile/lib/releaseNotesSeen.ts` | One note id in `expo-secure-store`: which note this device has acknowledged. |
-| `mobile/hooks/useReleaseNotes.ts` | `seenId !== latest.id`, and nothing more. |
+| `mobile/lib/releaseNotesSeen.ts` | The ids in `expo-secure-store`: every note this device has acknowledged, capped at 100 with the newest kept. |
+| `mobile/hooks/useReleaseNotes.ts` | `!seenIds.includes(latest.id)`, and nothing more. |
 | `mobile/components/WhatsNewCard.tsx` | The card. |
 | `mobile/app/(app)/whats-new.tsx` | The full list, newest first. |
 
@@ -478,9 +533,14 @@ pieces are:
   That is what "silent updates for small changes" means in practice.
 - Both doorways work: the card, and **Profile → About → What's new**. The card is the prompt; the
   screen is the permanent record.
-- The marker is local and non-secret — one note id. **If storage cannot be read, the card is
-  shown**: missing a message is worse than repeating one, and a failed write costs one repeat on
-  the next launch.
+- **A dismissal is final, in both directions.** The marker is the set of ids acknowledged, not the
+  last one seen, so a rollback, a republish of an earlier group, or deleting the newest note from
+  `RELEASE_NOTES` re-announces nothing. It was a single id until 2026-10-25, and that version brought
+  a dismissed card back on the first rollback — which is why the set replaced it. A note this device
+  has never acknowledged still appears, whichever bundle carries it.
+- The marker is local and non-secret — a short list of note ids, upgraded once from the single id the
+  old build wrote. **If storage cannot be read, the card is shown**: missing a message is worse than
+  repeating one, and a failed write costs one repeat on the next launch.
 
 **Why the card is not a modal or a toast, and not on Login.** A modal interrupts the task the person
 opened the app to do; a toast disappears before it is read. A card inside the page can be read,
@@ -590,6 +650,7 @@ changes when a new AAB is uploaded — which is one more reason a copy change sh
 | **Changes appear on one launch, then revert** | The update was published to a channel that install does not listen to, or its runtime differs | Check the build's channel and runtime (`expo config`), then publish to the right one |
 | **A dev build never receives updates** | Expected: development builds run Metro | Use a `preview` or `production` build to test OTA |
 | **`eas update` says it published, phone unchanged** | The app has only been launched once since | Close and start it again (§7) |
+| **A note you deleted from `RELEASE_NOTES` is still on the phone** | The channel is serving an earlier publish, or the phone has not launched twice since the correction | `npm run check:ota`, publish from the clean tree, then confirm the served group (§7) |
 
 ---
 
@@ -698,7 +759,10 @@ is a code defect; most are decisions about how the feature is operated.
    `expo-updates` inside it — the same mechanism, but it depends on the AAB actually being uploaded
    and installed from Play, which is the open release gate recorded elsewhere. Play App Signing does
    not interfere with EAS Update.
-7. **The card and the version row ship; the restart prompt and the bundle id do not.** A published
+7. **`update:list` cannot be joined back to git.** The publish output names the commit, and
+   `npm run check:ota` prints it before anybody publishes, but the group list does not carry it. That
+   is why the preflight refuses a dirty tree instead of trusting a later audit — see §6.
+8. **The card and the version row ship; the restart prompt and the bundle id do not.** A published
    note announces itself once, and Profile → About names the installed version (§7A.1), so a support
    conversation can start with "which build are you on?" instead of a guess. Still missing: a
    restart-to-apply control, deliberately deferred by the owner until it can see unsaved form input
@@ -745,6 +809,7 @@ next plan is $19/month — a business decision, not a technical blocker.
 | A **production-profile release APK** received a published update, and `roll-back-to-embedded` returned it to the embedded bundle | [2026-10-24-release-build](../evidence/device-runs/2026-10-24-release-build/README.md) |
 | The **store AAB** carries the right channel, runtime and API host — read out of the artifact, not the log | [2026-10-24-release-aab](../evidence/device-runs/2026-10-24-release-aab/README.md), [2026-10-24-permission-trim](../evidence/device-runs/2026-10-24-permission-trim/README.md) |
 | The real production app on the phone was updated by OTA to ship invitations, terms and the deletion fix, and the invitation flow was then walked on it | [2026-10-25-invitations](../evidence/device-runs/2026-10-25-invitations/README.md), [2026-10-25-invitations-admin](../evidence/device-runs/2026-10-25-invitations-admin/README.md) |
+| A test note was published, then undone on the laptop without republishing: the channel was found serving group `48f7bbcc-…`, which no commit contained. The corrective publish `62654350-…` at `0547569` replaced it, confirmed from the channel's own manifest | §27FF in [DEVELOPMENT_ROADMAP.md](../DEVELOPMENT_ROADMAP.md) |
 
 **Not verified:** code signing (not enabled), `update:rollback <group-id>` (the *roll-back-to-embedded*
 variant is the one that was exercised), the AAB's Play upload path, and iOS.
@@ -763,13 +828,18 @@ npx eas-cli env:list --environment production
 
 # check the code first
 npm run typecheck && npm run lint && npm test && npm run check:build-env
+# then prove the tree is a release (clean, right runtime, right channel)
+npm run check:ota
 
 # publish (preview first, production later)
 npx eas-cli update --channel preview    --environment preview    --platform android -m "…"
 npx eas-cli update --channel production --environment production --platform android -m "…"
 
-# what did I publish?
+# what did I publish, and what is the channel serving right now?
 npx eas-cli update:list --branch production --limit 5
+curl -sS -H "expo-platform: android" -H "expo-runtime-version: 1.0.0" \
+  -H "expo-channel-name: production" -H "accept: multipart/mixed" \
+  https://u.expo.dev/607eca05-1175-43ed-86a0-1829e91c9531 | grep -o '"updateGroup":"[^"]*"'
 npx eas-cli update:insights <group-id>
 
 # the phone refuses a publish that exists

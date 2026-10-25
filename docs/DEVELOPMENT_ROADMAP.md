@@ -20994,9 +20994,14 @@ unused binding in the new test's incomplete-record fixture. The fixture was rebu
 
 The **build** (production AAB + preview APK) once quota allows, the **phone pass** on the `1.0.1`
 runtime, then the **record file** written from that build — only after which `check:ota` passes and an
-OTA may be published. Code signing before the public build, and Dependabot **PR #95** (server-only
-minor/patch, green on its branch, needs an update from `main`) remain theirs. Nothing was published to
+OTA may be published. Code signing before the public build remains open. Nothing was published to
 EAS and no store artifact was produced by this entry.
+
+Dependabot **PR #95** was handled separately on the owner's instruction: updated from `main`
+(`mongoose` 9.11.3, `eslint` 10.13, `typescript-eslint` 8.72.0 — server only, no security fix), its
+four checks passed, and it was **squash-merged as `cbbf7b1`**; `npm ci` and the 1399-test unit suite
+were then re-run on this laptop against the merged lockfile and stayed green, and the follow-up CI run
+on `cbbf7b1` passed all four jobs.
 
 ---
 

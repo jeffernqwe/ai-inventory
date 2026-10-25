@@ -1007,6 +1007,22 @@ when `expo-router` 58 dropped `query-string` and the package left the lockfile. 
 (4 must-fire), and `SECURITY.md`'s stale four-advisory row was corrected to the two actually
 open. Roadmap §27FJ)
 
+The mobile runtime label moved, and the OTA preflight now enforces it (2026-10-25; **not an
+application phase**; mobile tooling and documentation — one preflight rule plus one test file, **no
+route, permission, schema, server behaviour or dependency change, and no build or publish**) —
+§27FJ's SDK patch moved `expo-modules-core` 58.0.23 → 58.0.26 under an `appVersion` runtime label
+that stayed `1.0.0`, so a publish from that tree would have reached binaries compiled for the older
+modules and EAS would have accepted it. The version is now **1.0.1** (`app.json` and
+`package.json`), and `npm run check:ota` compares the installed tree against a committed record of
+the runtime the last build was compiled with — `mobile/ota-native-runtime.json`, deliberately absent
+until a build exists — refusing on a moved module, a missing or incomplete record, or a version with
+no binary; `--allow-native-change` warns instead but never excuses an unbuilt version. **No build
+was produced:** the EAS free plan's Android builds for October are exhausted (reset 2026-11-01), the
+attempt incremented remote `versionCode` 4 → 5 without creating an artifact, and a local build is
+not a substitute because the Firebase config files are EAS-injected. Server `test:unit` **1399 /
+1343 pass / 0 fail / 56 skipped**, mobile **97 suites / 1172 tests**, `tsc`/`eslint` clean, CI green
+on `a47b129`. Roadmap §27FK)
+
 **Records are proportional:** a security, architecture, authorization, schema, route,
 dependency-policy or phase-level change gets a dated record; a routine feature or fix is
 documented by its pull request description, its tests and the code. Do not restate what the

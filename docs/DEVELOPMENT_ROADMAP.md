@@ -20917,6 +20917,89 @@ self-test unchanged at **23 controls**.
 
 ---
 
+# 27FK. The runtime boundary made mechanical, and the build that could not run (2026-10-25)
+
+**Mobile tooling and documentation — no route, permission, schema, server behaviour or dependency
+change.** `expo.version` and `mobile/package.json` move to **1.0.1**, `check:ota` gains a
+native-runtime rule with its own controls, and one new test file (11 cases) pins it. **No build was
+produced:** the EAS free plan's Android builds for October are exhausted, and that is recorded here
+rather than worked around.
+
+## Why the label had to move
+
+§27FJ's patch bump took `expo-modules-core` **58.0.23 → 58.0.26** under `runtimeVersion: {"policy":
+"appVersion"}`, whose label was still `1.0.0`. Every binary on the phone and every artifact in EAS had
+been compiled against the old modules. `eas update` would have accepted a publish from that tree — the
+label matched — and the incompatibility would have surfaced as a crash *after* the update had already
+been installed. The label is the only protection the mechanism offers, so it moves when the native
+side does. `1.0.1` rather than `1.1.0`: this is a patch-level SDK refresh, and nothing has been
+uploaded to Play, so 1.0.1 becomes the first store version rather than an upgrade to a nonexistent
+1.0.0 line.
+
+## What the preflight now refuses
+
+`mobile/scripts/check-ota-publish.mjs` reads a committed record — `mobile/ota-native-runtime.json` — of
+the versions the **last build** was compiled with, and compares it with the installed tree:
+
+| Condition | Verdict |
+| --- | --- |
+| No record file | **fail** — no build has claimed this runtime |
+| Record missing a version field | **fail** — an incomplete record is not evidence |
+| Recorded `appVersion` ≠ `expo.version` | **fail** — a bundle with no installed binary to serve |
+| `expo`, `expo-modules-core` or `react-native` moved | **fail**, unless `--allow-native-change` says so out loud |
+| All equal | pass, and the publish command is printed |
+
+The record is **deliberately absent** until a build exists; that is why the committed tree refuses to
+publish with one finding rather than passing on an assumption. `--allow-native-change` downgrades the
+native comparison to a warning but never excuses an unbuilt version — the two questions are different,
+and the controls keep them apart.
+
+## The build attempt, and the quota that stopped it
+
+`npx eas-cli build --platform android --profile production --non-interactive --no-wait --json` reached
+the upload and fingerprint, incremented the remote `versionCode` **4 → 5**, and then answered:
+
+```
+This account has used its Android builds from the Free plan this month, which will reset in 6 days
+(on Sun Nov 01 2026). …
+    Error: build command failed.
+```
+
+No build record was created, so there is no build id to poll; `eas build:version:get` confirms the
+remote counter now reads **5**, which means the next successful production build takes **6** and
+`versionCode` 5 has no artifact. A gap is harmless to Play (the counter only has to increase), and
+rewriting remote versioning to reclaim it would be a risk taken for cosmetics.
+
+**A local Gradle build is not a substitute.** The Android SDK and Android Studio's JDK are on this
+laptop, but `google-services.json` and `GoogleService-Info.plist` are **not** (owner decision P-1: they
+are injected by EAS as file environment variables), so `expo prebuild` would fail inside the Firebase
+plugin; and an APK signed with a debug key cannot install over the EAS-signed app that is already on
+the phone. The build waits for the quota to reset or for the plan to change — an owner decision, not a
+repository one.
+
+## Verification
+
+Server `test:unit` **1399 tests / 1343 pass / 0 fail / 56 skipped** (11 new; the new file is classified
+in `scripts/run-tests.mjs`, which refuses an unclassified suite). Mobile **97 suites / 1172 tests / 0
+failures**, `tsc` and `eslint` clean. `check:build-env --profile production --live` and `--profile
+preview --live`: no findings. `check:ota` on the committed tree: runtime `1.0.1`, one finding
+(`native-record-missing`), exit **1** — the refusal the guard exists for.
+
+CI failed once on the way, honestly recorded: run on `b517657` failed the **server lint** step over an
+unused binding in the new test's incomplete-record fixture. The fixture was rebuilt explicitly in
+`a47b129`, and run **40199460249** is green on all four jobs (`server`, `mobile`, `secret-guard`,
+`attribution-guard`).
+
+## What is still open
+
+The **build** (production AAB + preview APK) once quota allows, the **phone pass** on the `1.0.1`
+runtime, then the **record file** written from that build — only after which `check:ota` passes and an
+OTA may be published. Code signing before the public build, and Dependabot **PR #95** (server-only
+minor/patch, green on its branch, needs an update from `main`) remain theirs. Nothing was published to
+EAS and no store artifact was produced by this entry.
+
+---
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

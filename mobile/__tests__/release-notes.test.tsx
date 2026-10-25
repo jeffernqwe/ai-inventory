@@ -8,16 +8,25 @@ import { useReleaseNotes } from '../hooks/useReleaseNotes';
 import { dashboardApi, productsApi, purchaseOrdersApi } from '../lib/api';
 import { useSession } from '../lib/auth';
 import { LATEST_RELEASE_NOTE, RELEASE_NOTES, formatReleaseDate } from '../lib/releaseNotes';
+import {
+  MAX_REMEMBERED_RELEASE_NOTES,
+  markReleaseNoteSeen,
+  readSeenReleaseNoteIds,
+} from '../lib/releaseNotesSeen';
 import { ThemeProvider } from '../lib/theme-context';
 
 /**
  * Release notes (2026-10-25) — the app telling its own users what changed.
  *
  * WHAT THESE CASES ARE FOR. The feature has one ordering invariant (newest first), one durable
- * marker (which note this device has acknowledged), and one rule the whole thing hangs on: a
- * note announces itself ONCE, and a bundle that carries no new note announces nothing. A broken
- * marker shows the same card on every launch, which is the failure mode that would actually
- * annoy a user — so the marker, not just the rendering, is what is asserted here.
+ * marker (the ids this device has acknowledged), and one rule the whole thing hangs on: a note
+ * announces itself ONCE, and a bundle that carries no new note announces nothing. A broken marker
+ * shows the same card on every launch, which is the failure mode that would actually annoy a user
+ * — so the marker, not just the rendering, is what is asserted here.
+ *
+ * The marker was a single id until 2026-10-25, when the first live publish of a note was rolled
+ * back by hand and the card came back. The cases marked *rollback* below are that defect: they
+ * fail against the old `seenId !== latest.id` rule and pass only because the marker is a set.
  *
  * The storage read failing is also pinned. It must show the card, not crash and not silence it:
  * missing a message about a change is worse than showing one twice.
@@ -79,6 +88,17 @@ if (!LATEST) throw new Error('The app ships no release note; the dashboard card 
 
 const wrapper = ({ children }: { children: ReactNode }) => <ThemeProvider>{children}</ThemeProvider>;
 const mount = (node: ReactNode) => render(<ThemeProvider>{node}</ThemeProvider>);
+
+/** Every note id written to storage, in call order — the marker's value is a JSON array. */
+const writtenIds = (): string[] =>
+  secureStore.setItemAsync.mock.calls.flatMap(([, value]: [string, string]) => {
+    try {
+      const parsed: unknown = JSON.parse(String(value));
+      return Array.isArray(parsed) ? (parsed as string[]) : [];
+    } catch {
+      return [];
+    }
+  });
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -170,7 +190,52 @@ describe('the dashboard card', () => {
 });
 
 // ---------------------------------------------------------------------------
-// The marker
+// The marker file
+// ---------------------------------------------------------------------------
+
+describe('the stored marker', () => {
+  const LEGACY_KEY = 'inventoryai.releaseNotes.seenId';
+
+  it('reads a list back in the order it was written', async () => {
+    secureStore.getItemAsync.mockResolvedValue(JSON.stringify(['a', 'b']));
+    await expect(readSeenReleaseNoteIds()).resolves.toEqual(['a', 'b']);
+  });
+
+  it('reads the single id the old build wrote, so an upgrade re-announces nothing', async () => {
+    // A device that dismissed a note before 2026-10-25 holds one bare id under the old key.
+    secureStore.getItemAsync.mockImplementation(async (key: string) =>
+      key === LEGACY_KEY ? '2026-10-20-a-note' : null,
+    );
+    await expect(readSeenReleaseNoteIds()).resolves.toEqual(['2026-10-20-a-note']);
+  });
+
+  it('merges on write instead of replacing, and stores an id once', async () => {
+    await markReleaseNoteSeen('c', ['a', 'b', 'a']);
+    expect(JSON.parse(secureStore.setItemAsync.mock.calls[0][1])).toEqual(['a', 'b', 'c']);
+  });
+
+  it('keeps the newest ids when the list is full', async () => {
+    const many = Array.from({ length: MAX_REMEMBERED_RELEASE_NOTES + 5 }, (_, i) => `id-${i}`);
+    await markReleaseNoteSeen('newest', many);
+    const written = JSON.parse(secureStore.setItemAsync.mock.calls[0][1]) as string[];
+    expect(written).toHaveLength(MAX_REMEMBERED_RELEASE_NOTES);
+    expect(written[written.length - 1]).toBe('newest');
+    expect(written).not.toContain('id-0');
+  });
+
+  it('reports nothing seen when storage cannot be read, so the card shows rather than hides', async () => {
+    secureStore.getItemAsync.mockRejectedValue(new Error('unavailable'));
+    await expect(readSeenReleaseNoteIds()).resolves.toEqual([]);
+  });
+
+  it('does not throw when the write fails', async () => {
+    secureStore.setItemAsync.mockRejectedValue(new Error('disk full'));
+    await expect(markReleaseNoteSeen('a', [])).resolves.toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The hook
 // ---------------------------------------------------------------------------
 
 describe('useReleaseNotes', () => {
@@ -183,11 +248,65 @@ describe('useReleaseNotes', () => {
   });
 
   it('stays quiet when the newest note is already acknowledged', async () => {
-    secureStore.getItemAsync.mockResolvedValue(LATEST.id);
+    secureStore.getItemAsync.mockResolvedValue(JSON.stringify([LATEST.id]));
     const view = await renderHook(() => useReleaseNotes(), { wrapper });
 
     await waitFor(() => expect(view.result.current.loading).toBe(false));
     expect(view.result.current.unseen).toBe(false);
+  });
+
+  it('*rollback*: stays quiet when a newer note was acknowledged before this older bundle', async () => {
+    // The defect a single stored id had: this list is what a device holds after acknowledging a
+    // note from a newer bundle and then being rolled back (or after that note is deleted from
+    // RELEASE_NOTES). Under `seenId !== latest.id` the older note announced itself again.
+    secureStore.getItemAsync.mockResolvedValue(
+      JSON.stringify(['2026-12-01-a-note-from-a-later-bundle', LATEST.id]),
+    );
+    const view = await renderHook(() => useReleaseNotes(), { wrapper });
+
+    await waitFor(() => expect(view.result.current.loading).toBe(false));
+    expect(view.result.current.unseen).toBe(false);
+  });
+
+  it('*rollback*: an unacknowledged note still announces itself after one from a later bundle', async () => {
+    // The other half of the same rule: a set suppresses only what is IN it. A device that never
+    // saw this note must still be told about it, whatever else it has acknowledged.
+    secureStore.getItemAsync.mockResolvedValue(JSON.stringify(['2026-12-01-a-note-from-a-later-bundle']));
+    const view = await renderHook(() => useReleaseNotes(), { wrapper });
+
+    await waitFor(() => expect(view.result.current.loading).toBe(false));
+    expect(view.result.current.unseen).toBe(true);
+  });
+
+  it('keeps every earlier acknowledgement when a new one is made', async () => {
+    secureStore.getItemAsync.mockResolvedValue(JSON.stringify(['2026-09-01-older']));
+    const view = await renderHook(() => useReleaseNotes(), { wrapper });
+    await waitFor(() => expect(view.result.current.loading).toBe(false));
+
+    await act(() => view.result.current.acknowledge());
+
+    expect(writtenIds()).toEqual(['2026-09-01-older', LATEST.id]);
+  });
+
+  it('cannot replace the stored list before it has been read', async () => {
+    // Writing during the read window would store this one id over every earlier dismissal.
+    let release: (value: string | null) => void = () => {};
+    secureStore.getItemAsync.mockReturnValue(
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+    );
+    const view = await renderHook(() => useReleaseNotes(), { wrapper });
+
+    await act(async () => {
+      view.result.current.acknowledge();
+    });
+    expect(secureStore.setItemAsync).not.toHaveBeenCalled();
+
+    await act(async () => {
+      release(JSON.stringify(['2026-09-01-older']));
+    });
+    await waitFor(() => expect(view.result.current.unseen).toBe(true));
   });
 
   it('re-announces only when a newer note than the acknowledged one arrives', async () => {
@@ -207,7 +326,7 @@ describe('useReleaseNotes', () => {
     await act(() => view.result.current.acknowledge());
 
     expect(view.result.current.unseen).toBe(false);
-    expect(secureStore.setItemAsync).toHaveBeenCalledWith(expect.any(String), LATEST.id);
+    expect(writtenIds()).toContain(LATEST.id);
   });
 
   it('still shows the card when storage cannot be read', async () => {
@@ -249,12 +368,12 @@ describe("the What's New screen", () => {
 
     await fireEvent.press(getByText('Mark as read'));
 
-    expect(secureStore.setItemAsync).toHaveBeenCalledWith(expect.any(String), LATEST.id);
+    expect(writtenIds()).toContain(LATEST.id);
     expect(routerMock.back).toHaveBeenCalledTimes(1);
   });
 
   it('says Done rather than Mark as read when there is nothing new', async () => {
-    secureStore.getItemAsync.mockResolvedValue(LATEST.id);
+    secureStore.getItemAsync.mockResolvedValue(JSON.stringify([LATEST.id]));
     const { getByText, queryByText } = await mount(<WhatsNewScreen />);
 
     await waitFor(() => expect(getByText('Done')).toBeTruthy());
@@ -293,7 +412,7 @@ describe('the dashboard', () => {
     await fireEvent.press(await findByText("See what's new"));
 
     expect(routerMock.push).toHaveBeenCalledWith('/whats-new');
-    expect(secureStore.setItemAsync).toHaveBeenCalledWith(expect.any(String), LATEST.id);
+    expect(writtenIds()).toContain(LATEST.id);
     // The card is gone as soon as the tap lands — it does not wait for a re-render from storage.
     await waitFor(() => expect(queryByText(LATEST.title)).toBeNull());
   });
@@ -308,7 +427,7 @@ describe('the dashboard', () => {
   });
 
   it('shows nothing once the note has been acknowledged', async () => {
-    secureStore.getItemAsync.mockResolvedValue(LATEST.id);
+    secureStore.getItemAsync.mockResolvedValue(JSON.stringify([LATEST.id]));
     const { queryByText } = await mount(<DashboardScreen />);
 
     await waitFor(() => expect(summary).toHaveBeenCalled());

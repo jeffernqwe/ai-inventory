@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { LATEST_RELEASE_NOTE } from '../lib/releaseNotes';
 import type { ReleaseNote } from '../lib/releaseNotes';
-import { markReleaseNotesSeen, readSeenReleaseNoteId } from '../lib/releaseNotesSeen';
+import { markReleaseNoteSeen, readSeenReleaseNoteIds } from '../lib/releaseNotesSeen';
 
 export interface ReleaseNotesState {
   /** The note the dashboard card announces, or null when this bundle carries none. */
@@ -18,26 +18,29 @@ export interface ReleaseNotesState {
 /**
  * The dashboard card's state: has this device been told about the newest note yet?
  *
- * The rule is one comparison, and it is deliberately the simple one. `seenId !== latest.id`
- * means a note announces itself once and never again; publishing a bundle with no new note
- * announces nothing; and a device that has never stored anything is shown the newest note — which
- * is exactly right for a build that arrives by over-the-air update, because the app really did
- * just change underneath the person holding it.
+ * The rule is one membership test — `!seenIds.includes(latest.id)` — and the list is what makes
+ * it correct in both directions. A note announces itself once and never again; a bundle with no
+ * new note announces nothing; a device that has stored nothing is shown the newest note, which is
+ * exactly right for a build that arrives by over-the-air update, because the app really did just
+ * change underneath the person holding it. And because the marker is a SET of ids rather than the
+ * last one seen, going BACKWARDS — a rollback, a republish, or a note deleted from
+ * `RELEASE_NOTES` — re-announces nothing, so a dismissal is final. See `lib/releaseNotesSeen.ts`.
  *
- * `loading` exists so the card cannot flash for one frame before the stored marker is known.
+ * `loading` exists so the card cannot flash for one frame before the stored marker is known, and
+ * so nothing can write a fresh list over one that has not been read yet.
  */
 export function useReleaseNotes(): ReleaseNotesState {
   const latest = LATEST_RELEASE_NOTE;
-  const [seenId, setSeenId] = useState<string | null>(null);
+  const [seenIds, setSeenIds] = useState<readonly string[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let active = true;
-    readSeenReleaseNoteId()
+    readSeenReleaseNoteIds()
       .then((stored) => {
-        if (active) setSeenId(stored);
+        if (active) setSeenIds(stored);
       })
-      // `readSeenReleaseNoteId` already swallows its own failures; this keeps the hook's
+      // `readSeenReleaseNoteIds` already swallows its own failures; this keeps the hook's
       // contract even if that ever changes. Either way there is nothing to report: the card
       // simply shows.
       .catch(() => {})
@@ -52,16 +55,20 @@ export function useReleaseNotes(): ReleaseNotesState {
   const acknowledge = useCallback(() => {
     const id = LATEST_RELEASE_NOTE?.id;
     if (!id) return;
+    // The stored list has not been read yet, so writing now would replace every id in it with
+    // this one. Refusing costs a repeated card (the fail-open direction); the alternative would
+    // lose a dismissal. In practice this window is a few milliseconds and no card is on screen.
+    if (loading) return;
     // Flip in memory first so the card disappears on the tap, then persist without awaiting:
     // the screen must never wait on storage, and a failed write only costs one repeat.
-    setSeenId(id);
-    void markReleaseNotesSeen(id);
-  }, []);
+    setSeenIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
+    void markReleaseNoteSeen(id, seenIds);
+  }, [loading, seenIds]);
 
   return {
     latest,
     loading,
-    unseen: !loading && latest !== null && seenId !== latest.id,
+    unseen: !loading && latest !== null && !seenIds.includes(latest.id),
     acknowledge,
   };
 }

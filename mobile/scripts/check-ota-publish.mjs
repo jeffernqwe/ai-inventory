@@ -124,7 +124,11 @@ export function auditPublish({ tree, branch, ahead, config, profiles, channel, a
   if (branch !== 'main') {
     warn.push(`on branch ${branch}, not main — the publish will still be served to every install`);
   }
-  if (ahead > 0) {
+  if (ahead === null) {
+    // Saying nothing here would read as "nothing is unpushed", which is a claim this run cannot
+    // make. Not checked is reported as not checked.
+    warn.push('origin/main is unavailable, so unpushed commits were NOT checked');
+  } else if (ahead > 0) {
     warn.push(
       `${ahead} commit(s) are not on origin/main — the release is real but exists only on this laptop`,
     );
@@ -186,7 +190,7 @@ function main() {
   let tree;
   let branch;
   let head;
-  let ahead = 0;
+  let ahead = null;
   let config;
   let profiles;
   try {
@@ -196,7 +200,7 @@ function main() {
     try {
       ahead = Number(git(['rev-list', '--count', 'origin/main..HEAD']).trim());
     } catch {
-      ahead = 0; // no origin/main to compare with; reported as unknown below
+      ahead = null; // no origin/main to compare with; reported as NOT checked
     }
     config = readExpoConfig();
     profiles = readJson('eas.json').build ?? {};
@@ -217,7 +221,8 @@ function main() {
   });
 
   console.log(`check-ota-publish: ${channel} · runtime ${result.runtime} · profile ${result.profile ?? '(none)'}`);
-  console.log(`check-ota-publish: HEAD ${head} on ${branch}${ahead > 0 ? ` (+${ahead} unpushed)` : ''}`);
+  const aheadLabel = ahead === null ? '' : ahead > 0 ? ` (+${ahead} unpushed)` : '';
+  console.log(`check-ota-publish: HEAD ${head} on ${branch}${aheadLabel}`);
   for (const entry of result.warn) console.log(`check-ota-publish: note — ${entry}`);
   for (const finding of result.findings) console.log(`::error::${finding.rule} ${finding.message}`);
 

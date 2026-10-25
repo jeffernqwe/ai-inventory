@@ -1,10 +1,11 @@
 // `SEED_CONFIRM=seed-accounts npm run seed:accounts`
+// `SEED_CONFIRM=seed-accounts npm run seed:accounts -- --database=<name> --accounts="a@x.com:5000:<businessId>"`
 //
 // Seed SEVERAL accounts at once, each with its OWN dataset size, so the AI
 // assistant's speed, accuracy and reliability can be compared across tenants that
 // hold very different amounts of data. Each account is registered in the app first
 // (or already exists), and this script attaches to it — it never invents an
-// identity, and it never deletes one.
+// identity quietly, and it never deletes one.
 //
 // WHY ONE TENANT PER ACCOUNT. Every row is written with that account's own
 // `businessId`, and the application scopes every read by it, so the three datasets
@@ -21,11 +22,12 @@
 // nothing left to do).
 //
 // SAFETY — all of it inherited, none of it re-implemented:
-//   * `assertSafeTarget` (../perf/lib.mjs) refuses `NODE_ENV=production`, refuses a
-//     database that is not the DEVELOPMENT one, refuses a missing MONGODB_URI, and
-//     requires `SEED_CONFIRM=seed-accounts` — all BEFORE a connection is opened.
-//     The test database is refused as firmly as production, because `npm test`
-//     clears it and a measurement against it would be of a vanishing tenant.
+//   * `assertSafeTarget` (../perf/lib.mjs), called WITHOUT `--database=`, refuses
+//     `NODE_ENV=production`, refuses a database that is not the DEVELOPMENT one,
+//     refuses a missing MONGODB_URI, and requires `SEED_CONFIRM=seed-accounts` —
+//     all BEFORE a connection is opened. The test database is refused as firmly as
+//     production, because `npm test` clears it and a measurement against it would
+//     be of a vanishing tenant.
 //   * A re-run resets ONLY the data of the tenants this script resolved, by
 //     `businessId`, so another tenant cannot be reached even from a wrong id.
 //   * Account rows (`users`, `businesses`) are only ever CREATED, never deleted and
@@ -37,11 +39,33 @@
 //     application can repair it. Clearing MongoDB alone is the safe direction — it
 //     frees every address and orphans nothing.
 //
+// PRODUCTION (2026-10-25). `--database=<name>` makes the same command reach a
+// named database, production included; the name must equal the one this process
+// resolved, and the phrase is still required. Two extra rules apply there, because
+// several REAL businesses can be reset in one command:
+//   * the DEFAULT PLAN IS REFUSED. Every account must be named explicitly, as
+//     `address:documents[:businessId]`. The default three are a development
+//     convenience, and running them against production would reset three real
+//     businesses by accident.
+//   * whenever an account ALREADY owns a business, its id must be the third field.
+//     That is the same rule `seed:demo` applies: naming the tenant is what proves
+//     the reset is meant. A brand-new account has no id to name, and creating one
+//     deletes nothing, so it may omit it and the run prints the id it created.
+//   * an EXISTING login's password is never rewritten, even when
+//     DEMO_ACCOUNT_PASSWORD is set. Creation still uses it, because a new identity
+//     has none otherwise.
+//
 // Usage:
 //   SEED_CONFIRM=seed-accounts npm run seed:accounts                 # the three defaults
 //   SEED_CONFIRM=seed-accounts npm run seed:accounts -- --dry-run     # plan only, writes nothing
 //   SEED_CONFIRM=seed-accounts npm run seed:accounts -- --accounts="a@x.com:5000,b@x.com:44000"
 //   SEED_CONFIRM=seed-accounts npm run seed:accounts -- --include-sku # generated codes instead
+//
+// Production:
+//   NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
+//     SEED_CONFIRM=seed-accounts \
+//     npm run seed:accounts -- --database=inventoryai_prod_db \
+//       --accounts="you@example.com:60000:<the id verify:demo prints>"
 //
 // If an address has no Firebase identity yet, supply its initial password through
 // the environment (never on the command line, never in a file):
@@ -50,9 +74,15 @@
 import 'dotenv/config';
 import mongoose from 'mongoose';
 
-import env from '../src/config/env.ts';
+import env, { DATABASE_NAMES } from '../src/config/env.ts';
 import { SeedSafetyError, assertSafeTarget, clearTenantData } from './perf/lib.mjs';
-import { ensureTenantForIdentity, makeRandom, resolveIdentity, seedTenant } from './seed/lib.mjs';
+import {
+  assertTenantNamedForReset,
+  ensureTenantForIdentity,
+  makeRandom,
+  resolveIdentity,
+  seedTenant,
+} from './seed/lib.mjs';
 
 const COMMAND = 'seed:accounts';
 const CONFIRM_PHRASE = 'seed-accounts';
@@ -61,6 +91,7 @@ const CONFIRM_PHRASE = 'seed-accounts';
  * The suite the owner tests the assistant across. Three DELIBERATELY different
  * sizes, because the question being asked is whether the assistant's response time
  * moves with the amount of data — which three identical tenants cannot answer.
+ * This plan is DEVELOPMENT ONLY: production refuses it and requires `--accounts=`.
  *
  * The sizes are DOCUMENTS (what `seedTenant` counts), and products land at roughly
  * 22.5 %, so `large` yields ~50 600 products. That also closes the measurement
@@ -88,32 +119,55 @@ function fail(message) {
 }
 
 /**
- * Parse `--accounts="a@x.com:5000,b@x.com:44000"` into the plan.
+ * Parse `--accounts="a@x.com:5000,b@x.com:44000,b@x.com:900:<businessId>"`
+ * into the plan.
  *
- * A bare address is refused rather than defaulted: a size guessed here would show up
- * later as an unexplained difference between two tenants' response times, which is
- * precisely the measurement this script exists to make trustworthy.
+ * A bare address is refused rather than defaulted: a size guessed here would show
+ * up later as an unexplained difference between two tenants' response times, which
+ * is precisely the measurement this script exists to make trustworthy. The optional
+ * third field is the tenant's id, and production requires it whenever that tenant
+ * already exists.
  */
-function parsePlan(raw) {
-  if (!raw) return DEFAULT_PLAN;
+function parsePlan(raw, { production }) {
+  if (!raw) {
+    if (production) {
+      fail(
+        'a production run needs --accounts="address:documents[:businessId],…". The default plan is a ' +
+          'development convenience and would reset three real businesses. Nothing was written.',
+      );
+    }
+    return DEFAULT_PLAN;
+  }
   return raw
     .split(',')
     .map((entry) => entry.trim())
     .filter(Boolean)
     .map((entry) => {
-      const at = entry.lastIndexOf(':');
-      if (at === -1) {
-        fail(`--accounts entry "${entry}" has no size. Use address:documents. Nothing was written.`);
+      const parts = entry.split(':').map((part) => part.trim());
+      if (parts.length < 2 || parts.length > 3) {
+        fail(
+          `--accounts entry "${entry}" must be address:documents or address:documents:businessId. ` +
+            'Nothing was written.',
+        );
       }
-      const email = entry.slice(0, at).trim();
-      const total = Number.parseInt(entry.slice(at + 1).trim(), 10);
+      const [email, size, businessId] = parts;
+      const total = Number.parseInt(size, 10);
       if (!email.includes('@')) {
         fail(`--accounts entry "${entry}" has no usable address. Nothing was written.`);
       }
       if (!Number.isInteger(total) || total < MIN_TOTAL || total > MAX_TOTAL) {
-        fail(`--accounts entry "${entry}" needs a size between ${MIN_TOTAL} and ${MAX_TOTAL}. Nothing was written.`);
+        fail(
+          `--accounts entry "${entry}" needs a size between ${MIN_TOTAL} and ${MAX_TOTAL}. ` +
+            'Nothing was written.',
+        );
       }
-      return { email, total, tier: 'custom' };
+      if (businessId && !/^[a-f0-9]{24}$/i.test(businessId)) {
+        fail(
+          `--accounts entry "${entry}" has a businessId that is not 24 hexadecimal characters. ` +
+            'Nothing was written.',
+        );
+      }
+      return { email, total, tier: 'custom', businessId: businessId || undefined };
     });
 }
 
@@ -121,7 +175,17 @@ async function main() {
   const dryRun = process.argv.includes('--dry-run');
   const includeSku = process.argv.includes('--include-sku');
   const seed = Number.parseInt(argValue('--seed') ?? '1', 10);
-  const plan = parsePlan(argValue('--accounts'));
+  const production = env.mongodbDbName === DATABASE_NAMES.production;
+
+  // The guard runs BEFORE any connection, any identity lookup and any write — and it
+  // runs on a dry run too, so a dry run proves the target and the confirmation are
+  // right rather than only the shape of the plan.
+  assertSafeTarget(env, COMMAND, {
+    confirmPhrase: CONFIRM_PHRASE,
+    database: argValue('--database'),
+  });
+
+  const plan = parsePlan(argValue('--accounts'), { production });
 
   if (!Number.isInteger(seed) || seed < 0) {
     fail('--seed must be a non-negative integer. Nothing was written.');
@@ -138,12 +202,7 @@ async function main() {
     seen.add(entry.email);
   }
 
-  // The guard runs BEFORE any connection, any identity lookup and any write — and it
-  // runs on a dry run too, so a dry run proves the target and the confirmation are
-  // right rather than only the shape of the plan.
-  assertSafeTarget(env, COMMAND, { confirmPhrase: CONFIRM_PHRASE });
-
-  console.log(`[${COMMAND}] database    : ${env.mongodbDbName}`);
+  console.log(`[${COMMAND}] database    : ${env.mongodbDbName}${production ? '   (PRODUCTION)' : ''}`);
   console.log(`[${COMMAND}] accounts    : ${plan.length}`);
   console.log(`[${COMMAND}] sku/barcode : ${includeSku ? 'GENERATED (--include-sku)' : 'none — left for the app to generate'}`);
   console.log(`[${COMMAND}] PRNG seed   : ${seed} (the datasets are reproducible)`);
@@ -151,14 +210,22 @@ async function main() {
   console.log('');
   for (const entry of plan) {
     console.log(
-      `[${COMMAND}]   ${entry.tier.padEnd(7)} ${entry.email.padEnd(34)} ~${entry.total.toLocaleString()} documents`,
+      `[${COMMAND}]   ${entry.tier.padEnd(7)} ${entry.email.padEnd(34)} ~${entry.total.toLocaleString()} documents` +
+        `${entry.businessId ? `  business ${entry.businessId}` : ''}`,
+    );
+  }
+  if (production) {
+    console.log('');
+    console.log(
+      `[${COMMAND}] production: each account that ALREADY owns a business must name it as the third ` +
+        'field; its existing password is never changed',
     );
   }
 
   if (dryRun) {
     console.log('');
     console.log(`[${COMMAND}] dry run complete — no connection was opened and nothing was written.`);
-    console.log(`[${COMMAND}] to run for real: SEED_CONFIRM=${CONFIRM_PHRASE} npm run seed:accounts`);
+    console.log(`[${COMMAND}] to run for real: SEED_CONFIRM=${CONFIRM_PHRASE} npm run ${COMMAND}`);
     return;
   }
 
@@ -167,11 +234,12 @@ async function main() {
   // ---- the very comparison it is meant to support.
   const resolved = [];
   for (const entry of plan) {
-    const identity = await resolveIdentity(entry.email);
+    const identity = await resolveIdentity(entry.email, { refreshPassword: !production });
     resolved.push({ ...entry, identity });
     console.log(
       `[${COMMAND}] identity  : ${entry.email} uid ${String(identity.uid).slice(0, 10)}… ` +
-        `(${identity.created ? 'CREATED now' : 'already existed'}${identity.emailVerified ? ', verified' : ', NOT verified'})`,
+        `(${identity.created ? 'CREATED now' : 'already existed'}${identity.emailVerified ? ', verified' : ', NOT verified'})` +
+        `${identity.passwordSkipped ? ' — password NOT changed on a production run' : ''}`,
     );
   }
 
@@ -193,6 +261,19 @@ async function main() {
           'this plan already owns — the datasets would not be separate. Stopping.',
       );
     }
+
+    // Naming the tenant is required exactly when there is something to replace. A
+    // brand-new account has no id to name until this run creates one, and creating one
+    // deletes nothing. The rule itself is shared with seed:demo.
+    assertTenantNamedForReset({
+      production,
+      reused: tenant.reused,
+      requestedBusinessId: entry.businessId,
+      businessId: tenant.businessId,
+      businessName: tenant.businessName,
+      command: `${COMMAND} (${entry.email})`,
+      namingHint: 'the third field of --accounts',
+    });
 
     console.log('');
     console.log(
@@ -245,11 +326,25 @@ async function main() {
   console.log(`[${COMMAND}] barcode generation is left unassigned on purpose: open a seeded product`);
   console.log(`[${COMMAND}] in the app and use the barcode action to generate its first code.`);
   console.log(`[${COMMAND}]`);
-  console.log(`[${COMMAND}] compare the assistant across the three tenants (server must be running):`);
-  for (const r of results) {
-    console.log(`[${COMMAND}]   npm run perf:measure -- --business=${String(r.businessId)} --label=${r.tier}`);
+  if (production) {
+    console.log(`[${COMMAND}] compare the assistant against the DEPLOYED server (one tenant at a time):`);
+    console.log(
+      `[${COMMAND}]   NODE_ENV=production MONGODB_DB_NAME=${env.mongodbDbName} ` +
+        'PERF_TURNS_CONFIRM=perf-turns:production \\',
+    );
+    for (const r of results) {
+      console.log(
+        `[${COMMAND}]     npm run perf:turns -- --base=https://ai-inventory-l1mi.onrender.com ` +
+          `--database=${env.mongodbDbName} --business=${String(r.businessId)} --login --only=1,2`,
+      );
+    }
+  } else {
+    console.log(`[${COMMAND}] compare the assistant across the three tenants (server must be running):`);
+    for (const r of results) {
+      console.log(`[${COMMAND}]   npm run perf:measure -- --business=${String(r.businessId)} --label=${r.tier}`);
+    }
+    console.log(`[${COMMAND}]   npm run perf:turns   -- --business=<id> --only=1,3`);
   }
-  console.log(`[${COMMAND}]   npm run perf:turns   -- --business=<id> --only=1,3`);
 
   await mongoose.disconnect();
 }

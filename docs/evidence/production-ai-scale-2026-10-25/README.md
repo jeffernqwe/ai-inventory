@@ -72,3 +72,95 @@ Result line, verbatim:
   spread at 60,000+ products, or provider latency on a day with less allowance left.
 - The tenant was left in place at the end of the run so the owner could sign in to it; `cleanup:perf-tenant`
   removes it and proves 0 documents remain. See guide 6, Part 3G.
+
+## Repeat at 80,000 documents, and the full teardown
+
+Later the same day the cycle was run again, at the size the owner asked for, and finished with both
+cleanups. The tenant used here is a new one (`6addcd807dfb545ca5383c08`); the earlier one had already
+been removed, so the seeder created it and then reused it across runs.
+
+### The seed
+
+`npm run seed:perf-tenant -- --database=inventoryai_prod_db --size=80000`
+
+```text
+[seed:perf-tenant] database : inventoryai_prod_db   (PRODUCTION)
+[seed:perf-tenant] size     : 80000 document(s), PRNG seed 1 (reproducible)
+[seed:perf-tenant] identity : uid OwS6t2TkFE… (already existed, password refreshed)
+[seed:perf-tenant] tenant   : reused 6addcd807dfb545ca5383c08
+[seed:perf-tenant] reset    : removed 60016 previous document(s) of this tenant
+[seed:perf-tenant]   categories               24
+[seed:perf-tenant]   locations                6
+[seed:perf-tenant]   suppliers                300
+[seed:perf-tenant]   products                 18000
+[seed:perf-tenant]   inventory                36104
+[seed:perf-tenant]   inventory_transactions   23966
+[seed:perf-tenant]   purchase_orders          1600
+[seed:perf-tenant] ledger   : 23966 movement(s) checked
+[seed:perf-tenant] OK — verification found no problems
+[seed:perf-tenant] elapsed    : 171465 ms
+```
+
+### The measurement
+
+`node --env-file=../mobile/.env scripts/measure-ai-turns.mjs --base=https://ai-inventory-l1mi.onrender.com --database=inventoryai_prod_db --business=6addcd807dfb545ca5383c08 --login --only=1,2`
+
+Allowance before the run: **20 of 50** free-model requests left for the UTC day (30 already used), so
+two questions were chosen rather than six.
+
+| # | Question | ms | Tools | Facts checked |
+|---|---|---|---|---|
+| 1 | How is my inventory doing? | 8,713 | `getInventorySummary` | 18,000 / 2,777 / 1,109 — present |
+| 2 | Which products need restocking, and how many? | 16,419 | `getReorderNeededProducts` | 2,777 — present |
+
+Result line, verbatim:
+
+```text
+[turns] answered 2/2 | grounded 2/2 | ms: 8713, 16419 | slowest 16419
+```
+
+`80k-turns.json` in this folder is the probe's own record of those two answers.
+
+### The teardown
+
+`cleanup:demo` (guide 6, G.2) emptied the tenant and kept the account:
+
+```text
+[cleanup:demo]   ai_messages              4
+[cleanup:demo]   ai_conversations         1
+[cleanup:demo]   inventory                36104
+[cleanup:demo]   inventory_transactions   23966
+[cleanup:demo]   purchase_orders          1600
+[cleanup:demo]   products                 18000
+[cleanup:demo]   categories               24
+[cleanup:demo]   locations                6
+[cleanup:demo]   suppliers                300
+[cleanup:demo]   audit_logs               1
+[cleanup:demo] OK — removed 80006 document(s); verification found 0 remaining.
+```
+
+Before that number was trusted, the same command was run with a **wrong** business id and refused —
+the account belonged to `6addcd807dfb545ca5383c08`, not `000000000000000000000000` — proving the two
+identifiers must agree and that the refusal happened before any delete.
+
+`cleanup:perf-tenant` then removed the empty tenant's rows:
+
+```text
+[cleanup:perf-tenant] tenant    : 6addcd807dfb545ca5383c08
+[cleanup:perf-tenant]   sessions                 2
+[cleanup:perf-tenant]   users                    1
+[cleanup:perf-tenant]   businesses               1
+[cleanup:perf-tenant] OK — removed 4 document(s); verification found 0 remaining.
+[cleanup:perf-tenant] kept the Firebase identity for perf-seed-ai@example.invalid (F-50)
+```
+
+**Two transient failures, recorded rather than smoothed over:** `cleanup:perf-tenant` answered
+`connect ETIMEDOUT 159.143.174.111:27017` twice, and a DNS lookup of the cluster host failed between
+the attempts (`curl: (6) Could not resolve host`). A minute later the same command connected and
+completed. Both failures happened before any write, so neither left partial state; the sequence is
+the intermittent network/DNS note now in guide 6, Part 9.
+
+**End state:** `inventoryai_prod_db` holds no seed tenant (0 documents, 0 users, 0 businesses for it),
+and the `perf-seed-ai@example.invalid` Firebase identity remains **on purpose** — deleting an identity
+whose database record exists is the unrecoverable direction (F-50). The next `seed:perf-tenant` run
+reuses it and refreshes its password.

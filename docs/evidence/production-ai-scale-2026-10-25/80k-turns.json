@@ -1,0 +1,38 @@
+[
+ {
+  "question": "How is my inventory doing? Give me the headline numbers.",
+  "why": "dashboard summary: active products / low stock / out of stock (18000 / 2777 / 1109, read now)",
+  "status": 201,
+  "ms": 8713,
+  "degraded": null,
+  "model": "nvidia/nemotron-3.5-lightning:free",
+  "toolsUsed": [
+   "getInventorySummary"
+  ],
+  "usage": {
+   "inputTokens": 1106,
+   "outputTokens": 577
+  },
+  "answerChars": 329,
+  "missingFacts": [],
+  "answer": "Your inventory summary (as of 2026‑10‑25):\n\n- **18,000** active products  \n- **4,452,207** total units on hand  \n- **15,223** products currently in stock (above their minimum)  \n- **2,777** products at or below their minimum (low stock)  \n- **1,109** products out of stock  \n\nThat’s the headline picture of your inventory health."
+ },
+ {
+  "question": "Which products need restocking, and how many are there in total?",
+  "why": "reorder list total (2777, read now)",
+  "status": 201,
+  "ms": 16419,
+  "degraded": null,
+  "model": "nvidia/nemotron-3.5-lightning:free",
+  "toolsUsed": [
+   "getReorderNeededProducts"
+  ],
+  "usage": {
+   "inputTokens": 1374,
+   "outputTokens": 602
+  },
+  "answerChars": 178,
+  "missingFacts": [],
+  "answer": "2777 products need restocking; the 5 most urgent are below:\n\n- Pro Battery 27985  \n- Deluxe Detergent 27973  \n- Eco Kettle 27966  \n- Professional Bottle 27958  \n- Eco Towel 27954"
+ }
+]

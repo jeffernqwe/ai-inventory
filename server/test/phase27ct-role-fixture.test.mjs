@@ -122,7 +122,11 @@ describe('§27CT no mail path, and no identity is created by a pattern', () => {
   });
 
   test('the seeder refuses to run without the target guard and without a password', () => {
-    assert.match(seeder, /assertSafeTarget\(env, COMMAND, \{ confirmPhrase: SEED_CONFIRM_PHRASE \}\)/);
+    // The guard is still called with this fixture's own phrase; the named-database form
+    // added on 2026-10-25 passes `--database=` through the same call.
+    assert.match(seeder, /assertSafeTarget\(env, COMMAND, \{/);
+    assert.match(seeder, /confirmPhrase: SEED_CONFIRM_PHRASE/);
+    assert.match(seeder, /database: argValue\('--database'\)/);
     assert.match(seeder, /readFixturePassword|ensureRoleTestTenant/);
     // The password VALUE is never interpolated into any output. Naming the
     // variable is fine ("from ROLE_TEST_PASSWORD (not printed)"); printing its

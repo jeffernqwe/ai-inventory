@@ -67,8 +67,45 @@ function assertNamedEnvironment(command, { what = 'written or deleted' } = {}) {
  * test database is refused as firmly as production: `npm test` and
  * `npm run cleanup:test-mongodb` clear it, so seeded rows there would vanish
  * mid-experiment and the measurement would be of an empty tenant.
+ *
+ * PRODUCTION IS REACHABLE ONLY BY NAMING IT (2026-10-25). Called without `database`, this is
+ * still the development-only guard every caller has always had. Called with `database` — the
+ * value of `--database=` — the rules become `assertNamedDatabaseTarget`'s: the name must equal
+ * the database this process resolved, the test database is refused, and the command's own
+ * phrase is required. One guard serves both postures, so a shell that forgets the flag cannot
+ * reach production, and the account seeders did not need a second, weaker copy of the rule.
+ *
+ * `confirmEnvVar` defaults to `SEED_CONFIRM`, the variable every seeder already exports. A
+ * cleanup passes `CLEANUP_CONFIRM` so a destructive command reads its phrase from the variable
+ * its own name implies — and so the two families cannot be satisfied by one habitual export.
  */
-export function assertSafeTarget(env, command, { confirmPhrase = SEED_CONFIRM_PHRASE } = {}) {
+export function assertSafeTarget(
+  env,
+  command,
+  {
+    confirmPhrase = SEED_CONFIRM_PHRASE,
+    database,
+    what = 'written or deleted',
+    confirmEnvVar = 'SEED_CONFIRM',
+  } = {},
+) {
+  const requestedDatabase = String(database ?? '').trim();
+  if (requestedDatabase) {
+    // The named form. `assertNamedDatabaseTarget` also refuses the test database, an empty
+    // name, a name the run is not connected to, and a missing phrase — so this branch cannot
+    // be weaker than the one below; it is the same rule with production permitted.
+    return assertNamedDatabaseTarget({
+      mongodbUri: env.mongodbUri,
+      resolvedDbName: env.mongodbDbName,
+      requestedDatabase,
+      confirm: process.env[confirmEnvVar],
+      confirmPhrase,
+      confirmEnvVar,
+      command,
+      what,
+    });
+  }
+
   assertNamedEnvironment(command);
   if (!env.mongodbUri) {
     throw new SeedSafetyError('MONGODB_URI is not set. Nothing was written or deleted.');
@@ -83,8 +120,8 @@ export function assertSafeTarget(env, command, { confirmPhrase = SEED_CONFIRM_PH
   // The phrase is passed in so a second seeder (the demo-account one) can share this
   // single target guard instead of copying it — the copy is how two seeders drift
   // apart on what "safe" means.
-  if (process.env.SEED_CONFIRM !== confirmPhrase) {
-    throw new SeedSafetyError(`set SEED_CONFIRM=${confirmPhrase} to proceed. [${command}]`);
+  if (process.env[confirmEnvVar] !== confirmPhrase) {
+    throw new SeedSafetyError(`set ${confirmEnvVar}=${confirmPhrase} to proceed. [${command}]`);
   }
 }
 
@@ -267,6 +304,55 @@ export {
   countTenantLeftovers,
   removeTenant,
 } from '../../src/services/tenantTeardown.service.ts';
+
+/**
+ * Target check for a READ-ONLY script that may inspect production (`verify:demo`).
+ *
+ * Development and the test database need no naming, exactly as before. Anything else —
+ * production included — must be NAMED on the command line, because "which database did these
+ * numbers come from?" has to be answerable before the first query. There is deliberately no
+ * confirmation phrase: nothing is written, deleted or spent, so a phrase would protect nothing
+ * that the database name does not already make deliberate.
+ */
+export function assertNamedReadTarget({
+  mongodbUri,
+  resolvedDbName,
+  requestedDatabase,
+  command,
+  allowed = [DATABASE_NAMES.development, DATABASE_NAMES.test],
+}) {
+  const resolved = String(resolvedDbName ?? '').trim();
+  const requested = String(requestedDatabase ?? '').trim();
+
+  if (!mongodbUri) {
+    throw new SeedSafetyError(`MONGODB_URI is not set [${command}]. Nothing was read.`);
+  }
+  if (!resolved) {
+    throw new SeedSafetyError(`the resolved database name is empty [${command}]. Nothing was read.`);
+  }
+  if (allowed.includes(resolved)) {
+    if (requested && requested !== resolved) {
+      throw new SeedSafetyError(
+        `--database is "${requested}" but the resolved database is "${resolved}" [${command}]. ` +
+          'Nothing was read.',
+      );
+    }
+    return resolved;
+  }
+  if (requested && requested !== resolved) {
+    throw new SeedSafetyError(
+      `--database is "${requested}" but the resolved database is "${resolved}" [${command}]. ` +
+        'Nothing was read.',
+    );
+  }
+  if (!requested) {
+    throw new SeedSafetyError(
+      `the resolved database is "${resolved}", which is not read by default [${command}]. ` +
+        `Name it with --database=${resolved} to proceed. Nothing was read.`,
+    );
+  }
+  return resolved;
+}
 
 /** Every businessId that belongs to the seed tenant, by BOTH fingerprints. */
 export async function findSeedTenantIds() {

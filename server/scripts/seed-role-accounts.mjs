@@ -22,9 +22,12 @@
 //     and identified by BOTH its name and its owner address. Every data write is
 //     filtered by that one `businessId`, so no other tenant can be reached even
 //     if the wrong id were supplied;
-//   * a DEDICATED database guard: `assertSafeTarget` refuses `NODE_ENV=production`,
-//     refuses any database that is not the development one, and requires the
-//     confirmation phrase — all BEFORE a connection is opened;
+//   * a DEDICATED database guard: WITHOUT `--database=`, `assertSafeTarget` refuses
+//     `NODE_ENV=production`, refuses any database that is not the development one,
+//     and requires the confirmation phrase — all BEFORE a connection is opened.
+//     WITH `--database=` the SAME guard accepts a named database, production
+//     included, under the same phrase (2026-10-25) — the fixture is still found by
+//     its own two fingerprints, never by whatever happened to be in the shell;
 //   * a DEDICATED Firebase blast radius: four literal `.invalid` addresses. The
 //     script never enumerates, never deletes an identity and never matches a
 //     pattern, so no real login can be created, changed or removed.
@@ -40,6 +43,10 @@
 //   ROLE_TEST_PASSWORD='…' SEED_CONFIRM=seed-roles npm run seed:roles
 //   ROLE_TEST_PASSWORD='…' SEED_CONFIRM=seed-roles npm run seed:roles -- --total=900 --seed=7
 //
+// Production (the database is NAMED; the fixture's own tenant is still the only one touched):
+//   ROLE_TEST_PASSWORD='…' SEED_CONFIRM=seed-roles \
+//     npm run seed:roles -- --database=inventoryai_prod_db
+//
 // The password is read from the environment only: it is never printed, never
 // written to a file and never passed on the command line (where it would land in
 // the shell history).
@@ -47,7 +54,7 @@
 import 'dotenv/config';
 import mongoose from 'mongoose';
 
-import env from '../src/config/env.ts';
+import env, { DATABASE_NAMES } from '../src/config/env.ts';
 import { SeedSafetyError, assertSafeTarget, clearTenantData } from './perf/lib.mjs';
 import { makeRandom, seedTenant } from './seed/lib.mjs';
 import {
@@ -87,11 +94,15 @@ async function main() {
   const dryRun = process.argv.includes('--dry-run');
   const total = Number.parseInt(argValue('--total') ?? String(DEFAULT_TOTAL), 10);
   const seed = Number.parseInt(argValue('--seed') ?? '1', 10);
+  const production = env.mongodbDbName === DATABASE_NAMES.production;
 
   // The target guard runs before any connection and before any identity lookup,
   // on a dry run too, so a dry run proves the destination and not merely the
   // shape of the plan.
-  assertSafeTarget(env, COMMAND, { confirmPhrase: SEED_CONFIRM_PHRASE });
+  assertSafeTarget(env, COMMAND, {
+    confirmPhrase: SEED_CONFIRM_PHRASE,
+    database: argValue('--database'),
+  });
 
   if (!Number.isInteger(total) || total < MIN_TOTAL || total > MAX_TOTAL) {
     fail(`--total must be an integer between ${MIN_TOTAL} and ${MAX_TOTAL}. Nothing was written.`);
@@ -106,7 +117,7 @@ async function main() {
     );
   }
 
-  console.log(`[${COMMAND}] database : ${env.mongodbDbName}`);
+  console.log(`[${COMMAND}] database : ${env.mongodbDbName}${production ? '   (PRODUCTION)' : ''}`);
   console.log(`[${COMMAND}] tenant   : ${ROLE_TEST_BUSINESS_NAME}`);
   console.log(`[${COMMAND}] data     : ~${total.toLocaleString()} documents (PRNG seed ${seed})`);
   console.log(`[${COMMAND}] accounts : one per role, verified through the Firebase Admin SDK`);

@@ -934,6 +934,61 @@ in place for the owner to sign in to; the probe's password was generated for the
 so a phone sign-in needs a re-run with an owner-chosen password; a phone signed in to this production
 tenant is not measured, and one run is a sample rather than a benchmark. Roadmap §27FG)
 
+Production seeding through the SAME account commands (2026-10-25; **not an application phase**; server
+tooling + documentation — two guard additions, one shared tenant-naming rule, four CLIs and the guard
+tests; **no route, permission, schema, index, dependency, session-model, mobile, environment-variable
+or deployment change**) — the dedicated-tenant seeder above could not put a dataset inside the
+**owner's own deployment**, because `seed:demo`, `seed:accounts`, `seed:roles` and `verify:demo` still
+refused production outright. They now reach it **only by naming the database**: `assertSafeTarget`
+took an optional `database` (the `--database=` value) that hands over to the existing
+`assertNamedDatabaseTarget` rules — name equal to the resolved database, the test database refused,
+the command's own phrase still required — while the call without it is unchanged, so a forgotten flag
+is still a refusal. Because those commands **replace a tenant's data**, `seed:demo` and `seed:accounts`
+add a third act in production: the business being reset must be **named** (`--business=`, or the third
+field of `--accounts="email:size:businessId"`) through one shared `assertTenantNamedForReset`; a
+brand-new tenant has no id to name and creating it deletes nothing, so creation is allowed. A
+production run **never rewrites an existing login's password**
+(`resolveIdentity(email, { refreshPassword: false })`), `seed:accounts` **refuses its default plan**
+there (it would reset three real businesses), `seed:roles`/`cleanup:roles` keep their own fingerprinted
+fixture, and `verify:roles` requires `--signin` when `--base` is remote because a minted session
+carries the laptop's `JWT_SECRET`. `verify:demo` is read-only and gained `assertNamedReadTarget`:
+production must be named, development and test need nothing, and there is no phrase because nothing is
+written. **Measured on production, read-only and dry-run only:** `verify:demo --database=` read the
+60,000-document perf tenant back (13,500 products / 27,200 stock rows / 17,836 movements / 1,200
+purchase orders, ledger and references clean, `(PRODUCTION)` printed); `seed:demo` refused a missing
+and a wrong `--business=` **before any write**; `seed:accounts` refused the default plan and accepted
+an explicit tenant-named plan in `--dry-run`; `seed:roles --dry-run` named the database. **No
+production write was performed** — the existing tenant was not replaced. Guard tests **39** (was 23);
+server `test:unit` **1387 / 1331 pass / 0 fail / 56 skipped**, `test:db` **909 / 814 pass / 0 fail /
+95 skipped**, `tsc`/`eslint`/both module-graph checks clean (549 modules). Guide 6 Part 3's tables and
+Part 3G rewritten into G.1–G.4 (dedicated tenant; your own account; several accounts and roles;
+verify), and guide 4's database table, safety-net list and section A. Roadmap §27FH)
+
+Emptying a tenant without deleting its login, and the 80,000-document repeat (2026-10-25; **not an
+application phase**; server tooling + documentation — one new command, one guard parameter, one
+raised cap and one new guard case; **no route, permission, schema, index, dependency, session-model,
+mobile or environment change**) — §27FH made production seeding possible but left the owner's **own**
+business with no way back except a whole-database wipe, so `npm run cleanup:demo -- --email=…
+--business=…` (production: add `--database=…`) now removes **one tenant's data** — the shared
+`clearTenantData` list, including the assistant's conversations — and keeps the MongoDB user, the
+business row, its members, every session and the Firebase identity, then re-reads the same
+collections and prints `verification found 0 remaining`; `--dry-run` counts the same collections and
+prints `would remove N` without deleting (measured in development: 5,000 previewed, all 1,125
+products still present afterwards). The email resolves the account and the id
+names the tenant; a mismatch is refused before anything is deleted (F-50 is why an identity is never
+touched). `assertSafeTarget` gained `confirmEnvVar` (default `SEED_CONFIRM`), so this cleanup reads
+`CLEANUP_CONFIRM=cleanup:demo-account` and a leftover `SEED_CONFIRM` cannot satisfy it.
+`seed:perf-tenant`'s cap rose from 60,000 to 400,000 documents, and its printed production next step
+now includes `--base=` and the `node --env-file=../mobile/.env` form instead of implying `localhost`.
+**Measured on production:** 80,000 documents / 18,000 products seeded in **171 s** with no read-back
+problems; questions 1–2 of `perf:turns` answered **2/2 grounded** in **8.7 / 16.4 s**; then
+`cleanup:demo` removed **80,006** rows (0 remaining, login kept) and `cleanup:perf-tenant` removed the
+empty tenant (1 user, 2 sessions, 1 business) and kept the identity. Two `ETIMEDOUT`/DNS failures
+were retried successfully and wrote nothing; guide 6 Part 9 records the symptom. Server `test:unit`
+**1388 / 1332 pass / 0 fail / 56 skipped**, `tsc`/`eslint`/both module-graph checks clean (550
+modules). Guide 6 G.1/G.2, Part 3G, Part 4 and Part 9; guide 4's production routes; evidence
+`docs/evidence/production-ai-scale-2026-10-25/`. Roadmap §27FI)
+
 **Records are proportional:** a security, architecture, authorization, schema, route,
 dependency-policy or phase-level change gets a dated record; a routine feature or fix is
 documented by its pull request description, its tests and the code. Do not restate what the

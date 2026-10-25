@@ -26,8 +26,10 @@
 // against the wrong Firebase project it could only create/update those four
 // `.invalid` identities; it never enumerates, never deletes and never matches
 // on a pattern. The DATABASE side is guarded separately and before any
-// connection: `assertSafeTarget` refuses production and refuses any database
-// that is not the development one.
+// connection: `assertSafeTarget` refuses production and any database that is not
+// the development one — UNLESS the run names its database (`--database=`), which
+// is how this fixture can also be created in a real deployment (2026-10-25). The
+// four literal addresses are the whole blast radius in either mode.
 //
 // NOTHING HERE RUNS ON IMPORT: no `main()`, no connection, no write.
 

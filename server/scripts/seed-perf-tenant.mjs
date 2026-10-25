@@ -65,7 +65,10 @@ const COMMAND = 'seed:perf-tenant';
 /** Documents to write, across every collection. Products are ~22.5 % of this. */
 const DEFAULT_SIZE = 4000;
 const MIN_SIZE = 50;
-const MAX_SIZE = 60000;
+// The same ceiling as `seed:demo`: 400 000 documents (~90 000 products). The earlier
+// 60 000 cap was arbitrary; production testing on 2026-10-25 seeded 80 000 documents in
+// 171 s, so the larger ceiling is what a realistic scale test needs.
+const MAX_SIZE = 400000;
 
 function argValue(flag, argv = process.argv) {
   const prefix = `${flag}=`;
@@ -302,17 +305,29 @@ async function main() {
   // so a printed line without `NODE_ENV`/`MONGODB_DB_NAME` would be refused by the guard it is
   // meant to satisfy. A command an operator cannot paste is not a next step.
   const envPrefix = production ? `NODE_ENV=production MONGODB_DB_NAME=${database} ` : '';
-  const confirmPrefix = production ? 'PERF_TURNS_CONFIRM=perf-turns:production ' : '';
   if (production) {
+    // The deployed server cannot be reached with a locally minted token, so the probe signs in
+    // over Firebase's REST endpoint: it needs the seeded password and the project's PUBLIC web
+    // key. That key already sits in `mobile/.env`, and `--env-file` loads it without printing it —
+    // the reason this line names the script rather than `npm run`, which Node's flag cannot reach.
     console.log(
-      `[${COMMAND}]   (and export PERF_ACCOUNT_PASSWORD — the one you just set — plus ` +
-        'EXPO_PUBLIC_FIREBASE_API_KEY, the project\'s public web key)',
+      `[${COMMAND}]   (export PERF_ACCOUNT_PASSWORD — the one you just set. The Firebase web key is ` +
+        'in ../mobile/.env, which --env-file loads without printing it.)',
+    );
+    console.log(`[${COMMAND}]   ${envPrefix}PERF_TURNS_CONFIRM=perf-turns:production \\`);
+    console.log(
+      `[${COMMAND}]     node --env-file=../mobile/.env scripts/measure-ai-turns.mjs \\`,
+    );
+    console.log(
+      `[${COMMAND}]       --base=https://ai-inventory-l1mi.onrender.com --database=${database} ` +
+        `--business=${String(tenant.businessId)} --login --only=1,2`,
+    );
+  } else {
+    console.log(
+      `[${COMMAND}]   ${envPrefix}npm run perf:turns -- --database=${database} ` +
+        `--business=${String(tenant.businessId)} --login --only=1,2`,
     );
   }
-  console.log(
-    `[${COMMAND}]   ${envPrefix}${confirmPrefix}npm run perf:turns -- \\\n` +
-      `[${COMMAND}]     --database=${database} --business=${String(tenant.businessId)} --login --only=1,2`,
-  );
   console.log(`[${COMMAND}] remove it:`);
   console.log(
     `[${COMMAND}]   ${envPrefix}CLEANUP_CONFIRM=cleanup:perf-tenant npm run cleanup:perf-tenant -- --database=${database}`,

@@ -1,5 +1,10 @@
-// `npm run verify:demo -- --email=<address>` — prove the seeded dataset is what the
-// seeder claimed, WITHOUT believing the seeder's own report.
+// `npm run verify:demo -- --email=<address> [--database=<name>]` — prove the seeded
+// dataset is what the seeder claimed, WITHOUT believing the seeder's own report.
+//
+// It works in ANY named database, production included: `--database=<name>` must equal
+// the database this process resolved. Development and the test database need no
+// naming, exactly as before. Nothing is written, deleted or spent, so there is no
+// confirmation phrase — the target's name is the whole of what is deliberate.
 //
 // WHY THIS EXISTS. `seed:demo` prints counts it computed from its own inserts, which
 // is evidence about the script, not about the database. This reads the rows back and
@@ -27,7 +32,7 @@
 import 'dotenv/config';
 import mongoose from 'mongoose';
 
-import env from '../src/config/env.ts';
+import env, { DATABASE_NAMES } from '../src/config/env.ts';
 import Category from '../src/models/category.model.ts';
 import Inventory from '../src/models/inventory.model.ts';
 import InventoryTransaction from '../src/models/inventoryTransaction.model.ts';
@@ -36,8 +41,30 @@ import Product from '../src/models/product.model.ts';
 import PurchaseOrder from '../src/models/purchaseOrder.model.ts';
 import Supplier from '../src/models/supplier.model.ts';
 import User from '../src/models/user.model.ts';
+import { SeedSafetyError, assertNamedReadTarget } from './perf/lib.mjs';
 
+const COMMAND = 'verify:demo';
 const email = process.argv.find((a) => a.startsWith('--email='))?.slice('--email='.length) ?? process.argv[2];
+
+// Which database these numbers came from has to be answerable before the first query.
+// A refusal here is NOT a data problem, so it takes the same exit code as an
+// unreachable database: 2, "could not check".
+let database;
+try {
+  database = assertNamedReadTarget({
+    mongodbUri: env.mongodbUri,
+    resolvedDbName: env.mongodbDbName,
+    requestedDatabase: process.argv.find((a) => a.startsWith('--database='))?.slice('--database='.length),
+    command: COMMAND,
+  });
+} catch (err) {
+  if (err instanceof SeedSafetyError) {
+    console.error(`[${COMMAND}] ${err.message}`);
+    console.error(`[${COMMAND}] NOT VERIFIED (exit 2) — nothing was read.`);
+    process.exit(2);
+  }
+  throw err;
+}
 
 // THE EXIT CODE IS A CONTRACT, and conflating two very different outcomes is how a
 // network blip sends someone hunting for a data bug. That happened twice while this
@@ -57,6 +84,9 @@ try {
   console.error('[verify:demo] NOT VERIFIED (exit 2) — this is not a data violation.');
   process.exit(2);
 }
+
+// Printed BEFORE the lookup, so an exit 2 still says which database was checked.
+console.log(`database    : ${database}${database === DATABASE_NAMES.production ? '   (PRODUCTION)' : ''}`);
 
 const user = await User.findOne({ email }).select('_id businessId role status emailVerified firebaseUid').lean();
 if (!user) {

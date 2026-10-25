@@ -21,6 +21,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 
+import { DATABASE_NAMES } from '../src/config/env.ts';
 import {
   PERF_TENANT_CLEANUP_CONFIRM,
   PERF_TENANT_SEED_CONFIRM,
@@ -28,9 +29,11 @@ import {
   SeedSafetyError,
   assertMeasurementTarget,
   assertNamedDatabaseTarget,
+  assertNamedReadTarget,
   assertReadableTarget,
   assertSafeTarget,
 } from '../scripts/perf/lib.mjs';
+import { assertTenantNamedForReset } from '../scripts/seed/lib.mjs';
 
 /** A resolved environment as `config/env.ts` would hand it to a script. */
 const envOf = (dbName = 'inventoryai_dev_db') => ({
@@ -49,6 +52,19 @@ async function withNodeEnv(value, fn) {
   } finally {
     if (saved === undefined) delete process.env.NODE_ENV;
     else process.env.NODE_ENV = saved;
+  }
+}
+
+/** Set one environment variable for the duration of a callback, restoring it after. */
+async function withEnvValue(name, value, fn) {
+  const saved = process.env[name];
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
+  try {
+    return await fn();
+  } finally {
+    if (saved === undefined) delete process.env[name];
+    else process.env[name] = saved;
   }
 }
 
@@ -171,6 +187,125 @@ describe('a measurement refuses the wrong database before it reads or spends', (
       assert.equal(process.env.SEED_CONFIRM, undefined);
       assert.doesNotThrow(() => assertReadableTarget(envOf(), 'perf:measure'));
     });
+  });
+});
+
+/**
+ * The ACCOUNT seeders reach production the same way (2026-10-25): the command is the same, the
+ * only difference is that `--database=` names the target. Without it, the old refusal stands, so
+ * a shell that forgets the flag cannot write to a real deployment by accident.
+ */
+describe('naming the database is how an account seeder reaches production', () => {
+  const productionEnv = {
+    mongodbUri: 'mongodb://127.0.0.1:27017/unused',
+    mongodbDbName: DATABASE_NAMES.production,
+    nodeEnv: 'production',
+  };
+  const named = { confirmPhrase: 'seed-demo-account', database: DATABASE_NAMES.production };
+
+  it("accepts a named production target under the command's own phrase", async () => {
+    await withNodeEnv('production', () =>
+      withEnvValue('SEED_CONFIRM', 'seed-demo-account', () => {
+        assert.equal(assertSafeTarget(productionEnv, 'seed:demo', named), DATABASE_NAMES.production);
+      }),
+    );
+  });
+
+  it('still refuses production when no database is named', async () => {
+    await withNodeEnv('production', () =>
+      withEnvValue('SEED_CONFIRM', 'seed-demo-account', () => {
+        const message = messageOf(() =>
+          assertSafeTarget(productionEnv, 'seed:demo', { confirmPhrase: 'seed-demo-account' }),
+        );
+        assert.match(message, /NODE_ENV=production/);
+      }),
+    );
+  });
+
+  it('refuses a name that is not the database this run resolved', async () => {
+    await withEnvValue('SEED_CONFIRM', 'seed-demo-account', () => {
+      const message = messageOf(() =>
+        assertSafeTarget(productionEnv, 'seed:demo', { ...named, database: DATABASE_NAMES.development }),
+      );
+      assert.match(message, /but the resolved database is "inventoryai_prod_db"/);
+    });
+  });
+
+  it('refuses the test database even when it is named', async () => {
+    await withEnvValue('SEED_CONFIRM', 'seed-demo-account', () => {
+      const message = messageOf(() =>
+        assertSafeTarget(
+          { ...productionEnv, mongodbDbName: DATABASE_NAMES.test },
+          'seed:demo',
+          { ...named, database: DATABASE_NAMES.test },
+        ),
+      );
+      assert.match(message, /test database/);
+    });
+  });
+
+  it("refuses another command's phrase", async () => {
+    await withEnvValue('SEED_CONFIRM', 'seed-accounts', () => {
+      const message = messageOf(() => assertSafeTarget(productionEnv, 'seed:demo', named));
+      assert.match(message, /SEED_CONFIRM='seed-demo-account'/);
+    });
+  });
+
+  it('never rewrites an existing credential in production', () => {
+    // Pinned in the SOURCE because the behaviour itself needs Firebase: both account seeders
+    // pass `refreshPassword: !production`, so a real person's password is left alone.
+    for (const name of ['seed-demo-account.mjs', 'seed-accounts.mjs']) {
+      const source = readFileSync(new URL(`../scripts/${name}`, import.meta.url), 'utf8');
+      assert.match(
+        source,
+        /resolveIdentity\([^)]*refreshPassword: !production/,
+        `${name} would change an existing production credential`,
+      );
+    }
+  });
+});
+
+/**
+ * A read-only verification (`verify:demo`) may inspect production, but only when the database is
+ * named. It writes nothing and spends nothing, so there is no phrase to set.
+ */
+describe('a read-only verification names production instead of being refused', () => {
+  const read = (db, requestedDatabase = db) => ({
+    mongodbUri: 'mongodb://127.0.0.1:27017/unused',
+    resolvedDbName: db,
+    requestedDatabase,
+    command: 'verify:demo',
+  });
+
+  it('reads the development and test databases without naming them', () => {
+    for (const db of [DATABASE_NAMES.development, DATABASE_NAMES.test]) {
+      assert.equal(assertNamedReadTarget(read(db)), db);
+      assert.equal(assertNamedReadTarget(read(db, '')), db);
+    }
+  });
+
+  it('refuses production when it is not named', () => {
+    const message = messageOf(() => assertNamedReadTarget(read(DATABASE_NAMES.production, '')));
+    assert.match(message, /Name it with --database=inventoryai_prod_db/);
+    assert.match(message, /Nothing was read/);
+  });
+
+  it('accepts production when it is named, and needs no confirmation phrase', () => {
+    assert.equal(assertNamedReadTarget(read(DATABASE_NAMES.production)), DATABASE_NAMES.production);
+  });
+
+  it('refuses a name that is not the database the process resolved', () => {
+    const message = messageOf(() =>
+      assertNamedReadTarget(read(DATABASE_NAMES.production, DATABASE_NAMES.development)),
+    );
+    assert.match(message, /but the resolved database is "inventoryai_prod_db"/);
+  });
+
+  it('refuses a missing URI', () => {
+    assert.match(
+      messageOf(() => assertNamedReadTarget({ ...read(DATABASE_NAMES.development), mongodbUri: '' })),
+      /MONGODB_URI is not set/,
+    );
   });
 });
 
@@ -299,6 +434,68 @@ describe('a measurement reaches production only by naming it', () => {
 });
 
 /**
+ * A destructive production run names the business it replaces (2026-10-25). Pure, so the rule is
+ * asserted without a database — and shared by both account seeders, which is why one test covers both.
+ */
+describe('a production reset names the tenant it replaces', () => {
+  const id = (letter) => letter.repeat(24);
+  const base = {
+    production: true,
+    reused: true,
+    requestedBusinessId: id('a'),
+    businessId: id('b'),
+    businessName: 'A real business',
+    command: 'seed:demo',
+  };
+
+  it('says nothing in development, whatever the ids are', () => {
+    assert.doesNotThrow(() => assertTenantNamedForReset({ ...base, production: false }));
+    assert.doesNotThrow(() =>
+      assertTenantNamedForReset({ ...base, production: false, requestedBusinessId: undefined }),
+    );
+  });
+
+  it('allows a brand-new tenant, which has no id to name yet', () => {
+    assert.doesNotThrow(() =>
+      assertTenantNamedForReset({ ...base, reused: false, requestedBusinessId: undefined }),
+    );
+  });
+
+  it('refuses an existing tenant with no id named', () => {
+    const message = messageOf(() =>
+      assertTenantNamedForReset({ ...base, requestedBusinessId: undefined }),
+    );
+    assert.match(message, /--business=<businessId> is required in production/);
+    assert.match(message, /would REPLACE the data of business/);
+    assert.match(message, /Nothing was written/);
+  });
+
+  it('refuses an id that names another business', () => {
+    const message = messageOf(() => assertTenantNamedForReset(base));
+    assert.ok(
+      message.includes(`names business ${id('a')}, but this account owns ${id('b')}`),
+      message,
+    );
+    assert.match(message, /Refusing to reset a business that was not named/);
+  });
+
+  it('accepts the id the account actually owns, and names the command-specific hint', () => {
+    assert.doesNotThrow(() => assertTenantNamedForReset({ ...base, requestedBusinessId: id('b') }));
+
+    const message = messageOf(() =>
+      assertTenantNamedForReset({
+        ...base,
+        requestedBusinessId: undefined,
+        namingHint: 'the third field of --accounts',
+        command: 'seed:accounts (a@x.com)',
+      }),
+    );
+    assert.match(message, /the third field of --accounts is required in production/);
+    assert.match(message, /seed:accounts \(a@x\.com\)/);
+  });
+});
+
+/**
  * The scripts themselves, read from source. A guard that some path never calls is the failure mode
  * this pins: the next script added must opt in, and the old comparison must not grow back.
  */
@@ -309,6 +506,7 @@ describe('every data-touching script calls one of the guards', () => {
     'seed-perf-data.mjs',
     'cleanup-perf-data.mjs',
     'seed-demo-account.mjs',
+    'cleanup-demo-account.mjs',
     'seed-demo-tenant.mjs',
     'cleanup-demo-tenant.mjs',
     'seed-accounts.mjs',
@@ -316,10 +514,11 @@ describe('every data-touching script calls one of the guards', () => {
     'cleanup-role-accounts.mjs',
     'seed-perf-tenant.mjs',
     'cleanup-perf-tenant.mjs',
+    'verify-role-access.mjs',
     'restore-db.mjs',
   ];
 
-  const MEASUREMENTS = ['measure-ai-tools.mjs', 'measure-ai-turns.mjs'];
+  const MEASUREMENTS = ['measure-ai-tools.mjs', 'measure-ai-turns.mjs', 'verify-demo-data.mjs'];
 
   it('every seeder and cleanup resolves its target through a guard', () => {
     for (const name of SEEDERS) {
@@ -338,10 +537,28 @@ describe('every data-touching script calls one of the guards', () => {
     for (const name of MEASUREMENTS) {
       assert.match(
         read(name),
-        /assertReadableTarget\(|assertMeasurementTarget\(/,
+        /assertReadableTarget\(|assertMeasurementTarget\(|assertNamedReadTarget\(/,
         `${name} has no readable-target guard`,
       );
     }
+  });
+
+  it("the account cleanup empties one tenant's data and never an identity", () => {
+    // F-50: deleting a login whose MongoDB record still exists is the one unrecoverable state,
+    // so this command must use the data-only teardown and must be told which tenant it means.
+    const source = read('cleanup-demo-account.mjs');
+    assert.match(source, /clearTenantData\(\[businessId\]\)/, 'must use the shared data-only teardown');
+    assert.equal(/removeTenant\(/.test(source), false, 'removeTenant also deletes users and the business row');
+    assert.match(source, /--business=<24-character businessId> is required/, 'the tenant must be named');
+    assert.match(
+      source,
+      /String\(user\.businessId\) !== String\(businessId\)/,
+      'the account must agree with the named tenant before anything is removed',
+    );
+    // A destructive command reads its phrase from CLEANUP_CONFIRM, not the SEED_CONFIRM a seeder
+    // export would satisfy. Its phrase is its own, never the seeder's.
+    assert.match(source, /confirmEnvVar: 'CLEANUP_CONFIRM'/);
+    assert.match(source, /const CONFIRM_PHRASE = 'cleanup:demo-account'/);
   });
 
   it('no script compares NODE_ENV to "production" itself (control)', () => {

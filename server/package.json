@@ -39,6 +39,7 @@
     "cleanup:perf": "node scripts/cleanup-perf-data.mjs",
     "cleanup:perf-tenant": "node scripts/cleanup-perf-tenant.mjs",
     "cleanup:demo-tenant": "node scripts/cleanup-demo-tenant.mjs",
+    "cleanup:demo": "node scripts/cleanup-demo-account.mjs",
     "ai:usage": "node scripts/ai-usage.mjs",
     "ai:check": "node scripts/check-ai-model.mjs",
     "ai:models": "node scripts/ai-models.mjs",

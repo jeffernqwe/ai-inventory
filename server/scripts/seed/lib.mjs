@@ -49,6 +49,44 @@ const SUPPLIER_SUFFIX = ['Supplies', 'Trading', 'Distributors', 'Wholesale', 'In
 const PO_STATUSES = ['DRAFT', 'OPEN', 'RECEIVED', 'CANCELED'];
 const TX_TYPES = ['STOCK_IN', 'STOCK_OUT', 'ADJUSTMENT'];
 
+/**
+ * A production run that would REPLACE an existing tenant must name it.
+ *
+ * Shared by `seed:demo` and `seed:accounts` so the two CLIs cannot answer "may I replace this
+ * business?" differently. A brand-new tenant is allowed without an id: the run is about to create
+ * it, and creating deletes nothing.
+ *
+ * `namingHint` is the command's own way of naming the tenant (`--business=` for one account, the
+ * third field of `--accounts` for several), so the refusal tells the operator what to type rather
+ * than what the other command would have accepted.
+ */
+export function assertTenantNamedForReset({
+  production,
+  reused,
+  requestedBusinessId,
+  businessId,
+  businessName,
+  command,
+  namingHint = '--business=<businessId>',
+}) {
+  if (!production || !reused) return;
+
+  if (!requestedBusinessId) {
+    throw new SeedSafetyError(
+      `${namingHint} is required in production [${command}]: this run would REPLACE the data of ` +
+        `business ${String(businessId)}${businessName ? ` ("${businessName}")` : ''}. Name it to ` +
+        'prove that is the tenant you mean. Nothing was written.',
+    );
+  }
+  if (String(requestedBusinessId) !== String(businessId)) {
+    throw new SeedSafetyError(
+      `${namingHint} names business ${String(requestedBusinessId)}, but this account owns ` +
+        `${String(businessId)} [${command}]. Refusing to reset a business that was not named. ` +
+        'Nothing was written.',
+    );
+  }
+}
+
 /** Small deterministic PRNG (mulberry32) — same seed, same dataset, everywhere. */
 export function makeRandom(seed) {
   let a = seed >>> 0;
@@ -106,6 +144,11 @@ export async function insertChunked(model, docs, chunkSize = DEFAULT_CHUNK_SIZE)
  * across test cycles precisely to avoid accumulating addresses, so refreshing its credential
  * is the behaviour that makes the documented `DEMO_ACCOUNT_PASSWORD` mean what it says.
  *
+ * `refreshPassword: false` is for an EXISTING identity in production (2026-10-25). The account
+ * seeders can now run against a real deployment, where the address may belong to a person: a
+ * seeding run must never rewrite a living user's credential as a side effect. Creation still
+ * uses the password, because a new identity has none otherwise.
+ *
  * `emailVerified` is set true alongside it, for the reason the create path already gives:
  * this is a reserved demo credential (`…@example.invalid`), not a person, and the preview
  * test asserts the app's post-verification behaviour rather than re-testing Firebase.
@@ -115,7 +158,7 @@ export async function insertChunked(model, docs, chunkSize = DEFAULT_CHUNK_SIZE)
  * whose Firebase identity was deleted can neither sign in nor register
  * (`409 EMAIL_IN_USE`), and nothing in the application can repair it.
  */
-export async function resolveIdentity(email) {
+export async function resolveIdentity(email, { refreshPassword = true } = {}) {
   const { getFirebaseAdminApp } = await import('../../src/services/firebase/adminApp.ts');
   const { getAuth } = await import('firebase-admin/auth');
   const auth = getAuth(getFirebaseAdminApp());
@@ -124,12 +167,15 @@ export async function resolveIdentity(email) {
 
   try {
     const existing = await auth.getUserByEmail(email);
-    if (!password) {
+    if (!password || !refreshPassword) {
       return {
         uid: existing.uid,
         created: false,
         emailVerified: existing.emailVerified,
         passwordRefreshed: false,
+        // True only when a password WAS supplied and deliberately not applied. Callers use it to
+        // say "unchanged" out loud rather than leaving the operator to wonder.
+        passwordSkipped: Boolean(password) && !refreshPassword,
       };
     }
     await auth.updateUser(existing.uid, { password, emailVerified: true });
@@ -147,7 +193,7 @@ export async function resolveIdentity(email) {
   const created = await auth.createUser({ email, password, emailVerified: true });
   // NOT a refresh: the identity did not exist, so creation is what set the credential.
   // Saying otherwise in the console line would report a change that did not happen.
-  return { uid: created.uid, created: true, emailVerified: true, passwordRefreshed: false };
+  return { uid: created.uid, created: true, emailVerified: true, passwordRefreshed: false, passwordSkipped: false };
 }
 
 /**

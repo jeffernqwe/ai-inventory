@@ -31,6 +31,14 @@
 //   ROLE_TEST_PASSWORD='…' FIREBASE_WEB_API_KEY='…' SEED_CONFIRM=seed-roles \
 //     npm run verify:roles -- --business=<id> --signin
 //
+// Production: name the database, and use `--signin` unless `--base` is served by
+// this machine — a minted session is signed with this laptop's `JWT_SECRET`, which a
+// deployed server does not share. The check refuses that combination rather than
+// reporting a wall of 401s as role mismatches.
+//   ROLE_TEST_PASSWORD='…' FIREBASE_WEB_API_KEY='…' SEED_CONFIRM=seed-roles \
+//     npm run verify:roles -- --database=inventoryai_prod_db \
+//       --base=https://ai-inventory-l1mi.onrender.com --business=<id> --signin
+//
 // Exit code 0 = every cell matched. 1 = a cell disagreed, or the fixture is not
 // in the shape it must have.
 
@@ -38,7 +46,7 @@ import 'dotenv/config';
 import { randomBytes } from 'node:crypto';
 import mongoose from 'mongoose';
 
-import env from '../src/config/env.ts';
+import env, { DATABASE_NAMES } from '../src/config/env.ts';
 import { ROLE_VALUES, hasPermission } from '../src/constants/roles.ts';
 import { decodeAccessToken, signAccessToken } from '../src/config/jwt.ts';
 import { createSessionForToken, newSessionId } from '../src/services/session.service.ts';
@@ -65,6 +73,16 @@ function argValue(flag) {
 function fail(message) {
   console.error(`[${COMMAND}] ${message}`);
   process.exit(1);
+}
+
+/** Is this URL served from this machine? Only then does a minted session validate there. */
+function isLoopbackBase(base) {
+  try {
+    const host = new URL(base).hostname;
+    return host === 'localhost' || host === '127.0.0.1' || host === '::1';
+  } catch {
+    return false;
+  }
 }
 
 async function api(base, method, path, { token, body } = {}) {
@@ -225,11 +243,23 @@ async function main() {
   const businessArg = argValue('--business');
   const base = argValue('--base') ?? 'http://localhost:4000';
   const signin = process.argv.includes('--signin');
+  const production = env.mongodbDbName === DATABASE_NAMES.production;
 
   // The guard runs before the connection. This script writes almost nothing, but
   // it does mint sessions for real users, and a verification that can point at
-  // production is a verification nobody should be able to run by accident.
-  assertSafeTarget(env, COMMAND, { confirmPhrase: SEED_CONFIRM_PHRASE });
+  // production is a verification nobody should be able to run by accident. The
+  // named form makes production reachable deliberately, under the same phrase.
+  assertSafeTarget(env, COMMAND, {
+    confirmPhrase: SEED_CONFIRM_PHRASE,
+    database: argValue('--database'),
+  });
+
+  if (production && !signin && !isLoopbackBase(base)) {
+    fail(
+      'a production run against a remote server must use --signin: a minted session is signed ' +
+        `with this laptop's JWT_SECRET, which ${base} does not share. Nothing was checked.`,
+    );
+  }
 
   let webApiKey = null;
   let password = null;
@@ -271,7 +301,7 @@ async function main() {
     byRole[role] = matching[0];
   }
 
-  console.log(`[${COMMAND}] database : ${env.mongodbDbName}`);
+  console.log(`[${COMMAND}] database : ${env.mongodbDbName}${production ? '   (PRODUCTION)' : ''}`);
   console.log(`[${COMMAND}] tenant   : ${businessId} ("${ROLE_TEST_BUSINESS_NAME}")`);
   console.log(`[${COMMAND}] server   : ${base}`);
   console.log(`[${COMMAND}] sign-in  : ${signin ? 'REAL Firebase sign-in + exchange' : 'minted sessions (no password used)'}`);

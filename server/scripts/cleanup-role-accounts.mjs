@@ -21,13 +21,14 @@
 // Usage:
 //   SEED_CONFIRM=seed-roles npm run cleanup:roles
 //   SEED_CONFIRM=seed-roles npm run cleanup:roles -- --delete-firebase
+//   SEED_CONFIRM=seed-roles npm run cleanup:roles -- --database=inventoryai_prod_db
 //
 // Safe to run when nothing was ever seeded: it reports that and exits 0.
 
 import 'dotenv/config';
 import mongoose from 'mongoose';
 
-import env from '../src/config/env.ts';
+import env, { DATABASE_NAMES } from '../src/config/env.ts';
 import {
   SeedSafetyError,
   assertSafeTarget,
@@ -47,6 +48,12 @@ import User from '../src/models/user.model.ts';
 
 const COMMAND = 'cleanup:roles';
 
+function argValue(flag, argv = process.argv) {
+  const prefix = `${flag}=`;
+  const hit = argv.find((a) => a.startsWith(prefix));
+  return hit ? hit.slice(prefix.length) : undefined;
+}
+
 function fail(message) {
   console.error(`[${COMMAND}] ${message}`);
   process.exit(1);
@@ -54,11 +61,16 @@ function fail(message) {
 
 async function main() {
   const deleteFirebase = process.argv.includes('--delete-firebase');
+  const production = env.mongodbDbName === DATABASE_NAMES.production;
 
-  // Same phrase as the seeder: one fixture, one lifecycle. `assertSafeTarget`
-  // refuses production, refuses any database that is not development, and runs
-  // before a connection is opened.
-  assertSafeTarget(env, COMMAND, { confirmPhrase: SEED_CONFIRM_PHRASE });
+  // Same phrase as the seeder: one fixture, one lifecycle. Without `--database=`,
+  // `assertSafeTarget` refuses production and any database that is not development;
+  // WITH it, the same guard accepts a NAMED database, production included. It runs
+  // before a connection is opened either way.
+  assertSafeTarget(env, COMMAND, {
+    confirmPhrase: SEED_CONFIRM_PHRASE,
+    database: argValue('--database'),
+  });
 
   await mongoose.connect(env.mongodbUri, { dbName: env.mongodbDbName });
 
@@ -70,7 +82,7 @@ async function main() {
   }
 
   const users = await User.find({ businessId }).select('_id email role').lean();
-  console.log(`[${COMMAND}] database  : ${env.mongodbDbName}`);
+  console.log(`[${COMMAND}] database  : ${env.mongodbDbName}${production ? '   (PRODUCTION)' : ''}`);
   console.log(`[${COMMAND}] tenant    : ${businessId}`);
   for (const user of users) {
     console.log(`[${COMMAND}]   ${user.role.padEnd(7)} ${user.email}`);

@@ -1,412 +1,200 @@
 # 6. Every script, explained
 
-**What this guide gets you:** a plain list of every command this project ships, what each one does
-in ordinary words, the exact line to type, what you should see, and whether it can harm anything.
-
-It is the companion to [Guide 4](4-test-accounts-and-mock-data.md): Guide 4 explains *how accounts
-and data fit together*; this one is the *command reference*. Read Guide 4 first if you have not.
-
----
+Every command this project ships: what it does, the exact line, and whether it can harm anything.
+How accounts and data fit together is [Guide 4](4-test-accounts-and-mock-data.md); words are in
+[Guide 5](5-words-explained.md).
 
 ## How to read a command
 
-Every command in this guide has three parts. Once you can see them, none of them look like
-gibberish:
-
 ```bash
-cd C:/Users/jeffe/inventory-ai/server                          # 1. go to the right folder
-SEED_CONFIRM=seed-demo-account npm run seed:demo -- --email=x@y.z   # 2. setting  3. command
+cd C:/Users/jeffe/inventory-ai/server                          # where to stand
+SEED_CONFIRM=seed-demo-account npm run seed:demo -- --email=x@y.z   # setting, then command
 ```
 
-| Part | What it is | How to recognise it |
-|---|---|---|
-| `cd …` | **Where** you must be standing. A command only works from its own folder | The line starts with `cd` |
-| `NAME=value` | A **setting for one command only** — it disappears when the command ends | Text on the left, before `npm` or `node` |
-| `npm run name` / `node file` | The **command itself**, and often an option after it | `npm run …` or `node …` |
-
-Three details that explain most confusion:
-
-- **`--` separates npm from the script.** On the line `npm run seed:demo -- --email=x@y.z`, everything
-  after the `--` is an *option for the script*, not for npm. Forget the `--` and npm swallows the
-  option and complains about an unknown flag.
-- **Options are written `--name=value`.** For example `--size=1000` or `--email=me@example.com`.
-- **Where you type it matters.** `server/` commands assume you are in `server/`; `mobile/` commands
-  assume you are in `mobile/`; the three commands in Part 5 are typed from the project root. Each
-  block below starts with the exact `cd` line.
-
-> **On Windows with PowerShell**, `NAME=value npm run …` is not valid and must be split into two
-> lines first: `$env:SEED_CONFIRM="seed-demo-account"` then the command, then `$env:SEED_CONFIRM=$null`
-> to tidy up. In **Git Bash** the one-line form works as written. If a command complains that a
-> phrase is missing, this difference is almost always why.
-
----
+- `cd` — commands only work from their own folder (`server/`, `mobile/`, or the project root).
+- `NAME=value` — a setting for one command only.
+- `--` — everything after it goes to the script; forget it and npm rejects the option.
+- Options are `--name=value`.
+- In **PowerShell**: `$env:SEED_CONFIRM="…"`, run the command, then `$env:SEED_CONFIRM=$null`.
 
 ## Part 1 — Starting things
 
-### `npm start` — start the backend
-
 ```bash
 cd C:/Users/jeffe/inventory-ai/server
-npm start
-```
-
-Runs the backend, which holds the business rules and talks to the database. **You should see** a
-couple of database lines and then the port it is listening on — **4000**. Leave the window open.
-
-### `npm run dev` — the same, but self-restarting
-
-```bash
-cd C:/Users/jeffe/inventory-ai/server
-npm run dev
-```
-
-Identical to `npm start`, except it watches the `server/` folder and restarts by itself when you
-edit a file. Handy while changing backend code; for everything else, `npm start` is fine. Stop either
-one with **`Ctrl+C`**.
-
-### `npx expo start --dev-client` — start the app's code server
-
-```bash
-cd C:/Users/jeffe/inventory-ai/mobile
-npx expo start --dev-client
-```
-
-Serves the app's code to a phone (that server is called **Metro**). Press **`a`** to open the app on
-a connected Android phone. [Guide 2](2-run-on-your-phone.md) covers the phone side; nothing here
-works without the backend from Part 1 also running.
-
-### The other ways to start the app
-
-```bash
-cd C:/Users/jeffe/inventory-ai/mobile
-npm start          # same as npx expo start (no --dev-client)
-npm run android    # expo start --android
-npm run ios        # expo start --ios   (needs a Mac)
-npm run web        # expo start --web   (opens in a browser)
-```
-
----
-
-## Part 2 — Checking your work (safe, read-only)
-
-These do not change any data. They are the commands to run when you have edited code and want to
-know whether you broke something.
-
-```bash
-cd C:/Users/jeffe/inventory-ai/server
-npm run typecheck        # checks the code is written consistently; prints nothing when clean
-npm run lint             # checks for likely mistakes; prints nothing when clean
-npm run test:unit        # the fast tests; needs NO database
-npm test                 # every test, including ones that use a database
-npm run test:db          # only the database-using tests
-npm run check:extensions # catches a half-finished file rename
-npm run check:specifiers # catches an import that points at nothing
+npm start        # backend on port 4000; no build step
+npm run dev      # the same, restarting on edits
 ```
 
 ```bash
 cd C:/Users/jeffe/inventory-ai/mobile
-npm run typecheck        # same idea, for the app
+npx expo start --dev-client   # Metro; press "a" to open on a connected phone
+npm start                     # same, without --dev-client
+npm run android               # expo start --android
+npm run ios                   # expo start --ios (needs a Mac)
+npm run web                   # expo start --web
+```
+
+## Part 2 — Checking your work (read-only)
+
+```bash
+cd C:/Users/jeffe/inventory-ai/server
+npm run typecheck        # silent when clean
+npm run lint             # silent when clean
+npm run test:unit        # fast, no database
+npm test                 # everything, including database tests
+npm run test:db          # database tests only
+npm run check:extensions # half-finished file rename
+npm run check:specifiers # import pointing at nothing
+```
+
+```bash
+cd C:/Users/jeffe/inventory-ai/mobile
+npm run typecheck
 npm run lint
-npm test                 # the app's own test suite
-npm run test:watch       # re-runs the tests automatically as you edit
-npm run check:build-env  # will a phone build have the settings it needs?
-node scripts/check-build-env.mjs --live   # the same question, including EAS (needs a sign-in)
+npm test
+npm run test:watch
+npm run check:build-env                  # are this project's build settings complete?
+node scripts/check-build-env.mjs --live  # …and what the EAS environment holds (needs sign-in)
 ```
 
-**How to read the result:** the tests end with a summary line, where `0 failures` is a pass.
-`typecheck` and `lint` are **silent** when clean — no output at all is the good outcome. The two
-`check:` commands are the exception: they print an explicit `OK` line with counts.
+`0 failures` is a pass; `typecheck` and `lint` print nothing when clean; the two `check:` commands
+print an explicit `OK`. Database tests use the throwaway `inventoryai_test_db` and **fail loudly** if
+it is unreachable — a green run means they really ran.
 
-**About the database tests.** `npm test` and `npm run test:db` need the database. They use their own
-**throwaway** database (`inventoryai_test_db`) and there are guards that refuse to point them at
-your real data. If the database cannot be reached, a DB test **fails loudly** rather than being
-quietly skipped — a green run always means the tests really ran.
-
-### The label barcode — does it decode?
-
-A product label's barcode is drawn as vector bars, and a label whose bars are clipped or the wrong
-width prints perfectly and cannot be scanned. From the **project root**:
+### Label barcode — does it decode?
 
 ```bash
+cd C:/Users/jeffe/inventory-ai
 node scripts/verify-label-barcode.mjs --html --expect=2000053337540
 node scripts/verify-label-barcode.mjs --pdf=scripts/fixtures/label-2000053337540.pdf --expect=2000053337540
 ```
 
-The first decodes the label the app generates **right now** and also checks its geometry against the
-page — both 11-module quiet zones, and a page big enough to hold the label (a decode alone cannot see
-either defect, and both were real). The second decodes a **real** printed PDF (the fixtures record two
-that a phone produced, one either side of the quiet-zone fix). Both print what they found — code,
-module count, bar count, module width — and exit `0` only on a match. The decoder's own must-fail controls
-(clipped, thickened, stray bar, damaged digit) run first on every invocation, so a decoder that had
-stopped catching problems fails before it can report on a label. `2` means it could not look (a
-missing file) and is never a pass. This runs in CI with the app's tests; it is also what to run after
-a device print, replacing the fixture path with the file you just exported.
+The first decodes the label the app draws now **and** checks geometry (both 11-module quiet zones, a
+page large enough). The second decodes a real printed PDF. Exit `0` only on a match, `2` when it could
+not look. Its own must-fail controls run first on every invocation.
 
-### A phone pass you can re-run — `scripts/device/run.mjs`
+### A phone pass you can re-run
 
-The device acceptance pass used to be a hand-written list of `adb input tap` coordinates, which only
-worked on the screen they were measured on and left nothing behind. It is now a script. From the
-**project root**, with the phone connected, the development build installed and the tunnels up
-(`adb reverse tcp:4000 tcp:4000` and `adb reverse tcp:8081 tcp:8081`):
+Phone connected, development build installed, tunnels up (`adb reverse tcp:4000 tcp:4000`,
+`adb reverse tcp:8081 tcp:8081`):
 
 ```bash
-node scripts/device/run.mjs --list                      # what can be run
-node scripts/device/run.mjs --self-test                 # the harness's own controls; needs no phone
-node scripts/device/run.mjs                             # the read-only walk over every main screen
-node scripts/device/run.mjs --all --product=<id>        # the walk + print a label and decode its PDF
-node scripts/device/run.mjs --journey=draft --allow-writes   # create a draft purchase order
+cd C:/Users/jeffe/inventory-ai
+node scripts/device/run.mjs --list
+node scripts/device/run.mjs --self-test
+node scripts/device/run.mjs                                   # read-only walk, 24 steps
+node scripts/device/run.mjs --all --product=<id>              # + print a label, decode its PDF
+node scripts/device/run.mjs --journey=draft --allow-writes
 node scripts/device/run.mjs --journey=stock --product=<id> --source="Shop Front" --allow-writes
 node scripts/device/run.mjs --journey=transfer --product=<id> \
   --source="Shop Front" --destination="Main Warehouse" --allow-writes
 ```
 
-The two stock journeys are **net-zero**: `stock` moves 5 in and 5 out, `transfer` moves 1 across and 1
-back, and each checks the app's own confirmation arithmetic (`33 → 38`, `33 → 32, 32 → 33`) instead of
-a hard-coded quantity — so running them on every build does not drift the tenant and the tenth run
-still means something. They are write journeys, hence `--allow-writes`.
+- Exit **0** all steps passed, **1** a step failed, **2** blocked (no device, no session, no
+  debuggable build) — a block is never a pass. `--until=<n>` stops after step `n` and writes
+  `state.json`.
+- The write journeys are **net-zero** (`stock` 5 in/5 out, `transfer` 1 across/1 back) and check the
+  app's own confirmation arithmetic.
+- The product must belong to the tenant you are signed in as; another business's id fails at the
+  movement step — tenant isolation working.
+- Screens that may legitimately be empty are checked with `expectClean` (not loading, not the error
+  state); a screen that never finishes is exit 2.
+- The `label` journey reads the code off the screen, taps *Share PDF*, and decodes the PDF with the
+  same decoder CI uses (read via `adb exec-out` — `adb shell cat` rewrites newlines).
+- Each run writes `report.md`, `report.json` and screenshots to
+  `docs/evidence/device-runs/<timestamp>-<journey>/`.
+- Not covered: iOS, paper (no printer), the camera.
 
-**The product must belong to the tenant you are signed in as.** A product id from any other business
-is refused by the app (`Product not found` in the form), and the journey then fails at its movement
-step with *"expected 1 movement(s), saw 0"*. That is tenant isolation doing its job, not a defect —
-measured on 2026-10-22 with a real product of the neighbouring business. Pick an id from the signed-in
-business (the `role-owner@example.invalid` fixture tenant is disposable and is the right place for a
-write journey).
+## Part 3 — Sample data in and out
 
-**A pass means data, not just screens.** The smoke walk's `expectData` steps wait for labels only the
-server's data can produce — a stock row's `33 available · 33 on hand`, a product row's `SKU … ·
-Barcode …` — and fail when the screen shows its error state instead. This was added on 2026-10-22
-after a run reported **17/17 on a phone where every request was refused `401`**: every assertion was
-a heading, and a heading renders over an empty list. If a run stops at `expect stock rows on screen`
-with *"the screen is showing its error state"*, the app could not reach the API — check
-`curl http://localhost:4000/api/health` and the `tcp:4000` tunnel first. An **empty** tenant blocks
-that step (`exit 2`, *"nothing to prove"*) rather than passing it.
+Every command here can reach **production only when the database is named** (`--database=`) — see
+Part G. Without it, production is refused.
 
-The five screens that may legitimately be **empty** (purchase orders, suppliers, restock, the
-assistant, the audit trail) are covered by `expectClean` instead: it waits for the screen to stop
-loading and fails if it stopped on the app's error state, so a refusal is caught everywhere without
-needing rows to exist. A screen that never finishes loading is **exit 2** — out of time is not a
-verdict. The smoke walk is **24 steps** in total.
+| You want | Use |
+|---|---|
+| Data in the account you sign in with (dev) | `seed:demo` — A |
+| The same in production | `seed:demo -- --database=… --business=…` — G.2 |
+| Empty it again, keeping the login | `cleanup:demo -- --email=… --business=…` — G.2 |
+| A throwaway measurement tenant (no login) | `seed:perf` — D |
+| A large tenant you can sign into, in a named database | `seed:perf-tenant` — G.1 |
+| Several accounts at different sizes | `seed:accounts` — E |
+| One working login per role | `seed:roles` — F |
+| A small demo tenant with known figures (6 products, 112 units) | `seed:demo-tenant` — H |
+| Remove that demo tenant | `cleanup:demo-tenant` — H |
+| A brand-new signable test account | `seed:demo` with a new email + `DEMO_ACCOUNT_PASSWORD` |
 
-It drives the app by **route** (`inventoryai://dashboard`) and by the **label a person reads**, not by
-coordinates, so the same journey works on a different screen size. Each run writes `report.md`,
-`report.json` and screenshots into `docs/evidence/device-runs/<timestamp>-<journey>/`, and prints one
-line per step. Exit codes are the repository's: **0** every step passed, **1** a step failed (the app
-did something wrong), **2** a step was **blocked** — no device, no signed-in session, no debuggable
-build, no artifact — and a block is never reported as a pass. `--until=<n>` stops after step `n` and
-writes the screen to `state.json`, which is how a journey that fails mid-form gets debugged without
-another guessing session.
-
-The `label` journey needs a product whose barcode is a 13-digit EAN-13, so it takes `--product=<id>`.
-It reads the code **off the screen**, taps *Share PDF*, then decodes the PDF the phone wrote and
-fails if the two disagree — the same decoder CI uses. Its PDF is read with `adb exec-out`: plain
-`adb shell cat` runs the file through the phone's shell, which rewrites every newline and turned a
-correct label into "contains no decodable EAN-13" on the harness's first run.
-
-**What a pass does not mean:** iOS (still unverified, no macOS here), paper (no printer — the PDF
-decode rules out clipped bars, but it is not a scan of paper), and the camera (a barcode in the room
-was read by hand: a *Clearance Multi-Purpose Wipes* pack scanned to the record entered for it). The
-journeys prove the screens render, the routes work, the print path writes a decodable PDF and a form
-submits; a person still looks at the screenshots.
-
-**About `check:extensions` / `check:specifiers`.** These are plumbing checks that catch a specific
-kind of half-finished edit (a file renamed but its import lines not updated). When clean they print
-a line beginning `[check-module-graph] … OK` with a count of what they scanned, then exit `0`; a
-failure names the file and the line. You will rarely need them; they are listed so a failure is not
-a mystery.
-
----
-
-## Part 3 — Putting sample data in (and taking it out)
-
-There are **three seeding tools**, and they do genuinely different things — one can also create a
-brand-new signable account, and one is the only command pair here that can write to a named database,
-**production included**. Pick by the outcome you want:
-
-| You want | Use | Login needed? |
-|---|---|---|
-| **Data inside the account you sign in with** | `seed:demo` | Yes — it uses your existing login |
-| **A throwaway test tenant you measure against** | `seed:perf` | No — it never signs in |
-| **A large tenant you can sign into, in a database you NAME** (production included) | `seed:perf-tenant` — Part 3G | It creates the login |
-| **A small, fully known demo tenant** (6 products / 3 locations / 112 units) | `seed:demo-tenant` | It creates the login — sign in as `demo-preview@example.invalid` |
-| **Removing that demo tenant** | `cleanup:demo-tenant` | No — it deletes the tenant's rows only |
-| **A brand-new signable test account** | `seed:demo` with a new email + a password setting | Yes, and it creates the login |
-
-### A. Seed *your personal account* — the one you sign in with
-
-Your account on this machine is **`jefferndullamalinaozxc@gmail.com`** (role `OWNER`). To fill it
-with a large, realistic inventory dataset:
+### A. Seed your own account
 
 ```bash
 cd C:/Users/jeffe/inventory-ai/server
 SEED_CONFIRM=seed-demo-account npm run seed:demo -- --email=jefferndullamalinaozxc@gmail.com
 ```
 
-- **`--email=`** must be the address you sign in with. The address is used to look up your identity
-  in **Firebase** (the sign-in service), and the business is then found through that identity's
-  hidden id — never through the email itself. That is why the address has to be the real one.
-- **Optional `--total=80000`** — roughly how many documents to write. It must be between **100** and
-  **400000**, and the number is a real target, not a hint: the script hits it and prints the total it
-  actually produced.
-- **Optional `--seed=1`** — a number that makes the dataset **identical on every run**. Useful,
-  because then two measurements describe the same business.
+- `--email=` must be the address you sign in with; the business is found through its Firebase UID.
+- `--total=80000` (default, **100–400000**) is a real target; `--seed=1` makes runs identical.
+- **Replaces only that business's data.** Login and other tenants untouched. Re-running is safe.
+- Expect `OK` and `TOTAL 80000 (target 80000)`.
+- First run for a brand-new address creates the login — pass the password through a setting:
+  `DEMO_ACCOUNT_PASSWORD='…' SEED_CONFIRM=seed-demo-account npm run seed:demo -- --email=new-tester@example.com`
 
-**What you should see:** an `account` line, a `tenant` line naming your business, a `reset` line if
-data was replaced, a block of counts, and a final `OK` with `TOTAL 80000 (target 80000)`.
+### B. An extra test account
 
-**What it does, plainly:** it does **not** create anything new if your account already exists. It
-**deletes only the data of the one business that account owns**, then writes the new dataset. Your
-login is untouched, your other data is untouched, and no other business can be reached — every
-delete is filtered by your business's hidden id. Running it twice is safe: the second run replaces
-the data with the same dataset, which is exactly how you get a clean slate.
-
-**Only the first time, if the identity does not exist yet:** the script creates the login. Supply its
-initial password through a setting — never on the command line, never in a file:
+The same command with a new address creates a verified Firebase login, a MongoDB user + business
+(OWNER) and its dataset:
 
 ```bash
-cd C:/Users/jeffe/inventory-ai/server
-DEMO_ACCOUNT_PASSWORD='a-password-you-choose' SEED_CONFIRM=seed-demo-account \
-  npm run seed:demo -- --email=new-tester@example.com
-```
-
-### B. Create an extra test account you can sign in with
-
-There is no separate "create a user" script, and that is deliberate — the product's rules forbid
-deleting users, so a pile of half-made accounts is a liability. **A test account is created by the
-same command as A, with a new address:**
-
-```bash
-cd C:/Users/jeffe/inventory-ai/server
 DEMO_ACCOUNT_PASSWORD='choose-a-strong-password' SEED_CONFIRM=seed-demo-account \
   npm run seed:demo -- --email=tester-1@example.com --total=500
 ```
 
-That single command gives you **three** things at once:
+Use a throwaway address per tester. Do not delete its login while its database record exists (Part 6).
 
-1. a **Firebase login** for that address, marked verified;
-2. a **MongoDB user + business** linked to that login by its hidden id, with role `OWNER`;
-3. a **small seeded dataset** inside that business.
-
-You can then sign in to the app with that address and password, and it lands in its own data. **Rules
-of thumb:** use a different address for each tester, keep the address one you can throw away (the
-app's own rules never let an account be deleted cleanly), and remember that this account and your
-personal account have **completely separate data** — they are two different businesses.
-
-> **The one irreversible mistake in this guide.** Do **not** delete a login from Firebase while its
-> database record still exists. The two halves then disagree, nothing can repair it, and that address
-> can never sign in or register again. Part 6 covers the command that does this — read it there.
-
-**The other kind of test account — data only, no login.** `seed:perf` (next section) creates a tenant
-whose owner is `perf-seed-ai@example.invalid`. It has **no Firebase identity**, so it can never be
-signed into from the app. It exists purely to be measured against. Its sibling
-**`seed:perf-tenant`** (Part 3G) writes the same tenant **with** a verified identity, so the one thing
-that separates them is exactly the thing you choose: whether the tenant can be opened on a phone.
-Do not confuse the two.
-
-### C. Check that the seed really did what it claimed
-
-A script printing its own counts is evidence about the *script*. This one reads the rows back out of
-the database:
+### C. Verify a seed
 
 ```bash
-cd C:/Users/jeffe/inventory-ai/server
 npm run verify:demo -- --email=jefferndullamalinaozxc@gmail.com
 ```
 
-**It only reads** — it cannot damage anything. It prints the account, independent counts, the
-ledger check (every stock movement must satisfy the arithmetic its own type implies), referential
-integrity (no row may point at a product that does not exist) and the stock-health spread.
+Reads rows back: counts, ledger arithmetic, referential integrity, stock health. Exit **0** clean,
+**1** a real problem, **2** could not check (unreachable database / no such account) — not a data
+problem. Production: add `NODE_ENV=production MONGODB_DB_NAME=…` and `--database=`. Read-only, so no
+phrase.
 
-Its **exit code** is a contract, which matters if you ever script it:
-
-| Exit code | Meaning |
-|---|---|
-| **0** | Everything checked out |
-| **1** | A real problem was found — broken arithmetic, a negative quantity, a dangling reference |
-| **2** | **Could not check** — the database was unreachable, or there is no such account. This is *not* a data problem, and the tool says so explicitly, so you do not go hunting for a bug that is not there |
-
-If the numbers look wrong to you, that is the tool working: it is showing you the truth for whatever
-you actually seeded, including anything added in the app since.
-
-### D. A throwaway tenant, for measuring performance
-
-This creates one self-contained business, clearly named
-`PERF SEED — AI assistant stress test (do not use)`, with **no login attached**:
+### D. Throwaway measurement tenant
 
 ```bash
-cd C:/Users/jeffe/inventory-ai/server
-SEED_CONFIRM=seed-perf-ai npm run seed:perf -- --size=1000    # size = number of products (1–200000)
-SEED_CONFIRM=seed-perf-ai npm run cleanup:perf                # remove exactly that tenant
+SEED_CONFIRM=seed-perf-ai npm run seed:perf -- --size=1000    # products, 1–200000
+SEED_CONFIRM=seed-perf-ai npm run cleanup:perf
 ```
 
-The seeder prints a **`businessId`** on its last lines — copy it; Part 4's commands need it.
-`cleanup:perf` deletes only that tenant, **re-queries to prove nothing is left behind**, and reports
-`0 remaining`. It is safe to run when nothing was ever seeded — it says `nothing to clean` and exits
-cleanly. Nothing else in the database can be reached from it, even if it were handed a wrong id.
+Named `PERF SEED — AI assistant stress test (do not use)`, **no login** (owner
+`perf-seed-ai@example.invalid`), so it cannot be signed into. It prints the `businessId` the
+measurements need. `cleanup:perf` proves `0 remaining`; it says `nothing to clean` when empty.
 
-### E. Seed *several* accounts at once — and leave the barcodes blank on purpose
-
-`seed:accounts` fills **several accounts in one command**, each with its own size. Unlike `seed:demo`
-it **does not generate SKUs or barcodes**, which is the point: it leaves the app's own barcode
-generation as the thing that assigns a code first, so you can watch that feature work.
+### E. Several accounts, barcodes left blank
 
 ```bash
-cd C:/Users/jeffe/inventory-ai/server
-SEED_CONFIRM=seed-accounts npm run seed:accounts -- --dry-run   # show the plan; writes nothing
-SEED_CONFIRM=seed-accounts npm run seed:accounts                # seed the three default accounts
+SEED_CONFIRM=seed-accounts npm run seed:accounts -- --dry-run   # plan only, still runs the guard
+SEED_CONFIRM=seed-accounts npm run seed:accounts
 ```
 
-- **`--dry-run`** prints the plan and stops. It still runs the safety guard, so it proves the database
-  and the confirmation phrase are right — not merely the shape of the plan.
-- **`--accounts="a@x.com:5000,b@x.com:44000"`** replaces the plan. Each entry is `address:documents`.
-  A size is **required** for every entry; a guessed one would show up later as an unexplained
-  difference between two accounts, which is exactly what this tool exists to make trustworthy.
-- **`--include-sku`** generates SKUs and barcodes after all (then barcode generation has nothing left
-  to do).
+- **No SKUs or barcodes** — so the app's own generation is what assigns them.
+- `--accounts="a@x.com:5000,b@x.com:44000"` replaces the plan; a size is required per entry.
+- `--include-sku` generates them too.
+- Default sizes: small ≈ 5,000 documents (≈1,100 products), medium ≈ 44,000 (≈9,900), large ≈ 225,000
+  (≈50,600).
+- Each account gets its own business; the command refuses if two resolve to one business.
+- A missing login stops the run (unless `DEMO_ACCOUNT_PASSWORD` is supplied); an existing password is
+  never changed.
 
-| What the plan changes | Meaning |
-|---|---|
-| account **sizes** (`:5000`) | how many **documents** that account gets; products land at roughly 22 % of it |
-| `--seed` (default 1) | the number that makes a dataset reproducible |
-
-**Why the default sizes differ.** The default plan is three accounts at three very different sizes,
-because *"is the assistant slower on a bigger account?"* is a question three identical accounts cannot
-answer. `small` ≈ 5,000 documents, `medium` ≈ 44,000, `large` ≈ 225,000 (roughly 1,100 / 9,900 /
-50,600 products). The large tier is deliberately that size because an earlier measurement in
-`docs/DEVELOPMENT_ROADMAP.md` (§27BG) could only go up to 10,000 products and recorded "above that is
-still unmeasured".
-
-**What it guarantees:**
-
-- **Each account is its own business**, and every row is written with that account's own id, so the
-  three datasets cannot see each other. The script **refuses to continue** if two accounts in the plan
-  resolve to the same business — the whole comparison would be void, so it is checked rather than
-  assumed.
-- **Only the accounts in the plan are touched.** A re-run resets those accounts' data first, so running
-  it twice is safe and gives the same dataset.
-- **It never deletes a login**, and it only ever *creates* one if you supply `DEMO_ACCOUNT_PASSWORD`.
-  If an address has no login yet it **stops and tells you** rather than guessing — which is what you
-  want if you intend to register that address in the app yourself.
-
-**What you should see:** one block per account, then a table of **products**, **documents** and the
-**`businessId`** for each — and the exact `perf:measure` command to compare them.
-
-> **Good to know:** an account that has **never been signed in to** will still have its data, because
-> the seeder attaches the dataset to the account behind the address. Sign in once to see it in the app.
-
-### F. One login per role — for checking permissions, with no verification code
-
-`seed:roles` creates a **single small tenant** that holds **one working account per role** — OWNER, ADMIN,
-MANAGER and STAFF — so each role can be signed into on the phone and compared against the others **on the same
-data**. Four separate tenants would make a missing button indistinguishable from an empty dataset.
+### F. One login per role
 
 ```bash
-cd C:/Users/jeffe/inventory-ai/server
 ROLE_TEST_PASSWORD='choose-a-password' SEED_CONFIRM=seed-roles npm run seed:roles -- --dry-run
 ROLE_TEST_PASSWORD='choose-a-password' SEED_CONFIRM=seed-roles npm run seed:roles
+SEED_CONFIRM=seed-roles npm run verify:roles -- --business=<id printed>
+SEED_CONFIRM=seed-roles npm run cleanup:roles
 ```
-
-The four addresses are fixed, and are all in the reserved `example.invalid` domain, which **cannot receive
-mail**:
 
 | Role | Address |
 |---|---|
@@ -415,344 +203,221 @@ mail**:
 | MANAGER | `role-manager@example.invalid` |
 | STAFF | `role-staff@example.invalid` |
 
-All four share the password you put in `ROLE_TEST_PASSWORD`. Sign in on the phone with any of them, exactly as
-a normal user would.
+One tenant (`ROLE TEST — role boundary fixture (do not use)`, ≈900 documents). The `.invalid` addresses
+cannot receive mail; the logins are marked verified through the Firebase admin interface — the same
+write the app makes after a real code, so no rule is weakened. `verify:roles` signs all four in and
+checks **96 cells**, exiting 0 only when every one matches the role table; `--signin` (with
+`FIREBASE_WEB_API_KEY` and `ROLE_TEST_PASSWORD`) proves the real sign-in path. `cleanup:roles` keeps
+the logins unless `--delete-firebase`, and only after the database is gone.
 
-**No six-digit code is needed, and nothing is weakened to avoid it.** The login is marked verified through
-Firebase's admin interface — the *same* write the app performs after a real code is confirmed — and nothing
-about the app's verification rules changes: a normal account still has to verify its email, and these addresses
-could never receive a code anyway. The command refuses to run outside the development database, and it only
-ever touches those four addresses.
+### G. Production — the same commands, made deliberate
 
-**What it creates:** a tenant named `ROLE TEST — role boundary fixture (do not use)` with about **900
-documents** (roughly 200 products, 2 locations, suppliers, purchase orders and stock history), so every screen
-has something on it. The seeder **reads its own numbers back** and fails if the database disagrees.
+| Route | Commands | Touches |
+|---|---|---|
+| **A. A tenant of its own** (recommended for scale) | `seed:perf-tenant` / `cleanup:perf-tenant` — G.1 | one new, clearly named tenant; never an account it did not create |
+| **B. Your own account** | `seed:demo`, `seed:accounts`, `seed:roles` — G.2/G.3 | only the tenant that account owns, named with `--business=` when it exists |
+| **C. Emptying a tenant, keeping the login** | `cleanup:demo` — G.2 | one named tenant's data; user, business, members and sessions survive |
 
-**Prove the permissions, not just the logins** (the backend must be running):
+The rules every production run follows:
 
-```bash
-SEED_CONFIRM=seed-roles npm run verify:roles -- --business=<the id the seeder printed>
-```
+| Rule | Meaning |
+|---|---|
+| `--database=<name>` **required** | must equal the database the process resolved — never inferred from `--base=` or the URI |
+| the test database is refused | `npm test` clears it, so seeded rows would vanish mid-experiment |
+| a per-command phrase | `SEED_CONFIRM` for seeders, `CLEANUP_CONFIRM` for cleanups — the families cannot be satisfied by one habitual export |
+| the **tenant** is named when it would be reset | `seed:demo` and `seed:accounts` refuse to replace an existing business without `--business=` |
+| an existing **password is never changed** | only a brand-new identity gets one; the commands that own their addresses (G.1, roles) may rotate theirs |
+| every delete is scoped by `businessId` | no command here can become `cleanup:prod-mongodb` |
 
-It signs all four in and checks **96 cells** — every route against every role, plus the user-management rules
-(can ADMIN create another ADMIN? can ADMIN change its own role?) — and prints one line per route with `allow`
-or `deny` for each role. It exits **0** only when every cell matches the app's own role table. Add `--signin`
-(with `FIREBASE_WEB_API_KEY` and `ROLE_TEST_PASSWORD` set) to prove the real **phone sign-in path** too,
-rather than a session minted on the server.
+**One cycle:** G.1 seeds and prints the `businessId` → Part 4 asks the deployed assistant → G.2 empties
+the tenant keeping its login → G.1's cleanup removes the empty tenant and leaves the Firebase identity.
+They are not chained: the measurement spends shared AI allowance and the cleanups delete rows.
 
-**Remove it when you are done:**
-
-```bash
-SEED_CONFIRM=seed-roles npm run cleanup:roles
-```
-
-It removes that tenant and **proves nothing is left**; it re-queries rather than trusting its own report. The
-four Firebase logins are **kept** by default — that is the safe direction, because deleting a login whose
-database record still exists is the one irreversible mistake in this guide. `--delete-firebase` removes them
-too, but only after the database is gone and only after re-checking that nothing points at them.
-
-> **Note on ADMIN:** no screen or route is closed to ADMIN that is open to OWNER — the two capabilities ADMIN
-> lacks (business settings and role administration) have no screens yet. ADMIN's real restriction is visible in
-> **Users**: it cannot create another ADMIN, cannot change its own role, and cannot edit an ADMIN or the OWNER.
-> That is the difference to look for when comparing OWNER with ADMIN.
-
----
-
-### G. The production database — a large tenant you can sign in to (2026-10-25)
-
-Every command above refuses production on purpose, and that is still true of all of them. This pair is
-the single deliberate exception: it writes **one new tenant** into the **deployed** database, with its
-own sign-in, so the assistant can be exercised against the real deployment and a real phone without
-shipping a demo tenant or touching a customer's rows. It never accepts a `--business=` to write into
-and never resets an account it did not create.
+#### G.1 A tenant of its own
 
 ```bash
 cd C:/Users/jeffe/inventory-ai/server
 
-# the production database is NAMED, because server/.env sets MONGODB_DB_NAME to the development one
 NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
   DEMO_ACCOUNT_PASSWORD='choose-a-password' SEED_CONFIRM=seed:perf-tenant \
   npm run seed:perf-tenant -- --database=inventoryai_prod_db --size=60000
 
-# remove exactly that tenant (the Firebase login is kept, deliberately)
 NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
   CLEANUP_CONFIRM=cleanup:perf-tenant \
   npm run cleanup:perf-tenant -- --database=inventoryai_prod_db
 ```
 
-**Why it is a different command from `seed:perf`.** `seed:perf` is the query-measurement tool: it
-refuses production (`assertSafeTarget`) and creates **no login**, so its tenant cannot be opened in
-the app. That guard is relied on by its callers, so rather than weaken it this pair states its own
-terms (`assertNamedDatabaseTarget`):
+`NODE_ENV=production` alone is not enough: `server/.env` sets the development database, and the config
+refuses production with it.
 
-| Term | What it means |
-|---|---|
-| `--database=<name>` **required** | must equal the database the process actually resolved. Nothing is inferred from `--base=` or from the URI's path |
-| the test database is refused | `npm test` clears it, so seeded rows there vanish mid-experiment |
-| its own phrase | `SEED_CONFIRM=seed:perf-tenant` / `CLEANUP_CONFIRM=cleanup:perf-tenant` — not `seed-perf-ai`, so a shell-history entry cannot reach the wrong tool |
-| `DEMO_ACCOUNT_PASSWORD` required | the credential the seeded login is given, **refreshed on every run**, never written to a file and never printed |
+`--size` is **documents**, 50–400,000, default 4,000; products ≈22 %. It creates a verified OWNER login
+(`perf-seed-ai@example.invalid`) **only** in that tenant. Deterministic (`--seed`, default 1), SKUs are
+`SEEDSKU-…` (the probe asks about `SEEDSKU-0`). It re-counts every collection, re-checks every
+movement's arithmetic and requires that anchor before saying OK. Re-running resets its own rows and
+refreshes its password.
 
-**`NODE_ENV=production` alone is not enough here.** `server/.env` sets `MONGODB_DB_NAME` to
-`inventoryai_dev_db`, and the config refuses production-with-the-development-database outright, so
-the variable is set per command as above. That refusal is the point: it is what stops a
-`NODE_ENV=production` run from writing six figures of rows into the development database.
+Measured on production 2026-10-25: `--size=60000` → 18 categories, 6 locations, 240 suppliers, 13,500
+products, 27,200 inventory rows, 17,836 movements, 1,200 purchase orders in **110 s**. `--size=80000`
+→ 24 / 6 / 300 / 18,000 / 36,104 / 23,966 / 1,600 in **171 s**, after removing 60,016 previous rows.
 
-**What it creates.** A tenant named `PERF SEED — AI assistant stress test (do not use)` and one
-verified OWNER login, `perf-seed-ai@example.invalid` in that tenant and no other. `--size` is
-**documents** across every collection, 50–60,000, default 4,000; products are roughly 22 % of it.
-Intended for QA only: the address is in the reserved `.invalid` domain, so nothing can ever be
-delivered to it. The dataset is deterministic (`--seed`, default 1), the same `seed/lib.mjs` core
-`seed:demo` uses, and SKUs are `SEEDSKU-…` — which is the SKU the assistant probe asks about.
+The printed next-step commands carry the `NODE_ENV`/`MONGODB_DB_NAME` prefix, the deployed `--base=`
+URL and `node --env-file=../mobile/.env scripts/measure-ai-turns.mjs`. `cleanup:perf-tenant` re-queries
+to `0 remaining`, **keeps the Firebase identity** (F-50), and refuses if its name and owner address
+point at different businesses.
 
-**It verifies before it says OK.** Every collection is counted again, the ledger arithmetic of every
-stock movement is re-checked, and the `SEEDSKU-0` anchor the measurement needs must exist. A run that
-wrote an inconsistent dataset fails loudly instead of leaving a fixture the probe would then report
-as a model defect.
+#### G.2 Your own account
 
-**Measured 2026-10-25, on production:** `--size=60000` wrote **18 categories, 6 locations, 240
-suppliers, 13,500 products**, **27,200** inventory rows, **17,836** movements and **1,200** purchase
-orders in **110 s** (a second run took **126 s**), and the read-back found no problems. The same
-command on a re-run resets only that tenant's documents (it removed 6,008 of its own previous rows
-first), which is also how a password is changed: the credential is refreshed on every run.
+Read the id first (read-only, no phrase):
 
-**The command it prints is paste-able.** The suggested `perf:turns` and `cleanup:perf-tenant` lines
-carry `NODE_ENV=production MONGODB_DB_NAME=<database>`, because this machine's `server/.env` names the
-development database and both commands refuse a `--database=` value that is not what the process
-resolved. Without the prefix the next step would be rejected by the guard it is meant to satisfy.
+```bash
+NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
+  npm run verify:demo -- --database=inventoryai_prod_db --email=YOUR_EMAIL
+```
 
-**`cleanup:perf-tenant` removes it and proves it.** It re-queries and reports `0 remaining`, and it
-**keeps the Firebase identity** — the reverse direction is the harmless one, because a database
-record whose login is gone can never sign in again (F-50). If the business name and the owner
-address point at two different businesses it refuses rather than guessing, which is the only state
-in which this command could otherwise reach a stranger's tenant. Running it when nothing was ever
-seeded says so and exits cleanly.
+Then seed, naming that id:
 
-> **What this pair is not.** It is not `cleanup:prod-mongodb`, and it can never become it: every
-> delete is scoped to the single `businessId` both fingerprints agree on. Whole-database commands
-> remain in Part 6, where they are two phrases deep.
+```bash
+NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
+  SEED_CONFIRM=seed-demo-account \
+  npm run seed:demo -- --database=inventoryai_prod_db --email=YOUR_EMAIL \
+    --business=THE_BUSINESS_ID --total=60000
+```
 
----
+Expect `database … (PRODUCTION)`, the tenant line, `scope : replacing the DATA of business …`, counts,
+`OK`, and `password NOT changed on a production run`. Name, members and roles are untouched. A new
+business may omit `--business=`; once it exists, omitting it or naming the wrong id is refused **before**
+anything is deleted. `--total=900` is a quick smaller reset.
+
+Empty it, keeping the login:
+
+```bash
+NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
+  CLEANUP_CONFIRM=cleanup:demo-account \
+  npm run cleanup:demo -- --database=inventoryai_prod_db \
+  --email=YOUR_EMAIL --business=THE_BUSINESS_ID
+```
+
+Both identifiers are required and must agree. It removes inventory, movements, products, categories,
+locations, suppliers, purchase orders, audit rows, invitations and assistant conversations, then
+re-reads and prints `verification found 0 remaining`. Never deletes an identity. Add `--dry-run` to see
+the counts first — same collections, same order, nothing deleted.
+
+Measured on production 2026-10-25: 80,006 documents removed (36,104 inventory, 23,966 movements, 18,000
+products, 1,600 purchase orders, 300 suppliers, 24 categories, 6 locations, 4 assistant messages,
+1 conversation, 1 audit row), 0 remaining; the login and business row still signed in.
+
+#### G.3 Several accounts, and the role fixture
+
+```bash
+NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db SEED_CONFIRM=seed-accounts \
+  npm run seed:accounts -- --database=inventoryai_prod_db \
+    --accounts="a@x.com:60000:BUSINESS_ID_A,b@x.com:5000:BUSINESS_ID_B"
+
+NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
+  ROLE_TEST_PASSWORD='…' SEED_CONFIRM=seed-roles \
+  npm run seed:roles -- --database=inventoryai_prod_db
+NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
+  SEED_CONFIRM=seed-roles npm run cleanup:roles -- --database=inventoryai_prod_db
+```
+
+`seed:accounts` refuses the default plan in production. Roles own their tenant and addresses, so they
+need no `--business=`. `verify:roles` needs `--signin` when `--base` is the deployment: a local session
+is signed with the local `JWT_SECRET`, which the server does not share.
+
+#### G.4 Check before you trust it
+
+```bash
+NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
+  npm run verify:demo -- --database=inventoryai_prod_db --email=YOUR_EMAIL
+```
+
+Prints `(PRODUCTION)`, counts, ledger and integrity checks; exits 0 only if all hold; no phrase.
+
+#### H. The small demo tenant
+
+```bash
+DEMO_ACCOUNT_PASSWORD='<password>' SEED_CONFIRM=seed-demo-tenant \
+  npm run seed:demo-tenant -- --database=inventoryai_dev_db
+CLEANUP_CONFIRM=cleanup:demo-tenant npm run cleanup:demo-tenant -- --database=inventoryai_dev_db
+```
+
+Sign in as `demo-preview@example.invalid`. Fixed figures: **6 products**, **112 units**, Demo
+Warehouse 75 / Demo Shop 30 / Demo Van 7, health 3 healthy / 3 low / 1 out, three restock lines, 9
+ledger movements. Production form adds `NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db`. The
+database must be named and must match the resolved one; the password is set on every run; the teardown
+removes MongoDB rows only.
 
 ## Part 4 — Measuring the assistant
 
-These answer *"how fast is it, really?"* and *"how much of the allowance is left?"*. The three that
-ask the database need a `businessId`, and they refuse without one — the throwaway tenant's is printed
-by `seed:perf` (or by `seed:perf-tenant` for the sign-in-able one, Part 3G), and your own account's is
-printed by `verify:demo`. All of them are **read-only
-against the database**, and only `perf:turns` spends AI quota.
-
-| Command | What it measures |
+| Command | Measures |
 |---|---|
-| `npm run perf:measure -- --business=<id>` | How long each of the assistant's data queries takes — **no AI calls at all**, so it costs nothing |
-| `npm run perf:golden -- --business=<id> --out=before.json` | Records the exact answers those queries produce, with a fingerprint of each |
-| `npm run perf:turns -- --business=<id> --only=2` | One or two **real** assistant conversations, timed end to end |
-| `npm run ai:usage -- --log=<path>` | What the assistant has actually cost and how it failed — **no AI calls, no database, no quota** |
-| `npm run ai:usage -- --provider-only` | **Just the allowance left today** — no log, no database, no model call, no quota |
-| `npm run ai:models` | The configured chain with each model's **live endpoint status and 5m/30m/1d uptime**, then the free tool-capable ids you can add — **no completions, no quota** |
-| `npm run ai:models -- --check=<id>` | That model's live endpoint health, then whether ONE id answers a tool-shaped request, before you add it — **one request** |
-| `npm run ai:check` | The configured primary (and chain) verified against the provider's catalogue — free; `-- --probe` proves each with one tool-shaped request |
-| `npm run ai:health` | One scheduled model-health check, in the terminal — quota-free endpoint GETs; exit 0 healthy, 1 unavailable/degraded, 2 could not check; `-- --alert` sends the alert |
+| `npm run perf:measure -- --business=<id> --iterations=7 --label=before` | each data query's time — **no AI calls** |
+| `npm run perf:golden -- --business=<id> --out=before.json` | fingerprints the answers; `--compare=before.json` later |
+| `npm run perf:turns -- --business=<id> --only=1,3` | real assistant turns, end to end |
+| `npm run ai:usage -- --log=<path>` | turns, failures, requests and the allowance left — nothing spent (`--no-provider` keeps it offline) |
+| `npm run ai:usage -- --provider-only` | **just the allowance left today** — no log, database or model call |
+| `npm run ai:usage -- --db --days=30` | what was actually answered, from the database |
+| `npm run ai:models` | configured chain with live endpoint status and 5m/30m/1d uptime, plus free tool-capable ids |
+| `npm run ai:models -- --check=<id>` | one model's health, then one tool-shaped request |
+| `npm run ai:check` (`-- --probe`) | the configured models verified against the provider's catalogue |
+| `npm run ai:health` (`-- --alert`) | one model-health check; exit 0 healthy, 1 degraded/unavailable, 2 could not check |
 
-### Measuring the deployed assistant (production included)
+`perf:golden --compare` exits 0 identical, 1 different, 2 different tenants (a re-seed changes ids).
+`perf:turns` reads the allowance first and refuses with exit 2 when it provably cannot fit; `--force`
+overrides. All three read the database only; only `perf:turns` spends quota.
 
-`perf:turns` normally mints its own session, which works only against a **local** server because it
-shares that server's database and `JWT_SECRET`. The deployed server's secret is not (and should not
-be) on a laptop, so against it the probe takes the route the phone takes: Firebase sign-in over REST,
-then `POST /api/auth/firebase/exchange`. That is `--login`.
+### Measuring the deployed server
 
 ```bash
 cd C:/Users/jeffe/inventory-ai/server
 
-# 1. is there allowance left today? free, no log, no database
 npm run ai:usage -- --provider-only
 
-# 2. measure the deployed server, with the ground truth read from the database it writes to
 NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
   PERF_TURNS_CONFIRM=perf-turns:production \
   PERF_ACCOUNT_PASSWORD='the password the seed was run with' \
-  EXPO_PUBLIC_FIREBASE_API_KEY='the project\'s web API key' \
-  npm run perf:turns -- \
+  node --env-file=../mobile/.env scripts/measure-ai-turns.mjs \
     --base=https://ai-inventory-l1mi.onrender.com \
     --database=inventoryai_prod_db \
-    --business=<the businessId seed:perf-tenant printed> \
-    --login --only=1,2,3,4,5,6
+    --business=<businessId> --login --only=1,2,3,4,5,6
 ```
 
-| Piece | Why it is there |
-|---|---|
-| `--login` | sign in as the seeded owner and exchange the ID token; without it the run tries to mint a local session, which a deployed server refuses |
-| `PERF_ACCOUNT_PASSWORD` | the credential the seed set. `DEMO_ACCOUNT_PASSWORD` is accepted as a fallback; neither is printed |
-| `EXPO_PUBLIC_FIREBASE_API_KEY` | Firebase's REST sign-in needs the project's **public** web key — the same one that ships inside every build. `--firebase-api-key=` does the same job; neither is secret, and neither is logged |
-| `--database=` + `PERF_TURNS_CONFIRM` | the probe reads its expectations from this database, so it must be the one the server writes to. Omitting either is a refusal, before a token is minted or a request spent |
-| `--only=` | which of the six questions to ask. Each turn costs one or more provider requests against the shared daily allowance |
+`--login` signs in through Firebase REST and exchanges the ID token, as the phone does. The Firebase
+web key can come from `EXPO_PUBLIC_FIREBASE_API_KEY=` or `--firebase-api-key=` (both public), or be
+loaded from `mobile/.env` as above. `PERF_ACCOUNT_PASSWORD` is the seed's credential
+(`DEMO_ACCOUNT_PASSWORD` is a fallback). `--database=` plus `PERF_TURNS_CONFIRM` are both required — the
+probe reads its ground truth from that database.
 
-Questions 1–6 are: the dashboard headline numbers; the reorder total; one product by SKU
-(`SEEDSKU-0`); the out-of-stock count and its percentage; total units on hand; and products per
-location. Every expectation is read from the database **at run time** through the same services the
-assistant's tools call, so the check cannot describe a different dataset than the one being answered.
+Questions 1–6: dashboard numbers, reorder total, one product by `SEEDSKU-0`, out-of-stock count and
+percentage, total units on hand, products per location. `grounded` counts successful turns whose answer
+held every expected fact; `MISSING …` is a real disagreement; `NOT CHECKED` means the turn did not
+succeed (transport/quota/server) and is not a wrong answer.
 
-**How to read the output.** `grounded` is the number of successful turns whose answer contained all
-expected facts. `MISSING …` is a real disagreement between the model and the database. `NOT CHECKED`
-means the turn did not succeed (`status` not 201) — that is a transport, quota or server problem, not
-a wrong answer, and the server's own `[ai] turn outcome=…` line says which.
+Measured 2026-10-25 on production: at 60,000 documents **6/6 answered and grounded** (3275–13321 ms,
+one tool call each); at 80,000 documents questions 1–2 **2/2 grounded** (8713, 16419 ms). A six-question
+run cost **13 provider requests** — budget about two per question.
 
-**Measured 2026-10-25 against production**, with 13,500 products and 60,000 documents seeded by
-Part 3G: **6/6 answered, 6/6 grounded**, `3275, 3380, 4220, 5938, 7366, 13321` ms, one tool call per
-question, model `nvidia/nemotron-3.5-lightning:free`. The full answers are in
-`docs/evidence/production-ai-scale-2026-10-25/`. **It cost 13 provider requests for the six
-questions** (43 → 30 of the day's 50), so budget roughly **two requests per question** whenever an
-answer has to look something up — and check the allowance first on a day that has already been used.
-
-### Changing the AI models yourself
-
-The model list is **configuration, not code**. Two variables in `server/.env` (and the same two in
-the deployed host's environment) are the whole of it:
+### Changing the AI models yourself, and the watchdog
 
 ```bash
-# the model every turn starts on — measured healthy (100% endpoint uptime, 6/6 grounded
-# inventory turns) and therefore first
+# server/.env (and the deployed host's environment)
 AI_MODEL_OPENROUTER=nvidia/nemotron-3.5-lightning:free
-
-# the chain a turn falls back through, in preference order, comma-separated (max 5);
-# the primary is skipped automatically, so it does not need to be repeated here.
-# Order follows the same measurement: healthy second, degraded later, dead last.
 AI_FALLBACK_MODELS_OPENROUTER=nvidia/nemotron-3-ultra-550b-a55b:free,nvidia/nemotron-3.5-super-vl:free,liquid/lfm-2.5-2.6b:free,nvidia/nemotron-3-super-120b-a12b:free
+AI_MODEL_FAILURE_THRESHOLD=5     # default 5 failures open a cooldown
+AI_MODEL_COOLDOWN_MS=30000       # first cooldown; backs off 30s, 60s, 2m, 4m, then ≤5m
+AI_ATTEMPT_MAX_MS=0              # optional per-attempt slice; 0 = off
+AI_QUOTA_BLOCK_MS=30000          # a zero-remaining refusal blocks calls this long
 ```
 
-1. **See what is available:** `npm run ai:models` prints the configured chain with each model's
-   **live endpoint health** — the provider's own status code and its uptime over the last 5 minutes,
-   30 minutes and 1 day — then lists the ids you could add (free ones that declare tool support).
-   The health read is a GET, so it spends **no completion and no quota**.
-2. **Try one first:** `npm run ai:models -- --check=nvidia/nemotron-3.5-lightning:free` reads that
-   model's endpoint health, then sends a single tool-shaped request. A model that cannot call tools
-   cannot read inventory, so it is worth one request before it becomes part of the chain.
-3. **Edit the line** — reorder it to change priority, delete an id to drop it, add ids to try them. The
-   primary is skipped automatically wherever it appears, and duplicates are collapsed.
-4. **Restart the server** (`Ctrl+C`, then `npm start`, or `npm run dev`). `.env` is read at boot, so a
-   saved file does nothing until the process restarts; source edits under `npm run dev` do not reload
-   it either.
-5. **Verify:** `npm run ai:check` — and `npm run ai:check -- --probe` when you want each configured
-   model proven to answer (one request each).
+To change models: `npm run ai:models` to see health, `--check=<id>` to try one, edit the line, restart
+the server (`.env` is read at boot), then `npm run ai:check` (`-- --probe`). On Render a changed
+variable applies on the **next deploy**, not a restart.
 
-**How to choose the order.** Put the model with the best *measured* behaviour first — uptime alone is
-not enough, because a model can be up and still answer inventory questions badly. `npm run ai:models`
-now shows the provider's endpoint status and 5-minute, 30-minute and 1-day uptime beside each
-configured model, so the first half of that judgement needs no separate script. The second half is a
-real turn on your own tenant (`npm run perf:turns`), which shows whether its tool calls ground the
-numbers. A degraded model belongs below a healthy one, and a model reported at `status: -5` (no live
-endpoint) belongs last. The configured order is a snapshot of that judgement, not a permanent
-ranking: re-measure when answers slow down or start failing, and move the ids rather than editing
-code.
-
-On the deployed server there is no file to edit: set the same two variables in the host's environment
-and redeploy. Nothing else changes — no code, no migration, no mobile build.
-
-**On Render, a plain restart is not enough.** A changed environment variable belongs to the next
-**deploy**; a restart keeps the environment the deployment started with. Measured 2026-10-21: after
-changing the primary from `super-vl` to `lightning`, a restart still served `super-vl`, and the next
-deploy served `lightning`. Trigger a deploy after editing the variables, then confirm with the AI-5
-turn line (`model=…`).
-
-Two more optional variables decide when a model is rested, if the defaults are not what you want:
+Watchdog and alert variables:
 
 ```bash
-# how many consecutive availability failures open the cooldown (default 5)
-AI_MODEL_FAILURE_THRESHOLD=5
-
-# the first cooldown, in milliseconds (default 30000); repeated failed trials back off
-# 30 s, 60 s, 2 min, 4 min, then no more than every 5 min until the model answers again
-AI_MODEL_COOLDOWN_MS=30000
-```
-
-**What happens by itself.** When the active model fails five times in a row it is skipped for the
-cooldown and the next configured model serves the turn. Once that model answers, it becomes the
-**active** model for later turns — the configured default is not edited and still comes back after a
-restart. A cooled model is retried when its window ends; one success puts it back in the rotation,
-and one failure re-opens its cooldown immediately (so a permanently dead model costs one probe per
-window, not one per question). If every configured model is cooling, the assistant answers its
-normal temporary-unavailability message without spending a request. A quota refusal (429/402) is
-never treated as a model outage — the daily free allowance is shared by every model, so switching
-cannot help and the turn says so.
-
-### What happens before a request (AI-35–AI-38)
-
-Four mechanisms sit in front of the failover above. All of them use data the provider already
-publishes for free, and none changes what the assistant *answers* — only which model is asked and
-how long it is allowed to take.
-
-**A model the provider says is down is not tried first.** The same endpoint-health read the
-watchdog uses now also decides selection: a model whose reading is **unavailable** is skipped before
-any request is spent on it, at boot and again on every watchdog cycle. Only `unavailable` does
-this — `degraded` is still serving, and `unknown` is a check that could not run, never a verdict.
-The mark lasts until the next reading; an answer clears it at once. If a reading would remove
-**every** model, the configured primary is deliberately released so the assistant always has one
-attempt. The line that says so is `[ai] model unavailable by the provider, skipped: …`.
-
-**The allowance is visible, and an exhausted one is not re-tested every turn.** Every response
-carries the provider's remaining-request headers, so the turn line reports
-`quota=<remaining>/<limit>` (or `quota=unknown` when none is published). A refusal that reports
-**zero** remaining stops further provider calls for `AI_QUOTA_BLOCK_MS` (default 30 s) and answers
-the normal 429 immediately; a success lifts it at once. A 429 **without** that reading changes
-nothing — the old one-request-per-turn behaviour stays.
-
-**A promotion ends by itself.** The two checks that followed a promotion used to be the only way
-back: a restart, or the promoted model failing. Now the watchdog ends the promotion after **two
-consecutive** healthy readings of the configured model (one reading is a sample, two is a
-recovery), clearing its health mark at the same moment and logging
-`[ai:watchdog] the configured model is healthy again … returning to it: <id>`. One reading is
-deliberately not enough: that is the churn AI-31 exists to prevent.
-
-**Optional: a per-attempt slice.** `AI_ATTEMPT_MAX_MS` (default **0 = off**) bounds a single model
-attempt while another candidate remains, so a model that hangs instead of refusing cannot consume
-the whole turn. The **last** attempt always keeps everything left, so a slow-but-working answer is
-never cut short when there is nowhere else to go. Set it **above** the slowest legitimate answer you
-have measured — 25 000 ms is the documented starting point for this tier (5.3–19.4 s measured) —
-and re-measure after changing models.
-
-The watchdog's per-run line also states the live state, so none of this needs a log hunt:
-
-```text
-[ai:watchdog] checked 5 model(s): 3 ok, 1 degraded, 1 unavailable, 0 unknown; active=<promoted> (configured=<primary>) cooling=<ids|none> quota=12/50
-```
-
-### What watches the models (AI-34)
-
-Nothing used to notice a dead model until a member asked a question. The **model-health watchdog**
-now runs inside the server in production, once every 30 minutes, and reads the provider's own
-endpoint-health API for the primary and every configured fallback:
-
-```text
-GET /v1/models/{author}/{slug}/endpoints
-```
-
-That is a **GET, not a completion**, so it spends none of the free tier's daily request allowance.
-A model is:
-
-- **ok** — a current endpoint reports status 0 and its best 5-minute uptime is at least 90% and its
-  best 30-minute uptime is at least 95%;
-- **degraded** — an endpoint is down while another is up, an uptime window has fallen below its
-  threshold, or no endpoint reports status 0 but a recent uptime is still measurable (a negative
-  status with 100% five-minute uptime means *serving badly*, not *dead*);
-- **unavailable** — the provider publishes no endpoint, or none reports status 0 and no recent
-  uptime is measurable;
-- **unknown** — the health record could not be read. This is **not** called an outage, because the
-  check itself may be the broken thing. Two consecutive unreadable checks alert that the check
-  cannot run, and a later success reports the recovery.
-
-The watchdog alerts **only when the state changes**: one message when a model goes down or starts
-degrading, one when it recovers, and silence while nothing moves. A restart forgets the previous
-state, so a still-broken model produces one alert on the first check after the restart. That is
-deliberate for a single-instance deployment; there is no shared store for this state.
-
-**Where the alert goes.** Set the operator address and it is emailed through the same Brevo mail
-boundary that delivers verification and reset mail:
-
-```bash
-# the alert recipient; leave empty and the alert is written to the server log at error level
 AI_HEALTH_ALERT_EMAIL=owner@example.com
-
-# optional; the defaults are shown
-AI_HEALTH_WATCH_ENABLED=true            # production defaults on; development/test off
+AI_HEALTH_WATCH_ENABLED=true            # production on; development/test off
 AI_HEALTH_WATCH_INTERVAL_MS=1800000     # 30 minutes
 AI_HEALTH_WATCH_INITIAL_DELAY_MS=60000
 AI_HEALTH_MIN_UPTIME_5M=90
@@ -760,484 +425,201 @@ AI_HEALTH_MIN_UPTIME_30M=95
 AI_HEALTH_UNKNOWN_ALERT_AFTER=2
 ```
 
-Set these in the host's environment, not in a committed file. On Render a changed variable applies
-on the **next deploy**, not a restart. If mail is not configured, the alert is still logged — the
-watchdog never decides that an undeliverable alert is no alert.
+The watchdog reads `GET /v1/models/{author}/{slug}/endpoints` (a GET, no quota), classifies each model
+**ok / degraded / unavailable / unknown**, alerts only on state change, and emails through Brevo, or
+logs at error level when mail is not configured. If every model is cooling, the assistant answers its
+normal temporary-unavailability message without spending a request. A quota refusal (429/402) is never
+treated as a model outage.
 
-**Run the same check once, without waiting for the timer:**
-
-```bash
-cd C:/Users/jeffe/inventory-ai/server
-npm run ai:health                  # print the state; send nothing
-npm run ai:health -- --alert       # send the alert too, if a problem was found
-```
-
-It exits **0** healthy, **1** a model is unavailable or degraded, **2** the check could not run.
-A 2 is never a pass. This is also the command to use from an external scheduler if the host sleeps
-and the in-process timer therefore does not run; in that case `--alert` sends on every run that
-finds a problem, because a one-shot process has no previous state to compare.
-
-**What it cannot do.** A free hosting instance that sleeps stops checking while it sleeps. The
-watchdog watches the *model chain*, not the deployment: `/api/health/ready` and the 5xx counters are
-still the signals for "is the service itself healthy?" (Part 7).
-
-### Measuring turns, latency and answer changes
+### Capturing the log the usage report needs
 
 ```bash
 cd C:/Users/jeffe/inventory-ai/server
-
-# how fast are the data queries, with no AI cost?
-npm run perf:measure -- --business=PUT_THE_BUSINESS_ID_HERE --iterations=7 --label=before
-
-# did a change alter the answers? capture before, change, capture after and compare
-npm run perf:golden -- --business=PUT_THE_BUSINESS_ID_HERE --out=before.json
-#   ... make your change ...
-npm run perf:golden -- --business=PUT_THE_BUSINESS_ID_HERE --out=after.json --compare=before.json
-
-# ask the assistant two real questions (the backend must be running on port 4000)
-npm run perf:turns -- --business=PUT_THE_BUSINESS_ID_HERE --only=1,3
-```
-
-- **`--iterations`** (perf:measure) is 1–200, default 7. **`--label`** just names the run in the
-  output.
-- **`perf:golden --compare`** exits **0** when every answer is byte-for-byte identical, **1** when
-  something differs, **2** when the two captures are from *different* tenants (a re-seed creates new
-  ids, so differences are then expected and this deliberately says "cannot compare" instead of
-  crying wolf).
-- **`perf:turns` spends real AI quota.** The service behind the assistant allows only a small number
-  of requests per day in total, so keep the question list short and use `--only=` to re-check one
-  question instead of all of them. It defaults to `http://localhost:4000`; `--base=` overrides that,
-  and `--out=` says where to save the answers.
-- **`perf:turns` reads the allowance before it spends it.** It asks the provider for the day's
-  remaining free-model requests and, when there are **provably** too few for the questions selected,
-  refuses with exit **2** — before a session is minted and before anything is sent — naming the
-  numbers and the window (`00:00 UTC`). A reading it could not make (no key, no network, an
-  unfamiliar body) never blocks a run: the numbers are printed and the run continues, because a
-  diagnostic that cannot see must not pretend to know. `--force` overrides a refusal. Note what it
-  does **not** guarantee: a turn with tool rounds costs more than one request, so the check only
-  catches the run that cannot possibly fit — a run can still meet a `429` mid-way.
-- **`ai:usage` is the one to run *before* spending anything.** It reads two things that cost nothing
-  and joins them. **The log** — the server's own per-turn lines (`[ai] turn …`, written for every turn
-  including the ones that fail) — gives turns, which ones failed and how, how many provider
-  **requests** they cost and the provider-versus-tools time split. **The database** (`--db`) gives the
-  turns that were *answered*: `AIMessage` has always persisted the model, the tools used, the
-  provider's token usage and (since AI-8) whether the turn was degraded, so those figures need no new
-  field and no log sink. Then it asks the AI provider's own account how much of the daily free
-  allowance is left. Nothing is called and nothing is written, which is what makes it free to run
-  whenever the question comes up.
-
-  `--log=<path>` reads a saved log and **stdin** reads a pipe; `--db` reads the database and is
-  **opt-in** (no flag, no connection), scoped by `--days=N` (default 7) and `--business=<id>`;
-  `--no-provider` keeps it fully offline; `--json` prints the same figures as one object;
-  **`--provider-only`** prints the allowance and nothing else, and is the one form that needs no log
-  at all (it used to be impossible to ask "is there quota?" without first producing a log). The two
-  halves are **complements, not alternatives**: a failed turn persists nothing, so timeouts,
-  abandonment, output limits and quota refusals appear only in the log.
-
-```bash
-cd C:/Users/jeffe/inventory-ai/server
-
-# what has the assistant cost, and what is left today?   (nothing is spent)
-npm run ai:usage -- --log=server.log
-
-# the same, straight off a running server's output
-npm start | npm run ai:usage --silent --
-
-# what has actually been ANSWERED, over the last 30 days — straight from the database
-npm run ai:usage -- --db --days=30
-```
-
-  **The log has to come from somewhere, because there is no durable copy of it.** A turn line and
-  the empty-completion line are written to the server's stdout and never stored, so the failures
-  that persist nothing — a timeout, an abandoned turn, a quota refusal — exist **only** there, and
-  the database half cannot show them (the report says so in place). `logs/` is already ignored by
-  git, so keeping one is a redirect and nothing else:
-
-```bash
-cd C:/Users/jeffe/inventory-ai/server
-
-# a fresh clone has no logs/ directory, and the redirect fails without one
 mkdir -p logs
-
-# start the server with its output going to a file you can read back later
 npm start > logs/server.log 2>&1
 
-# ...and then, whenever the question comes up: nothing is spent, nothing is written
 npm run ai:usage -- --log=logs/server.log
-
-# the turns that FAILED (a turn line is written on every exit, including the ones that throw)
+npm start | npm run ai:usage --silent --      # or straight off a running server's output
 grep '\[ai\] turn outcome=' logs/server.log | grep -v outcome=ok
-
-# the 2xxs that carried nothing at all — one line per occurrence, with the body's SHAPE (AI-12)
 grep 'empty completion' logs/server.log
 ```
 
-  The last grep is the one to run first when an answer arrives as *"I could not generate a response
-  right now."*: it names the model the request asked for, whether the body named a model and
-  reported usage, which block types it carried, and which top-level fields it had — enough to tell
-  "the model reasoned and produced nothing" from "the gateway answered with a body that is not a
-  message". It never prints the body itself, so it is safe to paste into a record.
+Turn lines exist only in stdout (never stored), so timeouts, abandoned turns and quota refusals appear
+only here; the database half shows what was answered. The `empty completion` line names the model,
+whether the body reported usage, which block types it carried and which top-level fields — never the
+body itself.
 
----
-
-## Part 5 — Maintenance and safety checks (from the project root)
-
-These three live in the project's `scripts/` folder **outside** `server/` and `mobile/`, so they are
-typed from the project root with plain `node`:
+## Part 5 — Maintenance (from the project root)
 
 ```bash
 cd C:/Users/jeffe/inventory-ai
-
-node scripts/check-secrets.mjs              # fails if a credential shape appears in the tracked files
-node scripts/audit-access.mjs               # checks the repository is still private and yours alone
-node scripts/check-upgrade-watches.mjs      # reports whether a deferred upgrade is ready to start
+node scripts/check-secrets.mjs           # 0 = clean; waive a line with "secret-guard:allow"
+node scripts/audit-access.mjs            # repo privacy/access; needs gh signed in; run by hand
+node scripts/check-upgrade-watches.mjs   # deferred upgrades; --json, --self-test; needs network
 ```
-
-- **`check-secrets.mjs`** is the project's only automated credential control (the repository is
-  private, so GitHub's own scanning is not available). It proves its own rules can still *fail*
-  first, then scans. **Read the script itself if you want the detail; to use it, just note that `0`
-  means clean.** A deliberate exception can be waived on the line with the comment
-  `secret-guard:allow`.
-- **`audit-access.mjs`** needs the `gh` tool already signed in as you, and is deliberately **not**
-  run automatically — in a pipeline the same endpoints answer `403`, which would be a useless "not
-  verified". Run it by hand before and after anything that touches repository settings.
-- **`check-upgrade-watches.mjs`** needs the network. It watches four things that are **waiting on
-  other people to publish** — a new Expo SDK, the Jest version that comes with it, the linter that
-  gates a TypeScript 7 upgrade, and a `decode-uri-component` release that is both patched and usable
-  from CommonJS (the one open advisory that reaches a shipped bundle; its patched release is ESM-only,
-  so applying it today breaks the app — see `SECURITY.md`). `--json` gives machine-readable output;
-  `--self-test` runs only its own controls. A "READY" line is **news, not an error** — the exit code
-  stays 0 unless one of its own checks is broken.
-
-### `audit:indexes` — the database-index check
 
 ```bash
 cd C:/Users/jeffe/inventory-ai/server
 npm run audit:indexes
 ```
 
-Several performance and housekeeping features depend entirely on a **database index** existing for
-real. The test suite can only prove an index is *declared in the code*; this command asks the
-**database** whether it is actually there. **It is read-only** — it never creates, changes or drops
-anything, on purpose (a tool that "fixes" indexes can drop one an operator added deliberately).
+`audit:indexes` asks the **database** whether every declared index exists. Exit **0** all present,
+**1** a real disagreement (never auto-fixed — the fix can drop an index someone added), **2** **NOT
+VERIFIED**, the audit could not run. Nothing is created, changed or dropped.
 
-**You should see** a line per collection and an `OK`. There are **three outcomes**, and the difference
-between the last two is the point:
-
-| Exit code | Means | What to do |
-|---|---|---|
-| `0` | Every declared index is really there, in the right field order | Nothing |
-| `1` | The audit **ran to completion** and found a declaration the database disagrees with | An operator should look. Deliberately **not** auto-fixed, because the fix can drop an index someone added on purpose |
-| `2` | **NOT VERIFIED** — the audit could **not run** (no internet, database unreachable) | **Nothing is wrong.** Check the connection and re-run. **This is not a data problem** |
-
-The `2` is deliberate: a network hiccup must never be reported as *"your indexes are wrong"*, because
-the remedy for a real disagreement is a change to the database's index structure — and `2` is what
-stops a blip from pointing anyone at that. `verify:demo` uses the same code for the same reason.
-
-### `backup:db` — the recoverable copy, and `restore:db` — putting it back
+### Backup and restore
 
 ```bash
 cd C:/Users/jeffe/inventory-ai/server
 
-# 1. Take the copy. The folder MUST be outside the project — see below.
 BACKUP_DIR=C:/Users/jeffe/inventory-ai-backups CONFIRM=backup-db npm run backup:db
 
-# 2. Look before you leap: checks every file, writes nothing. Safe against ANY database.
-CONFIRM=restore-db npm run restore:db -- --from=<the folder it printed> --dry-run
+CONFIRM=restore-db npm run restore:db -- --from=<folder> --dry-run
 
-# 3. Put it back — DISPOSABLE DATABASES ONLY (the test or development one).
-CONFIRM=restore-db npm run restore:db -- --from=<a folder you have already dry-run>
+CONFIRM=restore-db npm run restore:db -- --from=<a folder you already dry-ran>
 ```
 
-The cluster this app runs on is Atlas's **free tier**, and MongoDB is blunt about it: free clusters
-have **no backups at all** — the paid tiers do, and the documented answer for the free tier is a
-`mongodump`. This pair is that dump, and it is the project's answer to *"what do we do if the data
-is gone?"*.
-
-**How it works, in one line each.** `backup:db` writes **one gzipped file per collection** plus a
-`manifest.json` recording every file's length and its **SHA-256 fingerprint**. `restore:db` reads
-that manifest, re-fingerprints every file, and only then drops and inserts — so a copy that was
-truncated by a dropped connection fails **before** it can replace good data with bad.
+The free Atlas tier has **no backups**; this pair is the answer. `backup:db` writes one gzipped file per
+collection plus a `manifest.json` with every file's length and SHA-256; `restore:db` verifies those
+fingerprints **before** dropping and inserting.
 
 | | `backup:db` | `restore:db` |
 |---|---|---|
-| Touches the database | **reads only** | **drops and rewrites** collections |
-| Which database | any, including production | `inventoryai_test_db` or `inventoryai_dev_db` **only** |
-| Folder | `BACKUP_DIR` (outside the project) | `--from=<folder>` |
+| Database | any, including production | `inventoryai_test_db` or `inventoryai_dev_db` **only** |
+| Folder | `BACKUP_DIR`, **outside the project** | `--from=` |
 | Phrase | `CONFIRM=backup-db` | `CONFIRM=restore-db` |
 | `--dry-run` | — | verifies and reports, writes nothing |
 
-**Three things that look like obstacles and are not.**
+A dump inside the repository is refused (one `git add` from being committed). A name containing `prod`
+or `live` is refused even if the list were edited. A long restore prints progress every 50,000
+documents. Watch the `size` line: a 525,750-document restore needs ≈240 MB, which fills a 512 MB free
+tier — the command reports that and exits 1. The habit worth forming: restore into the test database and
+run `npm test` before you need it.
 
-- **The folder must be outside the project.** A dump is a copy of real customer data; written inside
-the repository it is one `git add` away from being committed and pushed. The command refuses such a
-path rather than warning about it.
-- **`restore:db` refuses production, by name and by shape.** Restoring is the most destructive thing
-in this guide — it drops collections — so the target has to be one of the two throwaway databases,
-and a name containing `prod` or `live` is refused even if you edited the list (you did not).- **A long restore prints its progress every 50 000 documents.** If a collection seems to stall, look
-  for those lines before assuming it is stuck. On this project's throttled free-tier cluster the
-  223 227-document `inventory` collection took **46 s**.
-- **Watch the `size` line, because the disk copy tells you nothing about the fit.** The same drill
-  measured the ceiling too: restoring the whole 525 750-document development database needs about
-  **240 MB** of room, and this cluster is a 512 MB free tier, so the restore filled it and Atlas
-  answered *"you are over your space quota, using 520 MB of 512 MB. Writes are blocked"*. The command
-  reported that, exited `1`, and claimed nothing. **Nothing was lost** — the space was freed by
-  dropping the test database, and the development data was never touched — but this is why the size
-  is printed before the first write: an 11 MB copy can still be a 240 MB restore.
+### Files that are not commands
 
-**The one habit worth forming:** restore the copy into the *test* database and run `npm test` against
-it before you need it. That is the difference between a backup and a backup you have proved.
+`server/scripts/perf/lib.mjs` (the perf tenant definition, the safety guard and teardown helpers),
+`server/scripts/seed/lib.mjs` (the dataset shape shared by `seed:demo` and `seed:accounts`),
+`server/scripts/cleanup/lib.mjs` + `run.mjs` (the guarded delete sequence). Opening them does nothing, by
+design. Also automatic: `npm install` in `mobile/` applies a `postinstall` patch.
 
-### Files that are not commands (you never type these)
+## Part 6 — Destructive commands
 
-For completeness, a few files in the `scripts/` folders look like scripts but are **shared code**, not
-things to run:
-
-| File | What it is |
-|---|---|
-| `server/scripts/perf/lib.mjs` | the code that defines what the performance tenant *is*, and the safety guard and tenant-teardown helpers every seeder and cleanup command shares. Opening it as a program does nothing — by design, so that reading it can never seed a database by accident |
-| `server/scripts/seed/lib.mjs` | the code that shapes a seeded dataset (the seven collections). `seed:demo` and `seed:accounts` both call it, so the two seeders cannot drift apart. Opening it does nothing, for the same reason |
-| `server/scripts/cleanup/lib.mjs`, `server/scripts/cleanup/run.mjs` | the guards and the guarded delete sequence behind every `cleanup:*` command. The guards live here so that the code being tested is the code that runs |
-
-You will never type these directly; the commands in Part 6 already do. There is one more thing that
-runs without being typed: **`npm install` inside `mobile/` also applies a small patch automatically**
-(a `postinstall` step), so a fresh install is a complete install — you do not need a second command.
-
----
-
-## Part 6 — The destructive commands
-
-Everything here **permanently removes data**. Nothing is recoverable. Each one asks for a typed
-confirmation phrase, and `--yes` **does not skip the phrase** — it only skips the typing prompt. The
-phrase is always the command's own name, supplied as a setting:
+Everything here permanently removes data. `--yes` skips only the typing prompt — the phrase is still
+required, and it is the command's own name:
 
 ```bash
 cd C:/Users/jeffe/inventory-ai/server
 CLEANUP_CONFIRM=cleanup:test-mongodb npm run cleanup:test-mongodb -- --yes
 ```
 
-| Command | What it deletes | Risk |
+| Command | Deletes | Risk |
 |---|---|---|
-| `npm run cleanup:test-mongodb` | Everything in `inventoryai_test_db` — the tests' scratch database | ✅ **Low.** It is throwaway by design |
-| `npm run cleanup:perf` | The disposable performance tenant, and nothing else | ✅ **Low** (needs `SEED_CONFIRM=seed-perf-ai`) |
-| `npm run cleanup:dev-mongodb` | **Everything, in every business, in `inventoryai_dev_db`** — including your account's data | ⚠️ **High.** Your login survives (Firebase is untouched, so you can still sign in), but the app will be empty |
-| `npm run cleanup:test-firebase` | **Every login** in the development Firebase project, including yours | ⚠️⚠️ **Irreversible — read the next paragraphs first** |
-| `npm run cleanup:prod-mongodb`, `npm run cleanup:all-mongodb` | Real data / every database | ⚠️⚠️ Requires a second, deliberately loud phrase: `CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA` |
+| `cleanup:test-mongodb` | everything in `inventoryai_test_db` | ✅ throwaway |
+| `cleanup:perf` | the disposable perf tenant (needs `SEED_CONFIRM=seed-perf-ai`) | ✅ that tenant only |
+| `cleanup:demo-tenant` | the `seed:demo-tenant` tenant's rows | ✅ identity kept |
+| `cleanup:roles` | the role fixture tenant (logins kept unless `--delete-firebase`) | ✅ verified afterwards |
+| `cleanup:demo` | **one named tenant's data**, keeping its login | ⚠️ production-capable, verified afterwards |
+| `cleanup:dev-mongodb` | everything in `inventoryai_dev_db`, your account included | ⚠️ **High**; your login survives |
+| `cleanup:test-firebase` | **every login** in the development Firebase project | ⚠️⚠️ **irreversible** |
+| `cleanup:firebase-accounts -- --email=…` | **only the logins you name**, checked first | ⚠️⚠️ irreversible but guarded |
+| `cleanup:prod-mongodb`, `cleanup:all-mongodb` | real / every database | ⚠️⚠️ needs `CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA` |
 
-**Two guards worth knowing, because they can look like the tool is broken.** The cleanup commands
-refuse to run unless:
-- the environment is **named and non-production** — `NODE_ENV` must be one of the three the server
-  recognises, and anything else (`prod`, `Production`, `staging`, unset, blank) is refused as
-  **ambiguous**, because "I could not tell where this would delete" is treated as "refuse", not
-  "probably fine". This is the same classifier the server boots on, so a seeder cannot accept an
-  environment the server would reject (2026-10-22); and
-- the confirmation phrase matches the command exactly.
+Guards: `NODE_ENV` must be one the project recognises and non-production (`prod`, `Production`,
+`staging`, unset and blank are all refused as **ambiguous**), and the phrase must match the command.
+Measured tools check a recognised non-production environment **and** a resolved dev/test database,
+printed before the first query; they need no phrase, but a run that cannot say which database it read
+is not a measurement.
 
-Measured tools (`perf:measure`, `perf:turns`) check the same two things they can: a recognised
-non-production environment **and** a resolved database that is the development or test one, printed
-before the first query. They need no confirmation phrase — measuring is not destructive — but a run
-that cannot say which database it read is not a measurement.
+`perf:turns` is the exception that may measure production: the deployed `JWT_SECRET` is not on a laptop,
+so it signs in like the phone and needs the database the server writes to — hence `--database=` **and**
+`PERF_TURNS_CONFIRM=perf-turns:production`. Seeding commands use the same naming rule (Part G).
 
-**The two exceptions, and why they are exceptions.** `perf:turns` may measure a **deployed** server
-(Part 4, "Measuring the deployed assistant"): the deployed `JWT_SECRET` is not on a laptop, so the
-probe has to sign in the way the phone does, and the ground truth it checks the answers against can
-only come from the database that server actually writes to. It therefore accepts production when
-the database is NAMED (`--database=`) **and** confirmed (`PERF_TURNS_CONFIRM=perf-turns:production`).
-Likewise `seed:perf-tenant` / `cleanup:perf-tenant` (Part 3G) name their database and use a phrase
-unique to themselves instead of the development-only guard. A wrong `--database=` value is a
-refusal in all four, never a no-op that looks like success.
+**Why `cleanup:test-firebase` is the dangerous one.** A deleted login whose database record survives can
+never sign in again, and the address cannot be re-registered. **Clear MongoDB for a fresh start; leave
+Firebase alone.**
 
-**Why `cleanup:test-firebase` is the dangerous one.** Delete a login while its database record still
-exists and that address can **never sign in again** — and the app will not let you register it afresh
-either, because it can see a record for that address already. The application has no way to repair
-this, and it has happened here for real. So:
+### Deleting one specific login
 
-> **Clear MongoDB when you want a fresh start. Leave Firebase alone.**
-
-Clearing the database frees the address, orphans nothing, and your login keeps working — you sign in
-and get a brand-new empty business, exactly as a first-time user would. Same clean-slate outcome,
-none of the risk. [Guide 4, Part 4](4-test-accounts-and-mock-data.md) walks through this in full,
-including what to do instead of deleting anything.
-
-### When you *do* need one specific login deleted
-
-There is exactly one reason to delete a login rather than only the database: you are deliberately
-testing the **registration** journey — sign-up, the 6-digit code, the business the app creates — on an
-address that already has a login. That is what `cleanup:firebase-accounts` is for, and it deletes
-**only the addresses you name**, on the **development** project (it checks the project id first).
+Only for deliberately re-testing the registration journey on an address that already has a login:
 
 ```bash
-cd C:/Users/jeffe/inventory-ai/server
-CLEANUP_CONFIRM=cleanup:dev-mongodb npm run cleanup:dev-mongodb -- --yes          # 1. database first
+CLEANUP_CONFIRM=cleanup:dev-mongodb npm run cleanup:dev-mongodb -- --yes      # 1. database first
 CLEANUP_CONFIRM=cleanup:firebase-accounts npm run cleanup:firebase-accounts -- --yes \
-  --email=one@x.com --email=two@x.com                                             # 2. THEN the logins
+  --email=one@x.com --email=two@x.com                                         # 2. THEN logins
 ```
 
-- **The order is the whole safety.** A database record whose login has been deleted can never sign in
-  again, and the address cannot be re-registered either. So this command **refuses any address a
-  database record still points at**, and refuses the **whole** run rather than part of it. Run it before
-  step 1 and it stops with `REFUSED — still linked to a MongoDB user`, exit **1**, having deleted
-  nothing — that is the guard working, not a broken install.
-- `--dry-run` prints the plan and deletes nothing (it still runs the guard).
-- Addresses with no login are reported as `no identity` and skipped; the run still succeeds.
-- Unlike `cleanup:test-firebase` above, it **cannot** delete a login you did not name.
+The order is the safety. The command refuses any address a database record still points at, and refuses
+the **whole** run (`REFUSED — still linked to a MongoDB user`, exit 1, nothing deleted). `--dry-run`
+prints the plan; unknown addresses report `no identity` and are skipped; it cannot delete a login you
+did not name.
 
----
+## Part 7 — What runs by itself
 
-## Part 7 — What already runs by itself
+CI runs, for the server: `typecheck`, `lint`, `check:extensions`, `check:specifiers`, the full test
+suite and a boot smoke test; for mobile: `typecheck` and Jest; separately, the secret guard. Not
+automatic, because they write or need your credentials: the seeders, cleanups, performance probes and
+`audit-access.mjs`.
 
-You do not have to run the quality commands by hand to be safe: **CI** (the automated check that runs
-on every push) already runs, for the server, `typecheck`, `lint`, `check:extensions`,
-`check:specifiers`, the **full test suite** and a boot smoke test; for the mobile app, `typecheck` and
-the **Jest suite**; and, separately, the **secret guard** over the tracked files.
+**Nothing watches the deployment.** `/api/health/ready` answers 200 only when the database is reachable
+now; poll it every 5 minutes, alert after two non-200 answers, and optionally watch `/api/health` for a
+climbing `counters.serverErrors` (the 2026-10-18 failure shape readiness cannot see). The counters are
+per process (reset on restart) and public but contain no names, paths, users or messages.
 
-That is why `check-secrets.mjs` and the module-graph checks rarely need running by hand, and it is why
-a silenced test would be caught rather than admired. The commands that **do not** run automatically —
-and should not, because they write or they need your own credentials — are the seeders, the cleanup
-commands, the performance probes and `audit-access.mjs`.
+## Part 8 — The whole list
 
-### The gap that is not a command: nothing watches the running service
-
-CI checks the code. **Nothing checks the deployment.** On 2026-10-18 the database was refusing writes
-and five of the assistant's tools were answering errors while `/api/health/ready` reported `ready` the
-whole time — and nobody would have been told. The code half of that gap is closed (the counters below);
-the other half is one uptime check, and it takes about five minutes to set up:
-
-1. **Poll this URL every 5 minutes:** `https://<your-deployment>/api/health/ready`. It answers `200`
-only when the database is reachable **right now** and `503` when it is not, which is exactly the
-question worth waking someone for.
-2. **Alert when it is not `200` twice in a row** — once can be a deploy or a blip.
-3. **Optionally watch `https://<your-deployment>/api/health`** (always `200`) and alert if
-`counters.serverErrors` keeps climbing. That is the number that moves when requests are failing while
-the process is still up — the 2026-10-18 shape of failure, which readiness cannot see.
-
-The smallest service that does this is **[UptimeRobot](https://uptimerobot.com)** — a free tier, HTTP
-monitors, and an email when a check fails; create the monitor, paste the URL, choose your address as
-the alert contact, and nothing in this repository changes. (A cron job running `curl` on any machine
-you own works too, if you would rather not have an account anywhere. Anything that tells you is better
-than nothing, which is the current answer.) The **model chain** now has its own in-process watchdog
-(above); this section remains about the **service** being up and answering, which the watchdog does
-not replace.
-
-**Two things to know about the counters** so they are read correctly:
-
-- **They are per process and they reset when it restarts.** A deploy resets them to zero, so watch the
-  **climbing**, not the total.
-- **They are public, and deliberately contain no names** — a total, a by-class breakdown, a 5xx count,
-  a timestamp. No path, no user, no tenant, no error message. The detail stays in the logs behind
-  credentials; the healthy/unhealthy signal is the part an outside watcher needs.
-
----
-
-## Part 8 — The whole list, in one table
-
-**From `server/`**
+**`server/`**
 
 | Command | Does | Safe? |
 |---|---|---|
-| `npm start` | start the backend (port 4000) | ✅ |
-| `npm run dev` | start it, restarting on edits | ✅ |
-| `npm run typecheck` | consistency check; silent = clean | ✅ |
-| `npm run lint` | mistake check; silent = clean | ✅ |
-| `npm test` | all tests (needs the database) | ✅ |
-| `npm run test:unit` | tests that need no database | ✅ |
-| `npm run test:db` | only the database tests | ✅ |
-| `npm run check:extensions` | half-finished file-rename check | ✅ |
-| `npm run check:specifiers` | broken-import check | ✅ |
-| `npm run audit:indexes` | are the declared database indexes really there? | ✅ reads only |
-| `npm run backup:db` | write a recoverable copy of a database (needs `BACKUP_DIR` outside the project) | ✅ **reads only** — safe against production |
-| `npm run restore:db -- --from=…` | put a copy back (needs `CONFIRM=restore-db`) | ⚠️⚠️ **destructive** — test/development databases only, `--dry-run` first |
-| `npm run seed:demo -- --email=…` | put sample data in **your** account | ⚠️ replaces that one business's data |
-| `npm run seed:accounts` | seed **several** accounts, each at its own size, with **no** SKUs/barcodes | ⚠️ replaces those accounts' data |
-| `npm run seed:roles` | one isolated tenant with **one login per role** (OWNER/ADMIN/MANAGER/STAFF) and ~900 documents | ⚠️ replaces that fixture tenant's data |
-| `npm run verify:roles -- --business=…` | sign all four roles in and check **96 permission cells** | ✅ reads almost nothing; removes its own sessions |
-| `npm run cleanup:roles` | remove the role fixture tenant (Firebase logins kept unless `--delete-firebase`) | ⚠️ scoped delete, verified afterwards |
-| `npm run verify:demo -- --email=…` | read the data back and check it | ✅ reads only |
-| `npm run seed:perf -- --size=N` | create the throwaway test tenant | ⚠️ writes that tenant only |
-| `npm run seed:perf-tenant -- --database=… --size=N` | create the **sign-in-able** tenant in a **named** database, production included (Part 3G) | ⚠️ production-capable; own phrase; that tenant only |
-| `npm run cleanup:perf` | remove the throwaway tenant | ⚠️ scoped delete |
-| `npm run cleanup:perf-tenant -- --database=…` | remove the sign-in-able tenant and **prove 0 remain**; keeps the login | ⚠️ production-capable; scoped delete |
-| `npm run perf:measure -- --business=…` | time the assistant's queries (no AI cost) | ✅ reads only |
-| `npm run perf:golden -- --business=…` | fingerprint the assistant's answers | ✅ reads only |
-| `npm run perf:turns -- --business=…` | real assistant turns | ⚠️ spends AI quota |
-| `npm run perf:turns -- --login --database=… --base=https://…` | real turns against the **deployed** server, signed in through Firebase | ⚠️ spends AI quota; needs `PERF_TURNS_CONFIRM` |
-| `npm run ai:usage -- --log=…` | turns, failures and the allowance left | ✅ reads only (offline with `--no-provider`) |
-| `npm run ai:usage -- --db --days=30` | what was **answered**, and its degraded rate | ✅ reads only |
-| `npm run ai:usage -- --provider-only` | the free-model requests **left today** (AI-27: run it before `perf:turns`) | ✅ reads only |
-| `npm run ai:health` | one model-health check (endpoint GETs only, no quota); `-- --alert` sends the alert | ✅ reads only |
-| `npm run restore:db -- --from=…` | put a `backup:db` copy back | ⚠️⚠️ **destructive** — refuses production; `--dry-run` first |
-| `npm run cleanup:test-mongodb` | wipe the test database | ⚠️ destructive, throwaway data |
-| `npm run cleanup:dev-mongodb` | wipe the development database | ⚠️⚠️ **your data** |
-| `npm run cleanup:test-firebase` | delete every development login | ⚠️⚠️ **irreversible** |
-| `npm run cleanup:firebase-accounts -- --email=…` | **only the logins you name** | ⚠️⚠️ irreversible, but **checked** — refuses any address a database record still points at |
-| `npm run cleanup:prod-mongodb`, `cleanup:all-mongodb` | real data | ⚠️⚠️ **never** |
+| `npm start` / `npm run dev` | backend on 4000 / restarting on edits | ✅ |
+| `npm run typecheck`, `lint`, `test:unit`, `test:db`, `test` | checks and tests | ✅ |
+| `npm run check:extensions`, `check:specifiers` | module-graph plumbing | ✅ |
+| `npm run audit:indexes` | are declared indexes really there | ✅ reads |
+| `npm run backup:db` | recoverable copy (needs `BACKUP_DIR` outside the project) | ✅ reads; safe on production |
+| `npm run restore:db -- --from=…` | put a copy back (needs `CONFIRM=restore-db`) | ⚠️⚠️ test/dev only; `--dry-run` |
+| `npm run seed:demo -- --email=…` | sample data in your account | ⚠️ replaces that business |
+| `npm run seed:demo -- --database=… --business=… --email=…` | the same in production | ⚠️ named business only; password untouched |
+| `npm run cleanup:demo -- --email=… --business=…` | empty one tenant, keep its login (`--dry-run`) | ⚠️ scoped, verified |
+| `npm run seed:accounts` | several accounts, no SKUs (`--accounts=…`) | ⚠️ those accounts only |
+| `npm run seed:roles` | one login per role, ~900 documents | ⚠️ that fixture only |
+| `npm run verify:roles -- --business=…` | 96 permission cells (`--signin` for a deployment) | ✅ |
+| `npm run cleanup:roles` | remove the role fixture | ⚠️ scoped, verified |
+| `npm run verify:demo -- --email=…` | read data back and check it | ✅ reads |
+| `npm run seed:perf -- --size=N` | throwaway tenant, no login | ⚠️ that tenant only |
+| `npm run seed:perf-tenant -- --database=… --size=N` | sign-in-able tenant in a named database | ⚠️ production-capable, own phrase |
+| `npm run cleanup:perf` / `cleanup:perf-tenant` | remove those tenants, prove 0 remain | ⚠️ scoped |
+| `npm run perf:measure`, `perf:golden` | query timings / answer fingerprints | ✅ reads |
+| `npm run perf:turns` | real turns (`--login` for a deployment) | ⚠️ spends AI quota |
+| `npm run ai:usage`, `ai:models`, `ai:check`, `ai:health` | cost, allowance, models, health | ✅ reads |
+| `npm run cleanup:test-mongodb` | wipe the test database | ⚠️ throwaway |
+| `npm run cleanup:dev-mongodb` | wipe the development database | ⚠️⚠️ your data |
+| `npm run cleanup:test-firebase` | delete every development login | ⚠️⚠️ irreversible |
+| `npm run cleanup:firebase-accounts -- --email=…` | only the named logins, checked | ⚠️⚠️ irreversible but guarded |
+| `npm run cleanup:prod-mongodb`, `cleanup:all-mongodb` | real data | ⚠️⚠️ never |
 
-**From `mobile/`**
+**`mobile/`**: `npx expo start --dev-client`, `npm start`, `npm run android|ios|web`, `npm run
+typecheck`, `npm run lint`, `npm test`, `npm run test:watch`, `npm run check:build-env`,
+`node scripts/check-build-env.mjs --live` — all read-only or local.
 
-| Command | Does | Safe? |
+**project root**: `node scripts/check-secrets.mjs`, `audit-access.mjs`,
+`check-upgrade-watches.mjs`, `verify-label-barcode.mjs --html|--pdf --expect=…`,
+`scripts/device/run.mjs` (read-only walk; `--journey=draft|stock|transfer --allow-writes` writes).
+
+## Part 9 — When a command refuses
+
+| Message | Meaning | Do |
 |---|---|---|
-| `npx expo start --dev-client` | serve the app's code to a phone | ✅ |
-| `npm start`, `npm run android`, `npm run ios`, `npm run web` | other ways to start it | ✅ |
-| `npm run typecheck`, `npm run lint` | app consistency checks | ✅ |
-| `npm test`, `npm run test:watch` | the app's test suite | ✅ |
-| `npm run check:build-env` | are this project's build settings complete? | ✅ reads only |
-| `node scripts/check-build-env.mjs --live` | …**and** what the EAS environment holds (names only) | ✅ reads only |
+| `set SEED_CONFIRM=<phrase> to proceed` | prove which seeder you meant | put that command's own phrase in front (`seed-demo-account`, `seed-accounts`, `seed-perf-ai`, `seed:perf-tenant`, `seed-roles`) |
+| `no Firebase identity exists … and DEMO_ACCOUNT_PASSWORD is not set` | the address has no login | register it first (**recommended**) or set the password |
+| `set CLEANUP_CONFIRM=…` / `NODE_ENV is not set` | the cleanup guard needs a phrase and an environment | set both |
+| `… so the environment is ambiguous` | `NODE_ENV` missing or unrecognised | set `development` (or `test`) |
+| `the resolved database is … not the development database` | wrong database — probably test | do not override; check `server/.env` |
+| `NOT VERIFIED (exit 2)` | could not look (database/account) | not a data problem; check the connection |
+| `connect ETIMEDOUT …:27017` | network/DNS to Atlas; nothing was written | re-run; seen intermittently on 2026-10-25, succeeding on retry |
+| `is inside the repository` (`backup:db`) | `BACKUP_DIR` inside the project | choose a folder outside it |
+| `is not an approved restore target` | restore aimed elsewhere | test or development database only |
+| `has SHA-256 … the manifest recorded …` | the copy is damaged; **nothing was restored** | take a fresh copy |
 
-**From the project root**
-
-| Command | Does | Safe? |
-|---|---|---|
-| `node scripts/check-secrets.mjs` | scan tracked files for credentials | ✅ |
-| `node scripts/audit-access.mjs` | repository privacy/access audit | ✅ |
-| `node scripts/check-upgrade-watches.mjs` | is a deferred upgrade ready yet? | ✅ (needs network) |
-| `node scripts/verify-label-barcode.mjs --html --expect=…` | does the label the app draws decode as that EAN-13, and does its geometry fit the page? | ✅ reads only |
-| `node scripts/verify-label-barcode.mjs --pdf=… --expect=…` | does a **printed** label PDF decode as that EAN-13? | ✅ reads only |
-| `node scripts/device/run.mjs` | walks every main screen on a **connected phone** and writes a report with screenshots | ⚠️ needs the phone + tunnels |
-| `node scripts/device/run.mjs --journey=draft --allow-writes` | creates one draft purchase order on the phone | ❌ **writes** to the tenant |
-| `node scripts/device/run.mjs --journey=stock --allow-writes` | stock 5 in, 5 out, checking the arithmetic (net zero) | ❌ **writes** to the tenant |
-| `node scripts/device/run.mjs --journey=transfer --allow-writes` | transfer 1 unit across and back (net zero) | ❌ **writes** to the tenant |
-
----
-
-## Part 9 — When a command refuses to run
-
-Refusals are the safety system doing its job, not a broken install. The three you are most likely to
-meet:
-
-| What it says | What it means | What to do |
-|---|---|---|
-| *`set SEED_CONFIRM=<phrase> to proceed`* | The seed guard wants you to prove which command you meant | Put `SEED_CONFIRM=<phrase>` in front of the command, exactly as shown above. **Each seeder has its own phrase** — `seed-demo-account`, `seed-accounts`, `seed-perf-ai` — so pasting the wrong one does not work |
-| *`no Firebase identity exists for … and DEMO_ACCOUNT_PASSWORD is not set`* | That address has no login yet, and the seeder will not invent one silently | Either register that address in the app first (**recommended**), or set `DEMO_ACCOUNT_PASSWORD` in front of the command to create it |
-| *`set CLEANUP_CONFIRM=…`* / *`NODE_ENV is not set`* | The cleanup guard would not delete without an explicit environment | Set the phrase; if the environment is missing, `server/.env` — which normally sets it — is the thing being talked about |
-| *`… so the environment is ambiguous`* | `NODE_ENV` is missing or is a value the project does not recognise (`prod`, `Production`, `staging`) | Set it to `development` for these tools (or `test`). It is the same refusal the server makes at boot, and the value you typed is deliberately not repeated in the message |
-| *`the resolved database is "…", not the development database`* | You are pointed at the wrong database — most likely the test one | Do not override the guard. Check `server/.env`; a seeder is deliberately only allowed near the development database |
-| *`NOT VERIFIED (exit 2)`* from `verify:demo` | The database could not be reached, or the account does not exist | This is **not** a data problem. Check the internet and re-run |
-| *`is inside the repository`* from `backup:db` | You pointed `BACKUP_DIR` at a folder inside the project | Pick a folder outside it. This one is deliberate: a dump is real data and must not be committable |
-| *`is not an approved restore target`* from `restore:db` | You aimed a restore at a database it will not drop and rewrite | Point it at the test or development database. **Do not** widen the list |
-| *`has SHA-256 … the manifest recorded …`* from `restore:db` | The copy on disk is **damaged** — and **nothing was restored** | This is the guard working. Take a fresh copy; do not hand-edit the manifest |
-
----
-
-## Part 10 — Words from this guide
-
-- **Script** — a small program you run to do one job. The seeders and checks above are scripts.
-- **Backend** — the half that holds the rules and talks to the database.
-- **Metro** — the program that serves the app's code to a phone.
-- **Seed** — to fill a database with realistic sample data.
-- **Tenant / business** — one customer's separate world of data. Everything is labelled with the
-  business that owns it.
-- **Index** — a database shortcut that makes lookups fast. If it is missing the app still works, just
-  slowly — which is why `audit:indexes` exists.
-- **Exit code** — the small number a finished command reports: `0` means success.
-- **CI** — the automated checks that run after a push to the code host.
-- **Backup** — a separate copy of the data, kept somewhere else, for the day the original is lost.
-- **Manifest** — the small file inside a backup that lists what was written and each file's fingerprint.
-- **SHA-256** — a numeric fingerprint of a file's exact bytes. Change one byte and it no longer
-  matches, which is how a damaged backup is caught before it is used.
-- **Dry run** — do all the checking and printing, but write nothing.
-- **Read-only** — looks at data but cannot change it.
-- **Destructive** — permanently removes data. Nothing here can be undeleted.
-- **Fixture** — a small, fixed set of data used by automated tests.
-
-← Back to [the guides index](README.md) · Related: [4. Test accounts and mock data](4-test-accounts-and-mock-data.md) ·
+← [Guides index](README.md) · Related: [4. Test accounts](4-test-accounts-and-mock-data.md) ·
 [5. Words explained](5-words-explained.md)

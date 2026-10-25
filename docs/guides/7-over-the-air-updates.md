@@ -1,101 +1,53 @@
-# Inventory AI — EAS Update: how the installed app updates itself
+# 7. Updating the app without reinstalling (EAS Update)
 
-This is the complete reference for over-the-air updates in this project: what is configured, what
-each command does, how to publish safely, how to prove an update arrived, and what still requires a
-new build.
-
-It replaces the earlier shorter version of this guide, and every command below was checked against
-the CLI actually installed here (`eas-cli/24.7.0`, `expo-updates ~58.0.17`, Expo SDK 58). Two
-commands in the previous version were wrong and are corrected here: `eas update:list` takes
-`--branch`, not `--channel`, and `eas update:rollback` takes a **group id**, not a channel.
-
----
+Checked against the installed CLI (`eas-cli/24.7.0`, `expo-updates ~58.0.17`, Expo SDK 58).
+`eas update:list` takes `--branch` (not `--channel`), and `eas update:rollback` takes a **group id**.
 
 ## 0. The short answer
 
-**Saving a file does not update anything.** Code saved on this laptop is just code on this laptop.
-An installed app changes in exactly three ways:
+**Saving a file updates nothing.** An installed app changes in one of three ways:
 
-| You changed | What it takes to reach a phone |
+| You changed | To reach a phone |
 |---|---|
-| A screen, a sentence, a colour, a form rule, a new API call, a bug in `.ts`/`.tsx`, an image | **One command** — `eas update` — then the app picks it up on its next launches. No APK, no cable. |
-| A native library, a permission, a config plugin, `app.json`'s native fields, the Expo SDK | **A new build**, so a new APK/AAB, and one install (or a store release). |
-| A backend route, a permission, a database rule, an email template | **Neither.** Deploy the server; every installed app gets the new behaviour immediately. |
+| A screen, sentence, colour, form rule, API call, bug in `.ts`/`.tsx`, an image | **`eas update`** → the app picks it up on its next launches. No APK, no cable. |
+| A native library, permission, config plugin, `app.json` native field, the Expo SDK, an `EXPO_PUBLIC_*` **value** | **A new build** (APK/AAB) and one install or store release. |
+| A backend route, permission, database rule, mail template | **Neither** — deploy the server. |
 
-The phone stays installed for the first row. That is the whole feature.
+There is no auto-publish: a save is a draft, `eas update` is a release. The installed app decides
+what it can receive — channel and runtime version are compiled into it. Nothing tells the user,
+unless you write a release note (§7).
 
-Two things are worth saying plainly, because they are the two that surprise people:
+## 1. How it works
 
-1. **There is no "auto-publish".** Nothing leaves the laptop until you type `eas update`. That is a
-   safety property, not a limitation: a save is a draft, a publish is a release.
-2. **The app you installed decides what it can receive.** The channel (`preview` or `production`)
-   and the runtime version (`1.0.0`) are compiled into the APK. An update published to another
-   channel, or built for another runtime, is invisible to that install — by design.
-3. **Nothing tells the person it happened — unless you write a release note.** A copy change has no
-   banner, dialog or "new version" screen; the new words simply appear on the next launch. A change
-   worth knowing about is written up in `mobile/lib/releaseNotes.ts` and appears once as a What's
-   New card (§7A.1). Everything else stays silent on purpose.
+Each build contains `expo-updates`, a native client, plus the JavaScript it was compiled with (the
+**embedded bundle**). On each launch:
 
----
+1. the native shell starts the last accepted update, or the embedded bundle;
+2. `checkAutomatically: "ON_LOAD"` asks `https://u.expo.dev/607eca05-…` for a newer update **for this
+   channel and runtime**;
+3. it downloads while the current app keeps running;
+4. the new bundle is used on the **next** start — never mid-session;
+5. `fallbackToCacheTimeout: 0` means the launch never waits: offline, slow or EAS-down always starts
+   from what is on the device.
 
-## 1. How it works in this project
+So **the first launch after a publish still shows the old screen**; close and reopen (twice if you
+count the check).
 
-### What is inside the app
-
-`expo-updates` (declared at `~58.0.17` in [mobile/package.json](../../mobile/package.json)) is a
-small native client compiled into every build. Each build ships with a copy of the JavaScript it was
-compiled with — the **embedded bundle** — and the update client is what lets a different bundle
-replace it at runtime.
-
-### What happens on a launch
-
-1. The native shell starts and reads the last update it accepted (or the embedded bundle if none).
-2. `checkAutomatically: "ON_LOAD"` asks `https://u.expo.dev/607eca05-…` once, in the background,
-   whether a newer update exists **for this channel and this runtime version**.
-3. If one exists it downloads while the app you already have keeps running.
-4. The downloaded bundle is used **the next time the app starts**. Not mid-session — a reload of the
-   JavaScript can restart state, so the app never swaps under a person's hands.
-5. `fallbackToCacheTimeout: 0` means the launch **never waits** for that check. No internet, no EAS,
-   a slow provider: the app starts immediately with what is on the device. That is why an offline
-   cold start behaves exactly as before.
-
-A consequence worth knowing: **the first launch after a publish usually still shows the old screen.**
-You have to close and reopen the app (twice if you count the check itself), or force-stop and start
-it, exactly as §8 describes.
-
-### The five words that decide who receives what
-
-| Word | What it is here |
+| Word | Here |
 |---|---|
-| **Channel** | A name compiled into the binary: `development`, `preview`, `production`. An install listens to exactly one. |
-| **Branch** | Where an update group is stored. In this project each branch has the same name as its channel, which keeps the mapping obvious. |
-| **Update group** | One publish: the Android bundle, its assets, a message, a commit and a group id. This is what you roll back or republish. |
-| **Runtime version** | The compatibility label. Under `appVersion` policy it is `expo.version` — `1.0.0` today. Served only to installs with an **exact** match. |
-| **Embedded bundle** | The JavaScript that came inside the APK. The fallback that always exists. |
+| **Channel** | compiled into the binary: `development`, `preview`, `production`. An install listens to exactly one. |
+| **Branch** | where a group is stored; here each branch is named after its channel. |
+| **Update group** | one publish: bundle, assets, message, commit, group id. What you roll back or republish. |
+| **Runtime version** | the compatibility label; under `appVersion` policy it is `expo.version` (`1.0.0`). Delivered only on an **exact** match. |
+| **Embedded bundle** | the JavaScript inside the APK; the fallback that always exists. |
 
-Delivery is the intersection of those: a phone receives an update when its **channel** points at the
-branch the update was published to **and** its **runtime version** equals the update's.
+An install receives an update when its **channel** points at the branch **and** its **runtime**
+matches. It must also contain `expo-updates`, have been built with a channel, and be opened — there is
+no push.
 
-### What makes an install eligible (and what to fix if it is not)
+## 2. Configuration
 
-A phone can receive updates only when all four of these hold. Each one has a different fix:
-
-1. **The build contains `expo-updates`.** A build made before the package was added can never
-   receive anything; it needs one new install, and then it is updatable forever after.
-2. **The build was made from a profile with a channel** (`preview` or `production`). The channel is
-   compiled in; a build without one listens to nothing.
-3. **The runtime version matches the update.** Publish for `1.0.0` and installs on `1.0.0` get it;
-   an install on `1.1.0` does not, and should not.
-4. **The app is actually opened.** There is no push: an install that is never launched never checks.
-
-Everything else — the APK/AAB sitting in the store, the phone's Android version, the account the
-user is signed in to — is irrelevant to delivery.
-
----
-
-## 2. What this project has configured, exactly
-
-### `mobile/app.json` — the contract inside the binary
+`mobile/app.json`:
 
 ```json
 "version": "1.0.0",
@@ -108,16 +60,10 @@ user is signed in to — is irrelevant to delivery.
 "extra": { "eas": { "projectId": "607eca05-1175-43ed-86a0-1829e91c9531" } }
 ```
 
-- **`version` is the runtime label.** `appVersion` policy means the runtime version *is* this string.
-  So: JavaScript-only change → publish, keep `1.0.0`. Native change → bump this, and the new build
-  legitimately stops receiving updates built for the old runtime. That one manual rule is the price
-  of the automatic label, and it is the only manual rule in the system.
-- **`url` names this EAS project.** A publish into another project cannot be served here.
-- **`ON_LOAD` + `0`** is the offline-first combination explained above.
-- **`updates.enabled` is not set**, which means enabled. Do not set it to `false`: that would compile
-  an app that ignores every future update.
+`version` **is** the runtime label: JavaScript change → keep it; native change → bump it. Do not set
+`updates.enabled: false` — that compiles an app that ignores every update.
 
-### `mobile/eas.json` — which build listens where
+`mobile/eas.json`:
 
 ```json
 "cli": { "appVersionSource": "remote" },
@@ -132,331 +78,174 @@ user is signed in to — is irrelevant to delivery.
 }
 ```
 
-- **Every profile has its own channel**, except `ios-simulator`, which deliberately shares
-  `development` with the device build. Preview and production cannot collide; the channel is in the
-  binary, not in a setting someone could forget.
-- **`production` produces an AAB by default** (Play's format). `preview` produces an APK that `adb`
-  can install. A rehearsal can temporarily set `"buildType": "apk"` on production — and must remove
-  it again afterwards.
-- **`autoIncrement` is on for production**, so each build gets a new Android `versionCode` from EAS.
-- **`appVersionSource: "remote"`** means EAS owns the Android `versionCode` (currently **4**), not
-  the `expo.version` used for the runtime label. Read the current numbers rather than assuming:
+Every profile has its own channel (except `ios-simulator`, which shares `development`), so preview and
+production cannot collide. `production` builds an **AAB**; `preview` an APK. A rehearsal may set
+`"buildType": "apk"` on production temporarily — remove it afterwards. `appVersionSource: "remote"`
+means EAS owns the Android `versionCode`; check it rather than assuming:
 
 ```bash
 cd C:/Users/jeffe/inventory-ai/mobile
 npx eas-cli build:version:get --platform android --profile production
 ```
 
-### The test that guards all of it
+`mobile/__tests__/ota-update-config.test.ts` pins all of it: `expo-updates` installed, a runtime
+**policy** not a literal, this project's URL, a launch that never waits, and a distinct channel per
+profile.
 
-[mobile/__tests__/ota-update-config.test.ts](../../mobile/__tests__/ota-update-config.test.ts) pins
-the four things that would silently deliver the wrong bundle: `expo-updates` is installed,
-`runtimeVersion` is a policy rather than a hand-typed literal, the update URL is this project, a
-launch never waits on the network, and every profile has a channel with preview and production
-distinct. If a future edit changes behaviour, `npm test` fails before a build does.
+**Not the `fingerprint` policy.** A real build failed in *Configure expo-updates* with two hashes
+(`6217b878…` on EAS, `e32953a7…` here) because [mobile/app.config.js](../../mobile/app.config.js)
+resolves Firebase file paths that only exist on the builder. `appVersion` removes that mismatch.
 
-### Why not the automatic `fingerprint` policy
-
-It was tried first, and a real build failed in the *Configure expo-updates* phase with two different
-hashes (`6217b878…` on EAS, `e32953a7…` on the laptop). The cause is this project's dynamic
-[mobile/app.config.js](../../mobile/app.config.js): it reads the Firebase configuration **file
-paths** from EAS file variables, which exist only on the build runner, so the two sides hash
-different projects. `appVersion` removes that class of mismatch. Do not "improve" it back.
-
----
-
-## 3. The live state of the update service
-
-Read from the account, not from memory. Re-check it before a release:
+## 3. Live state
 
 ```bash
-cd C:/Users/jeffe/inventory-ai/mobile
-
-npx eas-cli channel:list                     # channels and what they point at
-npx eas-cli branch:list                      # branches, newest group and its runtime
-npx eas-cli update:list --branch production --limit 5   # recent publishes on a branch
+npx eas-cli channel:list
+npx eas-cli branch:list
+npx eas-cli update:list --branch production --limit 5
 ```
-
-At the time of writing:
 
 | | `preview` | `production` |
 |---|---|---|
-| Channel | exists, active, **unprotected** (no code signing) | exists, active, **unprotected** |
+| Channel | exists, **unprotected** (no code signing) | exists, **unprotected** |
 | Branch | `preview` | `production` |
-| Newest group | `6e14b317-…` | `62654350-…` — *Withdraw the test note, and stop a dismissed note returning* |
-| Runtime version | `1.0.0` | `1.0.0` |
+| Newest group | `6e14b317-…` | `62654350-…` |
+| Runtime | `1.0.0` | `1.0.0` |
 | Android `versionCode` (remote) | — | **4** |
-| What installs there | preview APKs you side-load | store builds, and the production-profile APK on the test phone |
+| Installs | side-loaded preview APKs | store builds and the production-profile APK on the test phone |
 
-Older production groups still exist (`d4582eda-…`, `2518ccb8-…`, the Google Sign-In fixes). They are
-history and evidence; nothing prunes them automatically, and installs always move **forward** to the
-newest group for their runtime. `48f7bbcc-…` is the test note of 2026-10-25, published and then
-withdrawn by `62654350-…`; it stays in the list as history, and no install moves back to it.
+Older groups remain as history; installs always move **forward** to the newest group for their runtime.
+Unprotected means code signing is off; enabling it is a **build-time** change (§10).
 
-**"Unprotected" means code signing is off.** It is available in this toolchain (the `expo-updates`
-CLI here offers `codesigning:generate` and `codesigning:configure`) but it is **not enabled**, and
-enabling it is a **build-time** change: the certificate is compiled into the app, so it must be turned
-on before the store build, not after. See §11.
+## 4. EAS environments
 
----
-
-## 4. EAS environments: what the bundle is built with
-
-`eas update` does not read `eas.json`'s build `env`. It reads the **EAS environment** named by
-`--environment`. That distinction matters, because a bundle published without the production values
-would still install and then reach no server.
-
-The `production` environment currently holds these **public** variables (all `EXPO_PUBLIC_*`, all
-visible in any bundle by definition — nothing secret may live here):
-
-```text
-EXPO_PUBLIC_API_URL
-EXPO_PUBLIC_FIREBASE_API_KEY
-EXPO_PUBLIC_FIREBASE_APP_ID
-EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN
-EXPO_PUBLIC_FIREBASE_PROJECT_ID
-EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID
-EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID
-```
-
-Inspect before publishing:
+`eas update` reads the **EAS environment** named by `--environment`, not `eas.json`'s build `env`.
+The `production` environment holds these public variables (all `EXPO_PUBLIC_*`, visible in any bundle —
+nothing secret may live there): `EXPO_PUBLIC_API_URL`, `EXPO_PUBLIC_FIREBASE_API_KEY`,
+`EXPO_PUBLIC_FIREBASE_APP_ID`, `EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN`, `EXPO_PUBLIC_FIREBASE_PROJECT_ID`,
+`EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID`, `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID`.
 
 ```bash
 npx eas-cli env:list --environment production
 npx eas-cli env:list --environment preview
-```
-
-Two gotchas, both real:
-
-- **`EXPO_PUBLIC_API_URL` is defined twice** — in the `production` environment *and* in the
-  `production` build profile's `env`. The profile value wins for builds, and the CLI says so when
-  you ask: *"The values from the build profile configuration will be used."* Keep the two identical
-  so nobody has to reason about which one applied.
-- **`mobile/lib/config.ts` falls back to `http://localhost:4000`** when the variable is absent. On
-  2026-10-24 the production environment was missing it, and a production publish would therefore have
-  reached no server. It is present now; the check above is how you confirm it still is.
-
-To set or change one (values here are public by design):
-
-```bash
-npx eas-cli env:set --environment production \
-  --name EXPO_PUBLIC_API_URL \
+npx eas-cli env:set --environment production --name EXPO_PUBLIC_API_URL \
   --value https://ai-inventory-l1mi.onrender.com --visibility plaintext
 ```
 
-Changing an `EXPO_PUBLIC_*` **value** is a native-build decision, not an OTA one: the value is
-compiled into whatever bundle is served, so an update would carry the new value to some installs and
-not others. Change it with a build.
+- `EXPO_PUBLIC_API_URL` is defined **twice** (EAS production environment and the production build
+  profile). The profile wins for builds. Keep them identical.
+- `mobile/lib/config.ts` falls back to `http://localhost:4000` when it is absent. On 2026-10-24 the
+  production environment lacked it, so a production publish would have reached no server.
+- Changing an `EXPO_PUBLIC_*` **value** is a build decision, not an OTA one.
 
----
-
-## 5. The commands
-
-All of these run from `C:/Users/jeffe/inventory-ai/mobile`. Flags shown are the ones this CLI
-accepts — verified against `eas-cli/24.7.0`, which is what is installed (a newer CLI is available;
-upgrading is safe but re-read `--help` afterwards, since flags do move between major versions).
-
-### Publish an update
+## 5. Commands (from `mobile/`)
 
 ```bash
-npx eas-cli update --channel preview --environment preview --platform android \
-  --message "Say what changed"
+# publish — preview first, production after it is proven
+npx eas-cli update --channel preview    --environment preview    --platform android -m "Say what changed"
+npx eas-cli update --channel production --environment production --platform android -m "Describe the release"
 ```
 
-| Flag | Why it is there |
+| Flag | Why |
 |---|---|
-| `--channel` | Which installs may receive it. This is the switch that matters. |
-| `--environment` | **Required on SDK 55+.** Loads that EAS environment's variables. The CLI refuses without it; do not work around the refusal. |
-| `--platform android` | **Always pass it.** Without it the command also exports the **web** bundle, which this project does not ship, and the publish fails before uploading (`expo-router` → `react-native-web`). |
-| `--message` | The line you will read in `update:list` in six months. Write it for your future self. |
+| `--channel` | which installs may receive it |
+| `--environment` | **required on SDK 55+**; loads that environment's variables — never bypass the refusal |
+| `--platform android` | **always**: without it the command also exports the **web** bundle this project does not ship, and fails |
+| `--message` | the line you will read in `update:list` months later; never shown to users |
 
-Useful extras: `--branch <name>` (defaults to the channel name), `--rollout-percentage 10`
-(stage a release), `--clear-cache`, `--json`, `--non-interactive`, `--skip-bundler` +
-`--input-dir dist` (publish a bundle you already exported), and `--private-key-path` (only with code
-signing).
-
-Publish to production — the real release:
+Extras: `--branch`, `--rollout-percentage 10`, `--clear-cache`, `--json`, `--non-interactive`,
+`--skip-bundler --input-dir dist`, `--private-key-path` (code signing only).
 
 ```bash
-npx eas-cli update --channel production --environment production --platform android \
-  --message "Describe the release"
-```
-
-### Inspect what exists
-
-```bash
-npx eas-cli update:list --branch production --limit 10   # NOT --channel
+# inspect
+npx eas-cli update:list --branch production --limit 10    # NOT --channel
 npx eas-cli update:list --all --limit 20
-npx eas-cli update:insights <group-id> --days 7          # launches, crashes, users, size
-npx eas-cli channel:list
-npx eas-cli branch:list
-```
+npx eas-cli update:insights <group-id> --days 7           # launches, crashes, users, size
 
-`update:list` prints, per group: platform, runtime version, message, code-signing key (N/A today),
-roll-back-to-embedded flag, rollout percentage and the group id. `--json` gives the same as data.
-
-### Republish (the remedy for a device that says "no update")
-
-```bash
+# republish (first remedy when a phone says "no update")
 npx eas-cli update:republish --group <group-id> --message "Republished"
-```
-
-This re-publishes an existing group — same JavaScript, new group id — and in the measured case the
-phone picked it up on the next launch. It is the first thing to try when `eas update:list` clearly
-shows a newer group than the device is running (§9).
-
-To raise a staged release to everyone:
-
-```bash
 npx eas-cli update:republish --group <group-id> --rollout-percentage 100
-```
 
-### Roll back
-
-```bash
-# To the update BEFORE this one (it must be the latest for its branch and runtime):
+# roll back
 npx eas-cli update:rollback <group-id> --platform android -m "Rolled back"
-
-# To the bundle compiled into the installed APK:
 npx eas-cli update:roll-back-to-embedded --channel production --platform android \
   --runtime-version 1.0.0 --message "Back to embedded" --non-interactive
-```
 
-Two facts learned on this project's hardware:
-
-- `update:rollback` takes the **group id**; `--channel` is not one of its flags.
-- `roll-back-to-embedded` **needs `--runtime-version`** when run non-interactively, or the CLI
-  refuses with *"--runtimeVersion is required in non-interactive mode"*. It was exercised on a
-  production-profile build on 2026-10-24 and returned the phone to its embedded bundle after two
-  cold launches.
-
-Rollback publishes a *newer* group that contains the older code. Installs move to it on their next
-launch — it does not reach into a phone and undo anything, and a phone that never launches again
-keeps what it already downloaded.
-
-### Delete a group
-
-```bash
+# delete a group (not a recall: installs that already have it keep running it)
 npx eas-cli update:delete <group-id>
-```
 
-This removes the group from the branch. It is not a recall: installs that already downloaded it keep
-running it until a newer group supersedes it. For "stop serving this", publish a correction or a
-rollback.
-
-### Version and diagnostics
-
-```bash
+# version and diagnostics
 npx eas-cli build:version:get --platform android --profile production
-npx eas-cli diagnostics                       # environment info for bug reports
-npx expo config --type public --json          # what the native config actually resolves to
-npx expo-updates runtimeversion:resolve       # the runtime label for this tree
+npx eas-cli diagnostics
+npx expo config --type public --json
+npx expo-updates runtimeversion:resolve
 ```
 
----
+`update:rollback` takes the **group id**, not a channel. `roll-back-to-embedded` **needs
+`--runtime-version`** in non-interactive mode; it was exercised on a production-profile build on
+2026-10-24 and returned the phone to its embedded bundle after two cold launches. A rollback publishes
+a **newer** group containing older code; it cannot reach into a phone that never launches again.
 
-## 6. The safe release procedure
+## 6. Safe release procedure
 
-The rule this project follows: **nothing is published that has not been verified, and nothing reaches
-production before it has been proven somewhere else.**
+Nothing is published unverified, and nothing reaches production before it is proven elsewhere.
 
-1. **Be on the commit you mean to ship.** Run `npm run check:ota` from `mobile/`. It refuses any
-   uncommitted path in the repository, re-checks the runtime and channel contract, prints the commit
-   and the runtime the publish will carry, and prints the exact command. This is a tool rather than a
-   reminder because `eas update` publishes the **working tree**, not a commit — see below.
-2. **Run the checks.** From `mobile/`: `npm run typecheck`, `npm run lint`, `npm test`,
-   `npm run check:build-env`. From `server/` if the change touches the API: `npm run test:unit`.
-3. **Confirm the config still says what you think:**
-   `npx eas-cli channel:list`, `npx eas-cli env:list --environment <env>`, and
+1. **Be on the commit you mean to ship.** `npm run check:ota` refuses any uncommitted path, re-checks
+   the runtime/channel contract, prints the commit, the runtime and the exact command.
+2. **Run the checks:** from `mobile/` — `npm run typecheck`, `npm run lint`, `npm test`,
+   `npm run check:build-env`; from `server/` if the API changed — `npm run test:unit`.
+3. **Confirm config:** `npx eas-cli channel:list`, `npx eas-cli env:list --environment <env>`,
    `npx expo config --type public --json | grep -A3 updates`.
-4. **Publish to `preview` first** with `--environment preview --platform android`.
-5. **Prove it on a preview install** (§7). If no preview build is installed, see §12 — this is the
-   one open gap in the current setup.
-6. **Publish to `production`** only after step 5, with `--environment production --platform android`.
-7. **Cold-start the production install twice** and look at the screen; confirm the app still reaches
-   the API (log in, load the dashboard).
-8. **Record it.** Roadmap entry or evidence README with the group id, the message, and what was
-   observed. The measured runs in §10 are the template.
-9. **If something is wrong:** roll back (or publish a corrected update), then investigate. Both are
-   one command and neither needs the store.
+4. **Publish to `preview`.**
+5. **Prove it on a preview install** (§7).
+6. **Publish to `production`.**
+7. **Cold-start the production install twice**, then sign in or load the dashboard — which proves the
+   bundle carries the right API URL.
+8. **Record it:** group id, message, what was observed (roadmap or evidence README).
+9. **If wrong:** roll back or publish a correction — one command, no store.
 
-### Why step 1 is a tool, not a reminder (2026-10-25)
+**Why step 1 is a tool.** On 2026-10-25 a release note was published to production, then the files
+were undone locally and nothing was republished. `git status` was clean and `main` committed — but the
+**channel** kept serving a bundle whose note read *A small test update*, which no commit contained.
+`eas update` uploads the **working tree**, and `update:list --json` returns **no commit hash**, so a
+live group cannot be joined back to git afterwards.
 
-On 2026-10-25 a release note was published to `production` to test the new card. The two files behind
-it — the note and one sentence on the login screen — were then undone on the laptop, and nothing was
-published again. `git status` was clean and `main` was committed. The **channel** was not: it kept
-serving a bundle whose newest note read *A small test update*, and no commit contained that text.
-Nothing in the repository could reveal it, because the repository was right.
-
-The cause is a property of the tool rather than a mistake in it: `eas update` uploads the working
-tree. A save is a draft; only a commit is a release. And this CLI cannot help afterwards —
-`update:list --json` returns branch, message, runtime, group and platforms, and **no commit hash at
-all**, so there is nothing to join a live group back to git. (`eas update` does print the commit when
-it publishes; `update:list` simply does not show it.)
-
-`npm run check:ota` closes the gap from the publish side, which is the only side it can be closed
-from:
-
-| It refuses | Because |
+| `check:ota` refuses | Because |
 |---|---|
-| Any modified or untracked path | The bundle would contain JavaScript that no commit describes. `--allow-dirty` overrides it and says so in the output. |
-| `runtimeVersion` that is not `appVersion` | The runtime label decides which installs an update can reach. |
-| `checkAutomatically` not `ON_LOAD`, or `fallbackToCacheTimeout` not `0` | An install would stop looking for updates at launch, or a launch would wait on EAS. |
-| `updates.enabled: false`, or a missing project URL | The app would ignore every publish. |
-| A channel with no build profile | No install listens there, so the publish reaches nobody. |
+| any modified or untracked path | the bundle would contain JavaScript no commit describes (`--allow-dirty` overrides and says so) |
+| `runtimeVersion` not `appVersion` | the label decides which installs can receive it |
+| `checkAutomatically` not `ON_LOAD`, or `fallbackToCacheTimeout` not `0` | installs would stop checking, or launches would wait |
+| `updates.enabled: false`, or a missing project URL | the app would ignore every publish |
+| a channel with no build profile | no install listens there |
 
-It **warns but does not fail** when the branch is not `main`, and when the commit is not yet on
-`origin/main`: publishing from a branch is legitimate, and so is a local commit, but both change what
-that commit hash means six months later, so both are printed beside it.
+It **warns** when the branch is not `main` or the commit is not on `origin/main`.
 
-For a larger audience, stage the production publish instead of going straight to everyone:
+Staged release: `--rollout-percentage 10`, then `update:republish --group <id> --rollout-percentage 100`.
 
-```bash
-npx eas-cli update --channel production --environment production --platform android \
-  --rollout-percentage 10 --message "Staged release"
-# then, once it looks healthy:
-npx eas-cli update:republish --group <group-id> --rollout-percentage 100
-```
+## 7. Proving an update arrived
 
----
-
-## 7. Proving an update actually arrived
-
-Do this once per meaningful release. It takes a minute.
-
-1. Note something **visible** that the update changes: a sentence, a button, a screen, a count.
-2. Publish (§5). `npx eas-cli update:list --branch <branch> --limit 3` shows the new group at the top
-   with its commit and message.
-3. Force-stop and start the app **twice** — the first launch downloads, the second runs it:
+1. Note something **visible** the update changes.
+2. Publish; `npx eas-cli update:list --branch <branch> --limit 3` shows the new group at the top.
+3. Force-stop and start the app **twice**:
 
 ```bash
 adb shell am force-stop com.inventoryai.app
 adb shell monkey -p com.inventoryai.app -c android.intent.category.LAUNCHER 1
 ```
 
-4. The changed thing is on screen. Then check the thing only a working bundle can do: sign in, or
-   load the dashboard — which also proves the bundle was built with the right `EXPO_PUBLIC_API_URL`
-   rather than `localhost`. (Symptom if it was not: *"Cannot reach the server"* on every screen.)
-5. Optional, decisive on a preview/development build: read the update client's own log. The tag
-   observed here is `dev.expo.updates`:
+4. The changed thing is on screen; then sign in or load the dashboard, which proves the bundle was
+   built with the right `EXPO_PUBLIC_API_URL` (symptom if not: *"Cannot reach the server"* everywhere).
+5. On a preview/development build, read the update client's log:
 
 ```bash
 adb logcat -d | grep dev.expo.updates | tail -20
 ```
 
-A launch that downloads an update logs `Updates state change: Download` and then
-`DownloadCompleteWithUpdate` with `isUpdateAvailable=true, isUpdatePending=true`. A launch with
-nothing newer logs `CheckCompleteUnavailable` / `No update available`. After the newest update has
-been downloaded, "no update available" on the next launch is **correct** — there is nothing newer to
-fetch, and the proof that the downloaded bundle is the running one is the screen itself.
+`Updates state change: Download` then `DownloadCompleteWithUpdate` with `isUpdateAvailable=true,
+isUpdatePending=true` means it downloaded; `CheckCompleteUnavailable` / `No update available` after
+the newest one is **correct**. Release builds log little — use the behaviour plus
+`npx eas-cli update:insights <group-id>`.
 
-Release builds log far less than this; for those, use the behaviour plus
-`npx eas-cli update:insights <group-id>` — launches and unique users per group tell you whether
-installs picked it up.
-
-### Which group is `production` serving right now?
-
-The channel's own answer, without a phone:
+**Which group is `production` serving right now?**
 
 ```bash
 curl -sS -H "expo-platform: android" -H "expo-runtime-version: 1.0.0" \
@@ -466,396 +255,213 @@ curl -sS -H "expo-platform: android" -H "expo-runtime-version: 1.0.0" \
   | grep -o '"updateGroup":"[^"]*"'
 ```
 
-```text
-"updateGroup":"62654350-7268-487f-8518-8ca7b6a8dfc9"
-```
-
-Two details, both measured. `accept: multipart/mixed` is **mandatory** — the host answers **406**
-*"EAS Update clients must accept multipart/mixed responses"* without it. And the bundle and asset
-URLs it returns answer **403** to a plain `curl` (*"Unauthorized asset request"*), so this command
-proves **which group** a channel serves, not what is inside it. For the contents, read the phone
-(step 4 above) or grep the export the publish just made:
-`mobile/dist/_expo/static/js/android/*.hbc`.
-
----
+`accept: multipart/mixed` is **mandatory** (the host answers 406 without it), and the returned asset
+URLs answer 403 to plain `curl`, so this proves **which group** a channel serves, not its contents.
+For contents, read the phone or grep `mobile/dist/_expo/static/js/android/*.hbc`.
 
 ## 7A. What the person holding the phone sees
 
-This is the part people ask about first, so it is worth being blunt: **by default, nothing.**
+**By default, nothing.** No banner, toast, "new version" or restart prompt — `expo-updates` ships no
+UI. A copy change simply appears after the next launch. `--message` is stored with the group and shown
+in `update:list` and the dashboard: a note **to the team**, never to users.
 
-If you change a sentence on the login screen and a heading on Create Account, then publish, the app
-on the phone is unchanged for one launch, and after the next launch the words are simply different.
-No banner, no toast, no "a new version is available", no restart prompt. `expo-updates` is a
-download-and-swap client; it ships no user interface at all. Neither Facebook nor TikTok announce
-copy changes either — a silent update is the normal behaviour people already expect from an app.
+**Profile → About → App version** shows `1.0.0` (from `expo-constants`), which changes only with a
+native build. Nothing displays `Updates.updateId`, so the running *bundle* cannot be identified from
+the phone.
 
-**What the `--message` is, and is not.** `eas update --message "Fixed the welcome copy"` is stored
-with the update group and shown in `eas update:list` and the Expo dashboard. It is a note **to the
-team** — for audits, rollbacks and later questions. It never reaches the phone and no user can see it.
+### Release notes — the "What's new" card (shipped 2026-10-25)
 
-**The version is shown; the bundle is not.** Profile → About carries an `App version` row
-(`1.0.0`, read from `expo-constants`, so it is the same number `app.json` and the OTA runtime use).
-That is enough to answer "which build are you on?". What it cannot tell you is which *bundle* —
-nothing in `mobile/` reads `Updates.updateId` (verified by searching) — and the version itself only
-changes with a new native build, so an over-the-air publish leaves the row reading `1.0.0`. That is
-correct, not a bug: the runtime version really is unchanged.
-
-### The three ways to tell people something changed
-
-| Approach | Effort | When it is right |
-|---|---|---|
-| **Say nothing** | none | Copy tweaks, layout fixes, a corrected word. This is the default and it is usually correct. |
-| **A "What's new" card** shown once per note | **shipped 2026-10-25** — §7A.1 | A change people would otherwise hunt for: a moved button, a new field, a renamed tab. |
-| **"Restart to apply" prompt** | ~15 lines, **not implemented** (deferred) | Rare — only when someone is waiting on a fix and cannot be asked to relaunch twice. |
-
-### 7A.1 The "What's new" card, as shipped (2026-10-25)
-
-**The note lives inside the bundle**, so the publish carries its own announcement and no server or
-database is involved: no endpoint, no collection, no new permission, and it renders offline. The
-pieces are:
+The note lives **inside the bundle**: no endpoint, no collection, no permission, renders offline.
 
 | File | What it is |
 |---|---|
-| `mobile/lib/releaseNotes.ts` | The notes themselves — the only file you edit to announce something. |
-| `mobile/lib/releaseNotesSeen.ts` | The ids in `expo-secure-store`: every note this device has acknowledged, capped at 100 with the newest kept. |
-| `mobile/hooks/useReleaseNotes.ts` | `!seenIds.includes(latest.id)`, and nothing more. |
-| `mobile/components/WhatsNewCard.tsx` | The card. |
-| `mobile/app/(app)/whats-new.tsx` | The full list, newest first. |
+| `mobile/lib/releaseNotes.ts` | the notes — the only file to edit to announce something |
+| `mobile/lib/releaseNotesSeen.ts` | acknowledged ids in `expo-secure-store`, capped at 100 (newest kept) |
+| `mobile/hooks/useReleaseNotes.ts` | `!seenIds.includes(latest.id)` |
+| `mobile/components/WhatsNewCard.tsx` | the card |
+| `mobile/app/(app)/whats-new.tsx` | the full list, newest first |
 
-**What the person sees.**
+- The card appears **once per note** on the dashboard, below the stale-data warning. **Got it**
+  dismisses; **See what's new** opens the list; either records the note.
+- A bundle with no new note announces nothing — silent updates are the normal case.
+- The permanent doorway is **Profile → About → What's new**.
+- Dismissal is final in both directions: the marker is the **set** of ids, so a rollback or a
+  republished older group re-announces nothing. A note this device never saw still appears.
+- If storage cannot be read, the card is shown — missing a message is worse than repeating one.
+- It is a card, not a modal or toast, and not on Login: it appears where a signed-in person lands.
 
-- The card appears **once per note**, on the dashboard — below the stale-data warning, above
-  Overview — with the note's title and one-sentence summary.
-- **"Got it"** dismisses it. **"See what's new"** opens the full list. Either one records the note
-  as acknowledged, so it never comes back for that note. A *newer* note in a later bundle appears
-  once, as its own card.
-- **A bundle with no new note announces nothing**, which is the normal case for a wording change.
-  That is what "silent updates for small changes" means in practice.
-- Both doorways work: the card, and **Profile → About → What's new**. The card is the prompt; the
-  screen is the permanent record.
-- **A dismissal is final, in both directions.** The marker is the set of ids acknowledged, not the
-  last one seen, so a rollback, a republish of an earlier group, or deleting the newest note from
-  `RELEASE_NOTES` re-announces nothing. It was a single id until 2026-10-25, and that version brought
-  a dismissed card back on the first rollback — which is why the set replaced it. A note this device
-  has never acknowledged still appears, whichever bundle carries it.
-- The marker is local and non-secret — a short list of note ids, upgraded once from the single id the
-  old build wrote. **If storage cannot be read, the card is shown**: missing a message is worse than
-  repeating one, and a failed write costs one repeat on the next launch.
-
-**Why the card is not a modal or a toast, and not on Login.** A modal interrupts the task the person
-opened the app to do; a toast disappears before it is read. A card inside the page can be read,
-dismissed, or ignored. And it is rendered where a *signed-in* person lands — Login and Create Account
-are seen by people who are signed out, where "what changed" is noise at the worst moment.
-
-**How to write an announcement.** Edit one file, then publish:
-
-1. Add an entry at the **top** of `mobile/lib/releaseNotes.ts`:
-
-   ```ts
-   {
-     id: '2026-11-02-return-counts',   // never reuse an id — see below
-     date: '2026-11-02',               // display date, YYYY-MM-DD
-     kind: 'feature',                  // 'feature' | 'improvement' | 'fix'
-     title: 'Returns are counted again',
-     summary: 'One sentence a shopkeeper would understand.',
-     points: ['Optional detail.', 'Keep it short.'],
-   },
-   ```
-
-2. Write it for the person using the app: no phase numbers, no file names, no acronyms, no hype.
-   `mobile/__tests__/release-notes.test.tsx` fails if the ids are not unique, if the list is not
-   newest-first, or if a note's title or summary is empty.
-
-3. Publish it like any other JavaScript change:
-
-   ```bash
-   cd C:/Users/jeffe/inventory-ai/mobile
-   npx eas-cli update --channel production --environment production --platform android \
-     -m "Release notes: Returns are counted again"
-   ```
-
-**The id is the whole contract.** It is the only thing that decides whether the card appears, so a
-reused id silently announces nothing. Editing a published note's wording is a code edit plus
-another publish — the same as any other copy in the app, by design (§7A, *What is not possible*).
-
-#### The restart prompt — NOT implemented, deliberately deferred (owner, 2026-10-25)
-
-**This is a design note, not a description of the app.** A `downloadComplete` listener only helps if a download happens
-*while the app is open*. This project checks at launch (`ON_LOAD`), so by the time a screen is
-interactive the download is usually already done, and the event has already fired. A real in-session
-prompt therefore has to ask explicitly:
+**Writing one** — add an entry at the top of `mobile/lib/releaseNotes.ts`, then publish:
 
 ```ts
-const check = async () => {
-  const result = await Updates.checkForUpdateAsync();   // a network call, on demand
-  if (result.isAvailable) {
-    await Updates.fetchUpdateAsync();                   // then offer the button
-    setReady(true);
-  }
-};
-// the button: await Updates.reloadAsync();
+{
+  id: '2026-11-02-return-counts',   // never reuse an id
+  date: '2026-11-02',
+  kind: 'feature',                  // 'feature' | 'improvement' | 'fix'
+  title: 'Returns are counted again',
+  summary: 'One sentence a shopkeeper would understand.',
+  points: ['Optional detail.', 'Keep it short.'],
+},
 ```
 
-Caveats worth knowing before adding it: `reloadAsync()` restarts the JavaScript, so **anything typed
-and not saved is lost** — never trigger it automatically while a form is open; and it makes the app
-feel like it restarts itself, which some people read as a crash. `ON_LOAD` plus a silent swap is the
-calmer default.
+```bash
+cd C:/Users/jeffe/inventory-ai/mobile
+npx eas-cli update --channel production --environment production --platform android \
+  -m "Release notes: Returns are counted again"
+```
 
-**The rule for the day it is built.** The owner deferred it on 2026-10-25 so that a safe publish and a
-correct update on both the preview build and the store build could come first. When it is built, the
-condition is not negotiable: it may only ever be offered when **nothing is holding unsaved input**.
-In practice that means one global "a form has unsaved changes" signal that every form sets, with the
-control hidden — not merely disabled — while it is set. `reloadAsync()` discards in-progress typing
-without a prompt and without an undo.
+Write for the person using the app: no phase numbers, file names or acronyms.
+`mobile/__tests__/release-notes.test.tsx` fails on duplicate ids, a wrong order or an empty title or
+summary. **The id is the contract** — reusing one silently announces nothing. Wording cannot be
+changed from a dashboard; it is bundle text, like all copy.
 
-### What is not possible
+**Restart prompt — not implemented (deferred by the owner, 2026-10-25).** `ON_LOAD` downloads before a
+screen is interactive, so a useful prompt must call `Updates.checkForUpdateAsync()` on demand, then
+`fetchUpdateAsync()`, then `reloadAsync()`. Caveats: `reloadAsync()` discards unsaved input and reads
+as a crash to some people. If built, it may only ever be offered when **nothing holds unsaved input**,
+hidden — not merely disabled — while a form is dirty.
 
-You cannot change the notice's wording from a dashboard or a server without publishing JavaScript.
-There is no remote-config channel here: the app's text is the bundle. If the wording had to change
-independently of a release, that would be a new backend endpoint serving copy — a backend change, not
-an update feature, and not something this project has or needs today.
+**Play Store users** see nothing different: an OTA publish creates no version, no review and no
+listing "What's new" entry. That text belongs to a store release.
 
-### What Play Store users see
+## 8. When something goes wrong
 
-Nothing different. An OTA publish is invisible to Play Console: no new version, no "What's new"
-entry, no review. The Play listing's *What's new* text belongs to a **store release**, so it only
-changes when a new AAB is uploaded — which is one more reason a copy change should not need one.
-
----
-
-## 8. How the app behaves when something goes wrong
-
-| Situation | What actually happens |
+| Situation | What happens |
 |---|---|
-| No internet at launch | Starts from the bundle on the device. The check silently fails. Next online launch retries. |
-| Download interrupted | The previous bundle keeps running; the download resumes on a later launch. |
-| A downloaded update crashes on launch | The client falls back to the embedded bundle, so the app still opens. Publish a fix or roll back. |
-| The update is live and wrong | Installed builds keep it until a newer group supersedes it. Publishing a correction is minutes, not a store review. |
-| The phone never opens the app | It never updates. There is no push-to-update mechanism — this is not a remote-control channel. |
-| The app is reinstalled from the store | It starts on the embedded bundle and picks up the newest update on its next launches. |
-
----
+| No internet at launch | Starts from the device's bundle; the check silently retries later |
+| Download interrupted | The previous bundle keeps running; the download resumes |
+| Downloaded update crashes | Falls back to the embedded bundle; the app still opens — publish a fix or roll back |
+| The update is live and wrong | Installs keep it until a newer group supersedes it; a correction is minutes, not a review |
+| The app is never opened | It never updates — there is no push |
+| Reinstalled from the store | Starts on the embedded bundle, picks up the newest update on the next launches |
 
 ## 9. Troubleshooting
 
-| Symptom | Likely cause | What to do |
+| Symptom | Cause | Do |
 |---|---|---|
-| **`404` from the update host for a channel** | No branch/update for that channel, or the runtime version does not match | `eas channel:list`, `eas branch:list`; compare the runtime in the manifest to `expo.version` |
-| **"No update available" although `update:list` shows a newer group** | The device's check was cached/refused for a period. On 2026-10-24 a publish was refused for **19+ minutes** while `curl` received the same manifest | Wait, then `eas update:republish --group <id>`; that was served on the very next launch |
-| **`Nonexistent flag: --channel`** on `update:list` | This CLI lists by **branch** | `--branch production` |
-| **The publish fails building the web bundle** | `--platform android` was omitted | Add it; the project ships no web build |
-| **`--environment` required** | SDK 55+ | Add `--environment preview` / `production`; never bypass it |
-| **The app says "Cannot reach the server" after an update** | The bundle was built without `EXPO_PUBLIC_API_URL` | `env:list --environment <env>`, fix, republish |
-| **`--runtimeVersion is required in non-interactive mode`** | `roll-back-to-embedded` without it | Add `--runtime-version 1.0.0` |
-| **Changes appear on one launch, then revert** | The update was published to a channel that install does not listen to, or its runtime differs | Check the build's channel and runtime (`expo config`), then publish to the right one |
-| **A dev build never receives updates** | Expected: development builds run Metro | Use a `preview` or `production` build to test OTA |
-| **`eas update` says it published, phone unchanged** | The app has only been launched once since | Close and start it again (§7) |
-| **A note you deleted from `RELEASE_NOTES` is still on the phone** | The channel is serving an earlier publish, or the phone has not launched twice since the correction | `npm run check:ota`, publish from the clean tree, then confirm the served group (§7) |
-
----
+| `404` from the update host | no branch/update for that channel, or runtime mismatch | `channel:list`, `branch:list`; compare the manifest runtime with `expo.version` |
+| "No update available" though `update:list` is newer | the device's check was cached/refused; on 2026-10-24 a publish was refused for **19+ minutes** while `curl` got the manifest | wait, then `update:republish --group <id>` |
+| `Nonexistent flag: --channel` on `update:list` | it lists by branch | `--branch production` |
+| Publish fails building the web bundle | `--platform android` omitted | add it |
+| `--environment` required | SDK 55+ | add it; never bypass |
+| App says *"Cannot reach the server"* after an update | bundle built without `EXPO_PUBLIC_API_URL` | `env:list`, fix, republish |
+| `--runtimeVersion is required in non-interactive mode` | `roll-back-to-embedded` without it | add `--runtime-version 1.0.0` |
+| Changes appear once, then revert | wrong channel or runtime | check the build's channel/runtime, publish to the right one |
+| A development build never updates | expected — it runs Metro | test OTA on a `preview`/`production` build |
+| `eas update` published, phone unchanged | only launched once since | close and start it again |
+| A deleted note is still on the phone | the channel serves an earlier publish, or it has not launched twice | `npm run check:ota`, publish from a clean tree, confirm the served group |
 
 ## 10. What still needs a new build
 
 | Change | Build? |
 |---|---|
-| New/upgraded native dependency (`expo-camera`, `@react-native-firebase/*`, …) | **Yes** |
-| Adding/removing a config plugin, or changing its options | **Yes** |
+| New/upgraded native dependency, config plugin or its options | **Yes** |
 | `app.json` native fields: permissions, icon, splash, name, package id | **Yes** |
 | Expo SDK upgrade | **Yes** |
-| `EXPO_PUBLIC_*` **value** changes | **Yes** |
-| Enabling code signing | **Yes** (the certificate is compiled in) |
+| `EXPO_PUBLIC_*` **value** | **Yes** |
+| Enabling code signing | **Yes** (certificate is compiled in) |
 | Changing `expo.version` | **Yes** — that is the runtime label |
-| Screens, components, styles, copy, client validation, API calls to existing or new routes | No — publish |
-| Server routes, permissions, mail templates, database rules | No — deploy the server, no app change at all |
+| Screens, components, styles, copy, client validation, API calls | No — publish |
+| Server routes, permissions, mail templates, database rules | No — deploy the server |
 
-Rule of thumb: **`package.json`'s native dependencies or `app.json`'s native fields changed → build.
-Only `.ts`/`.tsx` and images changed → publish.**
-
-### The one manual rule
-
-A **native** change must bump `expo.version` (e.g. `1.0.0` → `1.1.0`). Without the bump the new build
-keeps runtime `1.0.0` and will happily accept updates compiled for the old native code — the failure
-mode is a crash after the bad update is already installed. With the bump, the new build stops
-listening to `1.0.0` updates entirely, which is the point.
-
-Because `appVersionSource` is `remote`, EAS owns the Android `versionCode`; the runtime label still
-comes from `expo.version` in `app.json`. Check both before a release build:
-`npx eas-cli build:version:get --platform android --profile production`.
-
----
+Rule of thumb: **native dependencies or native `app.json` fields changed → build; only `.ts`/`.tsx`
+and images → publish.** A native change **must bump `expo.version`** (`1.0.0` → `1.1.0`); without it
+the new binary keeps runtime `1.0.0` and accepts updates built for the old native code, which crashes
+after install. With it, the new build stops listening to `1.0.0` — the point.
 
 ## 11. Security
 
-**What the transport protects.** Updates come over HTTPS from `https://u.expo.dev/<project-id>`. The
-project id is public — it is in the bundle already.
-
-**What a bundle may contain.** Only what is compiled into the app today: client code and
-`EXPO_PUBLIC_*` values. No database credential, no mail key, no AI provider key can travel this way;
-those live on the server and are never in the app. An update **cannot bypass the backend**: sessions,
-roles, permissions, tenant isolation and `requireAuth` are enforced on every request, whatever
-JavaScript the phone happens to be running. The mobile client is a view; the server is the boundary.
-
-**Who can publish.** Anyone with access to this Expo account/organisation. Treat that account like a
-deployment credential: it can change what every installed app runs.
-
-**Code signing is not enabled.** The channels report `Unprotected`. Enabling it means a certificate
-compiled into the app and a private key used to sign publishes, so it must be done **before** the store
-build, and the build after it ships a different native contract:
+- **Transport:** HTTPS from `https://u.expo.dev/<project-id>`; the id is public.
+- **Contents:** only client code and `EXPO_PUBLIC_*` values. No database, mail or AI key travels this
+  way. An update **cannot bypass the backend**: sessions, roles, permissions, tenant isolation and
+  `requireAuth` are enforced per request.
+- **Who can publish:** anyone with access to the Expo account/organisation — treat it as a deployment
+  credential.
+- **Code signing is off** (channels report *Unprotected*). Enabling it is a build-time change:
 
 ```bash
-# 1. Generate the key pair and a self-signed certificate (once, offline; keep the private key
-#    out of git and out of the app)
 cd C:/Users/jeffe/inventory-ai/mobile
 npx expo-updates codesigning:generate \
-  --key-output-directory ../keys \
-  --certificate-output-directory ../keys \
-  --certificate-validity-duration-years 10 \
-  --certificate-common-name "Inventory AI"
-
-# 2. Write the app-side configuration (updates.codeSigningCertificate and
-#    updates.codeSigningMetadata in app.json) and verify it
+  --key-output-directory ../keys --certificate-output-directory ../keys \
+  --certificate-validity-duration-years 10 --certificate-common-name "Inventory AI"
 npx expo-updates codesigning:configure \
-  --certificate-input-directory ../keys \
-  --key-input-directory ../keys
-```
-
-Then **rebuild** — the certificate is compiled into the app — and publish signed updates with the
-private key:
-
-```bash
+  --certificate-input-directory ../keys --key-input-directory ../keys
+# then rebuild (certificate compiled in) and publish signed:
 npx eas-cli update --channel production --environment production --platform android \
   --private-key-path ../keys/private-key.pem --message "Signed release"
 ```
 
-**None of this has been done or exercised in this project.** The commands above are the flags the
-installed `expo-updates` CLI actually accepts (checked with `npx expo-updates codesigning:generate
---help`); treat it as a recommendation for the public release, not a description of the current state.
+None of it has been done here; treat it as required before the public store build. Staged releases
+(`--rollout-percentage`) are the other safety lever.
 
-**Staged releases** (`--rollout-percentage`) are the other safety lever: a bad bundle reaches a
-fraction of installs rather than all of them.
+## 12. Current gaps
 
----
+1. **No preview build installed** — the handset runs the production-profile APK, so testing on it
+   means publishing to production. Build one: `npx eas-cli build --platform android --profile preview`.
+2. **Code signing off** — turn on before the public build; later costs a release.
+3. **CLI a major version behind** (`24.7.0`; `25.3.0` available) — re-read `--help` after upgrading.
+4. **`EXPO_PUBLIC_API_URL` in two places** — harmless while identical.
+5. **Nothing prunes old groups** — `eas update:delete <group-id>` if the list becomes noise.
+6. **The Play path is unproven** — an OTA to store users needs a store build containing
+   `expo-updates`, which depends on the AAB being uploaded. Play App Signing does not interfere.
+7. **`update:list` cannot be joined to git** — hence the clean-tree preflight.
+8. **No restart prompt, no bundle id on screen.**
 
-## 12. Current gaps, and what to change
+## 13. Limits
 
-These are the honest gaps between "the feature works" and "the feature is operated well". None of them
-is a code defect; most are decisions about how the feature is operated.
-
-1. **No preview build is installed right now.** The handset runs the **production-profile APK**
-   (channel `production`, runtime `1.0.0`), because it was used for the release rehearsal. Until a
-   `preview` APK is installed, testing an OTA on that phone means publishing to **production** — safe
-   only while the sole production install is yours. Recommendation: build one
-   `npx eas-cli build --platform android --profile preview` and install it, restoring the
-   preview-then-production habit §6 describes. (Costs one build from the monthly allowance.)
-2. **Code signing is off.** Turn it on before the public store build, per §11. Doing it later costs a
-   store release.
-3. **The CLI is a major version behind** (`24.7.0` installed, `25.3.0` available). Not urgent, but
-   when you upgrade, re-read `eas update --help`: flags do move.
-4. **`EXPO_PUBLIC_API_URL` is declared in two places** (EAS `production` environment and the
-   production build profile). Harmless while identical; a trap the day they differ.
-5. **Nothing prunes old update groups.** Each publish is small and history is useful, but if the
-   list ever becomes noise, `eas update:delete <group-id>` removes one.
-6. **The Play path is still unproven.** An OTA to *store* users requires the store build that has
-   `expo-updates` inside it — the same mechanism, but it depends on the AAB actually being uploaded
-   and installed from Play, which is the open release gate recorded elsewhere. Play App Signing does
-   not interfere with EAS Update.
-7. **`update:list` cannot be joined back to git.** The publish output names the commit, and
-   `npm run check:ota` prints it before anybody publishes, but the group list does not carry it. That
-   is why the preflight refuses a dirty tree instead of trusting a later audit — see §6.
-8. **The card and the version row ship; the restart prompt and the bundle id do not.** A published
-   note announces itself once, and Profile → About names the installed version (§7A.1), so a support
-   conversation can start with "which build are you on?" instead of a guess. Still missing: a
-   restart-to-apply control, deliberately deferred by the owner until it can see unsaved form input
-   (§7A), and any display of `Updates.updateId` — so the *bundle* running under a given version
-   cannot be identified from the phone.
-
----
-
-## 13. Limits of EAS Update
-
-- **No native changes, ever.** Compiled code, permissions, icons, plugins, SDK version — all need a
-  build.
-- **No app-store presence.** Store listing, screenshots, content rating, data-safety form, version
-  number in Play Console: unchanged by a publish. Play does not see an OTA update as a release.
-- **No forced update.** A user who never opens the app keeps the old JavaScript indefinitely.
-- **No version rollback of the native app.** You can roll back the JavaScript; you cannot uninstall a
-  native change.
-- **No change to what the user granted.** A permission prompt cannot appear via OTA.
-- **Store policy.** Both stores allow delivering JavaScript that does not change the app's primary
-  purpose or bypass review for new features in a disallowed way. This project uses it for fixes and
-  shipped UI, which is the ordinary use.
-- **A publish is not a proof.** Delivery depends on the install's channel and runtime; the checks in
-  §7 are how "published" becomes "running on a phone".
-- **iOS is unverified here** (no macOS on this host), even though the mechanism is identical.
-
----
+No native changes; no app-store presence or review; no forced update (an app never opened keeps its
+JavaScript); no rollback of a native change; no new permission prompt; a publish is not proof of
+delivery. Both stores allow JavaScript that does not change the app's primary purpose — fixes and
+shipped UI are the ordinary use. iOS is unverified here (no macOS).
 
 ## 14. Cost
 
-EAS Update is part of the Expo account already used for builds. The Free plan includes updates to
-**1,000 monthly active users** and **15 Android / 15 iOS builds per month**, with no per-update
-charge. That covers development, testing and early production. Beyond 1,000 monthly active users the
-next plan is $19/month — a business decision, not a technical blocker.
+Included in the Expo account: **1,000 monthly active users** and **15 Android / 15 iOS builds a
+month**, no per-update charge. Beyond 1,000 MAU the next plan is $19/month.
 
----
+## 15. Evidence
 
-## 15. Evidence: what has actually been measured on this project
-
-| Claim | Evidence |
+| Claim | Record |
 |---|---|
-| A `preview` APK on the production API updated **without reinstalling**, and the new JavaScript was what ran | [2026-10-24-preview-ota](../evidence/device-runs/2026-10-24-preview-ota/README.md) |
-| Preview and production channels are isolated: a production publish was ignored by a preview install across two launches, and production/development manifests answered `404` at that runtime | same record (§ *Channel isolation*) |
-| The account journeys worked on that updated build: registration, verification, reset, offline cold start | [2026-10-24-preview-journeys](../evidence/device-runs/2026-10-24-preview-journeys/README.md) |
-| A **production-profile release APK** received a published update, and `roll-back-to-embedded` returned it to the embedded bundle | [2026-10-24-release-build](../evidence/device-runs/2026-10-24-release-build/README.md) |
-| The **store AAB** carries the right channel, runtime and API host — read out of the artifact, not the log | [2026-10-24-release-aab](../evidence/device-runs/2026-10-24-release-aab/README.md), [2026-10-24-permission-trim](../evidence/device-runs/2026-10-24-permission-trim/README.md) |
-| The real production app on the phone was updated by OTA to ship invitations, terms and the deletion fix, and the invitation flow was then walked on it | [2026-10-25-invitations](../evidence/device-runs/2026-10-25-invitations/README.md), [2026-10-25-invitations-admin](../evidence/device-runs/2026-10-25-invitations-admin/README.md) |
-| A test note was published, then undone on the laptop without republishing: the channel was found serving group `48f7bbcc-…`, which no commit contained. The corrective publish `62654350-…` at `0547569` replaced it, confirmed from the channel's own manifest | §27FF in [DEVELOPMENT_ROADMAP.md](../DEVELOPMENT_ROADMAP.md) |
+| A preview APK updated **without reinstalling**, and ran the new JavaScript | [2026-10-24-preview-ota](../evidence/device-runs/2026-10-24-preview-ota/README.md) |
+| Preview and production channels isolated; production/development manifests answered 404 | same record |
+| Registration, verification, reset and offline cold start on that updated build | [2026-10-24-preview-journeys](../evidence/device-runs/2026-10-24-preview-journeys/README.md) |
+| A production-profile APK received an update; `roll-back-to-embedded` restored the embedded bundle | [2026-10-24-release-build](../evidence/device-runs/2026-10-24-release-build/README.md) |
+| The store AAB carries the right channel, runtime and API host | [2026-10-24-release-aab](../evidence/device-runs/2026-10-24-release-aab/README.md) |
+| The production app was updated by OTA to ship invitations, terms and the deletion fix | [2026-10-25-invitations](../evidence/device-runs/2026-10-25-invitations/README.md) |
+| A note published then undone locally left the channel serving group `48f7bbcc-…`, which no commit contained; `62654350-…` corrected it | §27FF, [DEVELOPMENT_ROADMAP.md](../DEVELOPMENT_ROADMAP.md) |
 
-**Not verified:** code signing (not enabled), `update:rollback <group-id>` (the *roll-back-to-embedded*
-variant is the one that was exercised), the AAB's Play upload path, and iOS.
-
----
+Not verified: code signing, `update:rollback <group-id>` (only *roll-back-to-embedded* was exercised),
+the Play upload path, and iOS.
 
 ## 16. Cheat sheet
 
 ```bash
-# where am I, and what is configured?
 cd C:/Users/jeffe/inventory-ai/mobile
 npx eas-cli channel:list
 npx eas-cli branch:list
 npx expo config --type public --json | grep -A3 '"updates"'
 npx eas-cli env:list --environment production
 
-# check the code first
 npm run typecheck && npm run lint && npm test && npm run check:build-env
-# then prove the tree is a release (clean, right runtime, right channel)
 npm run check:ota
 
-# publish (preview first, production later)
 npx eas-cli update --channel preview    --environment preview    --platform android -m "…"
 npx eas-cli update --channel production --environment production --platform android -m "…"
 
-# what did I publish, and what is the channel serving right now?
 npx eas-cli update:list --branch production --limit 5
-curl -sS -H "expo-platform: android" -H "expo-runtime-version: 1.0.0" \
-  -H "expo-channel-name: production" -H "accept: multipart/mixed" \
-  https://u.expo.dev/607eca05-1175-43ed-86a0-1829e91c9531 | grep -o '"updateGroup":"[^"]*"'
 npx eas-cli update:insights <group-id>
 
-# the phone refuses a publish that exists
 npx eas-cli update:republish --group <group-id> -m "Republished"
-
-# something is wrong
 npx eas-cli update:rollback <group-id> --platform android -m "Rolled back"
 npx eas-cli update:roll-back-to-embedded --channel production --platform android \
   --runtime-version 1.0.0 -m "Back to embedded" --non-interactive
 
-# a native change needs a build, not an update
-npx eas-cli build --platform android --profile preview       # APK, adb-installable
+npx eas-cli build --platform android --profile preview       # APK
 npx eas-cli build --platform android --profile production    # AAB for Play
 ```
 
-**The three sentences to remember.** Saving does nothing; `eas update` publishes; the phone picks it up
-on its next launches. JavaScript and images travel this way — native code never does. If you changed
-`package.json`'s native dependencies, `app.json`'s native fields, or the SDK, you need a build, and a
-native change also needs `expo.version` bumped so old updates cannot reach the new binary.
+**Remember:** saving does nothing; `eas update` publishes; the phone applies it on its next launches.
+JavaScript and images travel that way — native code never does, and a native change also needs
+`expo.version` bumped.
+
+← [Guides index](README.md) · Related: [8. Preparing the Play submission](8-play-store-submission.md)

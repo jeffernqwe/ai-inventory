@@ -73,7 +73,9 @@ describe('the native-runtime comparison', () => {
   });
 
   it('fails when the record is present but incomplete', () => {
-    const { expoModulesCore, ...partial } = recorded;
+    // Built explicitly rather than by destructuring the field away: an unused binding is a lint
+    // error, and the point of the case is which field is absent, not how it was removed.
+    const partial = { appVersion: recorded.appVersion, expo: recorded.expo, reactNative: recorded.reactNative };
     const result = compareNativeRuntime({ recorded: partial, installed, appVersion: '1.0.1', allowNativeChange: false });
     assert.deepEqual(rules(result), ['native-record-incomplete']);
     assert.match(result.findings[0].message, /expoModulesCore/);

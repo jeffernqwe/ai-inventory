@@ -20796,6 +20796,95 @@ signed in to this production tenant (it is gone now), a store-signed build, and 
 
 ---
 
+# 27FJ. Two advisories that cannot be fixed here, and the watch that says when they can (2026-10-25)
+
+**Dependency triage and documentation — no route, permission, schema, index, session-model, environment
+or application-code change. No package was upgraded, no build or OTA publish was made, and both
+alerts remain open.**
+
+GitHub reported two high Dependabot alerts on `mobile/package-lock.json` after the documentation push
+(§27FE–§27FI). This entry is the triage the owner asked for: what each advisory is, whether the
+vulnerable code can run here, and what the safest upgrade path is. The answer to the last question is
+**there is no safe upgrade today**, and the work is therefore to prove that rather than to install
+something.
+
+## What the two alerts are, measured rather than summarised
+
+The alerts API was re-read on **2026-10-25**: **two open**, `0` dismissed, `0` auto-dismissed, `8`
+fixed. Both rows below come from that API and from the installed tree, not from a scanner summary.
+
+| Alert | Advisory | Sev / CVSS | Installed | Consumer (declared range) | Patched release |
+| --- | --- | --- | --- | --- | --- |
+| #10 (opened 2026-10-24) | **GHSA-mrhx-c7xc-m3w5** — `zod` exhausts memory validating an oversized array against a length-unconstrained array schema (CWE-770) | high / **7.5** | `3.25.76`, at `mobile/node_modules/expo/node_modules/zod` | `expo@58.0.16 → @expo/cli@58.1.13`, declares **`^3.25.76`** — and the newest published CLI, 58.1.15, declares the same | **4.6.6** (all 3.x is inside the advisory's `< 4.6.6`) |
+| #5 (opened 2026-10-09) | **GHSA-86w9-cpqp-85rv** — `node-forge` accepts extra nested `DigestAlgorithm` elements when verifying RSA PKCS#1 v1.5 signatures (CWE-347); an incomplete fix for CVE-2026-33894 | high / **7.5** | `1.4.0` | `expo-updates@58.0.18 → @expo/code-signing-certificates@0.0.7`, declares **`^1.4.0`**; `@expo/cli` declares the same | **none exists** — 1.4.0 is both the newest release (2026-03-24) and inside `<= 1.4.0` |
+
+**Neither package is in a shipped bundle**, and that was measured rather than assumed:
+
+- `expo-updates`' own runtime JavaScript (`node_modules/expo-updates/build/**.js`) contains **no
+  reference** to `@expo/code-signing-certificates` or `node-forge`; its dependency on the former is
+  used by the CLI-side signing tooling.
+- The only files that `require()` node-forge outside the package itself are
+  `@expo/code-signing-certificates/build/main.js` and
+  `@expo/cli/build/src/run/ios/codeSigning/Security.js` — certificate generation and iOS keychain
+  signing, both on a developer's machine.
+- `zod` is reached by `@expo/cli` from exactly two files, `DevToolsPlugin.schema.js` and
+  `createMCPDevToolsExtensionSchema.js`: the **dev-server** plugin-manifest validator. Its input is a
+  developer's own local plugin descriptor, not attacker-supplied data, and it never runs inside the
+  app, the API server or an EAS build.
+
+Both advisories also need a precondition this repository does not supply: the zod one needs an
+application to validate a large attacker-controlled array, and the node-forge one needs an application
+that **verifies** an untrusted RSA signature — here the package only generates certificates and reads
+Apple-signed ones from the keychain.
+
+## Why no override, and what `READY` will mean
+
+An `overrides` entry can force either version past its consumer's declared range. It was refused, for
+the reason the owner's instruction names: that is an unreviewed upgrade of build tooling, and it would
+buy a silenced alert rather than a fixed risk.
+
+- **zod** — 4.6.7 is patched, but `@expo/cli` declares `^3.25.76`. Forcing zod 4 into a v3 consumer is
+  a major-version substitution inside a dependency Expo owns; the failure mode would land in `expo
+  start`'s plugin validation or, worse, in an EAS build, for code that never runs in the product. The
+  fix belongs to Expo, and it is a one-line range change upstream.
+- **node-forge** — there is **nothing to upgrade to**. No release outside `<= 1.4.0` has been
+  published, so no bump, override or patch can close it. This is the same state §27AK recorded, now
+  re-measured five weeks later.
+
+What can be automated is the question "has upstream moved yet?". `scripts/check-upgrade-watches.mjs`
+gained a **generic advisory gate** — `decideAdvisoryUpgrade` — that answers `READY` only when a
+published release is **both** outside the advisory's range **and** admitted by the consumer's own
+declared range, which is precisely the condition under which a plain bump closes the alert with no
+override. Two watches now use it (`zod (advisory)`, `node-forge (advisory)`), reading the advisory from
+GitHub's public API and the consumer range from the **installed** manifests.
+
+## One watch retired, and a prediction that came true
+
+While re-reading the alerts, `decode-uri-component` was found **fixed** — `fixed_at
+2026-10-24T14:39:37Z` — and the package is now **absent from the lockfile entirely** (`0` occurrences).
+The route was the one §27AK predicted: `expo-router` 58 no longer depends on `query-string`, so the
+CommonJS consumer that made 0.5.0 unusable is gone. The watch that tracked it, its CJS-requireability
+decider and its eleven controls were **retired** rather than left printing `DEFERRED` about a package
+that is no longer installed; the history stays in §27AK/§27CJ and in git. `braces` (3.0.3) and
+`sprintf-js` (1.0.3) are still installed and are no longer flagged by the alerts API.
+
+## Verification
+
+The controls are the proof that the new gate can fail in both directions: **23 pass** (`4` must-fire,
+`17` must-not-fire, `2` range), including the two live shapes as must-not-fire and a patched release
+admitted by its consumer as must-fire in **both** advisory shapes — with a published
+`first_patched_version` (zod) and range-only (node-forge). The live report prints both watches
+**`DEFERRED`** with the reason in the line: *4.6.7 is patched … but @expo/cli@58.1.13 declares
+^3.25.76 — a bump cannot reach it*, and *the newest published release 1.4.0 is still inside the
+vulnerable range*. `SECURITY.md`'s known-open row was corrected from the stale four-advisory text it
+carried since 2026-10-16 to the two that are actually open.
+
+**No dependency was upgraded, so no mobile build or test run was owed by this change** — and per the
+owner's instruction, nothing was published to EAS for a documentation and tooling commit. Both alerts
+stay **open**, undispositioned by suppression, until the gate says `READY`.
+
+---
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

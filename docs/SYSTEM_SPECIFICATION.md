@@ -1528,8 +1528,20 @@ consulted on every authenticated request, a session can be ended server-side:
   same `404` as an unknown id.
 - **Sign out everywhere** ends every open session for the caller, the current one
   included.
+- **A per-account cap** bounds how many sessions one account may hold open: **20**
+  (`MAX_ACTIVE_SESSIONS_PER_USER`). Every sign-in, reinstall and exchange mints a
+  row that lives for the full 14-day cap, so without a bound a token taken from an
+  old device stays live for a fortnight however often the owner signs in
+  elsewhere. The rule runs **at creation only** and revokes the **oldest** sessions
+  rather than refusing the newest sign-in, so the device in the member's hand keeps
+  working; each eviction writes a `SESSION_REVOKED` audit row with
+  `reason: "session-cap"`. It is best-effort by design — the login has already
+  succeeded, so a cleanup failure is logged and the next sign-in tries again, which
+  is why 20 is a **bound and not a guarantee**. It is deliberately not a device
+  policy: a member cannot see or choose which device goes, so a tighter number
+  would be a product decision nobody has made.
 
-Both are self-service operations on the caller's own sessions and require no new
+All are self-service operations on the caller's own sessions and require no new
 permission: they are authenticated routes, not capability-gated ones. The three
 routes are `POST /api/auth/logout` (with `{ "all": true }` for sign out
 everywhere), `GET /api/auth/sessions` and `DELETE /api/auth/sessions/:id`. The

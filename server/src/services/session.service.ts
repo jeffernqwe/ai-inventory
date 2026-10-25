@@ -126,6 +126,34 @@ const LAST_USED_WRITE_INTERVAL_MS = 5 * 60 * 1000;
 /** Upper bound on the session list — a user has a handful of devices, not thousands. */
 export const MAX_SESSIONS_RETURNED = 50;
 
+/**
+ * The most sessions one account may hold OPEN at once.
+ *
+ * WHY THIS EXISTS. A session is the only thing that makes a token revocable, and
+ * until this bound nothing limited how many could exist: every sign-in, every
+ * app reinstall and every Exchange mints one more row, and each stays usable for
+ * the full 14-day absolute cap. Two consequences were real rather than
+ * theoretical — a token stolen from one device stays live for a fortnight even
+ * when the owner has since signed in elsewhere, and a forgotten test device can
+ * hold a working credential indefinitely inside the cap. `revokeAllSessions`
+ * answers both only by signing the owner out everywhere, which is the wrong
+ * trade for a normal person with a phone and a tablet.
+ *
+ * WHY 20, AND WHY NOT A TIGHTER NUMBER. Telemetry is not the basis here because
+ * none exists; the number is a bound, not a target. A shop's shared tablet, a
+ * personal phone and a reinstall every so often sit far below it, so an ordinary
+ * member never notices this rule fire. A cap small enough to act as a policy
+ * ("three devices") would sign real people out of a device they still use, and a
+ * member cannot see or choose which one — that is a product decision nobody has
+ * made. 20 therefore bounds accumulation without ever becoming the reason
+ * somebody is asked to sign in again.
+ *
+ * The cap is enforced at creation only. A renewal reuses its existing row and
+ * cannot add to the count, and revoking the OLDEST row (rather than refusing the
+ * newest login) keeps the device in the member's hand working.
+ */
+export const MAX_ACTIVE_SESSIONS_PER_USER = 20;
+
 /** A fresh, unguessable session id. Random, never derived from the user or time. */
 export function newSessionId() {
   return crypto.randomUUID();
@@ -202,7 +230,57 @@ export async function createSessionForToken({ userId, businessId, token, deviceL
     sessionId: session._id,
     metadata: { deviceLabel: session.deviceLabel },
   });
+  await enforceSessionCap({ userId, businessId });
   return session;
+}
+
+/**
+ * Revokes the open sessions beyond `MAX_ACTIVE_SESSIONS_PER_USER`, oldest first.
+ *
+ * NEWEST-FIRST ORDER IS THE POINT. The session just created is the newest, so it
+ * survives; the rows that fall past the cap are the ones nobody has used for
+ * longest. Revoking on `createdAt` rather than an idle interval is deliberate —
+ * a member cannot see an idle clock, but they can see that the oldest device is
+ * the one that had to sign in again.
+ *
+ * BEST-EFFORT BY CONSTRUCTION, exactly like the audit write above it. The login
+ * has already succeeded and its session is durable; failing the sign-in because
+ * a cleanup query timed out would turn a housekeeping rule into a lockout. A
+ * failure is logged and the next login tries again.
+ *
+ * Returns the ids it revoked, so the tests can assert the effect rather than
+ * infer it from a count.
+ */
+async function enforceSessionCap({ userId, businessId, now = new Date() }: RevokeAllSessionsInput) {
+  try {
+    const active = await Session.find({ userId, revokedAt: null, expiresAt: { $gt: now } })
+      .sort({ createdAt: -1, _id: -1 })
+      .select('_id deviceLabel')
+      .lean();
+    if (active.length <= MAX_ACTIVE_SESSIONS_PER_USER) return [];
+
+    const excess = active.slice(MAX_ACTIVE_SESSIONS_PER_USER);
+    const ids = excess.map((entry) => entry._id);
+    await Session.updateMany(
+      { _id: { $in: ids }, revokedAt: null },
+      { $set: { revokedAt: now } }
+    );
+    for (const entry of excess) {
+      await auditSession({
+        businessId,
+        userId,
+        action: AUDIT_ACTIONS.SESSION_REVOKED,
+        sessionId: entry._id,
+        metadata: { deviceLabel: entry.deviceLabel, reason: 'session-cap' },
+      });
+    }
+    return ids;
+  } catch (err) {
+    console.error(
+      `[session] cap enforcement failed (login preserved, ${MAX_ACTIVE_SESSIONS_PER_USER} is the intended bound): ${(err as { message?: unknown }).message}`
+    );
+    return [];
+  }
 }
 
 /**

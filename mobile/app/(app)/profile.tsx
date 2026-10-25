@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
+import Constants from 'expo-constants';
 import { router } from 'expo-router';
 import { Linking, StyleSheet, Text, View } from 'react-native';
 
@@ -18,6 +19,15 @@ import { roleLabel, defaultHomePath } from '../../lib/permissions';
 import { spacing, type } from '../../lib/theme';
 import type { Palette } from '../../lib/theme';
 import { useTheme } from '../../lib/theme-context';
+
+/**
+ * The installed app version — which is also this build's over-the-air runtime version, because
+ * `app.json` sets `runtimeVersion.policy: "appVersion"`. It is read from the bundle's own config
+ * rather than written out here, so it cannot drift from `app.json` the first time the version is
+ * bumped. This is the line that makes a support conversation possible at all: without it nobody
+ * can say which build they are on, and "did the update arrive?" is guesswork.
+ */
+const APP_VERSION = Constants.expoConfig?.version ?? 'unknown';
 
 /**
  * One label/value line. The label is the muted title and the value renders at
@@ -300,6 +310,29 @@ export default function ProfileScreen() {
       </Card>
 
       {/*
+       * About: the doorway to the release notes, and the only place the app states its own
+       * version. Both belong to the quiet end of the screen — a person checks them once — and
+       * neither needs the network, so the card works offline.
+       */}
+      <SectionHeader title="About" style={styles.section} />
+      <Card>
+        <Text style={styles.securityText}>
+          Inventory AI updates itself. A new version arrives the next time you open the app, so
+          there is nothing to download from the store.
+        </Text>
+        <Button
+          title="What's new"
+          variant="secondary"
+          style={styles.editName}
+          onPress={() => router.push('/whats-new')}
+        />
+        <View style={styles.versionRow}>
+          <Text style={styles.versionLabel}>App version</Text>
+          <Text style={styles.versionValue}>{APP_VERSION}</Text>
+        </View>
+      </Card>
+
+      {/*
        * The legal pages, kept at the quiet end of the screen: they are reference material a
        * person reads once, not an action. Both are PUBLIC pages on the server, so this card
        * works for an account that is signed in and says nothing about it — no token, no id and
@@ -377,4 +410,16 @@ const createStyles = (colors: Palette) => StyleSheet.create({
   // named where the account's provider is not knowable (see the phase comments).
   methodLabel: { ...type.label, color: colors.text, marginTop: spacing.lg },
   spaced: { marginTop: spacing.md },
+  versionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+    marginTop: spacing.lg,
+    paddingTop: spacing.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.divider,
+  },
+  versionLabel: { ...type.label, color: colors.textMuted },
+  versionValue: { ...type.body, color: colors.text, fontWeight: '600' },
 });

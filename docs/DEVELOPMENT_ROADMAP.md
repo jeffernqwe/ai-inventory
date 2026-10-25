@@ -20412,6 +20412,58 @@ measurement table: `docs/evidence/device-runs/2026-10-25-invitations-admin/`. Ro
 
 ---
 
+# 27FE. Release notes: a card that says what changed, and a version to quote (2026-10-25)
+
+**Mobile only — no route, permission, schema, index, dependency, session-model, environment or server
+change.** Over-the-air updates had been silent by design (§27EP, §27ER): a copy change simply appeared
+on the next launch. The guide that records that behaviour (`docs/guides/7-over-the-air-updates.md`
+§7A) could previously describe a What's New card only as something that *could* be built. It is now
+built, and it answers the question that started the work: **how will a user know the app changed, and
+how can an important change be announced without a new build?**
+
+**The feature.** `mobile/lib/releaseNotes.ts` holds the notes themselves — three ship in this bundle
+(this screen, invitations, the legal pages and account deletion). `mobile/hooks/useReleaseNotes.ts`
+reduces the whole rule to `seenId !== latest.id`; the marker is one note id in `expo-secure-store`
+(`mobile/lib/releaseNotesSeen.ts`), so nothing is added to the server and the list renders offline.
+`mobile/components/WhatsNewCard.tsx` renders on the dashboard, below the stale-data warning and above
+Overview. **"Got it"** dismisses, **"See what's new"** opens `mobile/app/(app)/whats-new.tsx`, which
+lists every note newest first and is also reachable from a new **Profile → About** card. **Both actions
+acknowledge**, so a note cannot return; a bundle with no new note announces nothing; and **a failed
+storage read shows the card** rather than swallowing the message.
+
+**Profile → About also shows `App version`**, read from `expo-constants` (never typed by hand), which is
+the same number `app.json` and `runtimeVersion` use. It is the first place the app states its own
+version: without it, "did the update arrive?" was unanswerable from the phone. It deliberately does not
+read `Updates.updateId`, so the **version is quotable and the bundle is not** — and the guide says so
+rather than implying more than the code does.
+
+**Decisions recorded, not implemented.** The **restart-to-apply prompt is deferred** by the owner
+(2026-10-25): safe publishing, and a correct OTA on both a preview build and the store build, come
+first. Its precondition is written into the guide — it may only ever be offered when **no form holds
+unsaved input**, because `reloadAsync()` discards typing with no prompt and no undo. The **notes stay in
+the bundle** rather than in a collection or an endpoint: the note ships with the code it describes, needs
+no route, permission or secret, and cannot announce something this build does not have. The cost is
+stated plainly in the guide — writing one is a code edit plus a publish, not a dashboard edit — and a
+server-driven list is recorded as the upgrade path, not smuggled in now.
+
+**Tests.** New `mobile/__tests__/release-notes.test.tsx`, **21 cases**: unique non-empty ids, newest-first
+order, the announced note being the first, date formatting that cannot shift by timezone, the card's two
+actions, the marker's six behaviours (unseen when nothing is stored, quiet when acknowledged, re-announced
+when a newer note arrives, flipped and written on acknowledge, fail-open on a read error, no wait on a
+failed write), the screen's exits with and without history, and four dashboard cases proving the card
+appears, acknowledges on both actions and never returns. It also pinned the test library's contract in
+this repo: **`fireEvent` is async in RNTL 14**, and an un-awaited press leaves an act scope open, which
+makes every later render in that file commit nothing.
+
+**Verification.** Mobile **97 suites / 1162 tests / 0 failures**, `tsc` clean, `eslint` clean. No server
+file was touched, so its baselines stand unchanged.
+
+**Not verified:** nothing on a device yet — the card and the screen have not been seen on the handset,
+and the first real proof will be the OTA publish that carries them (JavaScript only, so **no new build is
+needed**). iOS unverified. Guide §7A.1 is the operating record.
+
+---
+
 # 28. Phase Gate System
 
 Claude Code must NOT automatically move to the next phase after completing a phase.

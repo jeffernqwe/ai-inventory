@@ -16,6 +16,7 @@ import Screen from '../../components/Screen';
 import SectionHeader from '../../components/SectionHeader';
 import StatCard from '../../components/StatCard';
 import type { StatTone } from '../../components/StatCard';
+import WhatsNewCard from '../../components/WhatsNewCard';
 import { dashboardApi, productsApi, purchaseOrdersApi } from '../../lib/api';
 import type { ApiResponse } from '../../lib/api';
 import { isSessionError, useSession } from '../../lib/auth';
@@ -35,6 +36,7 @@ import {
   roleLabel,
 } from '../../lib/permissions';
 import useRefetchOnFocus from '../../hooks/useRefetchOnFocus';
+import { useReleaseNotes } from '../../hooks/useReleaseNotes';
 import { radius, spacing, type } from '../../lib/theme';
 import type { Palette } from '../../lib/theme';
 import { useTheme } from '../../lib/theme-context';
@@ -242,6 +244,8 @@ function DashboardView() {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { user, token, signOut } = useSession();
+  // One card per published note, on the surface the person opens first (2026-10-25).
+  const releaseNotes = useReleaseNotes();
   const [summary, setSummary] = useState<ApiResponse>(null);
   const [restock, setRestock] = useState<ApiResponse[] | null>(null);
   const [openPos, setOpenPos] = useState<ApiResponse[] | null>(null);
@@ -367,6 +371,23 @@ function DashboardView() {
             <Pressable style={styles.stale} onPress={load} accessibilityRole="button" accessibilityLabel="Retry loading">
               <Text style={styles.staleText}>Showing earlier data — pull to retry.</Text>
             </Pressable>
+          ) : null}
+
+          {/**
+           * Release notes sit below the stale-data warning, not above it: if the figures on this
+           * screen are out of date, that outranks product news. The card acknowledges on either
+           * action — dismissing it and opening the list are both "I have seen this" — so it can
+           * never come back for the same note.
+           */}
+          {releaseNotes.latest && releaseNotes.unseen ? (
+            <WhatsNewCard
+              note={releaseNotes.latest}
+              onOpen={() => {
+                releaseNotes.acknowledge();
+                router.push('/whats-new');
+              }}
+              onDismiss={releaseNotes.acknowledge}
+            />
           ) : null}
 
           <SectionHeader

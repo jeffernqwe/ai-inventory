@@ -31,9 +31,10 @@ Two things are worth saying plainly, because they are the two that surprise peop
 2. **The app you installed decides what it can receive.** The channel (`preview` or `production`)
    and the runtime version (`1.0.0`) are compiled into the APK. An update published to another
    channel, or built for another runtime, is invisible to that install — by design.
-3. **Nothing tells the person it happened.** There is no banner, dialog or "new version" screen.
-   The new words simply appear the next time they open the app. §7A is about that, and about how
-   to add a notice if you want one.
+3. **Nothing tells the person it happened — unless you write a release note.** A copy change has no
+   banner, dialog or "new version" screen; the new words simply appear on the next launch. A change
+   worth knowing about is written up in `mobile/lib/releaseNotes.ts` and appears once as a What's
+   New card (§7A.1). Everything else stays silent on purpose.
 
 ---
 
@@ -437,54 +438,89 @@ copy changes either — a silent update is the normal behaviour people already e
 with the update group and shown in `eas update:list` and the Expo dashboard. It is a note **to the
 team** — for audits, rollbacks and later questions. It never reaches the phone and no user can see it.
 
-**The app currently shows no version anywhere.** There is no Settings row with `1.0.0`, and no code
-that reads `Updates.updateId` (verified by searching `mobile/`). So a user cannot tell you which
-bundle they are running, and you cannot ask them to check. If supporting real users is the next step,
-an *About* line on Profile is the cheapest useful addition — `expo-constants` is already a dependency.
+**The version is shown; the bundle is not.** Profile → About carries an `App version` row
+(`1.0.0`, read from `expo-constants`, so it is the same number `app.json` and the OTA runtime use).
+That is enough to answer "which build are you on?". What it cannot tell you is which *bundle* —
+nothing in `mobile/` reads `Updates.updateId` (verified by searching) — and the version itself only
+changes with a new native build, so an over-the-air publish leaves the row reading `1.0.0`. That is
+correct, not a bug: the runtime version really is unchanged.
 
 ### The three ways to tell people something changed
 
 | Approach | Effort | When it is right |
 |---|---|---|
 | **Say nothing** | none | Copy tweaks, layout fixes, a corrected word. This is the default and it is usually correct. |
-| **A "What's new" card** shown once per update | one screen + ~20 lines | A change people would otherwise hunt for: a moved button, a new field, a renamed tab. |
-| **"Restart to apply" prompt** | ~15 lines | Rare — only when someone is waiting on a fix and cannot be asked to relaunch twice. |
+| **A "What's new" card** shown once per note | **shipped 2026-10-25** — §7A.1 | A change people would otherwise hunt for: a moved button, a new field, a renamed tab. |
+| **"Restart to apply" prompt** | ~15 lines, **not implemented** (deferred) | Rare — only when someone is waiting on a fix and cannot be asked to relaunch twice. |
 
-**The card, and why it fits this system.** The note lives **inside the new bundle**, so the publish
-carries its own announcement and no server or database is involved:
+### 7A.1 The "What's new" card, as shipped (2026-10-25)
 
-```tsx
-import * as React from 'react';
-import * as Updates from 'expo-updates';
-import * as SecureStore from 'expo-secure-store';
+**The note lives inside the bundle**, so the publish carries its own announcement and no server or
+database is involved: no endpoint, no collection, no new permission, and it renders offline. The
+pieces are:
 
-const SEEN = 'inventoryai.updates.seenUpdateId';
+| File | What it is |
+|---|---|
+| `mobile/lib/releaseNotes.ts` | The notes themselves — the only file you edit to announce something. |
+| `mobile/lib/releaseNotesSeen.ts` | One note id in `expo-secure-store`: which note this device has acknowledged. |
+| `mobile/hooks/useReleaseNotes.ts` | `seenId !== latest.id`, and nothing more. |
+| `mobile/components/WhatsNewCard.tsx` | The card. |
+| `mobile/app/(app)/whats-new.tsx` | The full list, newest first. |
 
-export function useWhatsNew() {
-  const [visible, setVisible] = React.useState(false);
+**What the person sees.**
 
-  React.useEffect(() => {
-    if (!Updates.isEnabled) return;          // Expo Go, or a build without the client
-    if (Updates.isEmbeddedLaunch) return;    // first run: nothing to announce yet
-    const id = Updates.updateId;
-    if (!id) return;
-    SecureStore.getItemAsync(SEEN).then((seen) => setVisible(seen !== id));
-  }, []);
+- The card appears **once per note**, on the dashboard — below the stale-data warning, above
+  Overview — with the note's title and one-sentence summary.
+- **"Got it"** dismisses it. **"See what's new"** opens the full list. Either one records the note
+  as acknowledged, so it never comes back for that note. A *newer* note in a later bundle appears
+  once, as its own card.
+- **A bundle with no new note announces nothing**, which is the normal case for a wording change.
+  That is what "silent updates for small changes" means in practice.
+- Both doorways work: the card, and **Profile → About → What's new**. The card is the prompt; the
+  screen is the permanent record.
+- The marker is local and non-secret — one note id. **If storage cannot be read, the card is
+  shown**: missing a message is worse than repeating one, and a failed write costs one repeat on
+  the next launch.
 
-  const dismiss = async () => {
-    setVisible(false);
-    if (Updates.updateId) await SecureStore.setItemAsync(SEEN, Updates.updateId);
-  };
+**Why the card is not a modal or a toast, and not on Login.** A modal interrupts the task the person
+opened the app to do; a toast disappears before it is read. A card inside the page can be read,
+dismissed, or ignored. And it is rendered where a *signed-in* person lands — Login and Create Account
+are seen by people who are signed out, where "what changed" is noise at the worst moment.
 
-  return { visible, dismiss };
-}
-```
+**How to write an announcement.** Edit one file, then publish:
 
-Render it where a **signed-in** person lands first — the dashboard — not on Login. Login and Create
-Account are seen by people who are signed out, and a "what changed" card shown before sign-in is
-noise at the worst moment.
+1. Add an entry at the **top** of `mobile/lib/releaseNotes.ts`:
 
-**The restart prompt, and its catch.** A `downloadComplete` listener only helps if a download happens
+   ```ts
+   {
+     id: '2026-11-02-return-counts',   // never reuse an id — see below
+     date: '2026-11-02',               // display date, YYYY-MM-DD
+     kind: 'feature',                  // 'feature' | 'improvement' | 'fix'
+     title: 'Returns are counted again',
+     summary: 'One sentence a shopkeeper would understand.',
+     points: ['Optional detail.', 'Keep it short.'],
+   },
+   ```
+
+2. Write it for the person using the app: no phase numbers, no file names, no acronyms, no hype.
+   `mobile/__tests__/release-notes.test.tsx` fails if the ids are not unique, if the list is not
+   newest-first, or if a note's title or summary is empty.
+
+3. Publish it like any other JavaScript change:
+
+   ```bash
+   cd C:/Users/jeffe/inventory-ai/mobile
+   npx eas-cli update --channel production --environment production --platform android \
+     -m "Release notes: Returns are counted again"
+   ```
+
+**The id is the whole contract.** It is the only thing that decides whether the card appears, so a
+reused id silently announces nothing. Editing a published note's wording is a code edit plus
+another publish — the same as any other copy in the app, by design (§7A, *What is not possible*).
+
+#### The restart prompt — NOT implemented, deliberately deferred (owner, 2026-10-25)
+
+**This is a design note, not a description of the app.** A `downloadComplete` listener only helps if a download happens
 *while the app is open*. This project checks at launch (`ON_LOAD`), so by the time a screen is
 interactive the download is usually already done, and the event has already fired. A real in-session
 prompt therefore has to ask explicitly:
@@ -504,6 +540,13 @@ Caveats worth knowing before adding it: `reloadAsync()` restarts the JavaScript,
 and not saved is lost** — never trigger it automatically while a form is open; and it makes the app
 feel like it restarts itself, which some people read as a crash. `ON_LOAD` plus a silent swap is the
 calmer default.
+
+**The rule for the day it is built.** The owner deferred it on 2026-10-25 so that a safe publish and a
+correct update on both the preview build and the store build could come first. When it is built, the
+condition is not negotiable: it may only ever be offered when **nothing is holding unsaved input**.
+In practice that means one global "a form has unsaved changes" signal that every form sets, with the
+control hidden — not merely disabled — while it is set. `reloadAsync()` discards in-progress typing
+without a prompt and without an undo.
 
 ### What is not possible
 
@@ -655,10 +698,12 @@ is a code defect; most are decisions about how the feature is operated.
    `expo-updates` inside it — the same mechanism, but it depends on the AAB actually being uploaded
    and installed from Play, which is the open release gate recorded elsewhere. Play App Signing does
    not interfere with EAS Update.
-7. **The user is told nothing, and cannot check a version.** There is no "What's new" card, no
-   restart prompt and no version row anywhere in the app (§7A). Fine for copy changes; worth one
-   small screen before real users arrive, so a support conversation can start with "which build are
-   you on?" instead of a guess.
+7. **The card and the version row ship; the restart prompt and the bundle id do not.** A published
+   note announces itself once, and Profile → About names the installed version (§7A.1), so a support
+   conversation can start with "which build are you on?" instead of a guess. Still missing: a
+   restart-to-apply control, deliberately deferred by the owner until it can see unsaved form input
+   (§7A), and any display of `Updates.updateId` — so the *bundle* running under a given version
+   cannot be identified from the phone.
 
 ---
 

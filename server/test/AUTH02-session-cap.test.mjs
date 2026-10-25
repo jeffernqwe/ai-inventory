@@ -94,6 +94,15 @@ function activeSessions(userId) {
 }
 
 dbSuite('the per-user session cap — a bound on accumulation, never a lockout', dbOk, () => {
+  it('is exactly 20, and the number is stated rather than implied', () => {
+    // The constant is the rule; the LITERAL is what the specification and every
+    // sentence written about this feature say out loud ("20 open sessions").
+    // Pinning it here means changing the bound is a deliberate edit that has to
+    // reach the prose too, instead of a one-character change that leaves three
+    // documents describing a number nothing enforces.
+    assert.equal(MAX_ACTIVE_SESSIONS_PER_USER, 20);
+  });
+
   it('lets a member hold the whole cap without revoking anything (positive control)', async () => {
     const account = await makeAccount('full');
     const created = await fillToCap(account);
@@ -185,6 +194,37 @@ dbSuite('the per-user session cap — a bound on accumulation, never a lockout',
     assert.equal(await Session.countDocuments({ userId: second.userId, revokedAt: { $ne: null } }), 1);
     const oldestOfSecond = await Session.findById(secondCreated[0]._id);
     assert.ok(oldestOfSecond?.revokedAt instanceof Date);
+  });
+
+  it('never fails the sign-in when the cleanup itself fails (best-effort by construction)', async () => {
+    const account = await makeAccount('failure');
+    await fillToCap(account);
+
+    // Break the eviction WRITE the way a real timeout or a stepped-down cluster
+    // would, while leaving the read intact so the code reaches the write it cannot
+    // finish. The login has already succeeded by then; a housekeeping rule must not
+    // turn a working sign-in into a lockout.
+    const originalUpdateMany = Session.updateMany;
+    Session.updateMany = async () => {
+      throw new Error('simulated write timeout');
+    };
+    let created;
+    try {
+      created = await signIn(account, 'Sign-in during an outage');
+    } finally {
+      Session.updateMany = originalUpdateMany;
+    }
+
+    assert.ok(String(created._id), 'the sign-in must still produce a session');
+    const row = await Session.findById(created._id);
+    assert.ok(row, 'and that session must be durable');
+    assert.equal(row.revokedAt, null, 'and usable — not born revoked');
+
+    // The honest consequence: the bound is exceeded until the next sign-in tries
+    // again. That is the trade the design states out loud, asserted rather than
+    // left as a comment.
+    const live = await activeSessions(account.userId);
+    assert.equal(live.length, MAX_ACTIVE_SESSIONS_PER_USER + 1);
   });
 
   it('writes an audit row naming the session it ended, and why', async () => {

@@ -13,7 +13,7 @@ plan, and nothing in it authorises further migration.
 
 ## 1. Final State
 
-`server/src` holds **94 `.ts` modules and exactly one `.js` module**. *(Annotated 2026-10-10: `main` now holds **117** `.ts` modules; the single deferred `.js` module is unchanged. This figure is a close-out snapshot, not a current count.)*
+`server/src` holds **94 `.ts` modules and exactly one `.js` module**. *(Annotated 2026-10-10: `main` held **117** `.ts` modules. Re-counted **2026-10-25: 160** `.ts` modules; the single deferred `.js` module is unchanged. This figure is a close-out snapshot, not a current count — measure with `find server/src -name '*.ts' | wc -l`.)*
 
 | Property | Value |
 | --- | --- |

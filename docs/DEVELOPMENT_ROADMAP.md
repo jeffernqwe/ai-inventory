@@ -1,7 +1,18 @@
 # Inventory AI — Development Roadmap
 
-**Version:** 1.0  
-**Status:** Initial Development Roadmap
+**What this file is:** two documents in one file. **Part one** (§1–§26) is the plan: purpose,
+philosophy, the phase overview and the phase sections written before the work. **Part two** is the
+append-only record log — one record per phase, increment or defect, in the `27…` series, newest
+last. It says what was changed, what was measured, and what is still open. That series is the source
+of truth for *what actually happened*, and it is why this file is long.
+
+**How to read it.** Do not read it top to bottom. Either find a record by number (§27FJ, §27DM — the
+numbers are cited from `CLAUDE.md` and from source comments), or use the index: `CLAUDE.md` §7 lists
+all **167** records by the title each gives itself.
+
+**Current state:** V1 complete and in production testing. The records that answer *where are we now*
+are §27FM (the V1 re-verification), §27FK (the runtime boundary and the blocked build), §27FJ (the two
+open advisories) and §27FL (the session cap).
 
 ---
 
@@ -19110,9 +19121,10 @@ auth suite passes unchanged. No server file was touched, so the server baselines
 and one tap opened the tenant's dashboard, and the offer was **gone** after signing out. iOS remains
 unverified (no macOS on this host).
 
-**Still open from the review this came from** (recommended, not started): a per-user session cap,
-a new-device sign-in email, and invitation-based onboarding. The live password rule and the shared
-helpers landed in §27EO.
+**Still open from the review this came from:** a new-device sign-in email. Two of the three items
+this sentence used to list have since shipped — the **per-user session cap** in §27FL and
+**invitation-based onboarding** in §27FB — so only the control that *detects* a takeover is left. The
+live password rule and the shared helpers landed in §27EO.
 
 ---
 
@@ -19205,8 +19217,9 @@ digests), and a production build. Evidence, the request-by-request table and thr
 text going to whatever holds focus; the two code rows sitting at different heights):
 `docs/evidence/device-runs/2026-10-24-auth-end-to-end/README.md`. iOS unverified.
 
-**Still open** (recommended, not started): a per-user session cap, a new-device sign-in email, and
-invitation-based onboarding as the prerequisite for retiring legacy password login.
+**Still open:** a new-device sign-in email. The **per-user session cap** shipped in §27FL, and
+invitation-based onboarding — the prerequisite for retiring legacy password login — shipped in
+§27FB.
 
 ---
 
@@ -21002,6 +21015,209 @@ Dependabot **PR #95** was handled separately on the owner's instruction: updated
 four checks passed, and it was **squash-merged as `cbbf7b1`**; `npm ci` and the 1399-test unit suite
 were then re-run on this laptop against the merged lockfile and stayed green, and the follow-up CI run
 on `cbbf7b1` passed all four jobs.
+
+---
+
+# 27FL. The session cap the roadmap had twice recommended and never built (2026-10-25)
+
+**Server only — one service rule, one constant and one new DB suite; no route, permission, schema,
+index, dependency, mobile or environment change, and nothing deployed or published.**
+
+Two roadmap sections listed *a per-user session cap* under "Still open (recommended, not started)"
+(§27EN, §27EO), and the same list still carried invitation onboarding after it had shipped (§27FB).
+This increment closes the cap and corrects both lists rather than leaving a second stale
+recommendation standing beside the first.
+
+## What was actually unbounded
+
+Since Phase 26A a session is the only thing that makes a token revocable, and nothing limited how many
+could exist: every sign-in, every app reinstall and every Firebase exchange minted a row that stayed
+usable for the full 14-day absolute cap. `listActiveSessions` capped what the **screen shows** at 50,
+but the rows themselves were never bounded, so the only way to end a forgotten device's credential was
+`revokeAllSessions` — which signs the owner out of the device in their hand.
+
+## The rule
+
+`MAX_ACTIVE_SESSIONS_PER_USER = 20`, enforced in `createSessionForToken` — the single creation point
+for both the legacy login and the Firebase exchange — by `enforceSessionCap`:
+
+| Property | Why it is the property |
+| --- | --- |
+| newest-first ordering | the session just created is the newest, so a member's sign-in is never what gets revoked |
+| oldest rows go first | a member cannot see an idle clock; they can see which device had to sign in again |
+| revoked, never deleted | a stale token must not silently resolve to a recreated row |
+| an audit row per eviction | `SESSION_REVOKED` with `metadata.reason = "session-cap"`, so a device that signed out is explainable |
+| best-effort, never fatal | the login has already succeeded; a cleanup failure is logged and retried on the next sign-in |
+
+20 is a bound, not a policy: a shared shop tablet, a personal phone and the occasional reinstall sit
+far below it, so the rule should never fire for an ordinary member. A tight "three devices" cap was
+rejected because it signs people out of a device they still use, and a member cannot see or choose
+which one — that is a product decision nobody has made.
+
+## What it is not
+
+Not login throttling, and not a shortening of the 14-day cap: a stolen token is live until its session
+is revoked or expires, exactly as before. It bounds **accumulation**, so a forgotten credential
+eventually stops working, and the existing per-device and sign-out-everywhere controls keep their
+current meaning. **A new-device sign-in email remains open** (§27EN/§27EO) — it is the control that
+*detects* a takeover, and this one does not.
+
+## Verification
+
+New suite `server/test/AUTH02-session-cap.test.mjs`, classified PURE_DB in `scripts/run-tests.mjs`
+(which refuses an unclassified suite): **6 cases**, each a direction that matters — the full cap is
+held without revoking anything (positive control); crossing it revokes the **oldest** and keeps the
+new one; an already-revoked row does not consume a slot; a row past its own cap does not either; the
+rule is per account; and the eviction is written to the audit trail with its reason. Against the real
+test database, **6 pass / 0 fail**.
+
+**The suite was proved able to fail**: with `enforceSessionCap` commented out it answers
+`✖ revokes the OLDEST session …` and `fail 1`; the file was then restored and the call re-asserted
+(`grep -c` = 1). Server `test:unit` **1399 / 1343 pass / 0 fail / 56 skipped** (unchanged — the new
+suite is DB-only), `tsc` and `eslint` clean, and the four auth suites most exposed to a session rule
+(`phaseAUTH03-session-renewal`, `phase03-auth`, `phase07b-auth-security`, `ACCOUNT-DELETION`) ran
+**73 tests / 71 pass / 0 fail / 2 skipped**.
+
+## Limits, recorded rather than rounded off
+
+* **Two concurrent sign-ins can overshoot by one.** Both read the count before either row is written,
+  so the next sign-in corrects it. A transaction or a unique-index trick would buy a guarantee nobody
+  can observe here.
+* **Not on hardware.** No phone run: the change is server-side and invisible in the UI, and the
+  runtime that would have carried a client change is the one blocked by the build quota (§27FK).
+* **Not deployed.** The rule reaches production users when the server is deployed; nothing was pushed.
+
+---
+
+# 27FM. The whole V1 surface re-verified, and the front door cut to a page (2026-10-25)
+
+**Verification and documentation — no route, permission, schema, index, session-model, dependency,
+mobile or server behaviour changed.** This is the start of the from-the-beginning V1 review the owner
+asked for: establish what is actually true before changing anything.
+
+## The baseline, measured rather than quoted
+
+| Check | Result |
+| --- | --- |
+| Server **full** suite (unit + every DB suite) | **2 156 tests / 348 suites / 2 156 pass / 0 fail / 0 skipped**, exit 0, 380 s |
+| Mobile suite | **97 suites / 1 172 tests / 0 failures** |
+| `tsc --noEmit`, `eslint` (server and mobile) | clean |
+| Module graph | 552 modules, 2 625 relative specifiers, 0 stale, 0 unresolved |
+| Docs guards (§27 numbering, citations, CLAUDE.md reachability, route inventory) | 16 / 16 |
+
+## Tenant isolation, scanned rather than sampled
+
+Every query in the 65 modules under `server/src/services` was extracted and checked for a
+`businessId` filter: **45 looked unscoped at first pass**, and reading each one showed every one of
+them is scoped through a `filter`/`base`/`match` object built a few lines above, or is deliberately
+account-scoped (`Session` by `userId`, reset/verification challenges by digest, `User` by email at
+login, the teardown service). No unscoped tenant query was found. The three that most needed reading
+— `audit.listAudit` (filter starts `{ businessId }`), `inventory.stockIn` (filter carries
+`businessId`, `productId`, `locationId`), and the purchase-order receive claim — were verified line by
+line. The runtime proof remains the Phase 23/24 matrices and the per-suite isolation cases, not this
+scan.
+
+## No defect was found, and that is stated as a limit
+
+This pass establishes the baseline and closes the isolation question. It does **not** mean every path
+was read: concurrency under sustained real load, AI answer quality against live models, the voice of
+the UI on a phone, accessibility, backup/restore rehearsal and iOS remain outside what a green suite
+proves. Those are the items the review continues with.
+
+## The front door was 16 000 words, and is now 1 155
+
+`README.md` went from **1 423 lines / 16 311 words to 169 lines / 1 155 words** — a 93 % cut with
+**every command, every variable name and every safety rule kept**. What was removed was the duplicated
+phase narrative (the roadmap's job), superseded route counts and per-incident prose. What was kept and
+compressed: the stack, the layout, the prerequisites, the run/test commands, the Render deployment
+model, the production variable table including `TRUST_PROXY=1` and its consequence, the data posture
+(archive-only products, no negative stock, tenant filter from the session), the mobile build/OTA
+commands, the secrets rules, and the document map with an explicit **reading rule**: the roadmap is an
+archive and is not required reading.
+
+`docs/README.md` was corrected at the same time: it listed only guides 1–5 while guides 6–8 had
+existed for weeks, and it described the roadmap as ~10,000 lines when it is ~21,000.
+
+## The instruction file, cut to a page and an index (later the same day)
+
+The two records that dominate the corpus were **`DEVELOPMENT_ROADMAP.md` (234 000 words)** and
+**`CLAUDE.md` (65 000 words)**. They could not simply be deleted: source and tests cite §27 numbers,
+and the docs guard requires every declared record to stay reachable from `CLAUDE.md`. The method
+recorded here was the guard-verified one — keep every heading, replace the instruction file's
+historical paragraphs with a complete anchor index — and the `CLAUDE.md` half is now done:
+
+| | Before | After |
+| --- | --- | --- |
+| `CLAUDE.md` | 1 455 lines / **65 201 words** / 446 791 bytes | 839 lines / **5 747 words** / 41 829 bytes |
+
+The rules were never the problem. §4 (architecture, inventory lifecycle, AI read-only) and §5
+(security) are carried through essentially unchanged — they are what an agent must not get wrong.
+What went was the ~650 lines of phase narrative that duplicated the roadmap word for word. In its
+place: a **phase overview** table, **ten operational traps** in one line each, a short **open items**
+list, and an **index of all 167 records by the title each record gives itself** — generated from the
+roadmap's own headings, so it cannot drift and invents nothing.
+
+The roadmap's own header said **"Initial Development Roadmap"** on a 21 400-line document holding 167
+dated records of a shipped V1. It now says what the file is (plan, then append-only record log), how
+to read it (by number, or through the index), and which four records answer *where are we now*.
+
+## Three stale facts, and the guard that now catches the class
+
+Cutting the file forced every figure in it to be re-read, and three were wrong:
+
+1. **`CLAUDE.md` claimed `server/src` holds 117 `.ts` modules.** Measured: **160**. The figure was true
+   when written on 2026-10-10 and nothing re-read it while AUTH-04/05/06, the invitation surface and
+   the public legal pages landed. Corrected in `CLAUDE.md` and annotated in
+   `docs/TS-MIGRATION-MANIFEST.md`, which now carries the 160 recount and the command to reproduce it.
+2. **Guide 8 planned the wrong artifact.** It said the next store build is `versionCode ≥ 4`; a
+   quota-refused attempt had already advanced the remote counter to 5, so the next build is **6**, at
+   `versionName 1.0.1`. Anyone following that table would have planned the wrong upload.
+3. **The roadmap's status line** (above).
+
+The first and third are *mechanically* checkable, and that is the gap this closes. The new
+`server/test/phase-docs-fact-drift.test.mjs` (7 cases, registered in `scripts/run-tests.mjs`) pins:
+
+* the `server/src` `.ts` module count `CLAUDE.md` states against `find`-equivalent bytes on disk;
+* the mobile version it states against `mobile/app.json`, **and the runtime against that version**
+  while `runtimeVersion` is `{ policy: "appVersion" }` — a document that separates the two labels
+  describes an update no installed binary would accept;
+* the record count the roadmap states, and that `CLAUDE.md`'s index lists **exactly** the anchors the
+  roadmap declares — none missing, none invented.
+
+Every parser is controlled in both directions (a planted wrong value must be reported, the right one
+must not), and the break/restore proof was run on the real tree: 117 modules → **1 fail**, one index
+line removed → **1 fail**, 168 in the header → **1 fail**, each restored byte-identically (md5
+compared). Its header states the limit plainly: **it cannot see a plan.** Item 2 was only half
+mechanical — the `versionCode` counter lives in EAS, not in a file, and reading it before writing it
+down stays a human step.
+
+## Verification of the documentation pass
+
+Server `test:unit` **1 406 tests / 1 350 pass / 0 fail / 56 skipped** (7 new), `eslint` and `tsc`
+clean; docs guards **16 / 16** (numbering, citations, reachability, route inventory); secret guard 22
+controls over 861 files, clean; `check:aab --self-test` 15 controls, exit 0; `check:build-env
+--profile production` no findings; `check:ota` **refuses** the dirty tree with 10 findings — the
+guard working as designed. Every `npm run` command named anywhere in the docs was checked against the
+three `package.json` files: **45 scripts, 0 dangling** across 22 documents.
+
+**The tree then ran as a whole**, against a real database: `npm test` **2 163 tests / 349 suites /
+2 163 pass / 0 fail / 0 skipped**, 360 s — the new guard included, and the session cap exercised in
+context rather than alone.
+
+One **behaviour** reached the specification in the same pass. The per-account session cap was
+implemented, tested and recorded, but `docs/SYSTEM_SPECIFICATION.md`'s *Server-Side Sessions* section
+still described only sign out, per-session revocation and sign out everywhere. It now states the
+bound where the other three are stated: **20** open sessions (`MAX_ACTIVE_SESSIONS_PER_USER`),
+enforced at creation, the **oldest** revoked so the device in hand keeps working, each eviction
+audited with `reason: "session-cap"`, and best-effort by design — a bound, not a guarantee, and
+deliberately not a device policy a member cannot see.
+
+## What is still open
+
+The **167 record bodies** in this file are still 234 000 words. Their value is in their measurements,
+so compressing them is per-record editorial work done in guard-verified batches, not a sweep; it has
+not been started. Everything else the owner asked of this pass — the baseline, the isolation scan, the
+front door, the instruction file, the drift guard — is recorded above with its measurement.
 
 ---
 

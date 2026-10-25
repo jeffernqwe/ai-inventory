@@ -23,7 +23,7 @@ quota, which resets **2026-11-01**.
 | Ads / analytics / billing | none in `package.json` |
 | Update channel | `production`, runtime `1.0.0` |
 | Embedded JavaScript | **predates account deletion — not uploadable** |
-| Next build | `versionCode` ≥ **4** |
+| Next build | `versionName 1.0.1`, `versionCode` **6** — the tree moved to `1.0.1` on 2026-10-25 (SDK patch) and a quota-refused attempt already advanced the remote counter to 5, so 5 has no artifact. Incrementing it back would be a risk taken for cosmetics; Play only requires the number to rise |
 
 `targetSdk 36` meets Play's rule that new apps and updates target Android 16 (API 36) from
 31 August 2026.

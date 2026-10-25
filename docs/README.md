@@ -25,6 +25,9 @@ the records below.
 | [guides/3-see-your-phone-on-your-laptop.md](guides/3-see-your-phone-on-your-laptop.md) | Mirroring the phone into a laptop window |
 | [guides/4-test-accounts-and-mock-data.md](guides/4-test-accounts-and-mock-data.md) | Which accounts exist, how sample data is seeded, and what is safe to delete |
 | [guides/5-words-explained.md](guides/5-words-explained.md) | Glossary, A–Z |
+| [guides/6-scripts-and-commands.md](guides/6-scripts-and-commands.md) | Every npm script, what it does, what it prints, and what is safe to run |
+| [guides/7-over-the-air-updates.md](guides/7-over-the-air-updates.md) | Publishing an update without a rebuild, and rolling one back |
+| [guides/8-play-store-submission.md](guides/8-play-store-submission.md) | Building and submitting the Android release |
 
 ## 2. What the system *is* — reference documents
 
@@ -44,7 +47,7 @@ still say what was true on the date they were written.
 
 | Document | Records |
 |---|---|
-| [`DEVELOPMENT_ROADMAP.md`](DEVELOPMENT_ROADMAP.md) | Every phase in order, with the evidence each one shipped with (~10,000 lines) |
+| [`DEVELOPMENT_ROADMAP.md`](DEVELOPMENT_ROADMAP.md) | Every increment in order, with the evidence each one shipped with (~21,000 lines — an archive, not required reading) |
 | [`PHASE_HISTORY.md`](PHASE_HISTORY.md) | The phase-by-phase history in a shorter, chronological form |
 | [`AUTH_SECURITY_MASTER_CHECKLIST.md`](AUTH_SECURITY_MASTER_CHECKLIST.md) | The security checklist for accounts, sessions and verification |
 | [`TS-MIGRATION-MANIFEST.md`](TS-MIGRATION-MANIFEST.md) | The completed migration of the backend to TypeScript |
@@ -70,3 +73,12 @@ what is in scope.
 
 Neither rule applies to the guides in section 1. They are ordinary prose and can be reworded,
 split or merged freely — if something there is unclear, the guide is what should change.
+
+---
+
+## Reading rule
+
+**You never need to read the records to use or change this project.** Start with
+[`../README.md`](../README.md) for the shape of the system and this folder's guides for a task. The
+records exist so that a decision made on a particular date can be audited later; when a record and
+the code disagree, the code and the specification win and the old record is corrected by a new entry.

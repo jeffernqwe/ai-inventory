@@ -21536,6 +21536,11 @@ the two data assertions reported **BLOCKED** with the copy they saw — `Nothing
 and `No products found` (Products) — because the tenant holds none. Exit 2 is the harness's "could not
 check", and it is the honest answer: nothing about data was proven either way.
 
+**Third run, once the tenant had a product: 24/24, exit 0** (`2026-10-26T05-27-39-113Z-smoke`), all
+seven screens, and both data assertions now proving rows rather than blocks — `4 row(s), e.g. "Smoke
+Widget, Smoke shelf, 0 available · 0 on hand, Low, Out"` and `1 row(s), e.g. "SKU SMOKE-1"`. The
+BLOCKED verdict was therefore a fact about the tenant, not a soft pass for a broken list.
+
 ## The harness could not write, so the write paths were walked by hand — on production
 
 The tenant has no product, no location and no supplier, so `stock`, `transfer`, `label` and `draft`
@@ -21575,10 +21580,12 @@ production data, not against a fixture.
   has no `User` row returned to the login screen with *"This sign-in is not linked to an Inventory AI
   account yet. Create a business account to continue."* — no session, no partial user, no silent
   sign-up. The exchange resolves by `firebaseUid` only, and this is that rule visible on a screen.
-- **`uiautomator dump` returned `null root node` for several minutes** while ColorOS's
-  `AssistOverlayBottom` / edge-bar window was flagged visible. **HOME then relaunching the app cleared
-  it**; the harness was not at fault and no code changed. Worth knowing before concluding "the phone
-  is broken".
+- **`uiautomator dump` returned `null root node` for several minutes.** ColorOS's
+  `AssistOverlayBottom` / edge-bar windows *were* flagged visible at the time — **and they are visible
+  while dumps work, including during the 24/24 run, so they are not established as the cause.**
+  **HOME then relaunching the app cleared it**; the harness was not at fault and no code changed. The
+  procedure is now in Guide `DEVELOPING_ON_A_PHYSICAL_DEVICE.md` §9b, stated as symptom + workaround
+  rather than as a diagnosis.
 - **On the product and location forms the inputs are absent from the accessibility dump** while their
   labels are present, so the flows were driven by geometry (tap below the label) and the typed value
   then appeared as text. The login and register screens *do* expose their `EditText` nodes. Not chased

@@ -427,6 +427,21 @@ in it (`Testpass9021`) removes the trap.
 **A floating `Tools` control is the dev client's overlay**, not your app (here at `[915,852][993,930]`).
 Tapping it opens the dev menu and swallows the next tap too; `BACK` dismisses it.
 
+**`uiautomator dump` can answer `null root node returned by UiTestAutomationBridge`.** Measured on
+2026-10-26: four consecutive reads failed over several minutes while `dumpsys activity` still reported
+the app resumed and a screenshot rendered normally — nothing was wrong with the phone or the app.
+**HOME, then relaunching the app, restored it immediately**, and every run since has been clean. The
+obvious suspect was on screen at the time — this OPPO keeps `AssistOverlayBottom` and
+`ColorOSEdgeFloatBar` windows flagged `isVisible=true`, and TalkBack's Accessibility Menu was up —
+**but that is not established as the cause**: those windows are visible while dumps work, and a full
+24-step run passed with them up. Read it as "the accessibility tree was momentarily unavailable":
+retry a few times, then background and relaunch before blaming the build.
+
+**A modal left open swallows the next deep link.** The stock, transfer and PO confirmations ("Done. …
+0 → 5" with an `OK`) are modal: `am start` still prints *"intent has been delivered to currently
+running top-most instance"*, the dialog stays, and the screen you read is the dialog rather than the
+route you asked for. Dismiss it first, or the next assertion is made against the wrong screen.
+
 **Make sure the server you started is the one answering.** On Windows a second `npm start` can bind
 `:4000` while a stale process keeps serving — the new one still prints its banner and `/health/ready`
 still says ready, from the old process. Check:

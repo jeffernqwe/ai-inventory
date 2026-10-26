@@ -127,6 +127,7 @@ Signed in as an owner of a tenant with **no** products, locations or suppliers:
 |---|---|---|
 | `2026-10-26T04-48-42-145Z-smoke` | the **first** run: `expect product rows on screen` FAILED with *"no state the harness knows"* on a screen that was showing `No products found` | **6/8, exit 1** — a harness defect, kept |
 | `2026-10-26T04-51-29-455Z-smoke` | after the fix: 7 screens, 5 `expectClean` passes, both data steps **BLOCKED** on the app's own empty copy | **22/24, exit 2** |
+| `2026-10-26T05-27-39-113Z-smoke` | once the tenant held a product: both data steps now **prove rows** — `4 row(s)` inventory, `1 row(s)` products | **24/24, exit 0** |
 
 The defect was `EMPTY_COPY` knowing only the shared shell's `Nothing (here yet?|to show)`; the app
 carries **thirteen** per-screen titles, so an empty Products list read as "not loaded". The pattern is
@@ -135,11 +136,13 @@ now the shape they share, and `device-harness.test.mjs` reads every `title`/`emp
 write journeys could not run (`--product` is an id that did not exist); the create, stock, transfer and
 AI flows were walked through the app itself and their numbers are in that record.
 
-**Two phone behaviours worth having here.** `uiautomator dump` can answer `null root node` for minutes
-while ColorOS's assist overlay window is flagged visible — **HOME + relaunch** cleared it, and it is
-not a harness fault. And on the product/location forms the inputs are missing from the dump while
-their labels are present, so those forms must be driven by geometry (tap below the label) rather than
-by an `EditText` node.
+**Two phone behaviours worth having here.** `uiautomator dump` answered `null root node` for minutes
+on 2026-10-26 while the app was demonstrably fine; **HOME + relaunch** cleared it, and it is not a
+harness fault. ColorOS's assist overlay was also visible at the time, but it stays visible while dumps
+work — including through the 24/24 run — so it is **not established as the cause**; Guide §9b records
+the symptom and the workaround without the diagnosis. And on the product/location forms the inputs are
+missing from the dump while their labels are present, so those forms must be driven by geometry (tap
+below the label) rather than by an `EditText` node.
 
 **What these runs do NOT prove.** iOS (no macOS on this host — Phase 30B stays open), physical paper
 (no printer; the PDF decode rules out clipped or distorted bars but it is not a scan of paper), and a

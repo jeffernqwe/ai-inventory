@@ -21439,15 +21439,43 @@ deploy them. A docs push skipping the deploy is the designed behaviour, not a br
 ## The phone could not be tested, and that is a block rather than a pass
 
 `adb devices` returned an empty list and `node scripts/device/run.mjs` exited **2** with
-`cannot check: no device attached`. The harness itself is intact — `--self-test` answers
-`5 journeys, 83 steps, controls pass` — and `--list` enumerates smoke, label, draft, stock and
-transfer. Nothing on-device was verified in this pass; the OPPO run waits for the phone to be plugged in.
+`cannot check: no device attached`; re-checked later the same day with the same answer. The harness
+itself is intact — `--self-test` answers `5 journeys, 83 steps, controls pass` — and `--list` enumerates
+smoke, label, draft, stock and transfer. Nothing on-device was verified in this pass; the OPPO run
+waits for the phone to be plugged in with USB debugging on.
 
 ## The OTA gate still refuses, as designed
 
 `npm run check:ota` at `85b42dc` answers exactly one finding — `native-record-missing`, because
 `ota-native-runtime.json` does not exist and no build has claimed runtime `1.0.1` — and prints
-**NOT ready to publish**. Nothing was published and the guard was not bypassed.
+**NOT ready to publish**. Nothing was published and the guard was not bypassed. Its own controls pass,
+**11/11** (`server/test/ota-native-runtime-guard.test.mjs`), and so do the mobile config assertions,
+**10/10** (`mobile/__tests__/ota-update-config.test.ts`).
+
+### OTA readiness, measured on EAS rather than assumed
+
+`eas build:list --platform android` answered with the actual state, which is narrower than "a build
+exists":
+
+| Build | Profile | Version | Runtime | Artifact |
+| --- | --- | --- | --- | --- |
+| `ea941bb7…` (2026-10-24) | `preview` | 1.0.0 / vc 1 | **1.0.0** | APK, downloadable |
+| `18a0af93…` (2026-10-23), `6ee0c10f…`, `4b9a79dd…` | `preview` | 1.0.0 / vc 1 | 1.0.0 | APKs |
+| `c23a59ff…`, `b1fecde3…`, `70497184…` | `development` | 1.0.0 / vc 1 | 1.0.0 | APKs |
+| — | any `production` | — | — | **none exists** (§27FN deleted both) |
+
+So the phone's installable APK is a **preview** build of runtime **1.0.0**, and the remote production
+`versionCode` is **5** with no artifact behind it. Both channels are `Active` / `Unprotected` and both
+carry a newest group at runtime `1.0.0`; neither has anything for `1.0.1`.
+
+**The build inputs are ready; only the build is missing.** `npm run check:build-env -- --profile
+production --live` reports 17 self-test controls passed, the eight inlined `EXPO_PUBLIC_*` names and the
+two build-runner file variables present, the EAS environment store consulted and **no findings**. The
+Free plan's Android quota resets at the start of November.
+
+**`ota-native-runtime.json` was deliberately not written.** It must describe the versions a **build**
+was compiled with; writing it from the tree today would claim a binary that does not exist and would
+disable the one check that stops a bundle being published to a runtime no install can accept.
 
 **Unchanged and still open:** L-17 (console-only reset action URL), the Play release, iOS verification,
 and OTA code signing (plan-gated). None of them was marked complete.

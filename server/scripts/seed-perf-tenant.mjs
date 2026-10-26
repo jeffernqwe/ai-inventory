@@ -7,9 +7,17 @@
 // purchase orders, and creates no Firebase identity — so it cannot be signed into from a phone.
 // The only database a store build can reach is the production one, and the owner asked to test
 // the assistant there against a large catalogue. Rather than weaken a guard its callers rely on,
-// this command states its own terms (`assertNamedDatabaseTarget`): the database must be NAMED on
-// the command line (`--database=`), the test database is refused, and a phrase unique to it is
-// required. Production is allowed — deliberately — and the target is made deliberate instead.
+// this command uses the SAME rule as every other seeder (`assertSeedTarget`): the database must be
+// NAMED on the command line (`--database=`) and must equal the one this process resolved, the test
+// database is refused, and the run costs TWO phrases in development or THREE in production:
+//
+//   SEED_CONFIRM      = seed:perf-tenant
+//   SEED_DB_CONFIRM   = <the resolved database name>
+//   SEED_PROD_CONFIRM = SEED-PRODUCTION-DATA        (production only)
+//
+// Production is allowed — deliberately — and the target is made deliberate instead. Before
+// 2026-10-27 this command used its own one-phrase guard (`assertNamedDatabaseTarget`), which made
+// the disposable production tenant the cheapest way to write production rows.
 //
 // WHY THE IDENTITY IS CREATED HERE. The application joins Firebase to MongoDB on `firebaseUid`
 // ONLY, never email (`services/firebaseAuth.service.ts`), so an account that can sign in from the
@@ -30,11 +38,15 @@
 //
 // Usage:
 //   DEMO_ACCOUNT_PASSWORD='…' SEED_CONFIRM=seed:perf-tenant \
+//     SEED_DB_CONFIRM=inventoryai_prod_db SEED_PROD_CONFIRM=SEED-PRODUCTION-DATA \
 //     npm run seed:perf-tenant -- --database=inventoryai_prod_db --size=4000
 //
-// Teardown (removes the tenant and keeps the identity):
-//   CLEANUP_CONFIRM=cleanup:perf-tenant \
-//     npm run cleanup:perf-tenant -- --database=inventoryai_prod_db
+// Teardown (removes the tenant and keeps the identity). Preview it first, then delete:
+//   CLEANUP_CONFIRM=cleanup:perf-tenant CLEANUP_DB_CONFIRM=inventoryai_prod_db \
+//     CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA \
+//     npm run cleanup:perf-tenant -- --database=inventoryai_prod_db --dry-run
+//
+//   …and the same line without `--dry-run` to remove the tenant.
 
 import 'dotenv/config';
 import mongoose from 'mongoose';
@@ -54,9 +66,9 @@ import {
   SEED_BUSINESS_NAME,
   SEED_OWNER_EMAIL,
   SeedSafetyError,
-  assertNamedDatabaseTarget,
   findSeedTenantIds,
 } from './perf/lib.mjs';
+import { assertSeedTarget } from './seed/guard.mjs';
 import { clearTenantData } from '../src/services/tenantTeardown.service.ts';
 import { makeRandom, resolveIdentity, seedTenant } from './seed/lib.mjs';
 
@@ -217,14 +229,12 @@ async function main() {
 
   let database;
   try {
-    database = assertNamedDatabaseTarget({
-      mongodbUri: env.mongodbUri,
-      resolvedDbName: env.mongodbDbName,
-      requestedDatabase: argValue('--database'),
-      confirm: process.env.SEED_CONFIRM,
-      confirmPhrase: PERF_TENANT_SEED_CONFIRM,
+    database = assertSeedTarget({
+      env,
       command: COMMAND,
-    });
+      database: argValue('--database'),
+      confirmPhrase: PERF_TENANT_SEED_CONFIRM,
+    }).database;
   } catch (err) {
     if (err instanceof SeedSafetyError) fail(err.message);
     throw err;
@@ -328,9 +338,15 @@ async function main() {
         `--business=${String(tenant.businessId)} --login --only=1,2`,
     );
   }
-  console.log(`[${COMMAND}] remove it:`);
+  console.log(`[${COMMAND}] remove it (preview the count, then delete):`);
+  const cleanupPhrases =
+    `CLEANUP_CONFIRM=cleanup:perf-tenant CLEANUP_DB_CONFIRM=${database} ` +
+    `${production ? 'CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA ' : ''}`;
   console.log(
-    `[${COMMAND}]   ${envPrefix}CLEANUP_CONFIRM=cleanup:perf-tenant npm run cleanup:perf-tenant -- --database=${database}`,
+    `[${COMMAND}]   ${envPrefix}${cleanupPhrases}npm run cleanup:perf-tenant -- --database=${database} --dry-run`,
+  );
+  console.log(
+    `[${COMMAND}]   ${envPrefix}${cleanupPhrases}npm run cleanup:perf-tenant -- --database=${database}`,
   );
 
   await mongoose.disconnect();

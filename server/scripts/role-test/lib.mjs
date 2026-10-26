@@ -26,10 +26,10 @@
 // against the wrong Firebase project it could only create/update those four
 // `.invalid` identities; it never enumerates, never deletes and never matches
 // on a pattern. The DATABASE side is guarded separately and before any
-// connection: `assertSafeTarget` refuses production and any database that is not
-// the development one — UNLESS the run names its database (`--database=`), which
-// is how this fixture can also be created in a real deployment (2026-10-25). The
-// four literal addresses are the whole blast radius in either mode.
+// connection: `assertSeedTarget` for the seeder and `assertScopedCleanupTarget`
+// for the teardown — two phrases in development, three in production, with
+// `--database=` required to equal the resolved database. The four literal
+// addresses are the whole blast radius in either mode.
 //
 // NOTHING HERE RUNS ON IMPORT: no `main()`, no connection, no write.
 
@@ -41,8 +41,11 @@ import User from '../../src/models/user.model.ts';
 import { ROLES, ROLE_VALUES } from '../../src/constants/roles.ts';
 import { SeedSafetyError } from '../perf/lib.mjs';
 
-/** The confirmation phrase the whole fixture lifecycle requires. */
+/** The phrase the seeder requires (`SEED_CONFIRM`). */
 export const SEED_CONFIRM_PHRASE = 'seed-roles';
+
+/** The phrase the teardown requires (`CLEANUP_CONFIRM`). */
+export const CLEANUP_CONFIRM_PHRASE = 'cleanup:roles';
 
 /** The fixture tenant's fingerprint. Every lookup and every delete is anchored here. */
 export const ROLE_TEST_BUSINESS_NAME = 'ROLE TEST — role boundary fixture (do not use)';
@@ -338,6 +341,7 @@ export async function countRoleFixtureExtras(businessId) {
 
 export default {
   SEED_CONFIRM_PHRASE,
+  CLEANUP_CONFIRM_PHRASE,
   ROLE_TEST_BUSINESS_NAME,
   PASSWORD_ENV,
   ACCOUNTS,

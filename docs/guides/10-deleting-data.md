@@ -112,17 +112,43 @@ check exists to prevent.
 
 ## What is not replaced
 
-The tenant-scoped cleanups delete one named tenant rather than a database. `cleanup:demo` follows the
-same phrase rule as the command above: **two phrases in development, three in production**, plus
-`--database=`. The fixture cleanups below take their own single phrase.
+The tenant-scoped cleanups delete one named tenant rather than a database. `cleanup:demo`,
+`cleanup:perf-tenant`, `cleanup:demo-tenant` and `cleanup:roles` follow the same phrase rule as the
+command above: **two phrases in development, three in production**, plus `--database=`. `cleanup:perf`
+is development-only, and `cleanup:test-firebase` is a test helper rather than a production tool.
 
 | Command | Removes |
 |---|---|
 | `cleanup:demo` | one tenant's data, keeping its login (`--dry-run`, `--database=`; 2 phrases dev / 3 prod) |
-| `cleanup:perf`, `cleanup:perf-tenant` | the measurement tenants, proving `0 remaining` |
-| `cleanup:demo-tenant` | the `seed:demo-tenant` fixture |
-| `cleanup:roles` | the role fixture |
+| `cleanup:perf-tenant` | the sign-in-able measurement tenant (`--dry-run`, `--database=`; 2 phrases dev / 3 prod); proves `0 remaining` and keeps the Firebase identity |
+| `cleanup:demo-tenant` | the `seed:demo-tenant` fixture (`--dry-run`, `--database=`; 2 phrases dev / 3 prod); proves `0 remaining` and keeps the Firebase identity |
+| `cleanup:roles` | the role fixture (`--dry-run`, `--database=`; 2 phrases dev / 3 prod); keeps its four identities unless `--delete-firebase` |
+| `cleanup:perf` | the data-only measurement tenant (development only, its own phrase); proves `0 remaining` |
 | `cleanup:test-firebase` | every login in the approved project — test helper, not a production tool |
+
+```bash
+# the sign-in-able tenant: preview the count first
+NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
+  CLEANUP_CONFIRM=cleanup:perf-tenant CLEANUP_DB_CONFIRM=inventoryai_prod_db \
+  CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA \
+  npm run cleanup:perf-tenant -- --database=inventoryai_prod_db --dry-run
+
+# the fixtures use the same rule, with their own first phrase; dry-run first
+NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
+  CLEANUP_CONFIRM=cleanup:demo-tenant CLEANUP_DB_CONFIRM=inventoryai_prod_db \
+  CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA \
+  npm run cleanup:demo-tenant -- --database=inventoryai_prod_db --dry-run
+
+NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
+  CLEANUP_CONFIRM=cleanup:roles CLEANUP_DB_CONFIRM=inventoryai_prod_db \
+  CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA \
+  npm run cleanup:roles -- --database=inventoryai_prod_db --dry-run
+```
+
+`--dry-run` walks the same teardown plan as the real run, counts every collection it would delete
+and stops. It costs the same phrases as the real run, because it proves the destination rather than
+skipping it. Drop `--dry-run` to delete; a real run then re-counts to `0 remaining` over that same
+plan.
 
 ---
 

@@ -495,6 +495,8 @@ anchor (`§27…`) in that file.
 - **§27FU** — One cleanup command, and a Firebase check that reads both databases (2026-10-26)
 - **§27FV** — The seeding scripts reviewed — four defects, and a read-back that makes OK a measurement (2026-10-26)
 - **§27FW** — The scoped cleanup that was cheaper than the rule (2026-10-26)
+- **§27FX** — The fixture cleanups take the rule, and the dry run counts (2026-10-27)
+- **§27FY** — The preview and the delete share one plan (2026-10-27)
 
 ---
 

@@ -642,4 +642,32 @@ describe('cleanup guard — scoped targets cost the same two/three phrases', () 
     assert.match(source, /assertScopedCleanupTarget\(\{/);
     assert.match(source, /confirmPhrase: CONFIRM_PHRASE/);
   });
+
+  it('the role fixture cleanup uses the shared scoped rule, not the old one-phrase guard', () => {
+    const source = readScript('cleanup-role-accounts.mjs');
+    assert.match(source, /assertScopedCleanupTarget\(\{/);
+    assert.match(source, /confirmPhrase: CLEANUP_CONFIRM_PHRASE/);
+    assert.match(source, /database: argValue\('--database'\)/);
+    assert.equal(/assertSafeTarget\(/.test(source), false, 'cleanup:roles still calls assertSafeTarget');
+  });
+
+  it('the demo tenant cleanup uses the shared scoped rule, not assertDemoTarget', () => {
+    const source = readScript('cleanup-demo-tenant.mjs');
+    assert.match(source, /assertScopedCleanupTarget\(\{/);
+    assert.match(source, /confirmPhrase: DEMO_CLEANUP_CONFIRM/);
+    assert.match(source, /database: argValue\('--database'\)/);
+    assert.equal(/assertDemoTarget\(/.test(source), false, 'cleanup:demo-tenant still calls assertDemoTarget');
+  });
+
+  it('the demo tenant cleanup dry run counts through the removal plan and stops', () => {
+    const source = readScript('cleanup-demo-tenant.mjs');
+    const lib = readScript('demo/lib.mjs');
+    assert.match(source, /const dryRun = process\.argv\.includes\('--dry-run'\)/);
+    assert.match(source, /previewDemoTenantRemoval\(/);
+    assert.match(lib, /countTenantRemoval\(\[found\.businessId\]\)/);
+    const dryAt = source.indexOf('if (dryRun)');
+    const removeAt = source.indexOf('await removeDemoTenant(');
+    assert.ok(dryAt > -1, 'cleanup:demo-tenant has no dry-run branch');
+    assert.ok(removeAt > dryAt, 'the real removal is reached before the dry-run branch');
+  });
 });

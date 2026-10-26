@@ -34,6 +34,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
   ACCOUNTS,
+  CLEANUP_CONFIRM_PHRASE,
   PASSWORD_ENV,
   ROLE_TEST_BUSINESS_NAME,
   SEED_CONFIRM_PHRASE,
@@ -81,6 +82,7 @@ describe('§27CT the fixture is one account per role, and cannot be a real addre
   test('the fixture is named so it cannot be mistaken for real data', () => {
     assert.match(ROLE_TEST_BUSINESS_NAME, /do not use/i);
     assert.equal(SEED_CONFIRM_PHRASE, 'seed-roles');
+    assert.equal(CLEANUP_CONFIRM_PHRASE, 'cleanup:roles');
     assert.equal(PASSWORD_ENV, 'ROLE_TEST_PASSWORD');
   });
 
@@ -129,9 +131,10 @@ describe('§27CT no mail path, and no identity is created by a pattern', () => {
     assert.match(seeder, /assertSeedTarget\(\{/);
     assert.match(seeder, /confirmPhrase: SEED_CONFIRM_PHRASE/);
     assert.match(seeder, /database: argValue\('--database'\)/);
-    // The teardown command it prints names the database too, so the printed line works
-    // in production, where the unnamed form is refused.
+    // The teardown command it prints carries the database phrase (and the production
+    // phrase when it applies), so the printed line works in either environment.
     assert.match(seeder, /cleanup:roles -- --database=\$\{target\.database\}/);
+    assert.match(seeder, /CLEANUP_DB_CONFIRM=\$\{target\.database\}/);
     assert.match(seeder, /readFixturePassword|ensureRoleTestTenant/);
     // The password VALUE is never interpolated into any output. Naming the
     // variable is fine ("from ROLE_TEST_PASSWORD (not printed)"); printing its
@@ -147,14 +150,24 @@ describe('§27CT no mail path, and no identity is created by a pattern', () => {
 describe('§27CT cleanup deletes the database first and an identity only after proving nothing points at it', () => {
   test('a destructive command reads CLEANUP_CONFIRM, not the seeder phrase', () => {
     // One fixture, two families: the seeder export must not confirm its teardown.
-    assert.match(cleanup, /confirmPhrase: 'cleanup:roles'/);
-    assert.match(cleanup, /confirmEnvVar: 'CLEANUP_CONFIRM'/);
+    assert.match(cleanup, /confirmPhrase: CLEANUP_CONFIRM_PHRASE/);
+    assert.match(cleanup, /assertScopedCleanupTarget\(\{/);
+    assert.match(cleanup, /database: argValue\('--database'\)/);
     assert.ok(!/confirmPhrase: SEED_CONFIRM_PHRASE/.test(cleanup));
   });
 
   test('the Firebase delete is gated behind --delete-firebase', () => {
     assert.match(cleanup, /const deleteFirebase = process\.argv\.includes\('--delete-firebase'\)/);
     assert.match(cleanup, /if \(!deleteFirebase\) \{/);
+  });
+
+  test('--dry-run counts through the removal plan and stops before removeTenant', () => {
+    assert.match(cleanup, /const dryRun = process\.argv\.includes\('--dry-run'\)/);
+    const dryAt = cleanup.indexOf('if (dryRun)');
+    const removeAt = cleanup.indexOf('await removeTenant(');
+    assert.ok(dryAt > -1, 'cleanup:roles has no dry-run branch');
+    assert.ok(removeAt > dryAt, 'the real removal is reached before the dry-run branch');
+    assert.match(cleanup, /countTenantRemoval\(\[businessId\]\)/);
   });
 
   test('no user may still reference an address when its identity is deleted', () => {
@@ -172,8 +185,12 @@ describe('§27CT cleanup deletes the database first and an identity only after p
     assert.match(cleanup, /findRoleTestBusiness/);
     assert.ok(!/find\(\{\}\)/.test(cleanup), 'cleanup must never scan a whole collection');
     assert.match(cleanup, /countTenantLeftovers/);
-    assert.match(cleanup, /countRoleFixtureExtras/);
+    assert.match(cleanup, /countTenantRemoval/);
     assert.match(cleanup, /leftovers !== 0/);
+    // The extras now live in the shared teardown plan; a second manual deletion/count
+    // in this script would be exactly the drift the plan removes.
+    assert.ok(!/clearRoleFixtureExtras/.test(cleanup));
+    assert.ok(!/countRoleFixtureExtras/.test(cleanup));
   });
 });
 

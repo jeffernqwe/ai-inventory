@@ -8,7 +8,7 @@ of truth for *what actually happened*, and it is why this file is long.
 
 **How to read it.** Do not read it top to bottom. Either find a record by number (§27FJ, §27DM — the
 numbers are cited from `CLAUDE.md` and from source comments), or use the index: `CLAUDE.md` §7 lists
-all **177** records by the title each gives itself.
+all **179** records by the title each gives itself.
 
 **Current state:** V1 complete and in production testing. The records that answer *where are we now*
 are §27FM (the V1 re-verification), §27FK (the runtime boundary and the blocked build), §27FJ (the two
@@ -22020,6 +22020,84 @@ shapes, the missing phrase, the database mismatch, the test database and a contr
 tools with their own single phrase; they still name the database and locate their tenant by two
 fingerprints. Guide 10 now says which rule each command follows instead of implying one rule for
 all. Making every fixture cleanup cost three phrases is a separate change, not a claim made here.
+`cleanup:perf-tenant`, `cleanup:roles` and `cleanup:demo-tenant` took it on 2026-10-27 — see §27FX.
+
+---
+
+# 27FX. The fixture cleanups take the rule, and the dry run counts (2026-10-27)
+
+**The finding.** §27FW put `cleanup:demo` on `assertScopedCleanupTarget` and recorded
+`cleanup:perf-tenant`, `cleanup:roles` and `cleanup:demo-tenant` as still carrying their own single
+phrases. That left the scoped commands that can delete a production tenant as the cheapest way to
+delete production rows — while `cleanup:perf`, which cannot reach production at all, already had a
+dry run. `seed:perf-tenant` had the same asymmetry: its own `assertNamedDatabaseTarget` guard
+required one phrase, not the two/three every other seeder costs.
+
+**The fix.** All four commands now call the shared guards and none has its own copy of the rule:
+
+```text
+seed:perf-tenant     assertSeedTarget           SEED_CONFIRM    + SEED_DB_CONFIRM    (+ SEED_PROD_CONFIRM in production)
+cleanup:perf-tenant  assertScopedCleanupTarget  CLEANUP_CONFIRM + CLEANUP_DB_CONFIRM (+ CLEANUP_PROD_CONFIRM in production)
+cleanup:demo-tenant  assertScopedCleanupTarget  CLEANUP_CONFIRM + CLEANUP_DB_CONFIRM (+ CLEANUP_PROD_CONFIRM in production)
+cleanup:roles        assertScopedCleanupTarget  CLEANUP_CONFIRM + CLEANUP_DB_CONFIRM (+ CLEANUP_PROD_CONFIRM in production)
+```
+
+`cleanup:perf-tenant --dry-run` is new and is a real dry run, not a description: it runs the same
+guard, resolves the same tenant by both fingerprints, and calls a new `countTenantRemoval` that walks
+the same collections, in the same order, as `removeTenant` — then stops. It costs the same phrases as
+the real run because a dry run proves the destination rather than skipping it. The seed command now
+prints both the preview and the delete, with all three phrases in production. The role and demo-tenant
+teardowns keep their own tenant proofs (two fingerprints, then `0 remaining`) and add the shared
+phrases; the role fixture keeps its identities unless `--delete-firebase`.
+
+**Measured.** The new guard/source suite (`test/perf-tenant-workflow.test.mjs`) passes **14/14**, and
+the adjacent guard, environment and documentation suites pass with it (**145/145** in one unit run).
+The database suite passed **6/6**, including a new test that seeds a whole tenant, previews it,
+compares the preview's per-collection counts **byte for byte** with the real removal, and confirms the
+preview deleted nothing. The full unit suite then passed **1,516 tests, 0 failures** (56 DB-backed
+suites skipped in unit mode), with `tsc` and `eslint` clean.
+
+The CLI was then exercised end to end in **development**: a 50-document tenant was seeded (2 phrases),
+a dry run counted **60 documents** and deleted nothing, a second dry run still counted **60**, and the
+real run removed **60** with verification finding **0 remaining**. In production, all four commands
+with their first two phrases (and no connection attempted) refused and named the missing
+`SEED_PROD_CONFIRM` / `CLEANUP_PROD_CONFIRM`. No production row was read or deleted in this pass.
+Guides 4, 6, 9 and 10 now show the two/three phrases, including the two remaining fixture teardowns.
+
+---
+
+# 27FY. The preview and the delete share one plan (2026-10-27)
+
+**The finding.** `countTenantRemoval` was described as the mirror of `removeTenant`, but it was a
+second copy of the same order. `cleanup:demo`'s dry run was a third copy, and the two fixture
+cleanups had no dry run at all — the commands that can delete a production tenant could only be
+inspected by deleting it or by reading their source.
+
+**The fix.** `TENANT_TEARDOWN_PLAN` is now the one ordered list: assistant messages (through their
+conversations), assistant conversations, every collection carrying `businessId`, the account-scoped
+rows (sessions, reset tokens, reset challenges), users, and the business row. A single
+`executeTenantTeardownPlan` is the only place a step becomes a query; `mode: 'count' | 'delete'`
+selects the operation, and `selection: 'data' | 'all'` selects the half. `removeTenant` and
+`countTenantRemoval` walk all of it; `clearTenantData` and the new `countTenantDataRemoval` walk the
+data steps; `countTenantLeftovers` walks the same plan after a removal. `cleanup:demo` now previews
+through `countTenantDataRemoval` instead of its own loop.
+
+**The fixture cleanups gained a real preview.** `cleanup:roles --dry-run` and
+`cleanup:demo-tenant --dry-run` run the same guard, resolve the same tenant by both fingerprints and
+count the same full plan as their real runs, then stop. They cost the same two/three phrases because
+the preview proves the destination rather than skipping it. The role cleanup also stopped deleting
+sessions, reset tokens and its audit/assistant extras in separate loops: `removeTenant` already
+walks those plan steps, and a second loop was the drift this change removes.
+
+**Measured.** The DEMO-2 database suite passed **7/7**, including a new data-only test that compares
+`countTenantDataRemoval` with `clearTenantData` byte for byte and proves the preview deleted nothing.
+The guard/source suites passed **106/106**, the full unit suite passed **1,521 tests, 0 failures**
+(56 DB-backed suites skipped), and `tsc`/`eslint` were clean. In development, two throwaway fixtures
+(one role, one demo tenant, each with 9 documents) were previewed at **9** each, then removed at
+**9** each with **0 remaining**; the dry runs deleted nothing. `cleanup:demo` was exercised on a
+third fixture: the preview and the real run both counted/removed **2** data rows, while its user,
+session and business row stayed behind as designed. No production row was read or deleted in this
+pass.
 
 ---
 

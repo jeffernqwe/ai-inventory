@@ -11,11 +11,12 @@
  * delete less than the tooling does, or more, and only a data-integrity test would ever
  * notice.
  *
- * THE ONE DEFINITION OF "THE TENANT'S ROWS" IS THE LIST BELOW. Every filter is
- * `{ businessId: { $in: ids } }`, so a wrong id matches nothing and no other tenant's
- * data can be reached from here. Collections are removed child-before-parent, and the
- * assistant's messages are resolved through their conversations because a message
- * carries only `conversationId`.
+ * THE ONE DEFINITION OF "THE TENANT'S ROWS" IS `TENANT_TEARDOWN_PLAN` BELOW. Data steps
+ * filter by `businessId`; messages and account rows are reached only through ids resolved
+ * from that same `businessId`, so a wrong id matches nothing and no other tenant's data
+ * can be reached from here. Steps run child-before-parent, and the assistant's messages
+ * are resolved through their conversations because a message carries only
+ * `conversationId`.
  *
  * ACCOUNT-SCOPED ROWS ARE RESOLVED BEFORE THE USERS GO. Sessions, password-reset tokens
  * and reset challenges carry only `userId`, so a businessId filter cannot see them and
@@ -81,8 +82,118 @@ export const TENANT_DATA_COLLECTIONS: Array<[string, TenantModel]> = [
   ['invitations', Invitation],
 ];
 
+/**
+ * How a plan step finds the rows it owns.
+ *
+ * `business`             — the row carries `businessId`.
+ * `conversationMessages` — a message carries only `conversationId`; its ids are resolved
+ *                          from the tenant's conversations before anything is deleted.
+ * `user`                 — the row carries only `userId`; its ids are resolved before the
+ *                          users are deleted.
+ * `businessRow`          — the business document itself (`_id`).
+ */
+type TenantPlanMatch = 'business' | 'conversationMessages' | 'user' | 'businessRow';
+
+/** `data` is the tenant's business data; `account` is its logins and business row. */
+type TenantPlanScope = 'data' | 'account';
+
+type TenantPlanStep = {
+  name: string;
+  model: TenantModel;
+  scope: TenantPlanScope;
+  match: TenantPlanMatch;
+};
+
+/**
+ * ONE ordered plan for counting and deleting a tenant.
+ *
+ * `removeTenant` / `countTenantRemoval` walk all of it; `clearTenantData` /
+ * `countTenantDataRemoval` walk only the `data` steps. The dry run and the deletion
+ * therefore cannot describe different collections or a different order — the executor
+ * below is the only place a plan step becomes a query.
+ */
+export const TENANT_TEARDOWN_PLAN: TenantPlanStep[] = [
+  { name: 'ai_messages', model: AIMessage, scope: 'data', match: 'conversationMessages' },
+  { name: 'ai_conversations', model: AIConversation, scope: 'data', match: 'business' },
+  ...TENANT_DATA_COLLECTIONS.map(([name, model]): TenantPlanStep => ({
+    name,
+    model,
+    scope: 'data',
+    match: 'business',
+  })),
+  { name: 'sessions', model: Session, scope: 'account', match: 'user' },
+  { name: 'password_reset_tokens', model: PasswordResetToken, scope: 'account', match: 'user' },
+  { name: 'password_reset_challenges', model: PasswordResetChallenge, scope: 'account', match: 'user' },
+  { name: 'users', model: User, scope: 'account', match: 'business' },
+  { name: 'businesses', model: Business, scope: 'account', match: 'businessRow' },
+];
+
 function toIds(businessIds: Array<IdLike>): mongoose.Types.ObjectId[] {
   return businessIds.map((id) => new mongoose.Types.ObjectId(String(id)));
+}
+
+type TenantPlanContext = {
+  ids: mongoose.Types.ObjectId[];
+  businessFilter: { businessId: { $in: mongoose.Types.ObjectId[] } };
+  conversationIds: mongoose.Types.ObjectId[];
+  userIds: mongoose.Types.ObjectId[];
+};
+
+async function resolveTenantPlanContext(
+  ids: mongoose.Types.ObjectId[],
+  { withAccounts }: { withAccounts: boolean },
+): Promise<TenantPlanContext> {
+  const businessFilter = { businessId: { $in: ids } };
+  const conversationIds = await AIConversation.find(businessFilter).distinct('_id');
+  // Only the account half needs user ids. Resolving them before the first delete is
+  // what keeps sessions and reset rows reachable after their users are gone.
+  const userIds = withAccounts ? await User.find(businessFilter).distinct('_id') : [];
+  return { ids, businessFilter, conversationIds, userIds };
+}
+
+function tenantPlanFilter(step: TenantPlanStep, context: TenantPlanContext): object {
+  switch (step.match) {
+    case 'conversationMessages':
+      return { conversationId: { $in: context.conversationIds } };
+    case 'user':
+      return { userId: { $in: context.userIds } };
+    case 'businessRow':
+      return { _id: { $in: context.ids } };
+    case 'business':
+    default:
+      return context.businessFilter;
+  }
+}
+
+type TenantPlanMode = 'count' | 'delete';
+type TenantPlanSelection = 'data' | 'all';
+
+/**
+ * The only executor. It resolves the ids once, then walks the plan in order and either
+ * counts or deletes exactly the rows the plan names. A dry run and a real run differ only
+ * in `mode`, so their per-collection keys and totals cannot drift.
+ */
+async function executeTenantTeardownPlan(
+  businessIds: Array<IdLike>,
+  { mode, selection }: { mode: TenantPlanMode; selection: TenantPlanSelection },
+): Promise<{ total: number; counts: Record<string, number> }> {
+  const ids = toIds(businessIds);
+  const context = await resolveTenantPlanContext(ids, { withAccounts: selection === 'all' });
+  const counts: Record<string, number> = {};
+  let total = 0;
+
+  for (const step of TENANT_TEARDOWN_PLAN) {
+    if (selection === 'data' && step.scope !== 'data') continue;
+    const filter = tenantPlanFilter(step, context);
+    const count =
+      mode === 'delete'
+        ? (await step.model.deleteMany(filter)).deletedCount ?? 0
+        : await step.model.countDocuments(filter);
+    counts[step.name] = count;
+    total += count;
+  }
+
+  return { total, counts };
 }
 
 /**
@@ -95,27 +206,11 @@ function toIds(businessIds: Array<IdLike>): mongoose.Types.ObjectId[] {
 export async function clearTenantData(
   businessIds: Array<IdLike>
 ): Promise<{ removed: number; counts: Record<string, number> }> {
-  const filter = { businessId: { $in: toIds(businessIds) } };
-  const counts: Record<string, number> = {};
-  let removed = 0;
-
-  // A CONVERSATION carries `businessId`; a MESSAGE carries only `conversationId`.
-  // Resolve the conversations first, then delete their messages, then the
-  // conversations — child before parent, like the list below.
-  const conversationIds = await AIConversation.find(filter).distinct('_id');
-  const messages = await AIMessage.deleteMany({ conversationId: { $in: conversationIds } });
-  counts.ai_messages = messages.deletedCount ?? 0;
-  removed += counts.ai_messages;
-  const conversations = await AIConversation.deleteMany(filter);
-  counts.ai_conversations = conversations.deletedCount ?? 0;
-  removed += counts.ai_conversations;
-
-  for (const [name, model] of TENANT_DATA_COLLECTIONS) {
-    const res = await model.deleteMany(filter);
-    counts[name] = res.deletedCount ?? 0;
-    removed += counts[name];
-  }
-  return { removed, counts };
+  const { total, counts } = await executeTenantTeardownPlan(businessIds, {
+    mode: 'delete',
+    selection: 'data',
+  });
+  return { removed: total, counts };
 }
 
 /**
@@ -127,58 +222,57 @@ export async function clearTenantData(
 export async function removeTenant(
   businessIds: Array<IdLike>
 ): Promise<{ removed: number; counts: Record<string, number> }> {
-  const ids = toIds(businessIds);
-  const filter = { businessId: { $in: ids } };
+  const { total, counts } = await executeTenantTeardownPlan(businessIds, {
+    mode: 'delete',
+    selection: 'all',
+  });
+  return { removed: total, counts };
+}
 
-  const { removed: dataRemoved, counts } = await clearTenantData(businessIds);
-  let removed = dataRemoved;
+/**
+ * Count every row `removeTenant` would delete, without deleting any.
+ *
+ * Walks the SAME plan as `removeTenant`, so a cleanup dry run cannot describe a different
+ * set from the removal it previews. The counts are keyed the same way as `removeTenant`'s,
+ * which is what lets a caller compare a preview with the real run.
+ */
+export async function countTenantRemoval(
+  businessIds: Array<IdLike>
+): Promise<{ total: number; counts: Record<string, number> }> {
+  return executeTenantTeardownPlan(businessIds, { mode: 'count', selection: 'all' });
+}
 
-  // Resolve the account-scoped rows while the users still exist, then remove the rows
-  // with their owner.
-  const userIds = await User.find(filter).distinct('_id');
-  const userFilter = { userId: { $in: userIds } };
-  for (const [name, model] of [
-    ['sessions', Session],
-    ['password_reset_tokens', PasswordResetToken],
-    ['password_reset_challenges', PasswordResetChallenge],
-  ] as Array<[string, TenantModel]>) {
-    const res = await model.deleteMany(userFilter);
-    counts[name] = res.deletedCount ?? 0;
-    removed += counts[name];
-  }
-
-  const users = await User.deleteMany(filter);
-  counts.users = users.deletedCount ?? 0;
-  removed += counts.users;
-
-  const businesses = await Business.deleteMany({ _id: { $in: ids } });
-  counts.businesses = businesses.deletedCount ?? 0;
-  removed += counts.businesses;
-  return { removed, counts };
+/**
+ * Count every DATA row `clearTenantData` would delete, without deleting any.
+ *
+ * The data-only dry run, for `cleanup:demo`: the same plan and the same filters, with the
+ * account steps left out. Its counts are directly comparable with `clearTenantData`'s.
+ */
+export async function countTenantDataRemoval(
+  businessIds: Array<IdLike>
+): Promise<{ total: number; counts: Record<string, number> }> {
+  return executeTenantTeardownPlan(businessIds, { mode: 'count', selection: 'data' });
 }
 
 /**
  * Count anything still carrying the given tenant ids — the verification half of a
- * removal, over the SAME collection list the removal uses, so a collection that is
- * deleted is necessarily also verified. Includes the account rows.
+ * removal, over the SAME plan the removal uses, so a collection that is deleted is
+ * necessarily also verified. Includes the account rows and the business row itself.
  */
 export async function countTenantLeftovers(businessIds: Array<IdLike>): Promise<number> {
-  const ids = toIds(businessIds);
-  const filter = { businessId: { $in: ids } };
-  let total = 0;
-  for (const [, model] of TENANT_DATA_COLLECTIONS) {
-    total += await model.countDocuments(filter);
-  }
-  const conversationIds = await AIConversation.find(filter).distinct('_id');
-  total += conversationIds.length;
-  total += await AIMessage.countDocuments({ conversationId: { $in: conversationIds } });
-  total += await User.countDocuments(filter);
+  const { total } = await executeTenantTeardownPlan(businessIds, {
+    mode: 'count',
+    selection: 'all',
+  });
   return total;
 }
 
 export default {
   TENANT_DATA_COLLECTIONS,
+  TENANT_TEARDOWN_PLAN,
   clearTenantData,
   removeTenant,
+  countTenantRemoval,
+  countTenantDataRemoval,
   countTenantLeftovers,
 };

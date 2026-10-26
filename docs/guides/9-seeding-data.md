@@ -173,9 +173,10 @@ Seed in the morning rather than mid-measurement: a run replaces the tenant's dat
 would be measured against a half-written catalogue.
 
 Two performance tools sit **outside** this workflow, because they are measurements rather than
-fixtures: `npm run seed:perf` (a disposable tenant with no login, development only) and
-`npm run seed:perf-tenant` (a sign-in-able tenant in a named database). Each has its own guard and
-phrase, documented in Guide 6.
+fixtures: `npm run seed:perf` (a disposable tenant with no login, development only, its own single
+phrase) and `npm run seed:perf-tenant` (a sign-in-able tenant in a named database).
+`seed:perf-tenant` follows the **same** rule as the commands above — two phrases in development,
+three in production — and its cleanup previews with `--dry-run`. Both are documented in Guide 6.
 
 ---
 

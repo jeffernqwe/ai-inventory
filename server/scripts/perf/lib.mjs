@@ -172,8 +172,13 @@ export const PERF_TENANT_CLEANUP_CONFIRM = 'cleanup:perf-tenant';
 export const PERF_TURNS_PROD_CONFIRM = 'perf-turns:production';
 
 /**
- * Target check for the production-capable performance tenant (`seed:perf-tenant`,
- * `cleanup:perf-tenant`).
+ * The named-database primitive behind `assertSafeTarget`'s named form.
+ *
+ * It was written for `seed:perf-tenant` / `cleanup:perf-tenant` and is no longer called by
+ * them: since 2026-10-27 they use the unified `assertSeedTarget` / `assertScopedCleanupTarget`
+ * (two phrases in development, three in production). The function remains because
+ * `assertSafeTarget`'s named form delegates here, and it is the one place a production-capable
+ * command's target rule is stated rather than copied.
  *
  * WHY PRODUCTION IS ALLOWED HERE AT ALL. `assertSafeTarget` refuses it deliberately, because
  * `seed:perf` writes tens of thousands of documents for query measurement on a developer's
@@ -291,16 +296,24 @@ export function assertMeasurementTarget({
 /**
  * The tenant teardown lives in application code, not only in this library.
  *
- * `clearTenantData` / `removeTenant` / `countTenantLeftovers` and the collection list
- * moved to `src/services/tenantTeardown.service.ts` when account deletion needed the
- * same definition: a business whose last member closes their account is removed with
- * exactly the rows this tooling removes. They are re-exported here so every script
- * keeps ONE import site and the project keeps ONE list — a second copy in the service
- * is how a teardown eventually deletes less than a seed created.
+ * `clearTenantData` / `removeTenant` / `countTenantRemoval` / `countTenantDataRemoval`
+ * / `countTenantLeftovers` and the teardown plan moved to
+ * `src/services/tenantTeardown.service.ts` when account deletion needed the same
+ * definition: a business whose last member closes their account is removed with exactly
+ * the rows this tooling removes. They are re-exported here so every script keeps ONE
+ * import site and the project keeps ONE plan — a second copy in the service is how a
+ * teardown eventually deletes less than a seed created.
+ *
+ * `countTenantRemoval` and `countTenantDataRemoval` are the counting half of that same
+ * plan, added for the cleanup dry runs: they walk the same steps, in the same order, and
+ * delete nothing.
  */
 export {
   TENANT_DATA_COLLECTIONS,
+  TENANT_TEARDOWN_PLAN,
   clearTenantData,
+  countTenantRemoval,
+  countTenantDataRemoval,
   countTenantLeftovers,
   removeTenant,
 } from '../../src/services/tenantTeardown.service.ts';

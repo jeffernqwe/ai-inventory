@@ -125,8 +125,8 @@ npm run seed -- --plan=<demo|accounts|roles> --database=<name> [options]
 needs **two** phrases — `SEED_CONFIRM=<the plan's phrase>` and `SEED_DB_CONFIRM=<the database name>`;
 production needs **three**, adding `SEED_PROD_CONFIRM=SEED-PRODUCTION-DATA`. `npm run seed:demo`,
 `seed:accounts` and `seed:roles` are the same command with the plan preselected and take the same
-phrases. `seed:perf`, `seed:perf-tenant` and `seed:demo-tenant` are separate tools with their own
-guards (D, G.1, H).
+phrases. `seed:perf-tenant` is a separate tool on the **same** two/three-phrase rule (G.1); `seed:perf`
+and `seed:demo-tenant` are separate tools with their own guards (D, H).
 
 | You want | Use |
 |---|---|
@@ -220,7 +220,10 @@ ROLE_TEST_PASSWORD='choose-a-password' SEED_CONFIRM=seed-roles SEED_DB_CONFIRM=i
 ROLE_TEST_PASSWORD='choose-a-password' SEED_CONFIRM=seed-roles SEED_DB_CONFIRM=inventoryai_dev_db \
   npm run seed -- --plan=roles --database=inventoryai_dev_db
 npm run verify:roles -- --business=<id printed>
-CLEANUP_CONFIRM=cleanup:roles npm run cleanup:roles -- --database=inventoryai_dev_db
+CLEANUP_CONFIRM=cleanup:roles CLEANUP_DB_CONFIRM=inventoryai_dev_db \
+  npm run cleanup:roles -- --database=inventoryai_dev_db --dry-run
+CLEANUP_CONFIRM=cleanup:roles CLEANUP_DB_CONFIRM=inventoryai_dev_db \
+  npm run cleanup:roles -- --database=inventoryai_dev_db
 ```
 
 | Role | Address |
@@ -234,8 +237,9 @@ One tenant (`ROLE TEST — role boundary fixture (do not use)`, ≈900 documents
 cannot receive mail; the logins are marked verified through the Firebase admin interface — the same
 write the app makes after a real code, so no rule is weakened. `verify:roles` signs all four in and
 checks **96 cells**, exiting 0 only when every one matches the role table; `--signin` (with
-`FIREBASE_WEB_API_KEY` and `ROLE_TEST_PASSWORD`) proves the real sign-in path. `cleanup:roles` keeps
-the logins unless `--delete-firebase`, and only after the database is gone.
+`FIREBASE_WEB_API_KEY` and `ROLE_TEST_PASSWORD`) proves the real sign-in path. `cleanup:roles --dry-run`
+counts the same teardown plan without deleting; the real run keeps the logins unless `--delete-firebase`,
+and only deletes an identity after the database is gone.
 
 ### G. Production — the same commands, made deliberate
 
@@ -267,15 +271,21 @@ cd C:/Users/jeffe/inventory-ai/server
 
 NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
   DEMO_ACCOUNT_PASSWORD='choose-a-password' SEED_CONFIRM=seed:perf-tenant \
+  SEED_DB_CONFIRM=inventoryai_prod_db SEED_PROD_CONFIRM=SEED-PRODUCTION-DATA \
   npm run seed:perf-tenant -- --database=inventoryai_prod_db --size=60000
 
+# Preview the cleanup first: the count, nothing deleted.
 NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
-  CLEANUP_CONFIRM=cleanup:perf-tenant \
-  npm run cleanup:perf-tenant -- --database=inventoryai_prod_db
+  CLEANUP_CONFIRM=cleanup:perf-tenant CLEANUP_DB_CONFIRM=inventoryai_prod_db \
+  CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA \
+  npm run cleanup:perf-tenant -- --database=inventoryai_prod_db --dry-run
+
+# The same line without --dry-run deletes it.
 ```
 
-`NODE_ENV=production` alone is not enough: `server/.env` sets the development database, and the config
-refuses production with it.
+The seed costs **three** phrases in production (`SEED_CONFIRM`, `SEED_DB_CONFIRM`, `SEED_PROD_CONFIRM`)
+and two in development; the cleanup costs the matching `CLEANUP_*` trio. `NODE_ENV=production` alone is
+not enough: `server/.env` sets the development database, and the config refuses production with it.
 
 `--size` is **documents**, 50–400,000, default 4,000; products ≈22 %. It creates a verified OWNER login
 (`perf-seed-ai@example.invalid`) **only** in that tenant. Deterministic (`--seed`, default 1), SKUs are
@@ -287,10 +297,11 @@ Measured on production 2026-10-25: `--size=60000` → 18 categories, 6 locations
 products, 27,200 inventory rows, 17,836 movements, 1,200 purchase orders in **110 s**. `--size=80000`
 → 24 / 6 / 300 / 18,000 / 36,104 / 23,966 / 1,600 in **171 s**, after removing 60,016 previous rows.
 
-The printed next-step commands carry the `NODE_ENV`/`MONGODB_DB_NAME` prefix, the deployed `--base=`
-URL and `node --env-file=../mobile/.env scripts/measure-ai-turns.mjs`. `cleanup:perf-tenant` re-queries
-to `0 remaining`, **keeps the Firebase identity** (F-50), and refuses if its name and owner address
-point at different businesses.
+The printed next-step commands carry the `NODE_ENV`/`MONGODB_DB_NAME` prefix, all three cleanup
+phrases, both the `--dry-run` preview and the real delete, the deployed `--base=` URL and
+`node --env-file=../mobile/.env scripts/measure-ai-turns.mjs`. `--dry-run` re-counts every collection
+`removeTenant` would touch and stops. A real run then re-queries to `0 remaining`, **keeps the Firebase
+identity** (F-50), and refuses if its name and owner address point at different businesses.
 
 #### G.2 Your own account
 
@@ -351,7 +362,9 @@ NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
   SEED_PROD_CONFIRM=SEED-PRODUCTION-DATA \
   npm run seed -- --plan=roles --database=inventoryai_prod_db
 NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
-  CLEANUP_CONFIRM=cleanup:roles npm run cleanup:roles -- --database=inventoryai_prod_db
+  CLEANUP_CONFIRM=cleanup:roles CLEANUP_DB_CONFIRM=inventoryai_prod_db \
+  CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA \
+  npm run cleanup:roles -- --database=inventoryai_prod_db
 ```
 
 `seed:accounts` refuses the default plan in production. Roles own their tenant and addresses, so they
@@ -372,14 +385,18 @@ Prints `(PRODUCTION)`, counts, ledger and integrity checks; exits 0 only if all 
 ```bash
 DEMO_ACCOUNT_PASSWORD='<password>' SEED_CONFIRM=seed-demo-tenant \
   npm run seed:demo-tenant -- --database=inventoryai_dev_db
-CLEANUP_CONFIRM=cleanup:demo-tenant npm run cleanup:demo-tenant -- --database=inventoryai_dev_db
+CLEANUP_CONFIRM=cleanup:demo-tenant CLEANUP_DB_CONFIRM=inventoryai_dev_db \
+  npm run cleanup:demo-tenant -- --database=inventoryai_dev_db --dry-run
+CLEANUP_CONFIRM=cleanup:demo-tenant CLEANUP_DB_CONFIRM=inventoryai_dev_db \
+  npm run cleanup:demo-tenant -- --database=inventoryai_dev_db
 ```
 
 Sign in as `demo-preview@example.invalid`. Fixed figures: **6 products**, **112 units**, Demo
 Warehouse 75 / Demo Shop 30 / Demo Van 7, health 3 healthy / 3 low / 1 out, three restock lines, 9
 ledger movements. Production form adds `NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db`. The
 database must be named and must match the resolved one; the password is set on every run; the teardown
-removes MongoDB rows only.
+removes MongoDB rows only. `--dry-run` counts the same plan without deleting, and the Firebase
+identity is left in place on both paths.
 
 ## Part 4 — Measuring the assistant
 
@@ -544,10 +561,10 @@ Everything here permanently removes data. Two families, one shape each:
 - **`npm run cleanup -- --target=database|firebase`** — a whole database, or the identities you name.
   `--database=` is required and must equal the database this shell resolved; **two phrases in
   development, three in production** ([Guide 9](9-seeding-data.md) has the rule).
-- **the scoped cleanups** (`cleanup:perf`, `cleanup:demo`, `cleanup:roles`, …) — one named tenant. The
-  production-capable `cleanup:demo` follows the same two-phrase/three-phrase rule and names
-  `--database=`; the fixture cleanups use their own single phrase. The perf pair reads
-  `SEED_CONFIRM=seed-perf-ai`, because it shares the perf seeder's fixture phrase.
+- **the scoped cleanups** (`cleanup:demo`, `cleanup:perf-tenant`, `cleanup:demo-tenant`,
+  `cleanup:roles`) — one named tenant, the same **two phrases in development / three in production**,
+  with `--database=` required. `cleanup:perf` is the exception that proves the rule: it cannot reach
+  production at all, so it keeps the development-only `SEED_CONFIRM=seed-perf-ai`.
 
 The old `cleanup:test-mongodb`, `cleanup:dev-mongodb`, `cleanup:prod-mongodb`, `cleanup:all-mongodb` and
 `cleanup:firebase-accounts` scripts are gone; each was this command with the target baked in.
@@ -563,9 +580,9 @@ CLEANUP_CONFIRM=cleanup:database CLEANUP_DB_CONFIRM=inventoryai_dev_db \
 | `cleanup -- --target=database` (dev) | everything in `inventoryai_dev_db`, **logins included** | ⚠️ **High** |
 | `cleanup -- --target=database` (prod) | real data, logins included | ⚠️⚠️ needs **three** phrases |
 | `cleanup -- --target=firebase -- --email=…` | **only the logins you name**, checked first | ⚠️⚠️ irreversible but guarded |
-| `cleanup:perf` | the disposable perf tenant (needs `SEED_CONFIRM=seed-perf-ai`) | ✅ that tenant only |
-| `cleanup:demo-tenant` | the `seed:demo-tenant` tenant's rows | ✅ identity kept |
-| `cleanup:roles` | the role fixture tenant (logins kept unless `--delete-firebase`) | ✅ verified afterwards |
+| `cleanup:perf` | the disposable perf tenant (development only, `SEED_CONFIRM=seed-perf-ai`) | ✅ that tenant only |
+| `cleanup:demo-tenant` | the `seed:demo-tenant` tenant's rows (`--dry-run` first; 2 phrases dev / 3 prod) | ✅ identity kept |
+| `cleanup:roles` | the role fixture tenant (`--dry-run` first; 2 phrases dev / 3 prod; logins kept unless `--delete-firebase`) | ✅ verified afterwards |
 | `cleanup:demo` | **one named tenant's data**, keeping its login | ⚠️ production-capable, verified afterwards |
 | `cleanup:test-firebase` | **every login** in the approved Firebase project | ⚠️⚠️ **irreversible** |
 
@@ -673,11 +690,13 @@ per process (reset on restart) and public but contain no names, paths, users or 
 | `npm run seed:accounts` | several accounts, no SKUs (`--accounts=…`) | ⚠️ those accounts only |
 | `npm run seed:roles` | one login per role, ~900 documents | ⚠️ that fixture only |
 | `npm run verify:roles -- --business=…` | 96 permission cells (`--signin` for a deployment) | ✅ |
-| `npm run cleanup:roles` | remove the role fixture | ⚠️ scoped, verified |
+| `npm run cleanup:roles -- --database=…` | remove the role fixture (`--dry-run` first) | ⚠️ scoped, verified; 2 phrases dev / 3 prod |
+| `npm run cleanup:demo-tenant -- --database=…` | remove the demo tenant's rows (`--dry-run` first) | ⚠️ scoped, verified; 2 phrases dev / 3 prod |
 | `npm run verify:demo -- --email=…` | read data back and check it | ✅ reads |
 | `npm run seed:perf -- --size=N` | throwaway tenant, no login | ⚠️ that tenant only |
-| `npm run seed:perf-tenant -- --database=… --size=N` | sign-in-able tenant in a named database | ⚠️ production-capable, own phrase |
-| `npm run cleanup:perf` / `cleanup:perf-tenant` | remove those tenants, prove 0 remain | ⚠️ scoped |
+| `npm run seed:perf-tenant -- --database=… --size=N` | sign-in-able tenant in a named database | ⚠️ production-capable; 2 phrases dev / 3 prod |
+| `npm run cleanup:perf-tenant -- --database=…` | remove that tenant (`--dry-run` first), prove 0 remain | ⚠️ scoped; 2 phrases dev / 3 prod |
+| `npm run cleanup:perf` | remove the data-only measurement tenant | ⚠️ scoped; development only |
 | `npm run perf:measure`, `perf:golden` | query timings / answer fingerprints | ✅ reads |
 | `npm run perf:turns` | real turns (`--login` for a deployment) | ⚠️ spends AI quota |
 | `npm run ai:usage`, `ai:models`, `ai:check`, `ai:health` | cost, allowance, models, health | ✅ reads |

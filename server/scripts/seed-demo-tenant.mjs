@@ -23,8 +23,9 @@
 //   DEMO_ACCOUNT_PASSWORD='…' SEED_CONFIRM=seed-demo-tenant \
 //     npm run seed:demo-tenant -- --database=inventoryai_prod_db
 //
-// Teardown:
-//   CLEANUP_CONFIRM=cleanup:demo-tenant npm run cleanup:demo-tenant -- --database=<name>
+// Teardown (two phrases; production adds the third):
+//   CLEANUP_CONFIRM=cleanup:demo-tenant CLEANUP_DB_CONFIRM=<name> \
+//     npm run cleanup:demo-tenant -- --database=<name>
 
 import 'dotenv/config';
 import mongoose from 'mongoose';

@@ -143,8 +143,11 @@ SEED_CONFIRM=seed-accounts SEED_DB_CONFIRM=inventoryai_dev_db \
 DEMO_ACCOUNT_PASSWORD='<password>' SEED_CONFIRM=seed-demo-tenant \
   npm run seed:demo-tenant -- --database=inventoryai_dev_db
 
-# remove it
-CLEANUP_CONFIRM=cleanup:demo-tenant npm run cleanup:demo-tenant -- --database=inventoryai_dev_db
+# preview the removal, then repeat without --dry-run to delete
+CLEANUP_CONFIRM=cleanup:demo-tenant CLEANUP_DB_CONFIRM=inventoryai_dev_db \
+  npm run cleanup:demo-tenant -- --database=inventoryai_dev_db --dry-run
+CLEANUP_CONFIRM=cleanup:demo-tenant CLEANUP_DB_CONFIRM=inventoryai_dev_db \
+  npm run cleanup:demo-tenant -- --database=inventoryai_dev_db
 ```
 
 Sign in as `demo-preview@example.invalid` (owner `Demo Tester`). Every figure is fixed:
@@ -165,6 +168,12 @@ It may run against production, because the database must be named and match, and
 NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
   DEMO_ACCOUNT_PASSWORD='<password>' SEED_CONFIRM=seed-demo-tenant \
   npm run seed:demo-tenant -- --database=inventoryai_prod_db
+
+# its teardown costs three phrases in production
+NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
+  CLEANUP_CONFIRM=cleanup:demo-tenant CLEANUP_DB_CONFIRM=inventoryai_prod_db \
+  CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA \
+  npm run cleanup:demo-tenant -- --database=inventoryai_prod_db
 ```
 
 Its teardown removes MongoDB rows only; the Firebase identity is left in place.
@@ -178,7 +187,10 @@ ROLE_TEST_PASSWORD='choose-a-password' SEED_CONFIRM=seed-roles SEED_DB_CONFIRM=i
   npm run seed -- --plan=roles --database=inventoryai_dev_db
 
 npm run verify:roles -- --business=<id the seeder printed>
-CLEANUP_CONFIRM=cleanup:roles npm run cleanup:roles
+CLEANUP_CONFIRM=cleanup:roles CLEANUP_DB_CONFIRM=inventoryai_dev_db \
+  npm run cleanup:roles -- --database=inventoryai_dev_db --dry-run
+CLEANUP_CONFIRM=cleanup:roles CLEANUP_DB_CONFIRM=inventoryai_dev_db \
+  npm run cleanup:roles -- --database=inventoryai_dev_db
 ```
 
 | Role | Address |
@@ -192,8 +204,9 @@ One tenant, `ROLE TEST — role boundary fixture (do not use)`, ~900 documents (
 addresses cannot receive mail, so no code is needed: the logins are marked verified through Firebase's
 admin interface — the same write the app makes after a real code. `verify:roles` checks **96 cells**
 (route × role) and exits 0 only when all match; add `--signin` with `FIREBASE_WEB_API_KEY` and
-`ROLE_TEST_PASSWORD` to prove the real sign-in path. `cleanup:roles` keeps the four logins by default;
-`--delete-firebase` removes them only after the database is gone.
+`ROLE_TEST_PASSWORD` to prove the real sign-in path. `cleanup:roles --dry-run` counts the removal
+without deleting. The real run keeps the four logins by default; `--delete-firebase` removes them
+only after the database is gone.
 
 ADMIN's visible restriction is in **Users**: no creating another ADMIN, no changing its own role, no
 editing an ADMIN or the OWNER.
@@ -211,8 +224,9 @@ CLEANUP_CONFIRM=cleanup:database CLEANUP_DB_CONFIRM=inventoryai_dev_db \
 
 | Command | Deletes | Risk |
 |---|---|---|
-| `cleanup:perf` | the disposable perf tenant | ✅ that tenant only (`SEED_CONFIRM=seed-perf-ai`) |
-| `cleanup:demo-tenant` | the demo tenant's rows | ✅ identity kept |
+| `cleanup:perf` | the disposable perf tenant | ✅ development only (`SEED_CONFIRM=seed-perf-ai`) |
+| `cleanup:demo-tenant` | the demo tenant's rows | ✅ identity kept; 2 phrases dev / 3 prod |
+| `cleanup:roles` | the role fixture tenant | ✅ identity kept unless `--delete-firebase`; 2 dev / 3 prod |
 | `cleanup -- --target=database` (`inventoryai_dev_db`) | everything in dev, **logins included** | ⚠️ **High** |
 | `cleanup -- --target=firebase` | only the identities you name with `--email=` | ⚠️⚠️ irreversible; refuses a linked address |
 | `cleanup:test-firebase` | **every** identity in the approved project | ⚠️⚠️ irreversible — Part 4 |
@@ -235,6 +249,7 @@ cd C:/Users/jeffe/inventory-ai/server
 # a tenant of its own, with a working login — the freestanding form is in Guide 6, Part 3G.1
 NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
   DEMO_ACCOUNT_PASSWORD='choose-a-password' SEED_CONFIRM=seed:perf-tenant \
+  SEED_DB_CONFIRM=inventoryai_prod_db SEED_PROD_CONFIRM=SEED-PRODUCTION-DATA \
   npm run seed:perf-tenant -- --database=inventoryai_prod_db --size=60000
 
 # your own account: replace only the business its login owns (three phrases)
@@ -251,9 +266,11 @@ NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
   npm run cleanup:demo -- --database=inventoryai_prod_db \
   --email=YOUR_EMAIL --business=THE_BUSINESS_ID
 
-# remove the dedicated tenant (identity kept)
-NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db CLEANUP_CONFIRM=cleanup:perf-tenant \
-  npm run cleanup:perf-tenant -- --database=inventoryai_prod_db
+# preview the dedicated tenant's removal, then run the same line without --dry-run
+NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
+  CLEANUP_CONFIRM=cleanup:perf-tenant CLEANUP_DB_CONFIRM=inventoryai_prod_db \
+  CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA \
+  npm run cleanup:perf-tenant -- --database=inventoryai_prod_db --dry-run
 ```
 
 `cleanup:demo` needs **two phrases in development, three in production**, requires the email and

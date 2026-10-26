@@ -1,7 +1,20 @@
-// `CLEANUP_CONFIRM=cleanup:roles npm run cleanup:roles`
+// `npm run cleanup:roles -- --database=<name>`
 //
 // Remove the role-boundary fixture: its tenant, its four accounts and their
 // sessions — and nothing else.
+//
+// THE SAME RULE AS EVERY OTHER PRODUCTION-CAPABLE SCOPED CLEANUP.
+// `assertScopedCleanupTarget` requires `--database=` to equal the database this
+// process resolved, refuses the test database, and costs TWO phrases in development
+// or THREE in production:
+//
+//   CLEANUP_CONFIRM      = cleanup:roles
+//   CLEANUP_DB_CONFIRM   = <the resolved database name>
+//   CLEANUP_PROD_CONFIRM = DELETE-PRODUCTION-DATA        (production only)
+//
+// Before 2026-10-27 this command used `assertSafeTarget`, so it was the one fixture
+// teardown that cost a single phrase. A scoped command must not be the cheaper way to
+// delete production rows.
 //
 // SCOPED BY BUSINESSID, NOT BY A QUERY. Every delete is filtered by the one
 // `businessId` this script resolved from the fixture's own fingerprints (the
@@ -18,31 +31,34 @@
 // only after re-querying that no user still references them; the four addresses
 // are literal, so no other login can be reached.
 //
-// Usage:
-//   CLEANUP_CONFIRM=cleanup:roles npm run cleanup:roles
-//   CLEANUP_CONFIRM=cleanup:roles npm run cleanup:roles -- --delete-firebase
-//   CLEANUP_CONFIRM=cleanup:roles npm run cleanup:roles -- --database=inventoryai_prod_db
+// Usage (development — TWO phrases):
+//   CLEANUP_CONFIRM=cleanup:roles CLEANUP_DB_CONFIRM=inventoryai_dev_db \
+//     npm run cleanup:roles -- --database=inventoryai_dev_db --dry-run
+//
+// `--dry-run` counts every row the real run would remove, using the SAME teardown plan,
+// and stops. It deletes nothing and never touches Firebase. Drop it only after the count
+// is the one you expect. Add `--delete-firebase` to remove the four identities as well
+// on a real run. Production adds `CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA` and
+// `NODE_ENV=production`.
 //
 // Safe to run when nothing was ever seeded: it reports that and exits 0.
 
 import 'dotenv/config';
 import mongoose from 'mongoose';
 
-import env, { DATABASE_NAMES } from '../src/config/env.ts';
+import env from '../src/config/env.ts';
 import {
   SeedSafetyError,
-  assertSafeTarget,
   countTenantLeftovers,
+  countTenantRemoval,
   removeTenant,
 } from './perf/lib.mjs';
+import { assertScopedCleanupTarget } from './cleanup/guard.mjs';
 import {
   ACCOUNTS,
-  clearRoleFixtureExtras,
-  countRoleFixtureExtras,
+  CLEANUP_CONFIRM_PHRASE,
   findRoleTestBusiness,
 } from './role-test/lib.mjs';
-import PasswordResetToken from '../src/models/passwordResetToken.model.ts';
-import Session from '../src/models/session.model.ts';
 import User from '../src/models/user.model.ts';
 
 const COMMAND = 'cleanup:roles';
@@ -60,64 +76,64 @@ function fail(message) {
 
 async function main() {
   const deleteFirebase = process.argv.includes('--delete-firebase');
-  const production = env.mongodbDbName === DATABASE_NAMES.production;
+  const dryRun = process.argv.includes('--dry-run');
 
-  // A DESTRUCTIVE command reads its phrase from CLEANUP_CONFIRM, not the SEED_CONFIRM
-  // a seeder export would satisfy — the two families must not share a habitual export.
-  // Without `--database=` the guard is development-only; WITH it, the named database
-  // (production included) is accepted. It runs before a connection is opened either way.
-  assertSafeTarget(env, COMMAND, {
-    confirmPhrase: 'cleanup:roles',
-    confirmEnvVar: 'CLEANUP_CONFIRM',
+  // The shared scoped rule: named database, two phrases in development, three in production,
+  // and a connection opened only after it passes.
+  const target = assertScopedCleanupTarget({
+    env,
+    command: COMMAND,
+    confirmPhrase: CLEANUP_CONFIRM_PHRASE,
     database: argValue('--database'),
   });
+  const production = target.production;
+
+  console.log(`[${COMMAND}] database  : ${target.database}${production ? '   (PRODUCTION)' : ''}`);
+  if (dryRun) console.log(`[${COMMAND}] mode      : DRY RUN — counting only, nothing will be deleted`);
 
   await mongoose.connect(env.mongodbUri, { dbName: env.mongodbDbName });
 
   const businessId = await findRoleTestBusiness();
   if (!businessId) {
-    console.log(`[${COMMAND}] nothing to clean — no role fixture tenant exists in ${env.mongodbDbName}.`);
+    console.log(`[${COMMAND}] nothing to clean — no role fixture tenant exists in ${target.database}.`);
     await mongoose.disconnect();
     return;
   }
 
   const users = await User.find({ businessId }).select('_id email role').lean();
-  console.log(`[${COMMAND}] database  : ${env.mongodbDbName}${production ? '   (PRODUCTION)' : ''}`);
   console.log(`[${COMMAND}] tenant    : ${businessId}`);
   for (const user of users) {
     console.log(`[${COMMAND}]   ${user.role.padEnd(7)} ${user.email}`);
   }
 
-  // Sessions and reset tokens are keyed by USER, not by business, so they would
-  // otherwise linger after the users are removed (harmless — the user lookup
-  // fails first — but a fixture that leaves rows behind is not clean).
-  const userIds = users.map((user) => user._id);
-  if (userIds.length) {
-    const sessions = await Session.deleteMany({ userId: { $in: userIds } });
-    const tokens = await PasswordResetToken.deleteMany({ userId: { $in: userIds } });
+  if (dryRun) {
+    // The same full teardown plan `removeTenant` executes. The role fixture's audit and
+    // assistant rows are part of that plan, so no separate extras count is needed here.
+    const { total, counts } = await countTenantRemoval([businessId]);
+    for (const [collection, count] of Object.entries(counts)) {
+      if (count > 0) console.log(`[${COMMAND}]   ${collection.padEnd(24)} ${count}`);
+    }
     console.log(
-      `[${COMMAND}] removed   : ${sessions.deletedCount ?? 0} session(s), ${tokens.deletedCount ?? 0} reset token(s)`,
+      `[${COMMAND}] DRY RUN — would remove ${total} document(s); nothing was deleted.`,
     );
+    console.log(
+      `[${COMMAND}] identities: ${deleteFirebase ? 'would be deleted after the database rows' : 'would be kept'}`,
+    );
+    await mongoose.disconnect();
+    return;
   }
-
-  // The governance trail and any assistant conversation are keyed by businessId but
-  // are not part of the shared data list, so they are removed — and counted — here.
-  const extras = await clearRoleFixtureExtras(businessId);
 
   const { removed, counts } = await removeTenant([businessId]);
-  for (const [collection, count] of Object.entries({ ...counts, ...extras.counts })) {
-    console.log(`[${COMMAND}]   ${collection.padEnd(24)} ${count}`);
+  for (const [collection, count] of Object.entries(counts)) {
+    if (count > 0) console.log(`[${COMMAND}]   ${collection.padEnd(24)} ${count}`);
   }
 
-  // Prove it rather than assert it, over the same collection list the removal
-  // used — a collection that is deleted is necessarily also verified.
-  const leftovers = (await countTenantLeftovers([businessId])) + (await countRoleFixtureExtras(businessId));
+  // Prove it rather than assert it, over the same full teardown plan the removal used.
+  const leftovers = await countTenantLeftovers([businessId]);
   if (leftovers !== 0) {
     fail(`verification failed: ${leftovers} document(s) still reference the fixture tenant.`);
   }
-  console.log(
-    `[${COMMAND}] OK — removed ${removed + extras.removed} document(s); verification found 0 remaining.`,
-  );
+  console.log(`[${COMMAND}] OK — removed ${removed} document(s); verification found 0 remaining.`);
 
   if (!deleteFirebase) {
     console.log(`[${COMMAND}] Firebase identities kept (${ACCOUNTS.map((a) => a.email).join(', ')}).`);

@@ -70,6 +70,7 @@ import {
 } from './seed/lib.mjs';
 import {
   ACCOUNTS,
+  CLEANUP_CONFIRM_PHRASE,
   PASSWORD_ENV,
   ROLE_TEST_BUSINESS_NAME,
   SEED_CONFIRM_PHRASE,
@@ -219,8 +220,11 @@ async function main() {
   console.log(`[${COMMAND}] prove the server-side boundary (server must be running):`);
   console.log(`[${COMMAND}]   npm run verify:roles -- --business=${tenant.businessId}`);
   console.log(`[${COMMAND}] remove the fixture when done (MongoDB only; Firebase identities are kept):`);
+  const cleanupPhrases =
+    `CLEANUP_CONFIRM=${CLEANUP_CONFIRM_PHRASE} CLEANUP_DB_CONFIRM=${target.database} ` +
+    `${production ? 'CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA ' : ''}`;
   console.log(
-    `[${COMMAND}]   CLEANUP_CONFIRM=cleanup:roles npm run cleanup:roles -- --database=${target.database}`,
+    `[${COMMAND}]   ${cleanupPhrases}npm run cleanup:roles -- --database=${target.database}`,
   );
 
   await mongoose.disconnect();

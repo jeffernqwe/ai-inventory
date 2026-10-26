@@ -30,7 +30,13 @@ import Session from '../src/models/session.model.ts';
 import User from '../src/models/user.model.ts';
 import AIConversation from '../src/models/aiConversation.model.ts';
 import AIMessage from '../src/models/aiMessage.model.ts';
-import { clearTenantData, countTenantLeftovers, removeTenant } from '../scripts/perf/lib.mjs';
+import {
+  clearTenantData,
+  countTenantDataRemoval,
+  countTenantLeftovers,
+  countTenantRemoval,
+  removeTenant,
+} from '../scripts/perf/lib.mjs';
 
 const oid = () => new mongoose.Types.ObjectId();
 const targetBusiness = oid();
@@ -194,6 +200,47 @@ dbSuite('DEMO-2 a tenant teardown takes everything the tenant owns', dbOk, () =>
     assert.equal(await PasswordResetToken.countDocuments({ userId: keeper.user._id }), 1);
     assert.equal(await PasswordResetChallenge.countDocuments({ userId: keeper.user._id }), 1);
     assert.equal(await Business.countDocuments({ _id: keeperBusiness }), 1);
+  });
+
+  it('★ the cleanup dry run counts exactly what the removal deletes, and deletes nothing', async () => {
+    const target = await seedAccount(targetBusiness, targetUser, TARGET_EMAIL, TARGET_NAME);
+    await seedTenant(targetBusiness, targetUser, 'Dry Run Target');
+    await AuditLog.create({ businessId: targetBusiness, action: 'STOCK_IN', entityType: 'INVENTORY' });
+
+    const preview = await countTenantRemoval([targetBusiness]);
+
+    // Nothing moved: the tenant and its login are still there, and the count is why.
+    assert.equal(await Business.countDocuments({ _id: targetBusiness }), 1);
+    assert.equal(await User.countDocuments({ _id: target.user._id }), 1);
+    assert.equal(await AIConversation.countDocuments({ businessId: targetBusiness }), 1);
+    assert.equal(
+      preview.total,
+      Object.values(preview.counts).reduce((sum, count) => sum + count, 0),
+      'the total is the sum of the per-collection counts',
+    );
+
+    const removal = await removeTenant([targetBusiness]);
+
+    // The dry run is only trustworthy if it describes the REAL run byte for byte.
+    assert.deepEqual(preview.counts, removal.counts);
+    assert.equal(preview.total, removal.removed);
+    assert.equal(await countTenantLeftovers([targetBusiness]), 0);
+  });
+
+  it('★ the data-only dry run counts exactly what clearTenantData deletes, and deletes nothing', async () => {
+    const target = await seedTenant(targetBusiness, targetUser, 'Data Dry Run');
+
+    const preview = await countTenantDataRemoval([targetBusiness]);
+
+    // The preview must not have touched the rows it counted.
+    assert.equal(await AIConversation.countDocuments({ businessId: targetBusiness }), 1);
+    assert.equal(await AIMessage.countDocuments({ conversationId: target.conversation._id }), 2);
+    assert.equal(await Product.countDocuments({ businessId: targetBusiness }), 1);
+
+    const removal = await clearTenantData([targetBusiness]);
+    assert.deepEqual(preview.counts, removal.counts);
+    assert.equal(preview.total, removal.removed);
+    assert.equal((await countTenantDataRemoval([targetBusiness])).total, 0);
   });
 
   it('★ an empty tenant is a no-op that still reports zero, not an error', async () => {

@@ -26,8 +26,9 @@
 // Every delete is scoped by the one `businessId` both the account and the flag
 // name, and the Firebase identity is never touched.
 //
-// `--dry-run` counts exactly what would be removed and writes nothing. It still connects and still
-// requires both identifiers to agree, so the preview describes the same tenant the real run would.
+// `--dry-run` counts through the SAME data-only teardown plan `clearTenantData` executes, and writes
+// nothing. It still connects and still requires both identifiers to agree, so the preview describes
+// the same tenant and the same rows the real run would.
 //
 // Usage:
 //   CLEANUP_CONFIRM=cleanup:demo-account CLEANUP_DB_CONFIRM=inventoryai_dev_db \
@@ -45,14 +46,12 @@ import 'dotenv/config';
 import mongoose from 'mongoose';
 
 import env from '../src/config/env.ts';
-import AIConversation from '../src/models/aiConversation.model.ts';
-import AIMessage from '../src/models/aiMessage.model.ts';
 import User from '../src/models/user.model.ts';
 import { assertScopedCleanupTarget } from './cleanup/guard.mjs';
 import {
   SeedSafetyError,
-  TENANT_DATA_COLLECTIONS,
   clearTenantData,
+  countTenantDataRemoval,
 } from './perf/lib.mjs';
 
 const COMMAND = 'cleanup:demo';
@@ -109,21 +108,13 @@ async function main() {
   }
 
   if (dryRun) {
-    // The same collections and the same order as `clearTenantData`, counted instead of deleted —
-    // so the preview and the real run cannot describe different sets of rows.
-    const counts = {};
-    let wouldRemove = 0;
-    const conversationIds = await AIConversation.find({ businessId }).distinct('_id');
-    counts.ai_messages = await AIMessage.countDocuments({ conversationId: { $in: conversationIds } });
-    counts.ai_conversations = conversationIds.length;
-    for (const [name, model] of TENANT_DATA_COLLECTIONS) {
-      counts[name] = await model.countDocuments({ businessId });
-    }
+    // The counting half of the SAME plan `clearTenantData` executes, so the preview and
+    // the real run cannot describe different collections, filters or order.
+    const { total, counts } = await countTenantDataRemoval([businessId]);
     for (const [collection, count] of Object.entries(counts)) {
       if (count > 0) console.log(`[${COMMAND}]   ${collection.padEnd(24)} ${count}`);
-      wouldRemove += count;
     }
-    console.log(`[${COMMAND}] would remove ${wouldRemove} document(s); nothing was deleted.`);
+    console.log(`[${COMMAND}] would remove ${total} document(s); nothing was deleted.`);
     await mongoose.disconnect();
     return;
   }
@@ -133,13 +124,10 @@ async function main() {
     if (count > 0) console.log(`[${COMMAND}]   ${collection.padEnd(24)} ${count}`);
   }
 
-  // Prove it over the same list the removal used. `clearTenantData` also removes the
-  // assistant's conversations, so those are counted here too.
-  let remaining = 0;
-  for (const [, model] of TENANT_DATA_COLLECTIONS) {
-    remaining += await model.countDocuments({ businessId });
-  }
-  remaining += await AIConversation.countDocuments({ businessId });
+  // Prove it over the same plan the removal used: after a successful data-only clear,
+  // the count must be zero. The users and business row are deliberately kept, and are
+  // not part of this data-only plan.
+  const remaining = (await countTenantDataRemoval([businessId])).total;
   if (remaining !== 0) {
     fail(
       `verification failed: ${remaining} document(s) still reference ${businessId}. The removal ` +

@@ -5,7 +5,9 @@
 // database — deliberately, because it writes a large dataset for measuring queries.
 // The preview APK talks to production and nothing else, so a demo tenant that can be
 // exercised from that build has to be seedable there. Rather than weaken that guard
-// for every caller, this module states its own, and the words in it are different on
+// for every caller, the seeder has its own named-database check (`assertDemoTarget`),
+// while the teardown uses the shared `assertScopedCleanupTarget` (two phrases in
+// development, three in production). The words in the seeder's guard are different on
 // purpose:
 //
 //   * the DATABASE IS NAMED BY HAND, twice — `--database=<name>` must equal the
@@ -14,8 +16,9 @@
 //     be copied from a shell history into the wrong target by accident; typing the
 //     target's name can still be, but only after reading it.
 //   * the TEST database is refused outright, because `npm test` clears it.
-//   * a confirmation phrase is required, and it is different from every other
-//     script's (`seed-demo-tenant` / `cleanup:demo-tenant`).
+//   * the seeder requires its own `SEED_CONFIRM=seed-demo-tenant`; the teardown's
+//     first phrase is `CLEANUP_CONFIRM=cleanup:demo-tenant`, plus the database
+//     phrase every scoped cleanup costs.
 //   * the tenant is identified by TWO fingerprints (exact business name AND exact
 //     owner email) and every delete is anchored to the businessId they agree on.
 //     There is no "delete by email" path, so a real account whose address happened to
@@ -39,7 +42,12 @@ import InventoryTransaction from '../../src/models/inventoryTransaction.model.ts
 import Location from '../../src/models/location.model.ts';
 import Product from '../../src/models/product.model.ts';
 import User from '../../src/models/user.model.ts';
-import { clearTenantData, countTenantLeftovers, removeTenant } from '../perf/lib.mjs';
+import {
+  clearTenantData,
+  countTenantLeftovers,
+  countTenantRemoval,
+  removeTenant,
+} from '../perf/lib.mjs';
 import { resolveIdentity } from '../seed/lib.mjs';
 import {
   DEMO_CATEGORIES,
@@ -65,12 +73,13 @@ export class DemoTenantError extends Error {}
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
- * Fail-closed target check, BEFORE a connection is opened.
+ * The SEEDER's fail-closed target check, BEFORE a connection is opened.
  *
  * Every rule is a pure function of its arguments, so each one is asserted in
  * `server/test/DEMO1-demo-tenant.test.mjs` without a database or a network call.
  * Production is deliberately ALLOWED — that is what makes the preview build testable —
  * and the target is made deliberate instead by requiring the operator to name it.
+ * The teardown no longer calls this: it uses the shared scoped cleanup rule.
  */
 export function assertDemoTarget({
   mongodbUri,
@@ -406,6 +415,40 @@ export async function verifyDemoTenant(businessId) {
 }
 
 /**
+ * The one place the teardown decides whether a found demo state is safe to remove.
+ * Both the preview and the real removal use it, so they cannot disagree about the
+ * tenant or refuse in only one of the two paths.
+ */
+function completeDemoTenant(found) {
+  if (!found.businessId && !found.userId) return false;
+  if (!found.businessId || !found.userId || found.userBusinessId !== found.businessId) {
+    throw new DemoTenantError(
+      'the demo tenant is in a half-state (business and user do not agree). Refusing to remove ' +
+        `anything: business=${found.businessId ?? '(none)'} user=${found.userId ?? '(none)'} ` +
+        `userBusiness=${found.userBusinessId ?? '(none)'}.`,
+    );
+  }
+  return true;
+}
+
+/**
+ * Count exactly what `removeDemoTenant` would remove, and delete nothing.
+ *
+ * It uses the same `countTenantRemoval` plan as the real removal and applies the same
+ * two-fingerprint check first. The Firebase identity is not counted, because the
+ * teardown never touches it.
+ */
+export async function previewDemoTenantRemoval() {
+  const found = await findDemoTenant();
+  if (!completeDemoTenant(found)) {
+    return { removable: false, reason: 'no demo tenant exists — nothing to remove', counts: {}, total: 0 };
+  }
+
+  const { total, counts } = await countTenantRemoval([found.businessId]);
+  return { removable: true, businessId: found.businessId, total, counts };
+}
+
+/**
  * Remove the demo tenant's Mongo rows, and prove nothing is left.
  *
  * Refuses unless BOTH fingerprints agree on one businessId, so the one command that
@@ -414,16 +457,8 @@ export async function verifyDemoTenant(businessId) {
  */
 export async function removeDemoTenant() {
   const found = await findDemoTenant();
-
-  if (!found.businessId && !found.userId) {
+  if (!completeDemoTenant(found)) {
     return { removed: false, reason: 'no demo tenant exists — nothing to remove', counts: {} };
-  }
-  if (!found.businessId || !found.userId || found.userBusinessId !== found.businessId) {
-    throw new DemoTenantError(
-      'the demo tenant is in a half-state (business and user do not agree). Refusing to delete ' +
-        `anything: business=${found.businessId ?? '(none)'} user=${found.userId ?? '(none)'} ` +
-        `userBusiness=${found.userBusinessId ?? '(none)'}.`,
-    );
   }
 
   const result = await removeTenant([found.businessId]);
@@ -447,5 +482,6 @@ export default {
   planSeed,
   seedDemoTenant,
   verifyDemoTenant,
+  previewDemoTenantRemoval,
   removeDemoTenant,
 };

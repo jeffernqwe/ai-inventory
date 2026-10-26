@@ -207,7 +207,7 @@ describe('seeding target — the database is named, checked and known', () => {
       assertSeedTarget({
         ...base,
         env: {
-          mongodbUri: 'mongodb+srv://user:secret@cluster.example.net/inventoryai_prod_db?retryWrites=true',
+          mongodbUri: 'mongodb+srv://user:secret@cluster.example.net/inventoryai_prod_db?retryWrites=true', // secret-guard:allow — fake
           mongodbDbName: DEV,
         },
         database: DEV,
@@ -223,7 +223,7 @@ describe('seeding target — the database is named, checked and known', () => {
   it('accepts a connection string that names the same database, or names none', () => {
     const withPath = assertSeedTarget({
       ...base,
-      env: { mongodbUri: `mongodb+srv://u:p@cluster.example.net/${DEV}`, mongodbDbName: DEV },
+      env: { mongodbUri: `mongodb+srv://u:p@cluster.example.net/${DEV}`, mongodbDbName: DEV }, // secret-guard:allow — fake
       database: DEV,
       values: phrases,
     });

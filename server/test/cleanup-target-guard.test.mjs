@@ -181,7 +181,7 @@ describe('cleanup guard — the connection string must agree', () => {
       () =>
         assertCleanupTarget({
           env: envFor(DATABASE_NAMES.development, {
-            mongodbUri: 'mongodb+srv://user:secret@cluster.example.net/inventoryai_prod_db?retryWrites=true',
+            mongodbUri: 'mongodb+srv://user:secret@cluster.example.net/inventoryai_prod_db?retryWrites=true', // secret-guard:allow — fake
           }),
           target: 'database',
           database: DATABASE_NAMES.development,
@@ -200,7 +200,7 @@ describe('cleanup guard — the connection string must agree', () => {
 
   it('accepts a URI that names the same database, or names none', () => {
     for (const uri of [
-      `mongodb+srv://u:p@cluster.example.net/${DATABASE_NAMES.development}`,
+      `mongodb+srv://u:p@cluster.example.net/${DATABASE_NAMES.development}`, // secret-guard:allow — fake
       'mongodb://example.invalid:27017',
       'mongodb://example.invalid:27017/?retryWrites=true',
     ]) {
@@ -221,9 +221,9 @@ describe('databaseNameInUri — reads the path segment and nothing else', () => 
     ['mongodb://host:27017', ''],
     ['mongodb://host/', ''],
     ['mongodb://host/?retryWrites=true', ''],
-    ['mongodb://user:pass@host:27017/db?retryWrites=true', 'db'],
-    ['mongodb+srv://user:pass@a.example.net,b.example.net/db', 'db'],
-    ['mongodb://user:p%40ss@host/db', 'db'],
+    ['mongodb://user:pass@host:27017/db?retryWrites=true', 'db'], // secret-guard:allow — fake
+    ['mongodb+srv://user:pass@a.example.net,b.example.net/db', 'db'], // secret-guard:allow — fake
+    ['mongodb://user:p%40ss@host/db', 'db'], // secret-guard:allow — fake
     ['mongodb://host/inventory%20ai', 'inventory ai'],
     ['', ''],
     [undefined, ''],
@@ -236,7 +236,7 @@ describe('databaseNameInUri — reads the path segment and nothing else', () => 
   }
 
   it('never returns the host or a credential', () => {
-    const name = databaseNameInUri('mongodb+srv://user:topsecret@cluster.example.net/inventoryai_dev_db');
+    const name = databaseNameInUri('mongodb+srv://user:topsecret@cluster.example.net/inventoryai_dev_db'); // secret-guard:allow — fake
     assert.equal(name, 'inventoryai_dev_db');
     assert.doesNotMatch(name, /topsecret|cluster\.example\.net/);
   });

@@ -427,6 +427,24 @@ on the publishing machine, so it has to be backed up somewhere that is not this 
 machine needs it provisioned before it can publish. Staged releases (`--rollout-percentage`) are the
 other safety lever.
 
+### Is the paid plan genuinely necessary? (measured 2026-10-26)
+
+Expo's documentation is explicit — *"EAS Update Code Signing is only available to accounts subscribed
+to the EAS Production or Enterprise plans"* — so inside the system this app already uses there is no
+free switch. The **verification** is not the paid part: `expo-updates` checks each downloaded update's
+signature on the phone against the certificate compiled into the binary. The **supported signed
+publish** is what the plan pays for.
+
+| Option | Cost | What it buys | What it costs |
+| --- | --- | --- | --- |
+| Stay unsigned on Free (today) | $0 | HTTPS transport, channel isolation, the publish gate in §7, and an Expo account treated as a deployment credential | A compromised Expo account or CDN could serve a malicious bundle; a signed install would refuse it |
+| EAS Production plan | $199/month | end-to-end signing: an ISP, a CDN, or Expo itself cannot tamper | the plan, plus a private key to back up and provision |
+| Self-hosted updates with our own key | $0 in licence, real engineering | the same cryptography without the plan | replaces the working channel — another server, another failure mode, and no EAS rollback/rollout |
+
+The middle row is the only one that keeps the system that already works, and $199 is not justified
+while the app has no store release and no real customers. The free posture is a decision, not an
+oversight; the trigger to revisit is the Play release plus real tenants, not a date.
+
 ## 12. Current gaps
 
 1. **No preview build installed** — the handset runs the production-profile APK, so testing on it

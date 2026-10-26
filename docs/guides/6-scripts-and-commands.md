@@ -8,14 +8,17 @@ How accounts and data fit together is [Guide 4](4-test-accounts-and-mock-data.md
 
 ```bash
 cd C:/Users/jeffe/inventory-ai/server                          # where to stand
-SEED_CONFIRM=seed-demo-account npm run seed:demo -- --email=x@y.z   # setting, then command
+SEED_CONFIRM=seed-demo-account SEED_DB_CONFIRM=inventoryai_dev_db \
+  npm run seed -- --plan=demo --database=inventoryai_dev_db --email=x@y.z   # settings, then command
 ```
 
 - `cd` — commands only work from their own folder (`server/`, `mobile/`, or the project root).
 - `NAME=value` — a setting for one command only.
 - `--` — everything after it goes to the script; forget it and npm rejects the option.
 - Options are `--name=value`.
-- In **PowerShell**: `$env:SEED_CONFIRM="…"`, run the command, then `$env:SEED_CONFIRM=$null`.
+- In **PowerShell**: `$env:SEED_CONFIRM="…"`, run the command, then `$env:SEED_CONFIRM=$null`. Same
+  shape for `$env:CLEANUP_CONFIRM` and `$env:CLEANUP_PROD_CONFIRM` — and because PowerShell keeps
+  them until you clear them, clear both after a production run rather than leaving one exported.
 
 ## Part 1 — Starting things
 
@@ -112,13 +115,23 @@ node scripts/device/run.mjs --journey=transfer --sku=SMOKE-1 \
 
 ## Part 3 — Sample data in and out
 
-Every command here can reach **production only when the database is named** (`--database=`) — see
-Part G. Without it, production is refused.
+**One seeding command, two environments** ([Guide 9](9-seeding-data.md) is the short version):
+
+```bash
+npm run seed -- --plan=<demo|accounts|roles> --database=<name> [options]
+```
+
+`--database=` is **required and must equal** the database `MONGODB_DB_NAME` resolved. Development
+needs **two** phrases — `SEED_CONFIRM=<the plan's phrase>` and `SEED_DB_CONFIRM=<the database name>`;
+production needs **three**, adding `SEED_PROD_CONFIRM=SEED-PRODUCTION-DATA`. `npm run seed:demo`,
+`seed:accounts` and `seed:roles` are the same command with the plan preselected and take the same
+phrases. `seed:perf`, `seed:perf-tenant` and `seed:demo-tenant` are separate tools with their own
+guards (D, G.1, H).
 
 | You want | Use |
 |---|---|
-| Data in the account you sign in with (dev) | `seed:demo` — A |
-| The same in production | `seed:demo -- --database=… --business=…` — G.2 |
+| Data in the account you sign in with (dev) | `seed --plan=demo` — A |
+| The same in production | `seed --plan=demo --business=…` — G.2 |
 | Empty it again, keeping the login | `cleanup:demo -- --email=… --business=…` — G.2 |
 | A throwaway measurement tenant (no login) | `seed:perf` — D |
 | A large tenant you can sign into, in a named database | `seed:perf-tenant` — G.1 |
@@ -132,15 +145,18 @@ Part G. Without it, production is refused.
 
 ```bash
 cd C:/Users/jeffe/inventory-ai/server
-SEED_CONFIRM=seed-demo-account npm run seed:demo -- --email=jefferndullamalinaozxc@gmail.com
+SEED_CONFIRM=seed-demo-account SEED_DB_CONFIRM=inventoryai_dev_db \
+  npm run seed -- --plan=demo --database=inventoryai_dev_db \
+    --email=jefferndullamalinaozxc@gmail.com
 ```
 
 - `--email=` must be the address you sign in with; the business is found through its Firebase UID.
 - `--total=80000` (default, **100–400000**) is a real target; `--seed=1` makes runs identical.
+- `--dry-run` prints the plan, the target and the phrase count without connecting or writing.
 - **Replaces only that business's data.** Login and other tenants untouched. Re-running is safe.
 - Expect `OK` and `TOTAL 80000 (target 80000)`.
 - First run for a brand-new address creates the login — pass the password through a setting:
-  `DEMO_ACCOUNT_PASSWORD='…' SEED_CONFIRM=seed-demo-account npm run seed:demo -- --email=new-tester@example.com`
+  `DEMO_ACCOUNT_PASSWORD='…' SEED_CONFIRM=seed-demo-account SEED_DB_CONFIRM=inventoryai_dev_db npm run seed -- --plan=demo --database=inventoryai_dev_db --email=new-tester@example.com`
 
 ### B. An extra test account
 
@@ -149,7 +165,9 @@ The same command with a new address creates a verified Firebase login, a MongoDB
 
 ```bash
 DEMO_ACCOUNT_PASSWORD='choose-a-strong-password' SEED_CONFIRM=seed-demo-account \
-  npm run seed:demo -- --email=tester-1@example.com --total=500
+  SEED_DB_CONFIRM=inventoryai_dev_db \
+  npm run seed -- --plan=demo --database=inventoryai_dev_db \
+    --email=tester-1@example.com --total=500
 ```
 
 Use a throwaway address per tester. Do not delete its login while its database record exists (Part 6).
@@ -179,8 +197,10 @@ measurements need. `cleanup:perf` proves `0 remaining`; it says `nothing to clea
 ### E. Several accounts, barcodes left blank
 
 ```bash
-SEED_CONFIRM=seed-accounts npm run seed:accounts -- --dry-run   # plan only, still runs the guard
-SEED_CONFIRM=seed-accounts npm run seed:accounts
+SEED_CONFIRM=seed-accounts SEED_DB_CONFIRM=inventoryai_dev_db \
+  npm run seed -- --plan=accounts --database=inventoryai_dev_db --dry-run   # plan only, guard still runs
+SEED_CONFIRM=seed-accounts SEED_DB_CONFIRM=inventoryai_dev_db \
+  npm run seed -- --plan=accounts --database=inventoryai_dev_db
 ```
 
 - **No SKUs or barcodes** — so the app's own generation is what assigns them.
@@ -195,10 +215,12 @@ SEED_CONFIRM=seed-accounts npm run seed:accounts
 ### F. One login per role
 
 ```bash
-ROLE_TEST_PASSWORD='choose-a-password' SEED_CONFIRM=seed-roles npm run seed:roles -- --dry-run
-ROLE_TEST_PASSWORD='choose-a-password' SEED_CONFIRM=seed-roles npm run seed:roles
-SEED_CONFIRM=seed-roles npm run verify:roles -- --business=<id printed>
-SEED_CONFIRM=seed-roles npm run cleanup:roles
+ROLE_TEST_PASSWORD='choose-a-password' SEED_CONFIRM=seed-roles SEED_DB_CONFIRM=inventoryai_dev_db \
+  npm run seed -- --plan=roles --database=inventoryai_dev_db --dry-run
+ROLE_TEST_PASSWORD='choose-a-password' SEED_CONFIRM=seed-roles SEED_DB_CONFIRM=inventoryai_dev_db \
+  npm run seed -- --plan=roles --database=inventoryai_dev_db
+npm run verify:roles -- --business=<id printed>
+CLEANUP_CONFIRM=cleanup:roles npm run cleanup:roles
 ```
 
 | Role | Address |
@@ -232,7 +254,7 @@ The rules every production run follows:
 | a per-command phrase | `SEED_CONFIRM` for seeders, `CLEANUP_CONFIRM` for cleanups — the families cannot be satisfied by one habitual export |
 | the **tenant** is named when it would be reset | `seed:demo` and `seed:accounts` refuse to replace an existing business without `--business=` |
 | an existing **password is never changed** | only a brand-new identity gets one; the commands that own their addresses (G.1, roles) may rotate theirs |
-| every delete is scoped by `businessId` | no command here can become `cleanup:prod-mongodb` |
+| every delete is scoped by `businessId` | no command here can become `cleanup -- --target=database` |
 
 **One cycle:** G.1 seeds and prints the `businessId` → Part 4 asks the deployed assistant → G.2 empties
 the tenant keeping its login → G.1's cleanup removes the empty tenant and leaves the Firebase identity.
@@ -284,7 +306,9 @@ Then seed, naming that id:
 ```bash
 NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
   SEED_CONFIRM=seed-demo-account \
-  npm run seed:demo -- --database=inventoryai_prod_db --email=YOUR_EMAIL \
+  SEED_DB_CONFIRM=inventoryai_prod_db \
+  SEED_PROD_CONFIRM=SEED-PRODUCTION-DATA \
+  npm run seed -- --plan=demo --database=inventoryai_prod_db --email=YOUR_EMAIL \
     --business=THE_BUSINESS_ID --total=60000
 ```
 
@@ -314,15 +338,18 @@ products, 1,600 purchase orders, 300 suppliers, 24 categories, 6 locations, 4 as
 #### G.3 Several accounts, and the role fixture
 
 ```bash
-NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db SEED_CONFIRM=seed-accounts \
-  npm run seed:accounts -- --database=inventoryai_prod_db \
+NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
+  SEED_CONFIRM=seed-accounts SEED_DB_CONFIRM=inventoryai_prod_db \
+  SEED_PROD_CONFIRM=SEED-PRODUCTION-DATA \
+  npm run seed -- --plan=accounts --database=inventoryai_prod_db \
     --accounts="a@x.com:60000:BUSINESS_ID_A,b@x.com:5000:BUSINESS_ID_B"
 
 NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
-  ROLE_TEST_PASSWORD='…' SEED_CONFIRM=seed-roles \
-  npm run seed:roles -- --database=inventoryai_prod_db
+  ROLE_TEST_PASSWORD='…' SEED_CONFIRM=seed-roles SEED_DB_CONFIRM=inventoryai_prod_db \
+  SEED_PROD_CONFIRM=SEED-PRODUCTION-DATA \
+  npm run seed -- --plan=roles --database=inventoryai_prod_db
 NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
-  SEED_CONFIRM=seed-roles npm run cleanup:roles -- --database=inventoryai_prod_db
+  CLEANUP_CONFIRM=cleanup:roles npm run cleanup:roles -- --database=inventoryai_prod_db
 ```
 
 `seed:accounts` refuses the default plan in production. Roles own their tenant and addresses, so they
@@ -505,33 +532,63 @@ run `npm test` before you need it.
 
 `server/scripts/perf/lib.mjs` (the perf tenant definition, the safety guard and teardown helpers),
 `server/scripts/seed/lib.mjs` (the dataset shape shared by `seed:demo` and `seed:accounts`),
-`server/scripts/cleanup/lib.mjs` + `run.mjs` (the guarded delete sequence). Opening them does nothing, by
-design. Also automatic: `npm install` in `mobile/` applies a `postinstall` patch.
+`server/scripts/cleanup/guard.mjs` (the one cleanup rule), `lib.mjs` + `run.mjs` (the guarded delete
+sequence). Opening them does nothing, by design. Also automatic: `npm install` in `mobile/` applies a `postinstall` patch.
 
 ## Part 6 — Destructive commands
 
-Everything here permanently removes data. `--yes` skips only the typing prompt — the phrase is still
-required, and it is the command's own name:
+Everything here permanently removes data. Two families, one shape each:
+
+- **`npm run cleanup -- --target=database|firebase`** — a whole database, or the identities you name.
+  `--database=` is required and must equal the database this shell resolved; **two phrases in
+  development, three in production** ([Guide 9](9-seeding-data.md) has the rule).
+- **the scoped cleanups** (`cleanup:perf`, `cleanup:demo`, `cleanup:roles`, …) — one named tenant, each
+  with its own `CLEANUP_CONFIRM` phrase.
+
+The old `cleanup:test-mongodb`, `cleanup:dev-mongodb`, `cleanup:prod-mongodb`, `cleanup:all-mongodb` and
+`cleanup:firebase-accounts` scripts are gone; each was this command with the target baked in.
 
 ```bash
 cd C:/Users/jeffe/inventory-ai/server
-CLEANUP_CONFIRM=cleanup:test-mongodb npm run cleanup:test-mongodb -- --yes
+CLEANUP_CONFIRM=cleanup:database CLEANUP_DB_CONFIRM=inventoryai_dev_db \
+  npm run cleanup -- --target=database --database=inventoryai_dev_db --dry-run
 ```
 
 | Command | Deletes | Risk |
 |---|---|---|
-| `cleanup:test-mongodb` | everything in `inventoryai_test_db` | ✅ throwaway |
+| `cleanup -- --target=database` (dev) | everything in `inventoryai_dev_db`, **logins included** | ⚠️ **High** |
+| `cleanup -- --target=database` (prod) | real data, logins included | ⚠️⚠️ needs **three** phrases |
+| `cleanup -- --target=firebase -- --email=…` | **only the logins you name**, checked first | ⚠️⚠️ irreversible but guarded |
 | `cleanup:perf` | the disposable perf tenant (needs `SEED_CONFIRM=seed-perf-ai`) | ✅ that tenant only |
 | `cleanup:demo-tenant` | the `seed:demo-tenant` tenant's rows | ✅ identity kept |
 | `cleanup:roles` | the role fixture tenant (logins kept unless `--delete-firebase`) | ✅ verified afterwards |
 | `cleanup:demo` | **one named tenant's data**, keeping its login | ⚠️ production-capable, verified afterwards |
-| `cleanup:dev-mongodb` | everything in `inventoryai_dev_db`, your account included | ⚠️ **High**; your login survives |
-| `cleanup:test-firebase` | **every login** in the development Firebase project | ⚠️⚠️ **irreversible** |
-| `cleanup:firebase-accounts -- --email=…` | **only the logins you name**, checked first | ⚠️⚠️ irreversible but guarded |
-| `cleanup:prod-mongodb`, `cleanup:all-mongodb` | real / every database | ⚠️⚠️ needs `CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA` |
+| `cleanup:test-firebase` | **every login** in the approved Firebase project | ⚠️⚠️ **irreversible** |
 
-Guards: `NODE_ENV` must be one the project recognises and non-production (`prod`, `Production`,
-`staging`, unset and blank are all refused as **ambiguous**), and the phrase must match the command.
+The test database is refused by name, because `npm test` owns it.
+
+**Production needs three phrases, and each answers a different question.** `CLEANUP_CONFIRM` names
+*which command*, `CLEANUP_DB_CONFIRM` names *where*, and `CLEANUP_PROD_CONFIRM` states *that the data is
+real*. None substitutes for another: an exported command phrase cannot reach production on its own, and
+the phrase that acknowledges real data cannot run a command the operator did not name. Measured
+2026-10-26: with the first two set and the third missing, a production run stops at `three confirmation
+phrase(s) are required to clean inventoryai_prod_db (PRODUCTION) … 1 is missing or wrong:
+CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA` and deletes nothing. The command that runs:
+
+```bash
+NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
+  CLEANUP_CONFIRM=cleanup:database CLEANUP_DB_CONFIRM=inventoryai_prod_db \
+  CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA \
+  npm run cleanup -- --target=database --database=inventoryai_prod_db
+```
+
+Guards: the target must be one of the two; `--database` must match the resolved database **and** be a
+cleanable name; a `MONGODB_URI` that names a different database in its path is refused (the shell is
+configured for the other environment, even when every flag agrees); the live connection must report the
+same name; and every phrase must match exactly. A run that fails any of them opens no connection at
+all, so it cannot have deleted anything. The old
+"`NODE_ENV` must be explicitly development" rule is gone — the database name and its phrase are the
+proof, which is what lets one command serve both environments.
 Measured tools check a recognised non-production environment **and** a resolved dev/test database,
 printed before the first query; they need no phrase, but a run that cannot say which database it read
 is not a measurement.
@@ -549,15 +606,37 @@ Firebase alone.**
 Only for deliberately re-testing the registration journey on an address that already has a login:
 
 ```bash
-CLEANUP_CONFIRM=cleanup:dev-mongodb npm run cleanup:dev-mongodb -- --yes      # 1. database first
-CLEANUP_CONFIRM=cleanup:firebase-accounts npm run cleanup:firebase-accounts -- --yes \
-  --email=one@x.com --email=two@x.com                                         # 2. THEN logins
+# 1. database first
+CLEANUP_CONFIRM=cleanup:database CLEANUP_DB_CONFIRM=inventoryai_dev_db \
+  npm run cleanup -- --target=database --database=inventoryai_dev_db
+
+# 2. THEN the logins
+CLEANUP_CONFIRM=cleanup:firebase CLEANUP_DB_CONFIRM=inventoryai_dev_db \
+  npm run cleanup -- --target=firebase --database=inventoryai_dev_db \
+  --email=one@x.com --email=two@x.com
 ```
 
 The order is the safety. The command refuses any address a database record still points at, and refuses
-the **whole** run (`REFUSED — still linked to a MongoDB user`, exit 1, nothing deleted). `--dry-run`
-prints the plan; unknown addresses report `no identity` and are skipped; it cannot delete a login you
-did not name.
+the **whole** run (`REFUSED — still linked to a MongoDB user`, exit 1, nothing deleted). It counts in
+**both** the development and the production database, because one Firebase project serves both and an
+address can be referenced twice; a refusal names the database(s) that still hold it. Measured
+2026-10-26: the first development address tried was referenced by both, which the old single-database
+check would have called safe to delete.
+
+It checks that link **twice**: by `firebaseUid` and by the address itself. The uid is not enough. A
+`firebaseUid` is copied from a token, so when an identity is deleted and re-created under the same
+address the row keeps the old uid forever — measured 2026-10-26, all three development rows held uids
+that no longer existed in Firebase. A uid-only check called a live, owned identity *safe to delete*,
+which is the one outcome that cannot be repaired. `email` is unique, lower-cased and indexed, and it is
+what registration collides on, so the address decides.
+
+A third verdict covers the case where the damage is already done: `ORPHANED — identity already gone,
+database row remains` (exit 1). That address cannot sign in and cannot register (`409 EMAIL_IN_USE`),
+and deleting anything in Firebase cannot change it — the database row has to go first. It is reported
+rather than counted as "0 deleted", because the run's promise was not met.
+
+`--dry-run` prints the same plan and the same refusals; unknown addresses report `no identity` and are
+skipped; it cannot delete a login you did not name.
 
 ## Part 7 — What runs by itself
 
@@ -586,6 +665,7 @@ per process (reset on restart) and public but contain no names, paths, users or 
 | `npm run seed:demo -- --email=…` | sample data in your account | ⚠️ replaces that business |
 | `npm run seed:demo -- --database=… --business=… --email=…` | the same in production | ⚠️ named business only; password untouched |
 | `npm run cleanup:demo -- --email=… --business=…` | empty one tenant, keep its login (`--dry-run`) | ⚠️ scoped, verified |
+| `npm run seed -- --plan=… --database=…` | any plan; **2 phrases** in development, **3** in production | ⚠️ resets that tenant's data |
 | `npm run seed:accounts` | several accounts, no SKUs (`--accounts=…`) | ⚠️ those accounts only |
 | `npm run seed:roles` | one login per role, ~900 documents | ⚠️ that fixture only |
 | `npm run verify:roles -- --business=…` | 96 permission cells (`--signin` for a deployment) | ✅ |
@@ -597,11 +677,9 @@ per process (reset on restart) and public but contain no names, paths, users or 
 | `npm run perf:measure`, `perf:golden` | query timings / answer fingerprints | ✅ reads |
 | `npm run perf:turns` | real turns (`--login` for a deployment) | ⚠️ spends AI quota |
 | `npm run ai:usage`, `ai:models`, `ai:check`, `ai:health` | cost, allowance, models, health | ✅ reads |
-| `npm run cleanup:test-mongodb` | wipe the test database | ⚠️ throwaway |
-| `npm run cleanup:dev-mongodb` | wipe the development database | ⚠️⚠️ your data |
-| `npm run cleanup:test-firebase` | delete every development login | ⚠️⚠️ irreversible |
-| `npm run cleanup:firebase-accounts -- --email=…` | only the named logins, checked | ⚠️⚠️ irreversible but guarded |
-| `npm run cleanup:prod-mongodb`, `cleanup:all-mongodb` | real data | ⚠️⚠️ never |
+| `npm run cleanup -- --target=database --database=…` | wipe the named database (`--dry-run` first) | ⚠️⚠️ logins included; 2 phrases, 3 in production |
+| `npm run cleanup -- --target=firebase --database=… --email=…` | only the named logins, checked in both databases | ⚠️⚠️ irreversible but guarded |
+| `npm run cleanup:test-firebase` | delete every login in the approved project | ⚠️⚠️ irreversible |
 
 **`mobile/`**: `npx expo start --dev-client`, `npm start`, `npm run android|ios|web`, `npm run
 typecheck`, `npm run lint`, `npm test`, `npm run test:watch`, `npm run check:build-env`,
@@ -617,9 +695,11 @@ typecheck`, `npm run lint`, `npm test`, `npm run test:watch`, `npm run check:bui
 |---|---|---|
 | `set SEED_CONFIRM=<phrase> to proceed` | prove which seeder you meant | put that command's own phrase in front (`seed-demo-account`, `seed-accounts`, `seed-perf-ai`, `seed:perf-tenant`, `seed-roles`) |
 | `no Firebase identity exists … and DEMO_ACCOUNT_PASSWORD is not set` | the address has no login | register it first (**recommended**) or set the password |
-| `set CLEANUP_CONFIRM=…` / `NODE_ENV is not set` | the cleanup guard needs a phrase and an environment | set both |
-| `… so the environment is ambiguous` | `NODE_ENV` missing or unrecognised | set `development` (or `test`) |
-| `the resolved database is … not the development database` | wrong database — probably test | do not override; check `server/.env` |
+| `two confirmation phrase(s) are required to clean …` | a cleanup phrase is missing or wrong | set `CLEANUP_CONFIRM=cleanup:<target>` **and** `CLEANUP_DB_CONFIRM=<database>` |
+| `three confirmation phrase(s) … CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA` | production, and the third phrase is missing | add it **as well as** the other two |
+| `--database is "…" but this process resolved "…"` | the shell resolves the other database | set `MONGODB_DB_NAME` (and `NODE_ENV=production` for production); do not retype the flag to match |
+| `… is the test database … which "npm test" owns` | cleanup was aimed at the test database | `npm test` clears it; name development or production |
+| `ORPHANED — identity already gone, database row remains` | a login was deleted for an address a database row still owns | clear the database first (`--target=database`); the row is what blocks it, not Firebase |
 | `NOT VERIFIED (exit 2)` | could not look (database/account) | not a data problem; check the connection |
 | `connect ETIMEDOUT …:27017` | network/DNS to Atlas; nothing was written | re-run; seen intermittently on 2026-10-25, succeeding on retry |
 | `is inside the repository` (`backup:db`) | `BACKUP_DIR` inside the project | choose a folder outside it |

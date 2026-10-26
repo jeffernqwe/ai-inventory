@@ -26,6 +26,8 @@ documents.
 | [6-scripts-and-commands.md](guides/6-scripts-and-commands.md) | Every npm script, what it prints, what is safe to run |
 | [7-over-the-air-updates.md](guides/7-over-the-air-updates.md) | Publishing an update without a rebuild, and rolling one back |
 | [8-play-store-submission.md](guides/8-play-store-submission.md) | Building and submitting the Android release |
+| [9-seeding-data.md](guides/9-seeding-data.md) | One command for development and production, the phrases each needs, verification |
+| [10-deleting-data.md](guides/10-deleting-data.md) | One command for clearing a database or a login, the same phrase rule, what is not replaced |
 
 ## 2. What the system is — reference
 

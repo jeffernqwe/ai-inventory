@@ -8,8 +8,8 @@
 // is refused, and `CLEANUP_CONFIRM=cleanup:perf-tenant` is required. A wrong `--database=` value
 // is a refusal, not a no-op that looks like success.
 //
-// IT IS NOT `cleanup:prod-mongodb` AND MUST NEVER BE CONFUSED WITH IT. That command clears whole
-// databases by design. This one is scoped by the seed tenant's businessId and refuses to run at all
+// IT IS NOT `npm run cleanup --target=database` AND MUST NEVER BE CONFUSED WITH IT. That command
+// clears whole databases by design. This one is scoped by the seed tenant's businessId and refuses to run at all
 // if the two fingerprints disagree, so it cannot reach another business even when pointed at the
 // production database.
 //

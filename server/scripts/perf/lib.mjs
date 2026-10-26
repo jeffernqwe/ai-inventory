@@ -64,8 +64,8 @@ function assertNamedEnvironment(command, { what = 'written or deleted' } = {}) {
  *
  * The database is the one `config/env.ts` RESOLVES, not the ambient variable, so
  * this cannot be satisfied by editing an env var that the connection ignores. The
- * test database is refused as firmly as production: `npm test` and
- * `npm run cleanup:test-mongodb` clear it, so seeded rows there would vanish
+ * test database is refused as firmly as production: `npm test` clears it, so seeded
+ * rows there would vanish
  * mid-experiment and the measurement would be of an empty tenant.
  *
  * PRODUCTION IS REACHABLE ONLY BY NAMING IT (2026-10-25). Called without `database`, this is

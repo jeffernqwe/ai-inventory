@@ -11,6 +11,8 @@ technical documents listed at the bottom; if they disagree with a guide, they wi
 | Run the app on a real phone | [2. Running on a phone](2-run-on-your-phone.md) |
 | See the phone's screen on the laptop | [3. Mirroring the phone](3-see-your-phone-on-your-laptop.md) |
 | Understand test accounts and put sample data in | [4. Test accounts and mock data](4-test-accounts-and-mock-data.md) |
+| Put data in, verify it, or seed production | [9. Seeding data](9-seeding-data.md) |
+| Delete a database or a login | [10. Deleting data](10-deleting-data.md) |
 | Look up a command or script | [6. Every script, explained](6-scripts-and-commands.md) |
 | Update an installed app without reinstalling it | [7. Updating the app](7-over-the-air-updates.md) |
 | Prepare the Google Play submission | [8. Preparing the Play submission](8-play-store-submission.md) |

@@ -47,25 +47,34 @@
 // back; `clearTenantData` is exported from ./perf/lib.mjs for a targeted removal.
 // The performance tenant (Part 3G) has its own `cleanup:perf-tenant`.
 //
-// Usage:
-//   SEED_CONFIRM=seed-demo-account npm run seed:demo -- --email=you@example.com --total=80000
-//   SEED_CONFIRM=seed-demo-account npm run seed:demo -- --email=you@example.com --total=200 --seed=7
+// Usage (development — TWO phrases; the database is always named):
+//   SEED_CONFIRM=seed-demo-account SEED_DB_CONFIRM=inventoryai_dev_db \
+//     npm run seed -- --plan=demo --database=inventoryai_dev_db \
+//       --email=you@example.com --total=80000
+//   … add --dry-run to print the plan without connecting or writing.
 //
-// Production (the database is named, and the tenant being reset is named too):
+// Production (THREE phrases, and the tenant being reset is named too):
 //   NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
 //     SEED_CONFIRM=seed-demo-account \
-//     npm run seed:demo -- --database=inventoryai_prod_db \
+//     SEED_DB_CONFIRM=inventoryai_prod_db \
+//     SEED_PROD_CONFIRM=SEED-PRODUCTION-DATA \
+//     npm run seed -- --plan=demo --database=inventoryai_prod_db \
 //       --email=you@example.com --business=<the id verify:demo prints> --total=60000
+//
+// `npm run seed:demo` is the same command with the plan preselected, and takes the
+// same phrases. The rule itself lives in ./seed/guard.mjs, not here.
 //
 // If the Firebase identity does not exist yet, supply its initial password through
 // the environment (never on the command line, never in this file):
-//   DEMO_ACCOUNT_PASSWORD='…' SEED_CONFIRM=seed-demo-account npm run seed:demo -- --email=new@example.com
+//   DEMO_ACCOUNT_PASSWORD='…' SEED_CONFIRM=seed-demo-account SEED_DB_CONFIRM=inventoryai_dev_db \
+//     npm run seed -- --plan=demo --database=inventoryai_dev_db --email=new@example.com
 
 import 'dotenv/config';
 import mongoose from 'mongoose';
 
-import env, { DATABASE_NAMES } from '../src/config/env.ts';
-import { SeedSafetyError, assertSafeTarget, clearTenantData } from './perf/lib.mjs';
+import env from '../src/config/env.ts';
+import { SeedSafetyError, clearTenantData } from './perf/lib.mjs';
+import { assertSeedTarget } from './seed/guard.mjs';
 import {
   assertTenantNamedForReset,
   ensureTenantForIdentity,
@@ -101,14 +110,19 @@ async function main() {
   const total = Number.parseInt(argValue('--total') ?? '80000', 10);
   const seed = Number.parseInt(argValue('--seed') ?? '1', 10);
   const requestedBusiness = argValue('--business');
-  const production = env.mongodbDbName === DATABASE_NAMES.production;
+  const dryRun = process.argv.includes('--dry-run');
 
-  // The named form is the only way this script can reach production; without
-  // `--database=` it is the development-only guard it has always been.
-  assertSafeTarget(env, COMMAND, {
-    confirmPhrase: CONFIRM_PHRASE,
+  // The unified guard: `--database=` must equal the resolved database, and the
+  // target class decides the phrase count — two for development, three for
+  // production. It runs before any connection, identity lookup or write, on a dry
+  // run as well, so a dry run proves the destination too.
+  const target = assertSeedTarget({
+    env,
+    command: COMMAND,
     database: argValue('--database'),
+    confirmPhrase: CONFIRM_PHRASE,
   });
+  const production = target.production;
 
   if (!email || !email.includes('@')) {
     fail('--email=<address> is required. Nothing was written.');
@@ -123,10 +137,32 @@ async function main() {
     fail('--business must be a 24-character businessId. Nothing was written.');
   }
 
-  console.log(`[${COMMAND}] database : ${env.mongodbDbName}${production ? '   (PRODUCTION)' : ''}`);
+  console.log(`[${COMMAND}] database : ${target.database}${production ? '   (PRODUCTION)' : ''}`);
+  console.log(`[${COMMAND}] confirmed: ${target.phrases} phrase(s) accepted`);
   console.log(`[${COMMAND}] account  : ${email}`);
   console.log(`[${COMMAND}] target   : ~${total.toLocaleString()} documents across 7 collections`);
   console.log(`[${COMMAND}] PRNG seed: ${seed} (the dataset is reproducible)`);
+
+  if (dryRun) {
+    console.log('');
+    console.log(`[${COMMAND}] dry run complete — no connection was opened and nothing was written.`);
+    console.log(
+      `[${COMMAND}] a real run would resolve (creating only if absent) the Firebase identity for ` +
+        `${email}, then REPLACE the data of the tenant that account owns.`,
+    );
+    if (production) {
+      console.log(
+        `[${COMMAND}] production also needs --business=<the id verify:demo prints> whenever that ` +
+          'tenant already exists.',
+      );
+    }
+    console.log(
+      `[${COMMAND}] to run for real: SEED_CONFIRM=${CONFIRM_PHRASE} ` +
+        `SEED_DB_CONFIRM=${target.database}${production ? ' SEED_PROD_CONFIRM=SEED-PRODUCTION-DATA' : ''} ` +
+        `npm run ${COMMAND} -- --database=${target.database} …`,
+    );
+    return;
+  }
 
   // In production an existing credential is never rewritten; see resolveIdentity.
   const identity = await resolveIdentity(email, { refreshPassword: !production });

@@ -33,6 +33,8 @@ if (!VALID.includes(mode)) {
 // Phase 07F suite classification (by actual DB/unit content, not filenames).
 // ---------------------------------------------------------------------------
 const PURE_UNIT = [
+  'seed-target-guard.test.mjs',       // §27FT: the unified seeding guard — two phrases for development, three for production, a named database that must equal the resolved one, the test/unknown databases refused, and the plan table the single `seed` command dispatches from (all pure; no connection)
+  'cleanup-target-guard.test.mjs',    // §27FU: the same rule for cleanup — `--target=database|firebase`, the named database, two/three phrases, a phrase from the wrong command refused, a refused run that never connects, a dry run that never deletes, and the command surface that pins the five removed scripts as gone (all pure)
   'phase03-rbac.test.mjs',            // middleware/constants unit tests
   'phase06-ai-wire.test.mjs',         // OpenRouter wire mapping: payload, header and error-sanitization contract, plus the upstream diagnostics
   'phase07d-production-config.test.mjs', // env validation, health, shutdown

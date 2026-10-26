@@ -32,18 +32,19 @@ Three consequences:
 
 ### Built-in safety
 
-Before connecting or writing, every seeder and cleanup checks: the environment is recognised and
-non-production; the resolved database is the development one, or exactly the one named with
-`--database=`; the command's own confirmation phrase is set; and, for a production run that would
-replace an existing business, that business's `--business=` id. Any failure stops before touching
-anything. The test database is always refused.
+Before connecting or writing, every seeding run checks: `--database=` names the database this process
+resolved (which comes from `MONGODB_DB_NAME`); that database is development or production; two
+confirmation phrases in development (`SEED_CONFIRM` and `SEED_DB_CONFIRM`) or three in production
+(adding `SEED_PROD_CONFIRM=SEED-PRODUCTION-DATA`); and, for a production run that would replace an
+existing business, that business's `--business=` id. Any failure stops before touching anything. The
+test database is always refused.
 
 **PowerShell** cannot run `NAME=value npm run …` in one line:
 
 ```powershell
-$env:SEED_CONFIRM="seed-demo-account"
-npm run seed:demo -- --email=you@example.com
-$env:SEED_CONFIRM=$null
+$env:SEED_CONFIRM='seed-demo-account'; $env:SEED_DB_CONFIRM='inventoryai_dev_db'
+npm run seed -- --plan=demo --database=inventoryai_dev_db --email=you@example.com
+$env:SEED_CONFIRM=$null; $env:SEED_DB_CONFIRM=$null
 ```
 
 ## Part 3 — The commands
@@ -64,8 +65,13 @@ $env:SEED_CONFIRM=$null
 
 ```bash
 cd C:/Users/jeffe/inventory-ai/server
-SEED_CONFIRM=seed-demo-account npm run seed:demo -- --email=YOUR_EMAIL
+SEED_CONFIRM=seed-demo-account SEED_DB_CONFIRM=inventoryai_dev_db \
+  npm run seed -- --plan=demo --database=inventoryai_dev_db --email=YOUR_EMAIL
 ```
+
+**Two phrases in development, three in production** — `SEED_CONFIRM` (the plan), `SEED_DB_CONFIRM`
+(the database name) and, for production, `SEED_PROD_CONFIRM=SEED-PRODUCTION-DATA`. The full rule,
+the dry run and the production examples are in [Guide 9](9-seeding-data.md).
 
 - `--email=` is the address you sign in with; the business is found through its UID.
 - `--total=80000` (default, range 100–400000) is a real target; `--seed=1` makes the data identical
@@ -73,7 +79,7 @@ SEED_CONFIRM=seed-demo-account npm run seed:demo -- --email=YOUR_EMAIL
 - **What it does:** replaces **only that one business's data**. Logins and other tenants are untouched.
   Re-running is safe and gives a clean slate.
 - If the identity does not exist yet it is created — supply its password through a setting, never on
-  the command line: `DEMO_ACCOUNT_PASSWORD='…' SEED_CONFIRM=seed-demo-account npm run seed:demo -- --email=new@example.com`
+  the command line: `DEMO_ACCOUNT_PASSWORD='…' SEED_CONFIRM=seed-demo-account SEED_DB_CONFIRM=inventoryai_dev_db npm run seed -- --plan=demo --database=inventoryai_dev_db --email=new@example.com`
 
 ### B. Create an extra test account
 
@@ -82,7 +88,9 @@ business (OWNER) and its dataset:
 
 ```bash
 DEMO_ACCOUNT_PASSWORD='choose-a-strong-password' SEED_CONFIRM=seed-demo-account \
-  npm run seed:demo -- --email=tester-1@example.com --total=500
+  SEED_DB_CONFIRM=inventoryai_dev_db \
+  npm run seed -- --plan=demo --database=inventoryai_dev_db \
+    --email=tester-1@example.com --total=500
 ```
 
 Use a throwaway address per tester; its data is completely separate from yours.
@@ -115,8 +123,10 @@ signed into. It prints the `businessId` the measurement commands need. `cleanup:
 ### E. Several accounts at different sizes
 
 ```bash
-SEED_CONFIRM=seed-accounts npm run seed:accounts -- --dry-run   # plan only, writes nothing
-SEED_CONFIRM=seed-accounts npm run seed:accounts
+SEED_CONFIRM=seed-accounts SEED_DB_CONFIRM=inventoryai_dev_db \
+  npm run seed -- --plan=accounts --database=inventoryai_dev_db --dry-run   # plan only, writes nothing
+SEED_CONFIRM=seed-accounts SEED_DB_CONFIRM=inventoryai_dev_db \
+  npm run seed -- --plan=accounts --database=inventoryai_dev_db
 ```
 
 - **No SKUs or barcodes** are generated, so the app's own barcode generation is exercised.
@@ -162,11 +172,13 @@ Its teardown removes MongoDB rows only; the Firebase identity is left in place.
 ### G. One login per role
 
 ```bash
-ROLE_TEST_PASSWORD='choose-a-password' SEED_CONFIRM=seed-roles npm run seed:roles -- --dry-run
-ROLE_TEST_PASSWORD='choose-a-password' SEED_CONFIRM=seed-roles npm run seed:roles
+ROLE_TEST_PASSWORD='choose-a-password' SEED_CONFIRM=seed-roles SEED_DB_CONFIRM=inventoryai_dev_db \
+  npm run seed -- --plan=roles --database=inventoryai_dev_db --dry-run
+ROLE_TEST_PASSWORD='choose-a-password' SEED_CONFIRM=seed-roles SEED_DB_CONFIRM=inventoryai_dev_db \
+  npm run seed -- --plan=roles --database=inventoryai_dev_db
 
-SEED_CONFIRM=seed-roles npm run verify:roles -- --business=<id the seeder printed>
-SEED_CONFIRM=seed-roles npm run cleanup:roles
+npm run verify:roles -- --business=<id the seeder printed>
+CLEANUP_CONFIRM=cleanup:roles npm run cleanup:roles
 ```
 
 | Role | Address |
@@ -188,30 +200,34 @@ editing an ADMIN or the OWNER.
 
 ### Cleanup commands
 
-Each asks for a typed confirmation phrase; **`--yes` skips only the typing prompt**, not the phrase,
-which is supplied as a setting:
+One command, two targets — the same shape as seeding. `--database=` is required and must equal the
+database this shell resolved, and the phrases are supplied as settings: **two in development, three
+in production** ([Guide 9](9-seeding-data.md) has the rule in full).
 
 ```bash
-CLEANUP_CONFIRM=cleanup:test-mongodb npm run cleanup:test-mongodb -- --yes
+CLEANUP_CONFIRM=cleanup:database CLEANUP_DB_CONFIRM=inventoryai_dev_db \
+  npm run cleanup -- --target=database --database=inventoryai_dev_db --dry-run
 ```
 
 | Command | Deletes | Risk |
 |---|---|---|
-| `cleanup:test-mongodb` | everything in `inventoryai_test_db` | ✅ throwaway |
 | `cleanup:perf` | the disposable perf tenant | ✅ that tenant only (`SEED_CONFIRM=seed-perf-ai`) |
 | `cleanup:demo-tenant` | the demo tenant's rows | ✅ identity kept |
-| `cleanup:dev-mongodb` | everything in `inventoryai_dev_db`, your data included | ⚠️ **High**; your login survives |
-| `cleanup:test-firebase` | **every** development login | ⚠️⚠️ irreversible — Part 4 |
-| `cleanup:prod-mongodb`, `cleanup:all-mongodb` | real / every database | ⚠️⚠️ needs `CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA` |
+| `cleanup -- --target=database` (`inventoryai_dev_db`) | everything in dev, **logins included** | ⚠️ **High** |
+| `cleanup -- --target=firebase` | only the identities you name with `--email=` | ⚠️⚠️ irreversible; refuses a linked address |
+| `cleanup:test-firebase` | **every** identity in the approved project | ⚠️⚠️ irreversible — Part 4 |
+| `cleanup -- --target=database` (`inventoryai_prod_db`) | real data | ⚠️⚠️ needs **three** phrases |
 
-They also require the environment to be **explicitly** `development`; unset or blank is refused as
-ambiguous, because "I could not tell where this would delete" is treated as "refuse".
+The test database is refused by name: `npm test` owns it. Clearing a database deletes its `users`
+rows too, which is why the safe order for a fresh start is **database first, identities second** —
+after the rows are gone, no address is left stranded by a deleted identity.
 
 ### H. Production
 
-Every command above reaches production only when `--database=` names it. That opens the door; the
-phrase and, where a business would be replaced, `--business=` still apply. The pair below is the
-recommended route for scale testing.
+Every command above reaches production only when `--database=` names it **and** the third phrase is
+supplied. That opens the door; a business that would be replaced must also be named with `--business=`.
+The block below is the recommended route for scale testing; [Guide 9](9-seeding-data.md) has the short
+explanation of the phrase rule.
 
 ```bash
 cd C:/Users/jeffe/inventory-ai/server
@@ -221,9 +237,11 @@ NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
   DEMO_ACCOUNT_PASSWORD='choose-a-password' SEED_CONFIRM=seed:perf-tenant \
   npm run seed:perf-tenant -- --database=inventoryai_prod_db --size=60000
 
-# your own account: replace only the business its login owns
-NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db SEED_CONFIRM=seed-demo-account \
-  npm run seed:demo -- --database=inventoryai_prod_db --email=YOUR_EMAIL \
+# your own account: replace only the business its login owns (three phrases)
+NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
+  SEED_CONFIRM=seed-demo-account SEED_DB_CONFIRM=inventoryai_prod_db \
+  SEED_PROD_CONFIRM=SEED-PRODUCTION-DATA \
+  npm run seed -- --plan=demo --database=inventoryai_prod_db --email=YOUR_EMAIL \
   --business=THE_BUSINESS_ID --total=60000
 
 # empty that tenant's data, keeping the login, the business row and sessions
@@ -282,12 +300,13 @@ numbers; `verify:demo` prints the truth for what is actually stored.
 
 | Want | Do | Touches |
 |---|---|---|
-| Fresh sample data | `SEED_CONFIRM=seed-demo-account npm run seed:demo -- --email=YOUR_EMAIL` | only your business |
-| Your data gone, login kept | `CLEANUP_CONFIRM=cleanup:dev-mongodb npm run cleanup:dev-mongodb` | every business in dev |
+| Fresh sample data | `SEED_CONFIRM=seed-demo-account SEED_DB_CONFIRM=inventoryai_dev_db npm run seed -- --plan=demo --database=inventoryai_dev_db --email=YOUR_EMAIL` | only your business |
+| Your data gone, logins too | `CLEANUP_CONFIRM=cleanup:database CLEANUP_DB_CONFIRM=inventoryai_dev_db npm run cleanup -- --target=database --database=inventoryai_dev_db` | every business in dev |
 | Disposable tenant gone | `SEED_CONFIRM=seed-perf-ai npm run cleanup:perf` | that tenant only |
 | A truly new user | register a new address in the app | a new empty business |
 
-Ignore `cleanup:all-mongodb`, `cleanup:prod-mongodb` and `cleanup:test-firebase` without a specific reason.
+Ignore `--target=database` against `inventoryai_prod_db`, and `cleanup:test-firebase`, without a
+specific reason.
 
 ## Part 7 — Comparing the assistant across three accounts
 
@@ -300,24 +319,32 @@ Ignore `cleanup:all-mongodb`, `cleanup:prod-mongodb` and `cleanup:test-firebase`
 **Step 1 — clear both stores, in this order:**
 
 ```bash
-CLEANUP_CONFIRM=cleanup:dev-mongodb npm run cleanup:dev-mongodb -- --yes
-CLEANUP_CONFIRM=cleanup:firebase-accounts npm run cleanup:firebase-accounts -- \
+CLEANUP_CONFIRM=cleanup:database CLEANUP_DB_CONFIRM=inventoryai_dev_db \
+  npm run cleanup -- --target=database --database=inventoryai_dev_db
+
+CLEANUP_CONFIRM=cleanup:firebase CLEANUP_DB_CONFIRM=inventoryai_dev_db \
+  npm run cleanup -- --target=firebase --database=inventoryai_dev_db \
   --email=jefferndullamalinaozxc@gmail.com \
   --email=jefferndullamalinao@gmail.com \
   --email=jeffernmalinaoqwe@gmail.com
 ```
 
-The order is the safety: `cleanup:firebase-accounts` deletes **only the addresses you name**, on the
-development project, and refuses any address a database record still points at — the whole run, not
-part of it. It is nothing like `cleanup:test-firebase`.
+The order is the safety: `--target=firebase` deletes **only the addresses you name**, and refuses any
+address a user row still points at — the whole run, not part of it. It checks the link by
+`firebaseUid` **and** by the address, in **both** the development and the production database (there is
+one Firebase project, so an address can be referenced twice), because a uid goes stale when an
+identity is re-created. An address whose identity is already gone but whose row remains is reported as
+`ORPHANED` (exit 1), not as "0 deleted". It is nothing like `cleanup:test-firebase`.
 
 **Step 2 — register all three in the app** (Create Account → 6-digit code from the mailbox → dashboard).
 
 **Step 3 — seed them:**
 
 ```bash
-SEED_CONFIRM=seed-accounts npm run seed:accounts -- --dry-run
-SEED_CONFIRM=seed-accounts npm run seed:accounts
+SEED_CONFIRM=seed-accounts SEED_DB_CONFIRM=inventoryai_dev_db \
+  npm run seed -- --plan=accounts --database=inventoryai_dev_db --dry-run
+SEED_CONFIRM=seed-accounts SEED_DB_CONFIRM=inventoryai_dev_db \
+  npm run seed -- --plan=accounts --database=inventoryai_dev_db
 ```
 
 **Step 4 — generate a barcode** on a seeded product: SKUs and barcodes were left blank on purpose.

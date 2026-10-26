@@ -22,12 +22,11 @@
 //     and identified by BOTH its name and its owner address. Every data write is
 //     filtered by that one `businessId`, so no other tenant can be reached even
 //     if the wrong id were supplied;
-//   * a DEDICATED database guard: WITHOUT `--database=`, `assertSafeTarget` refuses
-//     `NODE_ENV=production`, refuses any database that is not the development one,
-//     and requires the confirmation phrase — all BEFORE a connection is opened.
-//     WITH `--database=` the SAME guard accepts a named database, production
-//     included, under the same phrase (2026-10-25) — the fixture is still found by
-//     its own two fingerprints, never by whatever happened to be in the shell;
+//   * a DEDICATED database guard (`assertSeedTarget`, shared with every seeder):
+//     `--database=` must name the database this process resolved, the test database
+//     is refused, development needs TWO phrases and production THREE — all BEFORE a
+//     connection is opened. The fixture is still found by its own two fingerprints,
+//     never by whatever happened to be in the shell;
 //   * a DEDICATED Firebase blast radius: four literal `.invalid` addresses. The
 //     script never enumerates, never deletes an identity and never matches a
 //     pattern, so no real login can be created, changed or removed.
@@ -38,14 +37,18 @@
 // between tenants; an existing account belonging to another business is an error,
 // not something to repair by guessing.
 //
-// Usage:
-//   ROLE_TEST_PASSWORD='…' SEED_CONFIRM=seed-roles npm run seed:roles -- --dry-run
-//   ROLE_TEST_PASSWORD='…' SEED_CONFIRM=seed-roles npm run seed:roles
-//   ROLE_TEST_PASSWORD='…' SEED_CONFIRM=seed-roles npm run seed:roles -- --total=900 --seed=7
+// Usage (development — TWO phrases, and the database is always named):
+//   ROLE_TEST_PASSWORD='…' SEED_CONFIRM=seed-roles SEED_DB_CONFIRM=inventoryai_dev_db \
+//     npm run seed -- --plan=roles --database=inventoryai_dev_db --dry-run
+//   … drop --dry-run for the real run; add --total=900 --seed=7 to change the size
 //
-// Production (the database is NAMED; the fixture's own tenant is still the only one touched):
-//   ROLE_TEST_PASSWORD='…' SEED_CONFIRM=seed-roles \
-//     npm run seed:roles -- --database=inventoryai_prod_db
+// Production (THREE phrases; the fixture's own tenant is still the only one touched):
+//   NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
+//     ROLE_TEST_PASSWORD='…' SEED_CONFIRM=seed-roles SEED_DB_CONFIRM=inventoryai_prod_db \
+//     SEED_PROD_CONFIRM=SEED-PRODUCTION-DATA \
+//     npm run seed -- --plan=roles --database=inventoryai_prod_db
+//
+// `npm run seed:roles` is the same command with the plan preselected.
 //
 // The password is read from the environment only: it is never printed, never
 // written to a file and never passed on the command line (where it would land in
@@ -54,8 +57,9 @@
 import 'dotenv/config';
 import mongoose from 'mongoose';
 
-import env, { DATABASE_NAMES } from '../src/config/env.ts';
-import { SeedSafetyError, assertSafeTarget, clearTenantData } from './perf/lib.mjs';
+import env from '../src/config/env.ts';
+import { SeedSafetyError, clearTenantData } from './perf/lib.mjs';
+import { assertSeedTarget } from './seed/guard.mjs';
 import { makeRandom, seedTenant } from './seed/lib.mjs';
 import {
   ACCOUNTS,
@@ -94,15 +98,18 @@ async function main() {
   const dryRun = process.argv.includes('--dry-run');
   const total = Number.parseInt(argValue('--total') ?? String(DEFAULT_TOTAL), 10);
   const seed = Number.parseInt(argValue('--seed') ?? '1', 10);
-  const production = env.mongodbDbName === DATABASE_NAMES.production;
 
   // The target guard runs before any connection and before any identity lookup,
   // on a dry run too, so a dry run proves the destination and not merely the
-  // shape of the plan.
-  assertSafeTarget(env, COMMAND, {
-    confirmPhrase: SEED_CONFIRM_PHRASE,
+  // shape of the plan. Two phrases for development, three for production — the
+  // same rule every seeder uses (./seed/guard.mjs).
+  const target = assertSeedTarget({
+    env,
+    command: COMMAND,
     database: argValue('--database'),
+    confirmPhrase: SEED_CONFIRM_PHRASE,
   });
+  const production = target.production;
 
   if (!Number.isInteger(total) || total < MIN_TOTAL || total > MAX_TOTAL) {
     fail(`--total must be an integer between ${MIN_TOTAL} and ${MAX_TOTAL}. Nothing was written.`);
@@ -117,7 +124,8 @@ async function main() {
     );
   }
 
-  console.log(`[${COMMAND}] database : ${env.mongodbDbName}${production ? '   (PRODUCTION)' : ''}`);
+  console.log(`[${COMMAND}] database : ${target.database}${production ? '   (PRODUCTION)' : ''}`);
+  console.log(`[${COMMAND}] confirmed: ${target.phrases} phrase(s) accepted`);
   console.log(`[${COMMAND}] tenant   : ${ROLE_TEST_BUSINESS_NAME}`);
   console.log(`[${COMMAND}] data     : ~${total.toLocaleString()} documents (PRNG seed ${seed})`);
   console.log(`[${COMMAND}] accounts : one per role, verified through the Firebase Admin SDK`);
@@ -131,7 +139,11 @@ async function main() {
   if (dryRun) {
     console.log('');
     console.log(`[${COMMAND}] dry run complete — no connection was opened and nothing was written.`);
-    console.log(`[${COMMAND}] to run for real: ROLE_TEST_PASSWORD='…' SEED_CONFIRM=${SEED_CONFIRM_PHRASE} npm run ${COMMAND}`);
+    console.log(
+      `[${COMMAND}] to run for real: ROLE_TEST_PASSWORD='…' SEED_CONFIRM=${SEED_CONFIRM_PHRASE} ` +
+        `SEED_DB_CONFIRM=${target.database}${production ? ' SEED_PROD_CONFIRM=SEED-PRODUCTION-DATA' : ''} ` +
+        `npm run ${COMMAND} -- --database=${target.database}`,
+    );
     return;
   }
 

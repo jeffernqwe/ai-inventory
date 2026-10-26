@@ -195,7 +195,8 @@ curl.exe -s -o NUL -w "ready %{http_code}`n" http://localhost:4000/api/health/re
 #     built from the URI alone falls back to a database named `test` that does not exist here.
 #     Read the boot line: `[db] connected to MongoDB (database: inventoryai_dev_db)`.
 #     Before 2026-10-11 it served inventoryai_test_db — the database `npm test` writes to and
-#     `cleanup:test-mongodb` EMPTIES. Roadmap §27AV.
+#     (then) `cleanup:test-mongodb` emptied; that script is now `npm run cleanup -- --target=database`,
+#     which reaches the test database only through `npm test`. Roadmap §27AV, §27FU.
 
 # 2. THE decisive probe: a deliberately invalid token on a route that verifies one.
 curl.exe -s -X POST http://localhost:4000/api/auth/email-verification/request `

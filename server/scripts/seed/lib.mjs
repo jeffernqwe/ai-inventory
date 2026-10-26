@@ -197,6 +197,47 @@ export async function resolveIdentity(email, { refreshPassword = true } = {}) {
 }
 
 /**
+ * The identity link on an existing account must be the one Firebase reports now.
+ *
+ * WHY THIS EXISTS (found 2026-10-26). `ensureTenantForIdentity` resolves the tenant by
+ * `firebaseUid`. When an identity has been deleted and re-created under the same address,
+ * Firebase reports a NEW uid while the row still carries the old one, so the lookup misses
+ * and the seeder tries to create a second User for the same address — dying on
+ * `users.email_1` with a raw driver error that says nothing about the cause.
+ *
+ * That state is §27BB's trap: the row can neither sign in (the exchange resolves by
+ * `firebaseUid` only) nor register again (`409 EMAIL_IN_USE`). It is NOT this seeder's job
+ * to repair it, because re-pointing `firebaseUid` is an identity linkage change and the
+ * project deliberately never performs one implicitly. So the run is refused, and the
+ * message names both uids and the choice (repair deliberately, or seed another address).
+ *
+ * Pure: both uids are passed in, so the rule is testable without Firebase or MongoDB.
+ */
+export function assertIdentityLinkUsable({ email, storedUid, resolvedUid }) {
+  const stored = String(storedUid ?? '').trim();
+  const resolved = String(resolvedUid ?? '').trim();
+  const short = (uid) => (uid.length > 10 ? `${uid.slice(0, 10)}…` : uid);
+
+  if (stored && stored === resolved) return true;
+
+  if (!stored) {
+    throw new SeedSafetyError(
+      `the database account for ${email} carries NO Firebase identity, so this run cannot prove it is the ` +
+        'same person. A legacy address has to be migrated deliberately; a data seeder will not attach an ' +
+        'identity to it. Nothing was written.',
+    );
+  }
+
+  throw new SeedSafetyError(
+    `the database account for ${email} is linked to Firebase uid ${short(stored)}, but Firebase now reports ` +
+      `${short(resolved)} for that address. That row can neither sign in (the exchange resolves by ` +
+      'firebaseUid only) nor register again (409 EMAIL_IN_USE), and re-pointing an identity link is not ' +
+      'something a data seeder does implicitly. Repair the link deliberately, or seed a different address. ' +
+      'Nothing was written.',
+  );
+}
+
+/**
  * Find — or create — the tenant that belongs to an already-resolved identity.
  *
  * Reuse is the normal path: the owner registers through the app, and the seeder then
@@ -212,6 +253,43 @@ export async function ensureTenantForIdentity({ email, identity, businessName })
   const user = await User.findOne({ firebaseUid: identity.uid })
     .select('_id businessId email')
     .lean();
+
+  // The uid lookup missed. If a row already owns this ADDRESS, the next write would hit
+  // `users.email_1` — and the reason is either a stale link (the §27BB trap) or a legacy
+  // account. Both are reported, neither is repaired here: see assertIdentityLinkUsable.
+  if (!user) {
+    const byEmail = await User.findOne({ email })
+      .select('_id businessId email firebaseUid')
+      .lean();
+    if (byEmail) {
+      assertIdentityLinkUsable({
+        email,
+        storedUid: byEmail.firebaseUid,
+        resolvedUid: identity.uid,
+      });
+      const business = byEmail.businessId
+        ? await Business.findById(byEmail.businessId).select('name status').lean()
+        : null;
+      if (!business) {
+        throw new SeedSafetyError(
+          `the account for ${email} exists but its business ${String(byEmail.businessId)} does not. ` +
+            'Refusing to guess at a repair. Nothing was written.',
+        );
+      }
+      if (business.status !== 'ACTIVE') {
+        throw new SeedSafetyError(
+          `the account's business status is ${business.status}. Nothing was written.`,
+        );
+      }
+      return {
+        businessId: business._id,
+        businessName: business.name,
+        userId: byEmail._id,
+        accountCreated: false,
+        reused: true,
+      };
+    }
+  }
 
   if (user && user.businessId) {
     const business = await Business.findById(user.businessId).select('name status').lean();
@@ -536,6 +614,7 @@ export default {
   intBetween,
   pick,
   insertChunked,
+  assertIdentityLinkUsable,
   resolveIdentity,
   ensureTenantForIdentity,
   seedTenant,

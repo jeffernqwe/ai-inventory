@@ -527,7 +527,7 @@ describe('every data-touching script calls one of the guards', () => {
       // the command line, refuses the test database and refuses a re-run over another business.
       assert.match(
         source,
-        /assertSafeTarget\(|assertRestoreTarget\(|assertDemoTarget\(|assertNamedDatabaseTarget\(/,
+        /assertSeedTarget\(|assertSafeTarget\(|assertRestoreTarget\(|assertDemoTarget\(|assertNamedDatabaseTarget\(/,
         `${name} has no target guard`,
       );
     }

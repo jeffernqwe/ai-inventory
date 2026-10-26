@@ -31,6 +31,7 @@ import {
   assertProductionConfirmation,
   assertTargetAllowed,
   assertTargetDatabase,
+  classifyFirebaseAddress,
   confirmationPhraseFor,
   isProductionEnv,
   isProductionTarget,
@@ -724,5 +725,33 @@ describe('cleanup utilities — multi-target success and verification', () => {
       }),
       CleanupIncompleteError
     );
+  });
+});
+
+describe('the Firebase link check is by address, not only by uid', () => {
+  it('★ a stale uid does NOT make a still-owned address deletable', () => {
+    // Measured 2026-10-26: every dev user row held a uid that no longer existed in
+    // Firebase, so the uid lookup found nothing while the address was still owned.
+    // The old uid-only check answered 'will delete' here — the unrecoverable state.
+    assert.equal(
+      classifyFirebaseAddress({ uid: 'live-uid', linkedByUid: 0, linkedByEmail: 1 }),
+      'refused-linked'
+    );
+  });
+
+  it('a uid match and an address match both refuse', () => {
+    assert.equal(classifyFirebaseAddress({ uid: 'u', linkedByUid: 1, linkedByEmail: 0 }), 'refused-linked');
+    assert.equal(classifyFirebaseAddress({ uid: 'u', linkedByUid: 1, linkedByEmail: 1 }), 'refused-linked');
+  });
+
+  it('an address with no identity but a database row is reported as orphaned', () => {
+    assert.equal(classifyFirebaseAddress({ uid: null, linkedByEmail: 1 }), 'orphaned');
+    assert.equal(classifyFirebaseAddress({ uid: '', linkedByEmail: 3 }), 'orphaned');
+  });
+
+  it('only an unreferenced identity is deletable, and an absent one has nothing to delete', () => {
+    assert.equal(classifyFirebaseAddress({ uid: 'u', linkedByUid: 0, linkedByEmail: 0 }), 'will-delete');
+    assert.equal(classifyFirebaseAddress({ uid: null, linkedByUid: 0, linkedByEmail: 0 }), 'no-identity');
+    assert.equal(classifyFirebaseAddress({}), 'no-identity');
   });
 });

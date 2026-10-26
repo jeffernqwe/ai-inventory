@@ -55,27 +55,33 @@
 //     DEMO_ACCOUNT_PASSWORD is set. Creation still uses it, because a new identity
 //     has none otherwise.
 //
-// Usage:
-//   SEED_CONFIRM=seed-accounts npm run seed:accounts                 # the three defaults
-//   SEED_CONFIRM=seed-accounts npm run seed:accounts -- --dry-run     # plan only, writes nothing
-//   SEED_CONFIRM=seed-accounts npm run seed:accounts -- --accounts="a@x.com:5000,b@x.com:44000"
-//   SEED_CONFIRM=seed-accounts npm run seed:accounts -- --include-sku # generated codes instead
+// Usage (development — TWO phrases, and the database is always named):
+//   SEED_CONFIRM=seed-accounts SEED_DB_CONFIRM=inventoryai_dev_db \
+//     npm run seed -- --plan=accounts --database=inventoryai_dev_db          # the three defaults
+//   … add --dry-run to print the plan without connecting or writing
+//   … add --accounts="a@x.com:5000,b@x.com:44000" to choose accounts and sizes
+//   … add --include-sku for generated codes instead of leaving them to the app
 //
-// Production:
+// Production (THREE phrases):
 //   NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
-//     SEED_CONFIRM=seed-accounts \
-//     npm run seed:accounts -- --database=inventoryai_prod_db \
+//     SEED_CONFIRM=seed-accounts SEED_DB_CONFIRM=inventoryai_prod_db \
+//     SEED_PROD_CONFIRM=SEED-PRODUCTION-DATA \
+//     npm run seed -- --plan=accounts --database=inventoryai_prod_db \
 //       --accounts="you@example.com:60000:<the id verify:demo prints>"
+//
+// `npm run seed:accounts` is the same command with the plan preselected.
 //
 // If an address has no Firebase identity yet, supply its initial password through
 // the environment (never on the command line, never in a file):
-//   DEMO_ACCOUNT_PASSWORD='…' SEED_CONFIRM=seed-accounts npm run seed:accounts
+//   DEMO_ACCOUNT_PASSWORD='…' SEED_CONFIRM=seed-accounts SEED_DB_CONFIRM=inventoryai_dev_db \
+//     npm run seed -- --plan=accounts --database=inventoryai_dev_db
 
 import 'dotenv/config';
 import mongoose from 'mongoose';
 
-import env, { DATABASE_NAMES } from '../src/config/env.ts';
-import { SeedSafetyError, assertSafeTarget, clearTenantData } from './perf/lib.mjs';
+import env from '../src/config/env.ts';
+import { SeedSafetyError, clearTenantData } from './perf/lib.mjs';
+import { assertSeedTarget } from './seed/guard.mjs';
 import {
   assertTenantNamedForReset,
   ensureTenantForIdentity,
@@ -175,15 +181,18 @@ async function main() {
   const dryRun = process.argv.includes('--dry-run');
   const includeSku = process.argv.includes('--include-sku');
   const seed = Number.parseInt(argValue('--seed') ?? '1', 10);
-  const production = env.mongodbDbName === DATABASE_NAMES.production;
 
   // The guard runs BEFORE any connection, any identity lookup and any write — and it
   // runs on a dry run too, so a dry run proves the target and the confirmation are
-  // right rather than only the shape of the plan.
-  assertSafeTarget(env, COMMAND, {
-    confirmPhrase: CONFIRM_PHRASE,
+  // right rather than only the shape of the plan. Two phrases for development, three
+  // for production; the rule is shared with every other seeder (./seed/guard.mjs).
+  const target = assertSeedTarget({
+    env,
+    command: COMMAND,
     database: argValue('--database'),
+    confirmPhrase: CONFIRM_PHRASE,
   });
+  const production = target.production;
 
   const plan = parsePlan(argValue('--accounts'), { production });
 
@@ -202,7 +211,8 @@ async function main() {
     seen.add(entry.email);
   }
 
-  console.log(`[${COMMAND}] database    : ${env.mongodbDbName}${production ? '   (PRODUCTION)' : ''}`);
+  console.log(`[${COMMAND}] database    : ${target.database}${production ? '   (PRODUCTION)' : ''}`);
+  console.log(`[${COMMAND}] confirmed   : ${target.phrases} phrase(s) accepted`);
   console.log(`[${COMMAND}] accounts    : ${plan.length}`);
   console.log(`[${COMMAND}] sku/barcode : ${includeSku ? 'GENERATED (--include-sku)' : 'none — left for the app to generate'}`);
   console.log(`[${COMMAND}] PRNG seed   : ${seed} (the datasets are reproducible)`);
@@ -225,7 +235,11 @@ async function main() {
   if (dryRun) {
     console.log('');
     console.log(`[${COMMAND}] dry run complete — no connection was opened and nothing was written.`);
-    console.log(`[${COMMAND}] to run for real: SEED_CONFIRM=${CONFIRM_PHRASE} npm run ${COMMAND}`);
+    console.log(
+      `[${COMMAND}] to run for real: SEED_CONFIRM=${CONFIRM_PHRASE} ` +
+        `SEED_DB_CONFIRM=${target.database}${production ? ' SEED_PROD_CONFIRM=SEED-PRODUCTION-DATA' : ''} ` +
+        `npm run ${COMMAND} -- --database=${target.database} …`,
+    );
     return;
   }
 

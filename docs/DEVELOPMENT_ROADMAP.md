@@ -8,7 +8,7 @@ of truth for *what actually happened*, and it is why this file is long.
 
 **How to read it.** Do not read it top to bottom. Either find a record by number (§27FJ, §27DM — the
 numbers are cited from `CLAUDE.md` and from source comments), or use the index: `CLAUDE.md` §7 lists
-all **172** records by the title each gives itself.
+all **175** records by the title each gives itself.
 
 **Current state:** V1 complete and in production testing. The records that answer *where are we now*
 are §27FM (the V1 re-verification), §27FK (the runtime boundary and the blocked build), §27FJ (the two
@@ -21700,6 +21700,223 @@ and is a gesture a person can make.
 publish gate, L-17, the Play release, iOS verification and OTA code signing. `draft` still needs a
 supplier to exist before it can run, and `label` needs a product with an EAN-13 on a debuggable build.
 None of the three was marked complete.
+
+---
+
+# 27FS. Two phrases that were both required and only one documented, and the cleanup guard that could not see its own trap (2026-10-26)
+
+**The question.** `cleanup:prod-mongodb` refused to run with `CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA`
+set, and the documentation read as though that one variable were enough.
+
+**It was by design, and the documentation was the defect.** Two independent gates answer two different
+questions: `CLEANUP_CONFIRM` names *which command* (its own name, `cleanup:prod-mongodb`), and
+`CLEANUP_PROD_CONFIRM` acknowledges that the data is real. Neither may substitute for the other — a
+habitually exported `CLEANUP_CONFIRM` must not reach production on its own, and the acknowledging phrase
+must not run a command the operator did not name. Measured in this shell: with neither phrase the run
+stops one gate earlier (`Refusing to clean PRODUCTION data`); with only the production phrase it stops at
+`Refusing to clean: confirmation phrase did not match … CLEANUP_CONFIRM=cleanup:prod-mongodb`. Exit 1
+both times, no connection opened, nothing deleted. Guide 6 and Guide 4 each named only the production
+phrase in their tables, so both now say **both**, print the working command, and explain the split.
+
+The prompt order changed too: the production phrase is now checked **before** the interactive read. It
+used to be checked after it, so an operator typed the command phrase and was then refused for a phrase
+they had never been asked for.
+
+**The guard that could not see its own trap.** `cleanup:firebase-accounts` refuses to delete an identity
+a MongoDB user still references, because §27BB's state — no identity to sign in with, `409 EMAIL_IN_USE`
+blocking registration — cannot be repaired by anything in the application. It asked that question of
+`firebaseUid` **only**. Measured on the development database: three user rows, uids
+`IWzTZ…`/`MyydZ…`/`6QZZZ…`; Firebase held **one** identity, `jefferndullamalinaozxc@gmail.com`, with uid
+`j4me8…`. Every stored uid was stale — an identity deleted and re-created under the same address keeps
+the row's old uid forever — so `User.countDocuments({ firebaseUid: uid })` returned 0 and the script
+printed **`will delete`** for an address a MongoDB user still owned. A `--dry-run` proved it without
+touching anything. Run for real it would have created the unrecoverable state the script exists to
+prevent.
+
+**The fix** is a pure classifier in `scripts/cleanup/lib.mjs` (`classifyFirebaseAddress`) that takes both
+counts and returns one of four verdicts: `refused-linked`, `will-delete`, `no-identity`, and `orphaned`.
+The address itself is the durable link — `email` is unique, lower-cased and indexed, and it is what
+registration collides on. The CLI now measures `firebaseUid` **and** `email` for every address, refuses
+the whole run when either matches, and reports the already-damaged case as
+**`ORPHANED — identity already gone, database row remains`** with exit 1 instead of counting it as
+"0 deleted" and printing that the address is free to register. That claim is now only printed when it is
+true for every address named. All-or-nothing is unchanged: every refusal is decided before the first
+deletion.
+
+**Verification.** `phase-cleanup-test-utilities.test.mjs` **56 pass** (four new cases, including the
+measured stale-uid case the old rule called deletable); the full server suite, `eslint` and
+`tsc --noEmit` green. Live and read-only: the one live identity now reports `REFUSED — still linked`
+(exit 1), the already-orphaned address reports `ORPHANED` (exit 1), the absent address still reports
+`no identity` and deletes nothing (exit 0). No production record and no Firebase identity was deleted.
+
+**Unchanged and still open:** both mobile advisories (§27FP), the OTA publish gate
+(`native-record-missing`), L-17, the Play release, iOS verification and OTA code signing.
+
+---
+
+# 27FT. One seeding command, and a production target that costs a third phrase (2026-10-26)
+
+**The problem was that the two environments cost the same.** Four seeders (`seed:demo`, `seed:accounts`,
+`seed:roles`, and the perf tools) all reached production through `assertSafeTarget` with ONE phrase. A
+throwaway development tenant and a real business were distinguished only by which database the shell
+happened to resolve — the check was correct, but it priced a real write the same as a test write.
+
+**One command, one guard, two or three phrases.** `npm run seed -- --plan=<demo|accounts|roles>
+--database=<name>` dispatches from a table in `scripts/seed/guard.mjs`; it holds no dataset logic and no
+second copy of the rule. `assertSeedTarget` requires the target to be NAMED and to equal the resolved
+database, refuses the test database and any database outside `{development, production}`, and then
+counts phrases by target class:
+
+- **development — two**: `SEED_CONFIRM=<the plan's phrase>` (what) and `SEED_DB_CONFIRM=<database>` (where)
+- **production — three**: both, plus `SEED_PROD_CONFIRM=SEED-PRODUCTION-DATA` (that the data is real)
+
+A refusal reports every missing phrase at once and states the count. `seed:demo`, `seed:accounts` and
+`seed:roles` remain as the same command with the plan preselected — the role-fixture test pins their
+package.json entries — so nothing that was documented stops working, and a phrase names the dataset
+rather than the wrapper that launched it. `seed:perf*` and `seed:demo-tenant` stay outside this
+workflow: they are measurements and a fixed demo fixture, each with its own guard.
+
+**Dry run added to `seed:demo`.** `--dry-run` now exists on all three plans. It runs the full guard and
+prints the plan, then returns before `resolveIdentity` and before `mongoose.connect`, so it cannot
+create a Firebase identity or open a connection. `verify:demo` is unchanged and still read-only, with
+its 0/1/2 contract: verification is not a dry run.
+
+**Measured, without touching data.** No plan → refused (exit 1). Development with zero phrases →
+`two confirmation phrase(s) … 2 are missing or wrong: SEED_CONFIRM=seed-demo-account AND
+SEED_DB_CONFIRM=inventoryai_dev_db`. With one → the same message naming only the missing one. With
+two → `confirmed: 2 phrase(s) accepted`, then `dry run complete — no connection was opened`. Production
+with two → `three confirmation phrase(s) … 1 is missing or wrong: SEED_PROD_CONFIRM=…` (exit 1); with
+three → `confirmed: 3 phrase(s) accepted` and a dry run that never connected. The `accounts` and
+`roles` plans ran the same way through the same command, and `npm run seed:demo` still accepted its
+original invocation plus the database phrase. Nothing was written to any database.
+
+`seed-target-guard.test.mjs` — **19 pass**, DB-free: both phrase counts, the missing-phrase enumeration,
+a production phrase that does not substitute for a development one, `--database` missing/mismatched/
+test/unknown, `MONGODB_URI` absent, the `--plan=` and `--plan ` spellings, an unknown plan refused, a
+source scan proving the three seeders call the unified guard (and no longer the one-phrase one), and
+the stale-identity-link refusal below.
+
+**The end-to-end run found a second defect, and it was the §27FS landmine in a new place.** Seeding the
+first development account died on `E11000 duplicate key … users index: email_1`. Cause: every stored
+`firebaseUid` in that database is stale (the identity was deleted and re-created under the same
+address), so `ensureTenantForIdentity`'s uid lookup missed and it tried to CREATE a second `User` for an
+address that already had one. The driver's message said nothing about why.
+
+Two things were wrong, and only one of them is a code bug. The code bug is the error path: an
+email collision is now detected explicitly and refused by a pure `assertIdentityLinkUsable` in
+`scripts/seed/lib.mjs`, which names both uids and states that re-pointing an identity link is not
+something a data seeder does implicitly. The other is a **data state** that no command here should
+repair by guessing: those rows can neither sign in (uid mismatch) nor re-register (`EMAIL_IN_USE`), so
+`seed --plan=demo` and `--plan=accounts` refuse until the link is repaired deliberately. Auto-relinking
+was considered and rejected — §27BB and the exchange's uid-only rule make it an identity operation, and
+this phase is about data.
+
+**The workflow itself was then proved on the development database.** A disposable address
+(`seed-probe-2026-10-26@example.invalid`, password generated in-shell and never printed) seeded **300
+documents / 68 products in 2,349 ms** through `npm run seed --plan=accounts` with two phrases (exit 0);
+`verify:demo` read it back clean (exit 0, ledger and referential integrity hold); `cleanup:demo` removed
+**300 documents, 0 remaining**, keeping the login and business row. The owner's first account was
+re-verified afterwards and still holds its **1,125 products** untouched — the refusal happens before any
+tenant is cleared.
+
+**Documentation.** New [Guide 9](../guides/9-seeding-data.md) — the database, the phrases, the one
+command, dry run, verification, what resets versus what is read-only, and large-data practice — plus
+the seeding examples in Guides 4 and 6 rewritten to commands that actually run.
+
+**Unchanged and still open:** both mobile advisories (§27FP), the OTA publish gate, L-17, the Play
+release, iOS verification and OTA code signing — plus the three development accounts stranded by
+stale identity links, which need a deliberate repair decision. No production data was read or written
+while testing these safeguards.
+
+---
+
+# 27FU. One cleanup command, and a Firebase check that reads both databases (2026-10-26)
+
+**The problem was that deleting still had two rules.** Seeding had just been unified (§27FT) around one
+question asked three ways — *what*, *where*, *is this real*. Cleanup still answered different ones:
+four npm scripts (`cleanup:test-mongodb`, `cleanup:dev-mongodb`, `cleanup:prod-mongodb`,
+`cleanup:all-mongodb`) selected the target by alias, a non-production target refused unless `NODE_ENV`
+was **explicitly** `development`, production carried a second phrase, and `cleanup:firebase-accounts`
+had a third variant of the same idea. An operator who had learnt the seeding rule was wrong about the
+cleanup one, and the rule that mattered — where is this pointed? — was the one nobody had to type.
+
+**One command, the same guard shape, two or three phrases.** `npm run cleanup --
+--target=<database|firebase> --database=<name>` dispatches from a table in `scripts/cleanup/guard.mjs`.
+The rule, checked before any connection opens:
+
+- the target must be one of the two — there is no default;
+- `--database=` is required and must equal the database `config/env.ts` resolved, and the connection
+  uses the resolved value, never the flag;
+- only `inventoryai_dev_db` and `inventoryai_prod_db` are cleanable; the test database is refused by
+  name because `npm test` owns it;
+- a `MONGODB_URI` whose **path** names a different database is refused, because the shell is configured
+  for the other environment even when the flag, the phrases and the resolved name all agree — the one
+  way an operator could be right about every value they typed and still be somewhere else;
+- **development — two**: `CLEANUP_CONFIRM=cleanup:<target>` (which command) and
+  `CLEANUP_DB_CONFIRM=<database>` (where);
+- **production — three**: both, plus `CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA`;
+- a phrase that belongs to the *other* command is refused and named, so `CLEANUP_CONFIRM` cannot be
+  satisfied from memory by the wrong run.
+
+A refusal reports every missing phrase at once and states the count. The old `NODE_ENV` rule is gone:
+the database name and its phrase are the proof, which is what lets one command serve both environments.
+The four selector scripts and `cleanup:firebase-accounts` were **removed** rather than aliased — unlike
+the seeders, their flags were the contract that changed, so keeping them would have preserved the rule
+this record replaces.
+
+**Deleting still happens in the same two engines, and a dry run now proves the target.**
+`cleanup-mongodb.mjs` clears every document in the named database and preserves the database, its
+collections and its indexes; `--dry-run` counts and stops. `cleanup-firebase-accounts.mjs` deletes only
+the addresses named with `--email=`, and now verifies each deleted uid is really gone. Both keep their
+phrases-only confirmation: no interactive prompt remains, and `--yes` is accepted but does nothing.
+
+**The Firebase check had a hole, and the first measurement fell into it.** There is one Firebase
+project, so an address is one identity, but user rows in **both** databases can reference it. The
+engine checked only the resolved database. The first development address tried was referenced by both
+development and production, so the old check would have deleted a login that production still uses —
+the exact unrecoverable state (§27BB) the check exists to prevent, one database away. It now counts in
+dev and prod, by `firebaseUid` **and** by `email` (a re-created identity leaves a stale uid behind), and
+a refusal names the database(s) still holding the address.
+
+**Measured, and nothing was destroyed.** No `--target` → usage plus `no --target was supplied; refusing
+to guess` (exit 1). `--target=database` with no `--database` → the resolved name is printed in the
+refusal (exit 1). `--database=inventoryai_prod_db` from a development shell → `--database is … but this
+process resolved "inventoryai_dev_db"` (exit 1, no connection). Development with only the command
+phrase → `two confirmation phrase(s) … 1 is missing or wrong: CLEANUP_DB_CONFIRM=…` (exit 1).
+Production with two phrases → `three confirmation phrase(s) … 1 is missing or wrong:
+CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA` (exit 1, and no banner, because the guard precedes the
+connection). Development with all three → the extra phrase is ignored and the dry run ran:
+**17 collections, 274 009 documents would be deleted; nothing was deleted**. A Firebase dry run against
+an absent address reported `no identity` (exit 0); against a real development address it reported
+`REFUSED — still linked to a MongoDB user  [inventoryai_dev_db, inventoryai_prod_db]` and exited 1.
+With `MONGODB_URI` pointed at `…/inventoryai_prod_db` while the resolved database stayed development,
+both commands refused with `MONGODB_URI names the database "inventoryai_prod_db"` (exit 1) and neither
+attempted a connection; the message contains no part of the URI beyond the database name.
+
+**One row is enough, and it is summed rather than judged per database.** The counting moved into a pure
+`summariseFirebaseReferences` in `scripts/cleanup/lib.mjs`: it totals each database's `byUid` and
+`byEmail`, records which databases contributed, and takes the verdict on the totals. A development-only
+check is not a subset of this — it is the defect above, and the test asserts a production-only reference
+refuses a deletion started from development.
+
+**Tests.** New `cleanup-target-guard.test.mjs` — **41 pass**, DB-free: both phrase counts, the
+missing-phrase enumeration, a phrase from the wrong command, the test-database and unknown-database
+refusals, the `MONGODB_URI` path refusal (with a control proving the URI itself is never echoed), the
+`databaseNameInUri` cases, one reference refusing a deletion in either database and by either link,
+`--target` spellings, a refused run that never opens a connection, a live-name mismatch that deletes
+nothing, a dry run that deletes nothing, and two source scans proving the guards precede
+`connect`/`deleteUser`. The suite also pins the command surface: `cleanup` exists and the five removed
+scripts do not. `seed-target-guard.test.mjs` gained the same two URI cases (**21 pass**), because a
+stale connection string is the same hazard on the write path.
+
+**Documentation.** New [Guide 10](../guides/10-deleting-data.md) — the one command, the two targets, the
+phrases, the ordering rule and what is *not* replaced — plus Guides 4 and 6 rewritten to commands that
+actually run, and `scripts/cleanup/README.md` reduced to the same rule. Guide 6's old "production needs
+two phrases" section was replaced, not amended: it described a message that no longer exists.
+
+**Unchanged and still open:** both mobile advisories (§27FP), the OTA publish gate, L-17, the Play
+release, iOS verification and OTA code signing — plus the three development accounts stranded by stale
+identity links (§27FT), which this command deliberately does not repair.
 
 ---
 

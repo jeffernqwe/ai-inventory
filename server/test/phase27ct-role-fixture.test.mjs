@@ -122,9 +122,11 @@ describe('§27CT no mail path, and no identity is created by a pattern', () => {
   });
 
   test('the seeder refuses to run without the target guard and without a password', () => {
-    // The guard is still called with this fixture's own phrase; the named-database form
-    // added on 2026-10-25 passes `--database=` through the same call.
-    assert.match(seeder, /assertSafeTarget\(env, COMMAND, \{/);
+    // The guard is still called with this fixture's own phrase and with `--database=`
+    // passed through. Since §27FT it is the SHARED guard (`assertSeedTarget`), which
+    // requires two phrases in development and three in production; the fixture keeps
+    // its own phrase and gains the database phrase like every other plan.
+    assert.match(seeder, /assertSeedTarget\(\{/);
     assert.match(seeder, /confirmPhrase: SEED_CONFIRM_PHRASE/);
     assert.match(seeder, /database: argValue\('--database'\)/);
     assert.match(seeder, /readFixturePassword|ensureRoleTestTenant/);

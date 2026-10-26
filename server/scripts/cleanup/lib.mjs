@@ -3,9 +3,11 @@
 // This module is the single place the destructive cleanup commands decide
 // whether they are allowed to run. It is deliberately pure and side-effect
 // free: every guard is a function of values passed in, so each rule can be
-// tested without a database, a network call, or a deletion. The CLI scripts
-// (scripts/cleanup-mongodb.mjs, scripts/cleanup-test-firebase.mjs) are the
-// only callers and they do the I/O; they perform no guard logic of their own.
+// tested without a database, a network call, or a deletion. The CLI scripts do
+// the I/O and hold no guard logic of their own: `cleanup-mongodb.mjs` and
+// `cleanup-firebase-accounts.mjs` call `assertCleanupTarget` in ./guard.mjs (the
+// unified rule), while `cleanup-test-firebase.mjs` still uses the development-only
+// guards below because it wipes the whole test project.
 //
 // THE RULE IS: WHEN ANYTHING IS UNCERTAIN, REFUSE. There is no "guess whether
 // this is safe" path, no default that proceeds, and no override flag that skips
@@ -34,10 +36,11 @@ export const MONGODB_CLEANUP_TARGETS = Object.freeze({
 export const ALL_MONGODB_CLEANUP_TARGETS = Object.freeze(Object.values(MONGODB_CLEANUP_TARGETS));
 
 /**
- * The extra phrase required before any command that deletes PRODUCTION data
- * (`cleanup:prod-mongodb` and `cleanup:all-mongodb`). Deliberately louder than the
- * per-command phrase so the production step cannot be confirmed by muscle memory.
- * Supplied through the `CLEANUP_PROD_CONFIRM` environment variable.
+ * The extra phrase required before any command that deletes PRODUCTION data.
+ * Deliberately louder than the per-command phrase so the production step cannot be
+ * confirmed by muscle memory. Supplied through `CLEANUP_PROD_CONFIRM`, and required
+ * by the shared cleanup guard (`./guard.mjs`) whenever the resolved database is
+ * production — `npm run cleanup -- --target=database --database=inventoryai_prod_db`.
  */
 export const PRODUCTION_CONFIRM_PHRASE = 'DELETE-PRODUCTION-DATA';
 
@@ -289,8 +292,10 @@ export function assertFirebaseProject(
 /**
  * Guard 4 — the operator confirmation phrase must match EXACTLY.
  *
- * The phrase is the utility's name for the target, e.g. `cleanup:test-mongodb`.
- * This runs only AFTER the safety guards above have passed, so a wrong phrase
+ * The phrase names the command, e.g. `cleanup:firebase`. In the `npm run cleanup`
+ * workflow the shared guard (`./guard.mjs`) checks it *together* with the database
+ * phrase, before any connection opens. This helper also runs only AFTER the safety
+ * guards above have passed, so a wrong phrase
  * can never reach a destructive call, and the phrase check can never be the only
  * thing standing between a mistake and production.
  */
@@ -312,6 +317,73 @@ export function confirmationPhraseFor(commandName) {
   return String(commandName ?? '').trim();
 }
 
+/**
+ * What `cleanup --target=firebase` may do with ONE address.
+ *
+ *   'refused-linked' — an identity exists AND a MongoDB user references it.
+ *                      Deleting it would strand that account. Refused.
+ *   'orphaned'       — no identity exists, but a MongoDB user still owns the
+ *                      address. The damage is already done: the row cannot sign
+ *                      in (no identity can mint a token) and cannot register
+ *                      (`409 EMAIL_IN_USE`). Reported, never "freed".
+ *   'will-delete'    — an identity exists and nothing references it.
+ *   'no-identity'    — nothing references it and there is nothing to delete.
+ *
+ * `linkedByUid` and `linkedByEmail` are counts the caller has already measured.
+ * Requiring BOTH is the point of this function: a `firebaseUid` is copied from a
+ * token, so once an identity is deleted and re-created under the same address the
+ * row keeps the OLD uid forever (measured on 2026-10-26: all three dev rows held
+ * uids that no longer exist in Firebase). Matching on uid alone therefore reports
+ * a live, linked identity as safe to delete — the exact unrecoverable outcome this
+ * script exists to prevent. The address itself is the durable link: `email` is
+ * unique, lower-cased and indexed, and it is what registration collides on.
+ */
+export function classifyFirebaseAddress({ uid, linkedByUid = 0, linkedByEmail = 0 }) {
+  const id = String(uid ?? '').trim();
+  const byUid = Number(linkedByUid) || 0;
+  const byEmail = Number(linkedByEmail) || 0;
+
+  if (id && (byUid > 0 || byEmail > 0)) return 'refused-linked';
+  if (!id && byEmail > 0) return 'orphaned';
+  return id ? 'will-delete' : 'no-identity';
+}
+
+/**
+ * Combine the per-database reference counts into the ONE verdict that decides whether
+ * an identity may be deleted.
+ *
+ * WHY THE TOTAL, AND NOT EACH DATABASE SEPARATELY. One Firebase project serves every
+ * database, so an address is one identity that several populations can reference. A
+ * single user row anywhere is enough to strand the address, so the counts are SUMMED and
+ * the verdict is taken on the sum — a reference in production refuses a deletion started
+ * from development, which is the case measured on 2026-10-26. `linkedIn` names every
+ * database that contributed, because "still linked" without saying where sends the
+ * operator looking in the wrong place.
+ *
+ * @param {{ uid?: string|null, countsByDatabase?: Record<string, { byUid?: number, byEmail?: number }> }} input
+ * @returns {{ linkedByUid: number, linkedByEmail: number, linkedIn: string[], verdict: string }}
+ */
+export function summariseFirebaseReferences({ uid, countsByDatabase = {} } = {}) {
+  let linkedByUid = 0;
+  let linkedByEmail = 0;
+  const linkedIn = [];
+
+  for (const [database, counts] of Object.entries(countsByDatabase ?? {})) {
+    const byUid = Number(counts?.byUid) || 0;
+    const byEmail = Number(counts?.byEmail) || 0;
+    linkedByUid += byUid;
+    linkedByEmail += byEmail;
+    if (byUid > 0 || byEmail > 0) linkedIn.push(database);
+  }
+
+  return {
+    linkedByUid,
+    linkedByEmail,
+    linkedIn,
+    verdict: classifyFirebaseAddress({ uid, linkedByUid, linkedByEmail }),
+  };
+}
+
 export default {
   APPROVED_TEST_DATABASE,
   APPROVED_TEST_FIREBASE_PROJECT_ID,
@@ -331,4 +403,6 @@ export default {
   assertFirebaseProject,
   assertConfirmation,
   confirmationPhraseFor,
+  classifyFirebaseAddress,
+  summariseFirebaseReferences,
 };

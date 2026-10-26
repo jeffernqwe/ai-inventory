@@ -275,8 +275,15 @@ below has the measurement.
   flow may depend on a template we configure.
 - **A failed `api.me` is not "signed out".** Sign out only when the server *refuses* the session; a
   network failure must degrade, not discard the token.
-- **`seed:*` and `cleanup:*` scripts refuse a production target without `SEED_CONFIRM`.** Read the
-  refusal rather than working around it.
+- **`npm run seed` is the one seeding command, and production costs three phrases.** The target is
+  always named (`--database=` must equal what `MONGODB_DB_NAME` resolves); development needs
+  `SEED_CONFIRM` (the plan) plus `SEED_DB_CONFIRM` (the database), and production adds
+  `SEED_PROD_CONFIRM=SEED-PRODUCTION-DATA`. **`npm run cleanup -- --target=database|firebase` is the
+  one destructive command and costs the same two or three phrases** (`CLEANUP_CONFIRM`,
+  `CLEANUP_DB_CONFIRM`, plus `CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA` for production) — the
+  per-selector `cleanup:*-mongodb` scripts and `cleanup:firebase-accounts` no longer exist. Read the
+  refusal rather than working around it — it names every phrase that is missing and how many the
+  target requires.
 - **OTA code signing is plan-gated**, not a config switch: Expo allows it on the Production ($199/mo)
   or Enterprise plans only. A binary carrying a certificate **rejects** any unsigned publish, so
   enabling `codeSigningCertificate` before the plan exists would freeze every install on its old
@@ -483,6 +490,9 @@ anchor (`§27…`) in that file.
 - **§27FP** — The advisories re-measured, and no published release can close either (2026-10-26)
 - **§27FQ** — The empty state the harness could not read, and the production walk it was hiding (2026-10-26)
 - **§27FR** — The journeys stopped needing an id, and four false verdicts fell out of it (2026-10-26)
+- **§27FS** — Two phrases that were both required and only one documented, and the cleanup guard that could not see its own trap (2026-10-26)
+- **§27FT** — One seeding command, and a production target that costs a third phrase (2026-10-26)
+- **§27FU** — One cleanup command, and a Firebase check that reads both databases (2026-10-26)
 
 ---
 

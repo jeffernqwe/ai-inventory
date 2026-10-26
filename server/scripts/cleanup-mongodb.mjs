@@ -1,94 +1,77 @@
-// `npm run cleanup:test-mongodb` / `cleanup:dev-mongodb` / `cleanup:prod-mongodb`
-// / `cleanup:all-mongodb` — clear ALL documents from one or more approved MongoDB
-// databases, selected EXPLICITLY by the command.
+// `npm run cleanup -- --target=database --database=<name> [--dry-run]`
 //
-// DESTRUCTIVE. Deletes every document in the selected database(s). It does NOT
-// drop databases, collections, or indexes — structure is preserved.
+// Clear ALL documents from the one database you name. DESTRUCTIVE. It does NOT drop
+// the database, its collections or its indexes — structure is preserved, so the next
+// start (or the next seed) finds the schema it expects.
 //
-// The target is chosen by the npm script that invoked this file (`--target=`),
-// NEVER by the ambient `MONGODB_DB_NAME`, and every name is checked against the
-// hard-coded allowlist in ./cleanup/lib.mjs. Fail-closed: refuses on any guard
-// failure, before deleting anything.
+// THE TARGET IS NEVER GUESSED. `--database=` is required and must equal the database
+// this process resolved from `MONGODB_DB_NAME`; the connection uses the resolved
+// value, so a typo cannot redirect the delete. Only the development and production
+// databases are accepted; the test database belongs to `npm test`.
+//
+// The phrases, and what each answers:
+//
+//   CLEANUP_CONFIRM=cleanup:database              which command
+//   CLEANUP_DB_CONFIRM=inventoryai_dev_db         where, typed out
+//   CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA   that the data is real  (production only)
 //
 // Usage:
-//   npm run cleanup:test-mongodb
-//   npm run cleanup:all-mongodb -- --yes
-//   CLEANUP_CONFIRM=cleanup:all-mongodb CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA \
-//     npm run cleanup:all-mongodb -- --yes
+//   npm run cleanup -- --target=database --database=inventoryai_dev_db --dry-run
+//   npm run cleanup -- --target=database --database=inventoryai_dev_db
+//   NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
+//     CLEANUP_CONFIRM=cleanup:database CLEANUP_DB_CONFIRM=inventoryai_prod_db \
+//     CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA \
+//     npm run cleanup -- --target=database --database=inventoryai_prod_db
 //
-// `--yes` skips the interactive prompt but NEVER any confirmation phrase.
+// `--dry-run` counts what would be deleted and stops; it still requires the phrases,
+// because a dry run is there to prove the destination. `--yes` is accepted and does
+// nothing — there is no interactive prompt any more, only the phrases.
 
 import 'dotenv/config';
 import { MongoClient } from 'mongodb';
 
-import env from '../src/config/env.ts';
-import {
-  CleanupSafetyError,
-  MONGODB_CLEANUP_TARGETS,
-  confirmationPhraseFor,
-} from './cleanup/lib.mjs';
-import { performMongodbTargetsCleanup } from './cleanup/run.mjs';
+import env, { DATABASE_NAMES } from '../src/config/env.ts';
+import { CleanupSafetyError } from './cleanup/lib.mjs';
+import { performNamedDatabaseCleanup } from './cleanup/run.mjs';
 
-function argValue(flag) {
+const COMMAND = 'cleanup:database';
+
+function argValue(flag, argv = process.argv) {
   const prefix = `${flag}=`;
-  const hit = process.argv.find((a) => a.startsWith(prefix));
+  const hit = argv.find((a) => a.startsWith(prefix));
   return hit ? hit.slice(prefix.length) : undefined;
 }
 
-const TARGET = argValue('--target');
-const COMMAND_NAME = argValue('--command') ?? 'cleanup:mongodb';
-const CONFIRM_PHRASE = confirmationPhraseFor(COMMAND_NAME);
-
 function fail(message) {
-  console.error(`[${COMMAND_NAME}] ${message}`);
+  console.error(`[${COMMAND}] ${message}`);
   process.exit(1);
 }
 
-/** Minimal readline prompt; returns the typed line. */
-function prompt(question) {
-  return new Promise((resolve) => {
-    process.stdout.write(question);
-    let data = '';
-    const onData = (chunk) => {
-      data += chunk.toString();
-      if (data.includes('\n')) {
-        process.stdin.off('data', onData);
-        process.stdin.pause();
-        resolve(data.split('\n')[0]);
-      }
-    };
-    process.stdin.resume();
-    process.stdin.on('data', onData);
-  });
+if (process.argv.some((a) => a.startsWith('--target=') || a.startsWith('--command='))) {
+  fail(
+    'the selector flags are gone. Use `npm run cleanup -- --target=database --database=<name>`. ' +
+      'Nothing was deleted.',
+  );
 }
 
-async function main() {
-  if (!TARGET) {
-    fail('no --target selector was supplied; refusing to guess. Nothing was deleted.');
-  }
-  if (!env.mongodbUri) {
-    fail('MONGODB_URI is not set; nothing was deleted.');
-  }
+const database = argValue('--database');
+const dryRun = process.argv.includes('--dry-run');
 
-  console.log(`[${COMMAND_NAME}] DESTRUCTIVE MongoDB cleanup`);
-  console.log(`[${COMMAND_NAME}] Approved targets : ${Object.values(MONGODB_CLEANUP_TARGETS).join(', ')}`);
-  console.log(`[${COMMAND_NAME}] Preserves        : databases, collections, indexes`);
-  console.log(`[${COMMAND_NAME}] Deletes          : all documents in every collection`);
+let client;
+let exitCode;
 
-  // `--yes` does NOT skip the confirmation phrase; it only skips the interactive
-  // read, so the phrase must still be supplied explicitly via CLEANUP_CONFIRM.
-  const providedConfirm = process.argv.includes('--yes')
-    ? process.env.CLEANUP_CONFIRM
-    : await prompt(`Type "${CONFIRM_PHRASE}" to delete all documents in the selected target(s): `);
-
-  // A single client on the same URI; `connect(name)` returns a db handle for that
-  // database and the ports the guarded sequence drives.
-  const client = new MongoClient(env.mongodbUri);
-
-  try {
-    await client.connect();
-
-    const connect = async (name) => {
+try {
+  const report = await performNamedDatabaseCleanup({
+    target: 'database',
+    database,
+    env,
+    values: process.env,
+    dryRun,
+    log: (line) => console.log(`[${COMMAND}] ${line}`),
+    connect: async (name) => {
+      // Created only after the guard has passed: a refused run never opens a socket.
+      client = new MongoClient(env.mongodbUri);
+      await client.connect();
       const db = client.db(name);
       return {
         liveName: db.databaseName,
@@ -105,29 +88,26 @@ async function main() {
           listIndexes: (col) => db.collection(col).indexes(),
         },
       };
-    };
+    },
+  });
 
-    const reports = await performMongodbTargetsCleanup({
-      nodeEnv: process.env.NODE_ENV,
-      selector: TARGET,
-      confirmPhrase: CONFIRM_PHRASE,
-      providedConfirm,
-      providedProdConfirm: process.env.CLEANUP_PROD_CONFIRM,
-      connect,
-      log: (line) => console.log(`[${COMMAND_NAME}] ${line}`),
-    });
-
-    for (const r of reports) {
-      console.log(
-        `[${COMMAND_NAME}] OK — ${r.target}: ${r.collections} collection(s) cleared, structure preserved.`
-      );
-    }
-  } finally {
-    await client.close().catch(() => {});
+  if (report.dryRun) {
+    console.log(
+      `[${COMMAND}] OK — dry run against ${report.target}${report.target === DATABASE_NAMES.production ? ' (PRODUCTION)' : ''}: ` +
+        `${report.collections} collection(s), ${report.total} document(s) would be deleted. Nothing was deleted.`,
+    );
+  } else {
+    console.log(
+      `[${COMMAND}] OK — ${report.target}: ${report.collections} collection(s) cleared ` +
+        `(${report.totalDeleted} document(s)); structure preserved.`,
+    );
   }
-}
-
-main().catch((err) => {
+  exitCode = 0;
+} catch (err) {
+  await client?.close().catch(() => {});
   if (err instanceof CleanupSafetyError) fail(err.message);
   fail(err && err.message ? err.message : String(err));
-});
+}
+
+await client?.close().catch(() => {});
+process.exit(exitCode ?? 0);

@@ -13,6 +13,7 @@
 // the whole guarded sequence in one function, which is what the tests exercise
 // and what the CLI scripts call.
 
+import { assertCleanupTarget } from './guard.mjs';
 import {
   APPROVED_TEST_DATABASE,
   APPROVED_TEST_FIREBASE_PROJECT_ID,
@@ -105,9 +106,56 @@ export async function clearMongoDatabase({ listCollectionNames, countDocuments, 
 }
 
 /**
+ * The fully guarded cleanup of the ONE database the operator named on the command
+ * line — the `npm run cleanup -- --target=database` path.
+ *
+ * The rule is `assertCleanupTarget` in ./guard.mjs, the same one the seeders use:
+ * the name must match what the process resolved, it must be a cleanable database,
+ * and it must be confirmed by two phrases (three for production). It runs BEFORE
+ * `connect` is called, so a refused run never opens a connection at all.
+ *
+ * `dryRun` stops after counting: it proves what would be deleted without deleting.
+ */
+export async function performNamedDatabaseCleanup({
+  target = 'database',
+  database,
+  env,
+  connect,
+  log = noopLog,
+  values = process.env,
+  dryRun = false,
+}) {
+  const checked = assertCleanupTarget({ env, target, database, values });
+
+  const { liveName, ports } = await connect(checked.database);
+  assertLiveTarget({ requested: checked.database, liveName });
+  log(`target database verified: ${checked.database}`);
+
+  if (dryRun) {
+    const collections = [...(await ports.listCollectionNames())].sort();
+    const counts = {};
+    let total = 0;
+    for (const name of collections) {
+      const n = await ports.countDocuments(name);
+      counts[name] = n;
+      total += n;
+      log(`would delete ${name} = ${n}`);
+    }
+    log(`DRY RUN — ${collections.length} collection(s), ${total} document(s); nothing was deleted`);
+    return { target: checked.database, dryRun: true, collections: collections.length, total, counts };
+  }
+
+  const report = await clearMongoDatabase({ ...ports, log });
+  return { target: checked.database, dryRun: false, ...report };
+}
+
+/**
  * The fully guarded MongoDB cleanup: environment guard, target guard (configured
  * AND live names), then the confirmation phrase, then the mechanical clear.
  * Guards run before any port is touched.
+ *
+ * Superseded by `performNamedDatabaseCleanup` for the `npm run cleanup` path; kept
+ * because the test-database helper and its tests still drive it.
  */
 export async function performMongoCleanup({
   nodeEnv,
@@ -277,6 +325,7 @@ export async function performFirebaseCleanup({
 export default {
   CleanupIncompleteError,
   clearMongoDatabase,
+  performNamedDatabaseCleanup,
   performMongoCleanup,
   performMongodbTargetCleanup,
   performMongodbTargetsCleanup,

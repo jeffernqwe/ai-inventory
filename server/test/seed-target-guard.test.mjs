@@ -29,7 +29,12 @@ import {
   resolveSeedPlan,
 } from '../scripts/seed/guard.mjs';
 import { SeedSafetyError } from '../scripts/perf/lib.mjs';
-import { assertIdentityLinkUsable } from '../scripts/seed/lib.mjs';
+import {
+  assertIdentityLinkUsable,
+  countDisagreements,
+  normaliseEmail,
+  parseCount,
+} from '../scripts/seed/lib.mjs';
 
 const DEV = 'inventoryai_dev_db';
 const PROD = 'inventoryai_prod_db';
@@ -331,5 +336,92 @@ describe('the plan table and the dispatcher', () => {
     // The email collision has ONE explanation and ONE refusal, in the shared core.
     const lib = readFileSync(new URL('../scripts/seed/lib.mjs', import.meta.url), 'utf8');
     assert.match(lib, /assertIdentityLinkUsable\(\{/, 'the stale-link refusal is not applied');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The CLI boundary: one spelling for an address, one parser for a size, and the
+// read-back that makes "OK" a measurement rather than a claim.
+// ---------------------------------------------------------------------------
+describe('seeding helpers — addresses, sizes and the read-back', () => {
+  it('normalises an address the way the schema stores it', () => {
+    assert.equal(normaliseEmail('  Jeffern@Example.COM '), 'jeffern@example.com');
+    assert.equal(normaliseEmail('a+tag@x.co'), 'a+tag@x.co');
+    assert.equal(normaliseEmail(undefined), '');
+    assert.equal(normaliseEmail(null), '');
+  });
+
+  it('accepts a whole number inside the range', () => {
+    assert.equal(parseCount('900', { name: '--total', min: 100, max: 400000 }), 900);
+    assert.equal(parseCount(' 80 ', { name: '--total', min: 1, max: 100 }), 80);
+    // No upper bound: a PRNG seed is any non-negative integer.
+    assert.equal(parseCount('4294967296', { name: '--seed', min: 0 }), 4294967296);
+    assert.throws(() => parseCount('-1', { name: '--seed', min: 0 }), /at least 0/);
+  });
+
+  it('uses the fallback only when the flag is absent or blank', () => {
+    const spec = { name: '--total', min: 1, max: 100, fallback: 60 };
+    assert.equal(parseCount(undefined, spec), 60);
+    assert.equal(parseCount('', spec), 60);
+    assert.equal(parseCount('61', spec), 61);
+  });
+
+  it('refuses a value parseInt would silently truncate', () => {
+    // parseInt answered 900, 12 and 1 for these; a dataset of the wrong size cannot be
+    // noticed later, because nothing records what the size was meant to be.
+    for (const bad of ['900abc', '12.9', '1e3', '-5', ' ', 'NaN']) {
+      assert.throws(
+        () => parseCount(bad, { name: '--total', min: 1, max: 100000 }),
+        /must be a whole number between 1 and 100000/,
+        bad,
+      );
+    }
+  });
+
+  it('refuses a value outside the range, including zero', () => {
+    assert.throws(() => parseCount('0', { name: '--total', min: 100, max: 200 }), /between 100 and 200/);
+    assert.throws(() => parseCount('201', { name: '--total', min: 100, max: 200 }), /between 100 and 200/);
+  });
+
+  it('every refusal says nothing was written', () => {
+    assert.throws(() => parseCount('abc', { name: '--total', min: 1, max: 2 }), /Nothing was written\./);
+    assert.throws(() => parseCount('', { name: '--total', min: 1, max: 2 }), /Nothing was written\./);
+  });
+
+  it('the read-back comparison names each collection that disagrees', () => {
+    const written = { products: 10, inventory: 10, purchase_orders: 2 };
+    assert.deepEqual(countDisagreements(written, { ...written }), []);
+    assert.deepEqual(countDisagreements(written, { products: 9, inventory: 10, purchase_orders: 2 }), [
+      { collection: 'products', wrote: 10, found: 9 },
+    ]);
+    // A collection the read-back did not report is a disagreement, not a pass.
+    assert.deepEqual(countDisagreements(written, { products: 10, inventory: 10 }), [
+      { collection: 'purchase_orders', wrote: 2, found: undefined },
+    ]);
+  });
+
+  it('the seeders use the shared helpers rather than their own copies', () => {
+    const read = (name) => readFileSync(new URL(`../scripts/${name}`, import.meta.url), 'utf8');
+    const demo = read('seed-demo-account.mjs');
+    const accounts = read('seed-accounts.mjs');
+    const roles = read('seed-role-accounts.mjs');
+
+    assert.match(demo, /normaliseEmail\(argValue\('--email'\)\)/, 'demo does not normalise the address');
+    assert.match(
+      accounts,
+      /const email = normaliseEmail\(parts\[0\]\)/,
+      'accounts does not normalise plan addresses',
+    );
+
+    for (const [name, source] of [['demo', demo], ['accounts', accounts], ['roles', roles]]) {
+      assert.match(source, /parseCount\(/, `${name} does not use the strict size parser`);
+      assert.equal(
+        /Number\.parseInt\(\s*argValue\('--(total|seed)'\)/.test(source),
+        false,
+        `${name} still parses a size or seed with parseInt`,
+      );
+      assert.match(source, /readTenantCounts\(/, `${name} does not read the tenant back`);
+      assert.match(source, /countDisagreements\(/, `${name} does not compare the read-back`);
+    }
   });
 });

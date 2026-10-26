@@ -1,4 +1,5 @@
-// `SEED_CONFIRM=seed-roles ROLE_TEST_PASSWORD='…' npm run seed:roles`
+// `ROLE_TEST_PASSWORD='…' SEED_CONFIRM=seed-roles SEED_DB_CONFIRM=<database> \
+//   npm run seed -- --plan=roles --database=<database>`
 //
 // Create — or refresh — ONE isolated tenant holding ONE account per role
 // (OWNER, ADMIN, MANAGER, STAFF), each with its own working sign-in, plus a
@@ -60,7 +61,13 @@ import mongoose from 'mongoose';
 import env from '../src/config/env.ts';
 import { SeedSafetyError, clearTenantData } from './perf/lib.mjs';
 import { assertSeedTarget } from './seed/guard.mjs';
-import { makeRandom, seedTenant } from './seed/lib.mjs';
+import {
+  countDisagreements,
+  makeRandom,
+  parseCount,
+  readTenantCounts,
+  seedTenant,
+} from './seed/lib.mjs';
 import {
   ACCOUNTS,
   PASSWORD_ENV,
@@ -69,11 +76,6 @@ import {
   clearRoleFixtureExtras,
   ensureRoleTestTenant,
 } from './role-test/lib.mjs';
-import Inventory from '../src/models/inventory.model.ts';
-import InventoryTransaction from '../src/models/inventoryTransaction.model.ts';
-import Location from '../src/models/location.model.ts';
-import Product from '../src/models/product.model.ts';
-
 const COMMAND = 'seed:roles';
 
 // Small on purpose: the fixture exists for permission behaviour, not for scale.
@@ -96,8 +98,6 @@ function fail(message) {
 
 async function main() {
   const dryRun = process.argv.includes('--dry-run');
-  const total = Number.parseInt(argValue('--total') ?? String(DEFAULT_TOTAL), 10);
-  const seed = Number.parseInt(argValue('--seed') ?? '1', 10);
 
   // The target guard runs before any connection and before any identity lookup,
   // on a dry run too, so a dry run proves the destination and not merely the
@@ -111,12 +111,13 @@ async function main() {
   });
   const production = target.production;
 
-  if (!Number.isInteger(total) || total < MIN_TOTAL || total > MAX_TOTAL) {
-    fail(`--total must be an integer between ${MIN_TOTAL} and ${MAX_TOTAL}. Nothing was written.`);
-  }
-  if (!Number.isInteger(seed) || seed < 0) {
-    fail('--seed must be a non-negative integer. Nothing was written.');
-  }
+  const total = parseCount(argValue('--total'), {
+    name: '--total',
+    min: MIN_TOTAL,
+    max: MAX_TOTAL,
+    fallback: DEFAULT_TOTAL,
+  });
+  const seed = parseCount(argValue('--seed'), { name: '--seed', min: 0, fallback: 1 });
   if (!dryRun && !process.env[PASSWORD_ENV]) {
     fail(
       `${PASSWORD_ENV} is not set. It is the four accounts' sign-in password and is required for a ` +
@@ -186,34 +187,25 @@ async function main() {
   // A seeder's own count is evidence about the seeder. These are read back from
   // the database, through the same `businessId` filter every screen uses, so the
   // summary describes what is actually there.
-  const [products, inventory, transactions, locations] = await Promise.all([
-    Product.countDocuments({ businessId: tenant.businessId }),
-    Inventory.countDocuments({ businessId: tenant.businessId }),
-    InventoryTransaction.countDocuments({ businessId: tenant.businessId }),
-    Location.countDocuments({ businessId: tenant.businessId }),
-  ]);
-
-  const measured = { products, inventory, inventory_transactions: transactions, locations };
-  const disagreements = Object.entries(measured).filter(
-    ([collection, count]) => counts[collection] !== count,
-  );
+  const readBack = await readTenantCounts(tenant.businessId);
+  const disagreements = countDisagreements(counts, readBack);
   if (disagreements.length) {
     fail(
       `the read-back does not match what was written (${disagreements
-        .map(([c, n]) => `${c}: wrote ${counts[c]}, found ${n}`)
+        .map((d) => `${d.collection}: wrote ${d.wrote}, found ${d.found}`)
         .join('; ')}). The fixture is NOT trustworthy; re-run before using it.`,
     );
   }
 
   console.log('');
   console.log(`[${COMMAND}] wrote ${achieved.toLocaleString()} document(s) in ${elapsedMs} ms`);
-  console.log(`[${COMMAND}]   categories             ${counts.categories}`);
-  console.log(`[${COMMAND}]   locations              ${locations}`);
-  console.log(`[${COMMAND}]   suppliers              ${counts.suppliers}`);
-  console.log(`[${COMMAND}]   products               ${products}`);
-  console.log(`[${COMMAND}]   inventory              ${inventory}`);
-  console.log(`[${COMMAND}]   inventory_transactions ${transactions}`);
-  console.log(`[${COMMAND}]   purchase_orders        ${counts.purchase_orders}`);
+  console.log(`[${COMMAND}]   categories             ${readBack.categories}`);
+  console.log(`[${COMMAND}]   locations              ${readBack.locations}`);
+  console.log(`[${COMMAND}]   suppliers              ${readBack.suppliers}`);
+  console.log(`[${COMMAND}]   products               ${readBack.products}`);
+  console.log(`[${COMMAND}]   inventory              ${readBack.inventory}`);
+  console.log(`[${COMMAND}]   inventory_transactions ${readBack.inventory_transactions}`);
+  console.log(`[${COMMAND}]   purchase_orders        ${readBack.purchase_orders}`);
   console.log(`[${COMMAND}]   TOTAL                  ${achieved.toLocaleString()}   (target ${total.toLocaleString()}, read back and equal)`);
   console.log('');
   console.log(`[${COMMAND}] businessId : ${tenant.businessId}`);
@@ -227,7 +219,9 @@ async function main() {
   console.log(`[${COMMAND}] prove the server-side boundary (server must be running):`);
   console.log(`[${COMMAND}]   npm run verify:roles -- --business=${tenant.businessId}`);
   console.log(`[${COMMAND}] remove the fixture when done (MongoDB only; Firebase identities are kept):`);
-  console.log(`[${COMMAND}]   SEED_CONFIRM=${SEED_CONFIRM_PHRASE} npm run cleanup:roles`);
+  console.log(
+    `[${COMMAND}]   CLEANUP_CONFIRM=cleanup:roles npm run cleanup:roles -- --database=${target.database}`,
+  );
 
   await mongoose.disconnect();
 }

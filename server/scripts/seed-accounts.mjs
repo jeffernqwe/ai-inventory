@@ -1,5 +1,5 @@
-// `SEED_CONFIRM=seed-accounts npm run seed:accounts`
-// `SEED_CONFIRM=seed-accounts npm run seed:accounts -- --database=<name> --accounts="a@x.com:5000:<businessId>"`
+// `npm run seed -- --plan=accounts --database=<name> …`   (the one command; see Usage below)
+// `npm run seed:accounts -- --database=<name> …`          (the same plan, preselected)
 //
 // Seed SEVERAL accounts at once, each with its OWN dataset size, so the AI
 // assistant's speed, accuracy and reliability can be compared across tenants that
@@ -22,12 +22,12 @@
 // nothing left to do).
 //
 // SAFETY — all of it inherited, none of it re-implemented:
-//   * `assertSafeTarget` (../perf/lib.mjs), called WITHOUT `--database=`, refuses
-//     `NODE_ENV=production`, refuses a database that is not the DEVELOPMENT one,
-//     refuses a missing MONGODB_URI, and requires `SEED_CONFIRM=seed-accounts` —
-//     all BEFORE a connection is opened. The test database is refused as firmly as
-//     production, because `npm test` clears it and a measurement against it would
-//     be of a vanishing tenant.
+//   * `assertSeedTarget` (./seed/guard.mjs) requires `--database=` to equal the
+//     database this process resolved, refuses the test database and any unknown one,
+//     refuses a `MONGODB_URI` that names a different database, and counts phrases by
+//     target: TWO in development (`SEED_CONFIRM=seed-accounts` + `SEED_DB_CONFIRM`)
+//     and THREE in production (adding `SEED_PROD_CONFIRM`) — all BEFORE a connection
+//     is opened.
 //   * A re-run resets ONLY the data of the tenants this script resolved, by
 //     `businessId`, so another tenant cannot be reached even from a wrong id.
 //   * Account rows (`users`, `businesses`) are only ever CREATED, never deleted and
@@ -39,10 +39,10 @@
 //     application can repair it. Clearing MongoDB alone is the safe direction — it
 //     frees every address and orphans nothing.
 //
-// PRODUCTION (2026-10-25). `--database=<name>` makes the same command reach a
-// named database, production included; the name must equal the one this process
-// resolved, and the phrase is still required. Two extra rules apply there, because
-// several REAL businesses can be reset in one command:
+// PRODUCTION. The same command reaches a NAMED database, production included: the
+// name must equal the one this process resolved, and that target needs THREE
+// phrases (SEED_CONFIRM, SEED_DB_CONFIRM and SEED_PROD_CONFIRM). Two extra rules
+// apply there, because several REAL businesses can be reset in one command:
 //   * the DEFAULT PLAN IS REFUSED. Every account must be named explicitly, as
 //     `address:documents[:businessId]`. The default three are a development
 //     convenience, and running them against production would reset three real
@@ -84,8 +84,12 @@ import { SeedSafetyError, clearTenantData } from './perf/lib.mjs';
 import { assertSeedTarget } from './seed/guard.mjs';
 import {
   assertTenantNamedForReset,
+  countDisagreements,
   ensureTenantForIdentity,
   makeRandom,
+  normaliseEmail,
+  parseCount,
+  readTenantCounts,
   resolveIdentity,
   seedTenant,
 } from './seed/lib.mjs';
@@ -97,7 +101,7 @@ const CONFIRM_PHRASE = 'seed-accounts';
  * The suite the owner tests the assistant across. Three DELIBERATELY different
  * sizes, because the question being asked is whether the assistant's response time
  * moves with the amount of data — which three identical tenants cannot answer.
- * This plan is DEVELOPMENT ONLY: production refuses it and requires `--accounts=`.
+ * Development uses these defaults; production refuses them and requires `--accounts=`.
  *
  * The sizes are DOCUMENTS (what `seedTenant` counts), and products land at roughly
  * 22.5 %, so `large` yields ~50 600 products. That also closes the measurement
@@ -156,17 +160,16 @@ function parsePlan(raw, { production }) {
             'Nothing was written.',
         );
       }
-      const [email, size, businessId] = parts;
-      const total = Number.parseInt(size, 10);
+      const email = normaliseEmail(parts[0]);
+      const businessId = parts[2];
       if (!email.includes('@')) {
         fail(`--accounts entry "${entry}" has no usable address. Nothing was written.`);
       }
-      if (!Number.isInteger(total) || total < MIN_TOTAL || total > MAX_TOTAL) {
-        fail(
-          `--accounts entry "${entry}" needs a size between ${MIN_TOTAL} and ${MAX_TOTAL}. ` +
-            'Nothing was written.',
-        );
-      }
+      const total = parseCount(parts[1], {
+        name: `--accounts size for ${email}`,
+        min: MIN_TOTAL,
+        max: MAX_TOTAL,
+      });
       if (businessId && !/^[a-f0-9]{24}$/i.test(businessId)) {
         fail(
           `--accounts entry "${entry}" has a businessId that is not 24 hexadecimal characters. ` +
@@ -180,7 +183,6 @@ function parsePlan(raw, { production }) {
 async function main() {
   const dryRun = process.argv.includes('--dry-run');
   const includeSku = process.argv.includes('--include-sku');
-  const seed = Number.parseInt(argValue('--seed') ?? '1', 10);
 
   // The guard runs BEFORE any connection, any identity lookup and any write — and it
   // runs on a dry run too, so a dry run proves the target and the confirmation are
@@ -195,10 +197,8 @@ async function main() {
   const production = target.production;
 
   const plan = parsePlan(argValue('--accounts'), { production });
+  const seed = parseCount(argValue('--seed'), { name: '--seed', min: 0, fallback: 1 });
 
-  if (!Number.isInteger(seed) || seed < 0) {
-    fail('--seed must be a non-negative integer. Nothing was written.');
-  }
   if (!plan.length) {
     fail('the plan is empty. Nothing was written.');
   }
@@ -259,7 +259,12 @@ async function main() {
 
   await mongoose.connect(env.mongodbUri, { dbName: env.mongodbDbName });
 
-  const results = [];
+  // ---- phase 2: tenants. Resolve EVERY tenant, prove the datasets are separate and
+  // ---- that every tenant about to be replaced was named — before anything is cleared.
+  // ---- Resetting as this loop went would leave a half-seeded suite when a later
+  // ---- account was misnamed, and a half-seeded suite silently biases the comparison
+  // ---- it exists to support.
+  const prepared = [];
   for (const entry of resolved) {
     const tenant = await ensureTenantForIdentity({
       email: entry.email,
@@ -269,7 +274,7 @@ async function main() {
 
     // The premise of the whole exercise. If two accounts resolved to one business
     // their data WOULD mix, and every comparison drawn from them would be void.
-    if (results.some((r) => String(r.businessId) === String(tenant.businessId))) {
+    if (prepared.some((p) => String(p.tenant.businessId) === String(tenant.businessId))) {
       throw new SeedSafetyError(
         `"${entry.email}" resolved to business ${String(tenant.businessId)}, which another account in ` +
           'this plan already owns — the datasets would not be separate. Stopping.',
@@ -289,6 +294,13 @@ async function main() {
       namingHint: 'the third field of --accounts',
     });
 
+    prepared.push({ entry, tenant });
+  }
+
+  // ---- phase 3: reset and write, one tenant at a time. Every check above passed, so a
+  // ---- failure from here is a database failure rather than a plan that cannot work.
+  const results = [];
+  for (const { entry, tenant } of prepared) {
     console.log('');
     console.log(
       `[${COMMAND}] ${entry.tier}: ${entry.email} -> ${tenant.reused ? 'reusing' : 'CREATED'} ` +
@@ -309,6 +321,18 @@ async function main() {
       includeSkuBarcode: includeSku,
       label: 'ACCT',
     });
+
+    // Count it back before calling it done: a partially-rejected insert must not be
+    // reported as a comparable tenant.
+    const readBack = await readTenantCounts(tenant.businessId);
+    const disagreements = countDisagreements(counts, readBack);
+    if (disagreements.length) {
+      throw new SeedSafetyError(
+        `the read-back for ${entry.email} does not match what was written (${disagreements
+          .map((d) => `${d.collection}: wrote ${d.wrote}, found ${d.found}`)
+          .join('; ')}). The dataset is NOT trustworthy; re-run before using it.`,
+      );
+    }
 
     results.push({
       ...entry,

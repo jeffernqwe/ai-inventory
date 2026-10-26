@@ -1,4 +1,4 @@
-// `SEED_CONFIRM=seed-roles npm run cleanup:roles`
+// `CLEANUP_CONFIRM=cleanup:roles npm run cleanup:roles`
 //
 // Remove the role-boundary fixture: its tenant, its four accounts and their
 // sessions — and nothing else.
@@ -19,9 +19,9 @@
 // are literal, so no other login can be reached.
 //
 // Usage:
-//   SEED_CONFIRM=seed-roles npm run cleanup:roles
-//   SEED_CONFIRM=seed-roles npm run cleanup:roles -- --delete-firebase
-//   SEED_CONFIRM=seed-roles npm run cleanup:roles -- --database=inventoryai_prod_db
+//   CLEANUP_CONFIRM=cleanup:roles npm run cleanup:roles
+//   CLEANUP_CONFIRM=cleanup:roles npm run cleanup:roles -- --delete-firebase
+//   CLEANUP_CONFIRM=cleanup:roles npm run cleanup:roles -- --database=inventoryai_prod_db
 //
 // Safe to run when nothing was ever seeded: it reports that and exits 0.
 
@@ -37,7 +37,6 @@ import {
 } from './perf/lib.mjs';
 import {
   ACCOUNTS,
-  SEED_CONFIRM_PHRASE,
   clearRoleFixtureExtras,
   countRoleFixtureExtras,
   findRoleTestBusiness,
@@ -63,12 +62,13 @@ async function main() {
   const deleteFirebase = process.argv.includes('--delete-firebase');
   const production = env.mongodbDbName === DATABASE_NAMES.production;
 
-  // Same phrase as the seeder: one fixture, one lifecycle. Without `--database=`,
-  // `assertSafeTarget` refuses production and any database that is not development;
-  // WITH it, the same guard accepts a NAMED database, production included. It runs
-  // before a connection is opened either way.
+  // A DESTRUCTIVE command reads its phrase from CLEANUP_CONFIRM, not the SEED_CONFIRM
+  // a seeder export would satisfy — the two families must not share a habitual export.
+  // Without `--database=` the guard is development-only; WITH it, the named database
+  // (production included) is accepted. It runs before a connection is opened either way.
   assertSafeTarget(env, COMMAND, {
-    confirmPhrase: SEED_CONFIRM_PHRASE,
+    confirmPhrase: 'cleanup:roles',
+    confirmEnvVar: 'CLEANUP_CONFIRM',
     database: argValue('--database'),
   });
 

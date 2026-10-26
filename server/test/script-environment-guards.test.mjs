@@ -467,7 +467,8 @@ describe('a production reset names the tenant it replaces', () => {
     );
     assert.match(message, /--business=<businessId> is required in production/);
     assert.match(message, /would REPLACE the data of business/);
-    assert.match(message, /Nothing was written/);
+    // A refusal here prevented a REPLACEMENT, not a first write; the message says so.
+    assert.match(message, /Nothing was replaced/);
   });
 
   it('refuses an id that names another business', () => {

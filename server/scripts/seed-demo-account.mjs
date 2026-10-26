@@ -24,15 +24,17 @@
 // orphans nothing. This script therefore never deletes a Firebase user, and it only
 // ever creates one when the requested identity does not exist.
 //
-// SAFETY. Without `--database=`, `assertSafeTarget` refuses production, refuses the
-// test database, and requires a confirmation phrase — all before a connection is
-// opened. A re-run resets ONLY the data of the one tenant the resolved account owns
-// (never the account rows), by businessId, so another tenant cannot be reached even
-// if the wrong id were supplied.
+// SAFETY. `assertSeedTarget` requires `--database=` to equal the database this
+// process resolved, refuses the test database and any unknown one, and requires two
+// phrases in development or three in production — all before a connection is opened.
+// A re-run resets ONLY the data of the one tenant the resolved account owns (never
+// the account rows), by businessId, so another tenant cannot be reached even if the
+// wrong id were supplied.
 //
-// PRODUCTION (2026-10-25). The same command can write into a NAMED database,
-// production included: `--database=<name>` must equal the database this process
-// resolved, and the command's own phrase is still required. Because this script
+// PRODUCTION. The same command can write into a NAMED database, production
+// included: `--database=<name>` must equal the database this process resolved, and
+// that target needs THREE phrases (SEED_CONFIRM, SEED_DB_CONFIRM and
+// SEED_PROD_CONFIRM). Because this script
 // REPLACES the data of the business the account owns, a production run additionally
 // requires `--business=<id>` as soon as that business already exists — naming the
 // tenant is what proves the reset is meant. A production run never rewrites an
@@ -77,8 +79,12 @@ import { SeedSafetyError, clearTenantData } from './perf/lib.mjs';
 import { assertSeedTarget } from './seed/guard.mjs';
 import {
   assertTenantNamedForReset,
+  countDisagreements,
   ensureTenantForIdentity,
   makeRandom,
+  normaliseEmail,
+  parseCount,
+  readTenantCounts,
   resolveIdentity,
   seedTenant,
 } from './seed/lib.mjs';
@@ -106,9 +112,9 @@ function isBusinessId(value) {
 }
 
 async function main() {
-  const email = argValue('--email');
-  const total = Number.parseInt(argValue('--total') ?? '80000', 10);
-  const seed = Number.parseInt(argValue('--seed') ?? '1', 10);
+  // Lower-cased once, here: the schema lower-cases on write but queries are exact, so a
+  // mixed-case argument would find the Firebase identity and miss the database row.
+  const email = normaliseEmail(argValue('--email'));
   const requestedBusiness = argValue('--business');
   const dryRun = process.argv.includes('--dry-run');
 
@@ -127,12 +133,13 @@ async function main() {
   if (!email || !email.includes('@')) {
     fail('--email=<address> is required. Nothing was written.');
   }
-  if (!Number.isInteger(total) || total < 100 || total > 400000) {
-    fail('--total must be an integer between 100 and 400000. Nothing was written.');
-  }
-  if (!Number.isInteger(seed) || seed < 0) {
-    fail('--seed must be a non-negative integer. Nothing was written.');
-  }
+  const total = parseCount(argValue('--total'), {
+    name: '--total',
+    min: 100,
+    max: 400000,
+    fallback: 80000,
+  });
+  const seed = parseCount(argValue('--seed'), { name: '--seed', min: 0, fallback: 1 });
   if (requestedBusiness && !isBusinessId(requestedBusiness)) {
     fail('--business must be a 24-character businessId. Nothing was written.');
   }
@@ -216,6 +223,18 @@ async function main() {
     label: 'DEMO',
   });
 
+  // The write is not the claim. Count it back through the tenant's own filter, so a
+  // partially-rejected insert can never be reported as a finished dataset.
+  const readBack = await readTenantCounts(tenant.businessId);
+  const disagreements = countDisagreements(counts, readBack);
+  if (disagreements.length) {
+    fail(
+      `the read-back does not match what was written (${disagreements
+        .map((d) => `${d.collection}: wrote ${d.wrote}, found ${d.found}`)
+        .join('; ')}). The dataset is NOT trustworthy; re-run before using it.`,
+    );
+  }
+
   console.log('');
   console.log(`[${COMMAND}] OK`);
   console.log(`[${COMMAND}]   categories             ${counts.categories}`);
@@ -226,7 +245,10 @@ async function main() {
   console.log(`[${COMMAND}]   inventory_transactions ${counts.inventory_transactions}  (incl. ${receiptTransactions} PO receipt movement(s))`);
   console.log(`[${COMMAND}]   purchase_orders        ${counts.purchase_orders}`);
   console.log(`[${COMMAND}]   ----------------------------------------`);
-  console.log(`[${COMMAND}]   TOTAL                  ${achieved.toLocaleString()}   (target ${total.toLocaleString()})`);
+  console.log(
+    `[${COMMAND}]   TOTAL                  ${achieved.toLocaleString()}   ` +
+      `(target ${total.toLocaleString()}; read-back equal)`,
+  );
   console.log(`[${COMMAND}] businessId : ${String(tenant.businessId)}`);
   console.log(`[${COMMAND}] account    : ${email}${tenant.accountCreated ? '  (MongoDB account CREATED — sign in as usual)' : '  (existing account, unchanged)'}`);
   console.log(`[${COMMAND}] elapsed    : ${Date.now() - started} ms`);

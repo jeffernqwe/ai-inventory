@@ -30,6 +30,7 @@
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+import env, { DATABASE_NAMES } from '../src/config/env.ts';
 import { SeedSafetyError } from './perf/lib.mjs';
 import { extractSeedPlanArg, resolveSeedPlan } from './seed/guard.mjs';
 
@@ -50,12 +51,18 @@ try {
 
 const script = fileURLToPath(new URL(`./${selected.script}`, import.meta.url));
 
+// The RESOLVED database, not the raw `MONGODB_DB_NAME`: production can be selected by
+// `NODE_ENV` alone, and a banner that read the variable would then omit the third phrase
+// from the one run that needs it.
+const production = env.mongodbDbName === DATABASE_NAMES.production;
+
 console.log(`[seed] plan    : ${selected.plan} — ${selected.description}`);
 console.log(`[seed] runs    : scripts/${selected.script}`);
-console.log(`[seed] phrases : SEED_CONFIRM=${selected.phrase} and SEED_DB_CONFIRM=<database>` +
-  (process.env.MONGODB_DB_NAME === 'inventoryai_prod_db'
-    ? ', plus SEED_PROD_CONFIRM=SEED-PRODUCTION-DATA'
-    : ''));
+console.log(`[seed] database: ${env.mongodbDbName}${production ? '   (PRODUCTION)' : ''}`);
+console.log(
+  `[seed] phrases : SEED_CONFIRM=${selected.phrase} and SEED_DB_CONFIRM=${env.mongodbDbName}` +
+    (production ? ', plus SEED_PROD_CONFIRM=SEED-PRODUCTION-DATA' : ''),
+);
 
 // `stdio: 'inherit'` keeps the plan's own output, prompts and progress visible and
 // unmodified — a wrapper that buffered them would hide the guard's message.

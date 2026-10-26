@@ -8,7 +8,7 @@ of truth for *what actually happened*, and it is why this file is long.
 
 **How to read it.** Do not read it top to bottom. Either find a record by number (§27FJ, §27DM — the
 numbers are cited from `CLAUDE.md` and from source comments), or use the index: `CLAUDE.md` §7 lists
-all **175** records by the title each gives itself.
+all **176** records by the title each gives itself.
 
 **Current state:** V1 complete and in production testing. The records that answer *where are we now*
 are §27FM (the V1 re-verification), §27FK (the runtime boundary and the blocked build), §27FJ (the two
@@ -21917,6 +21917,73 @@ two phrases" section was replaced, not amended: it described a message that no l
 **Unchanged and still open:** both mobile advisories (§27FP), the OTA publish gate, L-17, the Play
 release, iOS verification and OTA code signing — plus the three development accounts stranded by stale
 identity links (§27FT), which this command deliberately does not repair.
+
+---
+
+# 27FV. The seeding scripts reviewed — four defects, and a read-back that makes OK a measurement (2026-10-26)
+
+**The review was of the workflow §27FT had just unified, and it found four real defects.** None of
+them was in the guard — the guard held. All four were in what surrounds it.
+
+**1. `Int` parsing quietly accepted a size nobody typed.** `Number.parseInt('900abc')` is 900 and
+`parseInt('12.9')` is 12, so `--total=900abc` seeded 900 documents and reported success. A seeded size
+is the input to every later measurement, so a value that was silently changed is a measurement that
+cannot be reproduced. All three seeders now use one strict parser (`parseCount`): digits only, a stated
+range, and a refusal that says nothing was written. The PRNG seed uses the same parser with no upper
+bound, so `--seed=1.5` no longer becomes 1.
+
+**2. The address was normalised on WRITE and not on LOOKUP.** `User.email` is `lowercase: true`, which
+Mongoose applies when saving; `findOne({ email })` is exact. A mixed-case `--email` therefore found the
+Firebase identity (case-insensitive) and could miss the MongoDB row, then try to create a second one
+and die on `users.email_1` — the §27FT symptom again, from a different cause. `normaliseEmail` now
+lower-cases and trims at every boundary: the CLIs, `resolveIdentity`, `ensureTenantForIdentity`, and the
+`--accounts` plan (which also dedupes on the normalised address, so `A@x.com` and `a@x.com` in one plan
+are one entry, refused as a duplicate).
+
+**3. `seed:accounts` promised an all-or-nothing check and did not do one.** Its comment said every
+identity was resolved first "so a plan that cannot be satisfied fails before any tenant has been
+reset", but tenant resolution and the production naming check ran inside the RESET loop. A plan whose
+third account was misnamed therefore wiped the first two before refusing — a half-seeded suite, which
+is exactly what biases the comparison the plan exists to support. The loop is now three phases:
+identities, then every tenant (resolve, prove the businesses differ, prove every replaced tenant was
+named), then reset and write. Nothing is cleared until every account has passed every check.
+
+**4. The role fixture's teardown was confirmed by the wrong family's phrase.** `cleanup:roles` required
+`SEED_CONFIRM=seed-roles`, while Guide 6 documented `CLEANUP_CONFIRM=cleanup:roles` — so the documented
+command refused, and the working one contradicted the rule that a seed phrase must not authorise a
+deletion. It now reads `CLEANUP_CONFIRM=cleanup:roles`; the command the seeder prints also names the
+database, because the unnamed form is refused in production.
+
+**And `OK` stopped being the seeder's own opinion.** `seed:role-accounts` counted four of the seven
+collections back; `seed:demo` and `seed:accounts` counted none. All three now use one
+`readTenantCounts` for the seven collections it writes, compared by a pure `countDisagreements`, and
+refuse by name (`products: wrote 10, found 9`) rather than report a dataset that is not there. The
+summary lines print the read-back, not the tally.
+
+**Measured, read-only against the real development database.** `readTenantCounts` on the largest tenant
+(**50 625 products, 101 374 inventory rows**) returned all seven counts in **475 ms** — small enough to
+do on every run. Dry runs for all three plans printed their plan and opened no connection. `--total=900abc`
+refused with `--total must be a whole number between 100 and 400000, not "900abc"`; `--seed=1.5` refused
+the same way (`at least 0`); a plan naming `A@example.invalid` and `a@example.invalid` refused the second
+as a duplicate. `npm run seed` now prints the RESOLVED database and the exact `SEED_DB_CONFIRM` value,
+because the old banner read the raw `MONGODB_DB_NAME` and would have omitted the third phrase from a
+production run selected by `NODE_ENV` alone.
+
+**Tests.** `seed-target-guard.test.mjs` — **29 pass** (was 21): the strict parser's accepted and refused
+shapes, the address normaliser, the read-back comparison (including a missing collection), and a source
+scan pinning that all three seeders use these helpers and none parses a size with `parseInt`.
+`phase27ct-role-fixture.test.mjs` gained two assertions: the teardown reads `CLEANUP_CONFIRM=cleanup:roles`,
+and the line the seeder prints carries `--database=`.
+
+**Documentation.** Guide 6's `cleanup:roles` examples were already right, which is how the code was
+found wrong; its phrase-variable summary now names the perf exception. Guide 9 gained the two-phrase
+PowerShell form for production, the `--accounts=` production rule, and the role fixture's real
+`--total` range (100–20 000, not 100–400 000). The three seeders' headers now name `assertSeedTarget`
+rather than the retired `assertSafeTarget`, and `cleanup:roles` no longer advertises a seed phrase.
+
+**Unchanged and still open:** both mobile advisories (§27FP), the OTA publish gate, L-17, the Play
+release, iOS verification and OTA code signing — plus the stranded development accounts (§27FT), which
+this batch deliberately still does not repair.
 
 ---
 

@@ -10,9 +10,9 @@
 // NOTHING HERE RUNS ON IMPORT: no `main()`, no connection, no write. A library that
 // acts when you read it is how a "seed" script writes to a database by accident.
 //
-// SAFETY lives in the CALLERS (`assertSafeTarget` from ../perf/lib.mjs), before a
-// connection is opened. This module only ever writes rows belonging to the
-// `businessId` it is handed, and it never deletes a Firebase identity.
+// SAFETY lives in the CALLERS (`assertSeedTarget` in ./guard.mjs), before a connection
+// is opened. This module only ever writes rows belonging to the `businessId` it is
+// handed, and it never deletes a Firebase identity.
 
 import mongoose from 'mongoose';
 
@@ -75,14 +75,14 @@ export function assertTenantNamedForReset({
     throw new SeedSafetyError(
       `${namingHint} is required in production [${command}]: this run would REPLACE the data of ` +
         `business ${String(businessId)}${businessName ? ` ("${businessName}")` : ''}. Name it to ` +
-        'prove that is the tenant you mean. Nothing was written.',
+        'prove that is the tenant you mean. Nothing was replaced.',
     );
   }
   if (String(requestedBusinessId) !== String(businessId)) {
     throw new SeedSafetyError(
       `${namingHint} names business ${String(requestedBusinessId)}, but this account owns ` +
         `${String(businessId)} [${command}]. Refusing to reset a business that was not named. ` +
-        'Nothing was written.',
+        'Nothing was replaced.',
     );
   }
 }
@@ -101,6 +101,55 @@ export function makeRandom(seed) {
 
 export const intBetween = (rand, min, max) => Math.floor(rand() * (max - min + 1)) + min;
 export const pick = (rand, list) => list[Math.floor(rand() * list.length)];
+
+/**
+ * One spelling for an address, everywhere.
+ *
+ * WHY THIS IS NOT COSMETIC. The `User.email` field is `lowercase: true`, and Mongoose applies
+ * that on WRITE only. A query with `{ email: 'A@X.com' }` therefore does not match the stored
+ * `a@x.com`, so a mixed-case argument could miss the existing row and attempt a second one —
+ * dying on the unique index with an error that names nothing. Firebase treats addresses
+ * case-insensitively, so the identity was found and the database lookup was not: the two halves
+ * of the script disagreed about who this person is. Normalising at the boundary makes the CLI,
+ * the identity lookup and the database lookup use one string.
+ */
+export function normaliseEmail(value) {
+  return String(value ?? '').trim().toLowerCase();
+}
+
+/**
+ * A strict whole number from a CLI value, or a refusal.
+ *
+ * `Number.parseInt` accepts `900abc` as 900 and `12.9` as 12, so a mistyped `--total` used to
+ * seed a plausible-looking dataset of the wrong size. Seeding is a measurement input; a size
+ * nobody intended is a measurement nobody can trust.
+ *
+ * Pure, so every branch is asserted without a database. `fallback` is used only when the flag
+ * is absent or blank, which is what makes `--total` optional in the first place.
+ */
+export function parseCount(value, { name, min, max, fallback }) {
+  const raw = String(value ?? '').trim();
+  const text = raw === '' ? (fallback === undefined ? '' : String(fallback)) : raw;
+  const range = max === undefined ? `at least ${min}` : `between ${min} and ${max}`;
+
+  if (!/^\d+$/.test(text)) {
+    const hint =
+      raw === ''
+        ? fallback === undefined
+          ? ' (it is required)'
+          : ` (default ${fallback})`
+        : `, not "${raw}"`;
+    throw new SeedSafetyError(`${name} must be a whole number ${range}${hint}. Nothing was written.`);
+  }
+
+  const parsed = Number.parseInt(text, 10);
+  if (!Number.isSafeInteger(parsed) || parsed < min || (max !== undefined && parsed > max)) {
+    throw new SeedSafetyError(
+      `${name} must be a whole number ${range}, not "${text}". Nothing was written.`,
+    );
+  }
+  return parsed;
+}
 
 /**
  * Insert in bounded chunks: one 30 000-document batch would approach the 16 MB
@@ -162,11 +211,12 @@ export async function resolveIdentity(email, { refreshPassword = true } = {}) {
   const { getFirebaseAdminApp } = await import('../../src/services/firebase/adminApp.ts');
   const { getAuth } = await import('firebase-admin/auth');
   const auth = getAuth(getFirebaseAdminApp());
+  const address = normaliseEmail(email);
 
   const password = process.env.DEMO_ACCOUNT_PASSWORD;
 
   try {
-    const existing = await auth.getUserByEmail(email);
+    const existing = await auth.getUserByEmail(address);
     if (!password || !refreshPassword) {
       return {
         uid: existing.uid,
@@ -186,11 +236,11 @@ export async function resolveIdentity(email, { refreshPassword = true } = {}) {
 
   if (!password) {
     throw new SeedSafetyError(
-      `no Firebase identity exists for ${email}, and DEMO_ACCOUNT_PASSWORD is not set. ` +
+      `no Firebase identity exists for ${address}, and DEMO_ACCOUNT_PASSWORD is not set. ` +
         'Set it in the environment to create the identity (it is never written to a file or printed).',
     );
   }
-  const created = await auth.createUser({ email, password, emailVerified: true });
+  const created = await auth.createUser({ email: address, password, emailVerified: true });
   // NOT a refresh: the identity did not exist, so creation is what set the credential.
   // Saying otherwise in the console line would report a change that did not happen.
   return { uid: created.uid, created: true, emailVerified: true, passwordRefreshed: false, passwordSkipped: false };
@@ -250,6 +300,7 @@ export function assertIdentityLinkUsable({ email, storedUid, resolvedUid }) {
  * data seeder has no business touching an account's identity linkage.
  */
 export async function ensureTenantForIdentity({ email, identity, businessName }) {
+  const address = normaliseEmail(email);
   const user = await User.findOne({ firebaseUid: identity.uid })
     .select('_id businessId email')
     .lean();
@@ -258,12 +309,12 @@ export async function ensureTenantForIdentity({ email, identity, businessName })
   // `users.email_1` — and the reason is either a stale link (the §27BB trap) or a legacy
   // account. Both are reported, neither is repaired here: see assertIdentityLinkUsable.
   if (!user) {
-    const byEmail = await User.findOne({ email })
+    const byEmail = await User.findOne({ email: address })
       .select('_id businessId email firebaseUid')
       .lean();
     if (byEmail) {
       assertIdentityLinkUsable({
-        email,
+        email: address,
         storedUid: byEmail.firebaseUid,
         resolvedUid: identity.uid,
       });
@@ -272,7 +323,7 @@ export async function ensureTenantForIdentity({ email, identity, businessName })
         : null;
       if (!business) {
         throw new SeedSafetyError(
-          `the account for ${email} exists but its business ${String(byEmail.businessId)} does not. ` +
+          `the account for ${address} exists but its business ${String(byEmail.businessId)} does not. ` +
             'Refusing to guess at a repair. Nothing was written.',
         );
       }
@@ -317,7 +368,7 @@ export async function ensureTenantForIdentity({ email, identity, businessName })
   const created = await User.create({
     businessId: business._id,
     name: 'AI Test Owner',
-    email,
+    email: address,
     role: 'OWNER',
     status: 'ACTIVE',
     firebaseUid: identity.uid,
@@ -609,13 +660,56 @@ export async function seedTenant({
   return { counts, achieved, receiptTransactions: receiptTxDocs.length, productDocs };
 }
 
+/**
+ * Count what is ACTUALLY in one tenant, through the same `businessId` filter every screen uses.
+ *
+ * A seeder's own tally is evidence about the seeder. This is the read-back: if an insert was
+ * partially rejected, the difference shows up here rather than in a measurement taken later.
+ * The seven collections are the ones `seedTenant` writes, so the comparison is exact.
+ */
+export async function readTenantCounts(businessId) {
+  const filter = { businessId };
+  const [categories, locations, suppliers, products, inventory, inventory_transactions, purchase_orders] =
+    await Promise.all([
+      Category.countDocuments(filter),
+      Location.countDocuments(filter),
+      Supplier.countDocuments(filter),
+      Product.countDocuments(filter),
+      Inventory.countDocuments(filter),
+      InventoryTransaction.countDocuments(filter),
+      PurchaseOrder.countDocuments(filter),
+    ]);
+
+  return { categories, locations, suppliers, products, inventory, inventory_transactions, purchase_orders };
+}
+
+/**
+ * The collections whose write count and read-back count disagree, named with both numbers.
+ *
+ * Pure, so the comparison is asserted on values rather than on a database. An empty array means
+ * the dataset that was reported is the dataset that exists.
+ */
+export function countDisagreements(written, readBack) {
+  return Object.keys(written ?? {})
+    .filter((collection) => (readBack ?? {})[collection] !== written[collection])
+    .map((collection) => ({
+      collection,
+      wrote: written[collection],
+      found: (readBack ?? {})[collection],
+    }));
+}
+
 export default {
   makeRandom,
   intBetween,
   pick,
   insertChunked,
+  normaliseEmail,
+  parseCount,
   assertIdentityLinkUsable,
   resolveIdentity,
   ensureTenantForIdentity,
   seedTenant,
+  readTenantCounts,
+  countDisagreements,
 };

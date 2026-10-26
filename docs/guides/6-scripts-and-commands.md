@@ -220,7 +220,7 @@ ROLE_TEST_PASSWORD='choose-a-password' SEED_CONFIRM=seed-roles SEED_DB_CONFIRM=i
 ROLE_TEST_PASSWORD='choose-a-password' SEED_CONFIRM=seed-roles SEED_DB_CONFIRM=inventoryai_dev_db \
   npm run seed -- --plan=roles --database=inventoryai_dev_db
 npm run verify:roles -- --business=<id printed>
-CLEANUP_CONFIRM=cleanup:roles npm run cleanup:roles
+CLEANUP_CONFIRM=cleanup:roles npm run cleanup:roles -- --database=inventoryai_dev_db
 ```
 
 | Role | Address |
@@ -543,7 +543,8 @@ Everything here permanently removes data. Two families, one shape each:
   `--database=` is required and must equal the database this shell resolved; **two phrases in
   development, three in production** ([Guide 9](9-seeding-data.md) has the rule).
 - **the scoped cleanups** (`cleanup:perf`, `cleanup:demo`, `cleanup:roles`, …) — one named tenant, each
-  with its own `CLEANUP_CONFIRM` phrase.
+  with its own phrase. Most read `CLEANUP_CONFIRM`; the perf pair reads `SEED_CONFIRM=seed-perf-ai`,
+  because it shares the perf seeder's fixture phrase.
 
 The old `cleanup:test-mongodb`, `cleanup:dev-mongodb`, `cleanup:prod-mongodb`, `cleanup:all-mongodb` and
 `cleanup:firebase-accounts` scripts are gone; each was this command with the target baked in.

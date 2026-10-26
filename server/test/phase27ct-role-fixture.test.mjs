@@ -129,6 +129,9 @@ describe('§27CT no mail path, and no identity is created by a pattern', () => {
     assert.match(seeder, /assertSeedTarget\(\{/);
     assert.match(seeder, /confirmPhrase: SEED_CONFIRM_PHRASE/);
     assert.match(seeder, /database: argValue\('--database'\)/);
+    // The teardown command it prints names the database too, so the printed line works
+    // in production, where the unnamed form is refused.
+    assert.match(seeder, /cleanup:roles -- --database=\$\{target\.database\}/);
     assert.match(seeder, /readFixturePassword|ensureRoleTestTenant/);
     // The password VALUE is never interpolated into any output. Naming the
     // variable is fine ("from ROLE_TEST_PASSWORD (not printed)"); printing its
@@ -142,6 +145,13 @@ describe('§27CT no mail path, and no identity is created by a pattern', () => {
 });
 
 describe('§27CT cleanup deletes the database first and an identity only after proving nothing points at it', () => {
+  test('a destructive command reads CLEANUP_CONFIRM, not the seeder phrase', () => {
+    // One fixture, two families: the seeder export must not confirm its teardown.
+    assert.match(cleanup, /confirmPhrase: 'cleanup:roles'/);
+    assert.match(cleanup, /confirmEnvVar: 'CLEANUP_CONFIRM'/);
+    assert.ok(!/confirmPhrase: SEED_CONFIRM_PHRASE/.test(cleanup));
+  });
+
   test('the Firebase delete is gated behind --delete-firebase', () => {
     assert.match(cleanup, /const deleteFirebase = process\.argv\.includes\('--delete-firebase'\)/);
     assert.match(cleanup, /if \(!deleteFirebase\) \{/);

@@ -22,6 +22,11 @@ npm run seed -- --plan=<demo|accounts|roles> --database=<name> [options]
 `npm run seed:demo`, `seed:accounts` and `seed:roles` still work — they are the same command with
 the plan already chosen, and they take the same phrases.
 
+Every plan **counts its dataset back** from the database before it prints `OK`: the seven collections,
+through the tenant's own filter. A partly-rejected insert therefore fails the run instead of being
+reported as a dataset that is not there. Sizes and seeds are whole numbers only — `--total=900abc` and
+`--seed=1.5` are refused, not silently truncated.
+
 ---
 
 ## Choosing the database
@@ -74,13 +79,16 @@ SEED_CONFIRM=seed-demo-account SEED_DB_CONFIRM=inventoryai_dev_db \
   --email=you@example.com --total=80000
 ```
 
-PowerShell keeps variables until you clear them:
+PowerShell keeps variables until you clear them, so set, run, clear:
 
 ```powershell
 $env:SEED_CONFIRM='seed-demo-account'; $env:SEED_DB_CONFIRM='inventoryai_dev_db'
 npm run seed -- --plan=demo --database=inventoryai_dev_db --email=you@example.com --total=80000
 $env:SEED_CONFIRM=$null; $env:SEED_DB_CONFIRM=$null
 ```
+
+Production in PowerShell adds `$env:NODE_ENV='production'`, `$env:MONGODB_DB_NAME='inventoryai_prod_db'`
+and `$env:SEED_PROD_CONFIRM='SEED-PRODUCTION-DATA'`, then clears all four.
 
 ## Production: three phrases
 
@@ -96,6 +104,10 @@ NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
 In production, an account that **already owns** a tenant must name it with `--business=<id>`. Naming
 the tenant is the fourth deliberate act when the run would replace data that already exists. A
 brand-new tenant has no id to name. An existing login's password is never rewritten.
+
+`--plan=accounts` refuses its default three-account plan in production: every account must be given
+as `--accounts="address:documents[:businessId],…"`. `--plan=roles` owns its own fixture tenant and
+needs no `--business=`.
 
 ---
 
@@ -148,7 +160,7 @@ tenant's data — every write is scoped by `businessId`.
 ## Large data, safely
 
 `--total` is documents, and products land at roughly 22.5 % of it (80 000 documents ≈ 18 000
-products). Allowed range is 100–400 000.
+products). The range is 100–400 000 for `demo` and `accounts`; the role fixture takes 100–20 000.
 
 | Want | Command |
 |---|---|
@@ -176,6 +188,8 @@ phrase, documented in Guide 6.
 | `--database is "…" but this process resolved "…"` | the flag and `MONGODB_DB_NAME` disagree | set `MONGODB_DB_NAME` to the database you mean |
 | `MONGODB_URI names the database "…"` | the connection string is configured for the other database | fix the URI or the environment; nothing was written |
 | `two/three confirmation phrase(s) … missing or wrong` | a phrase is absent or mistyped | the message lists every one it needs |
+| `--total must be a whole number …` | a size or seed is not a whole number | digits only; `900abc` and `1.5` are refused rather than read as 900 and 1 |
+| `the read-back does not match what was written` | an insert was partly rejected | nothing is reported as done; re-run and read the collections named |
 | `test database … npm test clears` | the test database was selected | use development or production |
 | `not a seeding target` | an unknown database name | only `inventoryai_dev_db` / `inventoryai_prod_db` |
 | `the database account for … is linked to Firebase uid …` | the Firebase identity was deleted and re-created under the same address, so the row still holds the old uid | see below — the seeder will not re-link it for you |

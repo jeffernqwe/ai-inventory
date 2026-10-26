@@ -493,6 +493,7 @@ anchor (`§27…`) in that file.
 - **§27FS** — Two phrases that were both required and only one documented, and the cleanup guard that could not see its own trap (2026-10-26)
 - **§27FT** — One seeding command, and a production target that costs a third phrase (2026-10-26)
 - **§27FU** — One cleanup command, and a Firebase check that reads both databases (2026-10-26)
+- **§27FV** — The seeding scripts reviewed — three defects, and a read-back that makes OK a measurement (2026-10-26)
 
 ---
 

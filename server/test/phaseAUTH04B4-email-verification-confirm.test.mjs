@@ -803,9 +803,24 @@ dbSuite('AUTH-04-B4 — confirm lifecycle against MongoDB', dbOk, () => {
         assert.equal(lost[0].reason.code, INVALID_VERIFICATION_CODE);
 
         const row = await rowFor(uid);
-        // Both reservations are dispatched before either resolves, so both spend
-        // an attempt — the invalid one on its own behalf.
-        assert.equal(row.attempts, 2, 'the invalid submission consumes its own attempt');
+        // TWO INTERLEAVINGS ARE CORRECT, and which one happens is scheduling, not
+        // policy:
+        //   * 2 — the invalid submission reserved while the challenge was still live,
+        //         so it spent an attempt of its own (what this case was written for);
+        //   * 1 — it arrived after the winner stamped `usedAt`, so its reservation
+        //         missed and spent nothing (AD-11/AD-13; "a reservation miss spends no
+        //         attempt" pins that separately).
+        // Asserting only 2 encoded an assumption about the event loop that a loaded
+        // CI runner can break without anything being wrong: it failed once on
+        // 2026-10-26 with 1, and every other assertion in this case still held.
+        // Anything outside {1, 2} would mean an attempt was invented or lost. The
+        // property that a wrong code *arriving while the challenge is live* spends its
+        // own attempt stays pinned deterministically by "the attempt is spent even
+        // though the code was wrong".
+        assert.ok(
+          row.attempts === 1 || row.attempts === 2,
+          `the invalid submission spends at most its own attempt (got ${row.attempts})`
+        );
         assert.ok(row.usedAt instanceof Date);
         assert.equal(updatedUids().length, 1);
         const failed = recordsOfType(lines, EMAIL_VERIFICATION_LOG_EVENTS.FAILED);

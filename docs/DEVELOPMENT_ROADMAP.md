@@ -21477,6 +21477,25 @@ Free plan's Android quota resets at the start of November.
 was compiled with; writing it from the tree today would claim a binary that does not exist and would
 disable the one check that stops a bundle being published to a runtime no install can accept.
 
+### CI caught an over-specified assertion, not a defect
+
+The docs-only push `07c1b0e` failed the server job — **2164 pass, 1 fail** — on
+`spends its own attempt on a concurrent invalid confirmation`
+(`phaseAUTH04B4-email-verification-confirm.test.mjs`): it expected `attempts === 2` and measured **1**.
+
+**The service is correct in both cases.** The reservation is one conditional `findOneAndUpdate` on
+`{ uid, usedAt: null, expiresAt > now, attempts < cap }`, so a submission that arrives after the winner
+stamped `usedAt` **misses and spends no attempt** — the locked AD-11/AD-13 behaviour, and the same
+answer the miss branch gives every other refusal. The case asserted the interleaving it was written
+under ("both reservations are dispatched before either resolves"), which a loaded runner can schedule
+the other way. The assertion now accepts **1 or 2** and says why; the property it exists to protect —
+a wrong code arriving while the challenge is live spends its own attempt — stays pinned
+**deterministically** by `the attempt is spent even though the code was wrong`, and the other side by
+`a reservation miss spends no attempt`. **No production file changed.**
+
+Verified locally in unit mode: **19 pass, 1 skipped** (the DB suite); the DB-backed proof is the CI run
+on the fix.
+
 **Unchanged and still open:** L-17 (console-only reset action URL), the Play release, iOS verification,
 and OTA code signing (plan-gated). None of them was marked complete.
 

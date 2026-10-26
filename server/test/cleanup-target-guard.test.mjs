@@ -20,6 +20,7 @@ import {
   CLEANUP_PROD_CONFIRM_PHRASE,
   CLEANUP_TARGETS,
   assertCleanupTarget,
+  assertScopedCleanupTarget,
   extractCleanupTargetArg,
   requiredCleanupPhraseCount,
   resolveCleanupTarget,
@@ -540,5 +541,105 @@ describe('cleanup — command surface', () => {
     const source = readScript('cleanup-firebase-accounts.mjs');
     assert.match(source, /REFERENCE_DATABASES = \[DATABASE_NAMES\.development, DATABASE_NAMES\.production\]/);
     assert.match(source, /client\.db\(dbName\)/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 7. A tenant-scoped cleanup is not the cheaper way to delete production rows
+// ---------------------------------------------------------------------------
+describe('cleanup guard — scoped targets cost the same two/three phrases', () => {
+  const PHRASE = 'cleanup:demo-account';
+  const scoped = (dbName, values, over = {}) =>
+    assertScopedCleanupTarget({
+      env: envFor(dbName, over),
+      command: 'cleanup:demo',
+      confirmPhrase: PHRASE,
+      database: dbName,
+      values,
+    });
+
+  it('accepts two phrases in development', () => {
+    const result = scoped(DATABASE_NAMES.development, {
+      [CLEANUP_CONFIRM_ENV]: PHRASE,
+      [CLEANUP_DB_CONFIRM_ENV]: DATABASE_NAMES.development,
+    });
+    assert.deepEqual(result, {
+      database: DATABASE_NAMES.development,
+      production: false,
+      phrases: 2,
+    });
+  });
+
+  it('accepts three phrases in production', () => {
+    const result = scoped(DATABASE_NAMES.production, {
+      [CLEANUP_CONFIRM_ENV]: PHRASE,
+      [CLEANUP_DB_CONFIRM_ENV]: DATABASE_NAMES.production,
+      [CLEANUP_PROD_CONFIRM_ENV]: CLEANUP_PROD_CONFIRM_PHRASE,
+    });
+    assert.equal(result.production, true);
+    assert.equal(result.phrases, 3);
+  });
+
+  it('names the missing database phrase, not just the command phrase', () => {
+    assert.throws(
+      () => scoped(DATABASE_NAMES.development, { [CLEANUP_CONFIRM_ENV]: PHRASE }),
+      (err) => {
+        assert.ok(err instanceof CleanupSafetyError);
+        assert.match(err.message, /two confirmation phrase/);
+        assert.match(err.message, /CLEANUP_DB_CONFIRM=inventoryai_dev_db/);
+        return true;
+      },
+    );
+  });
+
+  it('requires the production phrase, so a scoped cleanup cannot undercut the rule', () => {
+    assert.throws(
+      () =>
+        scoped(DATABASE_NAMES.production, {
+          [CLEANUP_CONFIRM_ENV]: PHRASE,
+          [CLEANUP_DB_CONFIRM_ENV]: DATABASE_NAMES.production,
+        }),
+      (err) => {
+        assert.match(err.message, /three confirmation phrase/);
+        assert.match(err.message, /CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA/);
+        assert.match(err.message, /Nothing was deleted/);
+        return true;
+      },
+    );
+  });
+
+  it('refuses a database the run is not connected to, the test database, and a URI mismatch', () => {
+    const values = {
+      [CLEANUP_CONFIRM_ENV]: PHRASE,
+      [CLEANUP_DB_CONFIRM_ENV]: DATABASE_NAMES.development,
+    };
+    assert.throws(
+      () =>
+        assertScopedCleanupTarget({
+          env: envFor(DATABASE_NAMES.development),
+          command: 'cleanup:demo',
+          confirmPhrase: PHRASE,
+          database: DATABASE_NAMES.production,
+          values,
+        }),
+      /--database is "inventoryai_prod_db" but this process resolved "inventoryai_dev_db"/,
+    );
+    assert.throws(
+      () => scoped(DATABASE_NAMES.test, values),
+      /the test database/,
+    );
+    assert.throws(
+      () =>
+        scoped(DATABASE_NAMES.development, values, {
+          mongodbUri: 'mongodb://example.invalid:27017/inventoryai_prod_db',
+        }),
+      /MONGODB_URI names the database "inventoryai_prod_db"/,
+    );
+  });
+
+  it('the demo cleanup uses the shared scoped rule', () => {
+    const source = readScript('cleanup-demo-account.mjs');
+    assert.match(source, /assertScopedCleanupTarget\(\{/);
+    assert.match(source, /confirmPhrase: CONFIRM_PHRASE/);
   });
 });

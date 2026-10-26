@@ -528,7 +528,7 @@ describe('every data-touching script calls one of the guards', () => {
       // the command line, refuses the test database and refuses a re-run over another business.
       assert.match(
         source,
-        /assertSeedTarget\(|assertSafeTarget\(|assertRestoreTarget\(|assertDemoTarget\(|assertNamedDatabaseTarget\(/,
+        /assertSeedTarget\(|assertSafeTarget\(|assertRestoreTarget\(|assertDemoTarget\(|assertNamedDatabaseTarget\(|assertScopedCleanupTarget\(/,
         `${name} has no target guard`,
       );
     }
@@ -557,8 +557,10 @@ describe('every data-touching script calls one of the guards', () => {
       'the account must agree with the named tenant before anything is removed',
     );
     // A destructive command reads its phrase from CLEANUP_CONFIRM, not the SEED_CONFIRM a seeder
-    // export would satisfy. Its phrase is its own, never the seeder's.
-    assert.match(source, /confirmEnvVar: 'CLEANUP_CONFIRM'/);
+    // export would satisfy. It also names the database, so it costs two phrases in development
+    // and three in production — the same rule as the database-wide command.
+    assert.match(source, /assertScopedCleanupTarget\(\{/);
+    assert.match(source, /confirmPhrase: CONFIRM_PHRASE/);
     assert.match(source, /const CONFIRM_PHRASE = 'cleanup:demo-account'/);
   });
 

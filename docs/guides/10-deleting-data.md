@@ -112,11 +112,13 @@ check exists to prevent.
 
 ## What is not replaced
 
-The tenant-scoped cleanups stay as they are: they delete one named tenant rather than a database.
+The tenant-scoped cleanups delete one named tenant rather than a database. `cleanup:demo` follows the
+same phrase rule as the command above: **two phrases in development, three in production**, plus
+`--database=`. The fixture cleanups below take their own single phrase.
 
 | Command | Removes |
 |---|---|
-| `cleanup:demo` | one tenant's data, keeping its login (`--dry-run`, `--database=`) |
+| `cleanup:demo` | one tenant's data, keeping its login (`--dry-run`, `--database=`; 2 phrases dev / 3 prod) |
 | `cleanup:perf`, `cleanup:perf-tenant` | the measurement tenants, proving `0 remaining` |
 | `cleanup:demo-tenant` | the `seed:demo-tenant` fixture |
 | `cleanup:roles` | the role fixture |

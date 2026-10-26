@@ -322,6 +322,8 @@ Empty it, keeping the login:
 ```bash
 NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
   CLEANUP_CONFIRM=cleanup:demo-account \
+  CLEANUP_DB_CONFIRM=inventoryai_prod_db \
+  CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA \
   npm run cleanup:demo -- --database=inventoryai_prod_db \
   --email=YOUR_EMAIL --business=THE_BUSINESS_ID
 ```
@@ -542,9 +544,10 @@ Everything here permanently removes data. Two families, one shape each:
 - **`npm run cleanup -- --target=database|firebase`** — a whole database, or the identities you name.
   `--database=` is required and must equal the database this shell resolved; **two phrases in
   development, three in production** ([Guide 9](9-seeding-data.md) has the rule).
-- **the scoped cleanups** (`cleanup:perf`, `cleanup:demo`, `cleanup:roles`, …) — one named tenant, each
-  with its own phrase. Most read `CLEANUP_CONFIRM`; the perf pair reads `SEED_CONFIRM=seed-perf-ai`,
-  because it shares the perf seeder's fixture phrase.
+- **the scoped cleanups** (`cleanup:perf`, `cleanup:demo`, `cleanup:roles`, …) — one named tenant. The
+  production-capable `cleanup:demo` follows the same two-phrase/three-phrase rule and names
+  `--database=`; the fixture cleanups use their own single phrase. The perf pair reads
+  `SEED_CONFIRM=seed-perf-ai`, because it shares the perf seeder's fixture phrase.
 
 The old `cleanup:test-mongodb`, `cleanup:dev-mongodb`, `cleanup:prod-mongodb`, `cleanup:all-mongodb` and
 `cleanup:firebase-accounts` scripts are gone; each was this command with the target baked in.

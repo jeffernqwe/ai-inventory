@@ -19,23 +19,25 @@
 // its members, and the address remains usable. Deleting a login whose database record still
 // exists is the one unrecoverable state (F-50); this command never goes near it.
 //
-// SAFETY. Without `--database=` the usual development-only guard applies; with it, the
-// database must be the one this process resolved (the test database is refused) and
-// `CLEANUP_CONFIRM=cleanup:demo-account` is required. Every delete is scoped by the one
-// `businessId` both the account and the flag name.
+// SAFETY. `--database=` is required and must equal the database this process
+// resolved; the test database is refused. Development costs TWO phrases
+// (`CLEANUP_CONFIRM=cleanup:demo-account` and `CLEANUP_DB_CONFIRM=<database>`);
+// production costs THREE, adding `CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA`.
+// Every delete is scoped by the one `businessId` both the account and the flag
+// name, and the Firebase identity is never touched.
 //
 // `--dry-run` counts exactly what would be removed and writes nothing. It still connects and still
 // requires both identifiers to agree, so the preview describes the same tenant the real run would.
 //
 // Usage:
-//   CLEANUP_CONFIRM=cleanup:demo-account \
-//     npm run cleanup:demo -- --email=you@example.com --business=<id> --dry-run
-//   CLEANUP_CONFIRM=cleanup:demo-account \
-//     npm run cleanup:demo -- --email=you@example.com --business=<id>
+//   CLEANUP_CONFIRM=cleanup:demo-account CLEANUP_DB_CONFIRM=inventoryai_dev_db \
+//     npm run cleanup:demo -- --database=inventoryai_dev_db \
+//       --email=you@example.com --business=<id> --dry-run
 //
-// Production:
+// Production (three phrases):
 //   NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
-//     CLEANUP_CONFIRM=cleanup:demo-account \
+//     CLEANUP_CONFIRM=cleanup:demo-account CLEANUP_DB_CONFIRM=inventoryai_prod_db \
+//     CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA \
 //     npm run cleanup:demo -- --database=inventoryai_prod_db \
 //       --email=you@example.com --business=<id>
 
@@ -46,10 +48,10 @@ import env from '../src/config/env.ts';
 import AIConversation from '../src/models/aiConversation.model.ts';
 import AIMessage from '../src/models/aiMessage.model.ts';
 import User from '../src/models/user.model.ts';
+import { assertScopedCleanupTarget } from './cleanup/guard.mjs';
 import {
   SeedSafetyError,
   TENANT_DATA_COLLECTIONS,
-  assertSafeTarget,
   clearTenantData,
 } from './perf/lib.mjs';
 
@@ -72,9 +74,12 @@ async function main() {
   const businessId = argValue('--business');
   const dryRun = process.argv.includes('--dry-run');
 
-  assertSafeTarget(env, COMMAND, {
+  // Two phrases in development, three in production — the same rule as the
+  // database-wide cleanup. The target is named and must match what was resolved.
+  const target = assertScopedCleanupTarget({
+    env,
+    command: COMMAND,
     confirmPhrase: CONFIRM_PHRASE,
-    confirmEnvVar: 'CLEANUP_CONFIRM',
     database: argValue('--database'),
   });
 
@@ -85,7 +90,7 @@ async function main() {
     fail('--business=<24-character businessId> is required. Nothing was removed.');
   }
 
-  console.log(`[${COMMAND}] database : ${env.mongodbDbName}`);
+  console.log(`[${COMMAND}] database : ${target.database}${target.production ? '   (PRODUCTION)' : ''}`);
   console.log(`[${COMMAND}] account  : ${email}`);
   console.log(`[${COMMAND}] tenant   : ${businessId}`);
   if (dryRun) console.log(`[${COMMAND}] mode     : DRY RUN — counts only, nothing is deleted`);

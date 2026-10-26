@@ -8,7 +8,7 @@ of truth for *what actually happened*, and it is why this file is long.
 
 **How to read it.** Do not read it top to bottom. Either find a record by number (§27FJ, §27DM — the
 numbers are cited from `CLAUDE.md` and from source comments), or use the index: `CLAUDE.md` §7 lists
-all **176** records by the title each gives itself.
+all **177** records by the title each gives itself.
 
 **Current state:** V1 complete and in production testing. The records that answer *where are we now*
 are §27FM (the V1 re-verification), §27FK (the runtime boundary and the blocked build), §27FJ (the two
@@ -21984,6 +21984,42 @@ rather than the retired `assertSafeTarget`, and `cleanup:roles` no longer advert
 **Unchanged and still open:** both mobile advisories (§27FP), the OTA publish gate, L-17, the Play
 release, iOS verification and OTA code signing — plus the stranded development accounts (§27FT), which
 this batch deliberately still does not repair.
+
+---
+
+# 27FW. The scoped cleanup that was cheaper than the rule (2026-10-26)
+
+**The finding.** `npm run cleanup -- --target=database|firebase` had cost two phrases in development
+and three in production since §27FU. `cleanup:demo` — the tenant-scoped command a production test
+uses to remove its own data while keeping the login — still cost **one** phrase, and Guide 10 called
+that “as it is”. A scoped command was therefore the cheaper way to delete production rows, which is
+exactly the habit the phrase rule exists to prevent.
+
+**The fix.** The database half of the cleanup rule moved into one private `assertCleanupDatabase`
+(resolved name equals `--database`, known and cleanable, no `MONGODB_URI` disagreement), and a new
+`assertScopedCleanupTarget` applies the same phrase count as the dispatch targets:
+
+```text
+development   CLEANUP_CONFIRM=cleanup:demo-account  CLEANUP_DB_CONFIRM=inventoryai_dev_db
+production    both of the above, plus CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA
+```
+
+`cleanup:demo` uses it. The phrase names the command, the database phrase names where, and the
+production phrase states that the rows are real. The tenant proof is unchanged and still comes
+after: `--email` and `--business` must resolve to the same account, and every delete is filtered by
+that one `businessId`. The Firebase identity is never touched.
+
+**Measured, non-destructively.** With one phrase in development the command refused and named
+`CLEANUP_DB_CONFIRM=inventoryai_dev_db`; in production with two it refused and named
+`CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA`; with both, a dry run against the 300-document probe
+tenant counted exactly 300 and deleted nothing. The shared guard's new tests cover the accepted
+shapes, the missing phrase, the database mismatch, the test database and a contradicting
+`MONGODB_URI`.
+
+**Still deliberate.** `cleanup:roles`, `cleanup:demo-tenant` and `cleanup:perf-tenant` are fixture
+tools with their own single phrase; they still name the database and locate their tenant by two
+fingerprints. Guide 10 now says which rule each command follows instead of implying one rule for
+all. Making every fixture cleanup cost three phrases is a separate change, not a claim made here.
 
 ---
 

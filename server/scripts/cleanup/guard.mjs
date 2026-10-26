@@ -122,9 +122,16 @@ export function requiredCleanupPhraseCount(database) {
  *
  * @returns {{ target: string, database: string, production: boolean, phrases: number }}
  */
-export function assertCleanupTarget({ env, target, database, values = process.env } = {}) {
-  const record = resolveCleanupTarget(target);
-  const command = `cleanup:${record.target}`;
+/**
+ * The database half of the cleanup rule, shared by the dispatch targets and the
+ * tenant-scoped commands: the name must be present, equal the resolved database,
+ * be a cleanable one, and not contradict the connection string.
+ *
+ * Extracted rather than copied because the two families must answer "which database?"
+ * identically. The message text is asserted by tests, so the extraction keeps it
+ * byte-for-byte.
+ */
+function assertCleanupDatabase({ env, command, database }) {
   const resolved = String(env?.mongodbDbName ?? '').trim();
   const requested = String(database ?? '').trim();
   const production = resolved === DATABASE_NAMES.production;
@@ -176,6 +183,69 @@ export function assertCleanupTarget({ env, target, database, values = process.en
     );
   }
 
+  return { resolved, production };
+}
+
+/**
+ * The same fail-closed rule for a TENANT-SCOPED cleanup (`cleanup:demo`,
+ * `cleanup:roles`, …), which deletes one named tenant rather than a database.
+ *
+ * It costs the same as the database target: TWO phrases in development
+ * (`CLEANUP_CONFIRM=<the command's phrase>` and `CLEANUP_DB_CONFIRM=<database>`)
+ * and THREE in production (adding `CLEANUP_PROD_CONFIRM`). A scoped command must
+ * not be the cheaper way to delete production rows.
+ *
+ * The caller still proves WHICH tenant — this guard only proves WHERE and that the
+ * operator meant it.
+ *
+ * @returns {{ database: string, production: boolean, phrases: number }}
+ */
+export function assertScopedCleanupTarget({
+  env,
+  command,
+  confirmPhrase,
+  database,
+  values = process.env,
+} = {}) {
+  const { resolved, production } = assertCleanupDatabase({ env, command, database });
+
+  const missing = [];
+  if (String(values?.[CLEANUP_CONFIRM_ENV] ?? '').trim() !== confirmPhrase) {
+    missing.push(`${CLEANUP_CONFIRM_ENV}=${confirmPhrase}`);
+  }
+  if (String(values?.[CLEANUP_DB_CONFIRM_ENV] ?? '').trim() !== resolved) {
+    missing.push(`${CLEANUP_DB_CONFIRM_ENV}=${resolved}`);
+  }
+  if (production && String(values?.[CLEANUP_PROD_CONFIRM_ENV] ?? '').trim() !== CLEANUP_PROD_CONFIRM_PHRASE) {
+    missing.push(`${CLEANUP_PROD_CONFIRM_ENV}=${CLEANUP_PROD_CONFIRM_PHRASE}`);
+  }
+
+  if (missing.length > 0) {
+    const need = production ? 'three' : 'two';
+    throw new CleanupSafetyError(
+      `${need} confirmation phrase(s) are required to clean ${resolved}` +
+        `${production ? ' (PRODUCTION)' : ''} [${command}], and ${missing.length} ` +
+        `${missing.length === 1 ? 'is' : 'are'} missing or wrong: ${missing.join(' AND ')}. ` +
+        'Nothing was deleted.',
+    );
+  }
+
+  return { database: resolved, production, phrases: production ? 3 : 2 };
+}
+
+/**
+ * The fail-closed dispatch-target check. Called by every cleanup engine BEFORE it
+ * opens a connection, resolves an identity or deletes anything — dry runs included,
+ * so a dry run proves the destination and the phrases rather than only the shape of
+ * the plan.
+ *
+ * @returns {{ target: string, database: string, production: boolean, phrases: number }}
+ */
+export function assertCleanupTarget({ env, target, database, values = process.env } = {}) {
+  const record = resolveCleanupTarget(target);
+  const command = `cleanup:${record.target}`;
+  const { resolved, production } = assertCleanupDatabase({ env, command, database });
+
   const providedConfirm = String(values?.[CLEANUP_CONFIRM_ENV] ?? '').trim();
   const otherPhrase = Object.values(CLEANUP_TARGETS).find((t) => t.phrase === providedConfirm);
   if (otherPhrase && providedConfirm !== record.phrase) {
@@ -220,4 +290,5 @@ export default {
   resolveCleanupTarget,
   requiredCleanupPhraseCount,
   assertCleanupTarget,
+  assertScopedCleanupTarget,
 };

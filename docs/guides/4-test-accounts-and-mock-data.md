@@ -245,7 +245,9 @@ NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
   --business=THE_BUSINESS_ID --total=60000
 
 # empty that tenant's data, keeping the login, the business row and sessions
-NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db CLEANUP_CONFIRM=cleanup:demo-account \
+NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
+  CLEANUP_CONFIRM=cleanup:demo-account CLEANUP_DB_CONFIRM=inventoryai_prod_db \
+  CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA \
   npm run cleanup:demo -- --database=inventoryai_prod_db \
   --email=YOUR_EMAIL --business=THE_BUSINESS_ID
 
@@ -254,7 +256,8 @@ NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db CLEANUP_CONFIRM=cleanup:
   npm run cleanup:perf-tenant -- --database=inventoryai_prod_db
 ```
 
-`cleanup:demo` requires the email and business id to **agree**, deletes that tenant's inventory,
+`cleanup:demo` needs **two phrases in development, three in production**, requires the email and
+business id to **agree**, deletes that tenant's inventory,
 movements, products, categories, locations, suppliers, purchase orders, audit rows, invitations and
 assistant conversations, then re-reads and prints `0 remaining`. It never deletes an identity.
 `--dry-run` prints the same counts without deleting. A production seed never changes an existing

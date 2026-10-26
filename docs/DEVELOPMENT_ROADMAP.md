@@ -8,7 +8,7 @@ of truth for *what actually happened*, and it is why this file is long.
 
 **How to read it.** Do not read it top to bottom. Either find a record by number (§27FJ, §27DM — the
 numbers are cited from `CLAUDE.md` and from source comments), or use the index: `CLAUDE.md` §7 lists
-all **168** records by the title each gives itself.
+all **169** records by the title each gives itself.
 
 **Current state:** V1 complete and in production testing. The records that answer *where are we now*
 are §27FM (the V1 re-verification), §27FK (the runtime boundary and the blocked build), §27FJ (the two
@@ -21298,6 +21298,95 @@ server or mobile source changed.
 
 **Not done, deliberately:** no build (quota), no publish (guard), no key pair generated (it would sit
 unused and must be backed up by the owner), no plan change (owner decision).
+
+---
+
+# 27FO. The documentation set, measured and cut — and four documents that were confidently wrong (2026-10-26)
+
+**The problem was not only length.** The eleven documents in `docs/` came to **319 495 words**, of
+which the roadmap alone was 236 350 — but several of the others had drifted far enough to mislead a
+reader who trusted them:
+
+- `AUTH_SECURITY_MASTER_CHECKLIST.md` still listed **invitation-based registration as `[ ]` not
+  implemented**, months after it shipped (§27FB), and its baseline was `main @ 934b15a` (2026-09-28).
+- `SECURITY_DEPENDENCY_DECISIONS.md` described the **server's** two moderate `uuid`/`gaxios`
+  advisories as the standing position. Re-measured today: that tree is **0**, and the open advisories
+  are two **high** ones in `mobile/` — `zod` and `node-forge` — which the document did not mention at
+  all.
+- `docs/README.md` said some files are "pinned by checksums and a check fails if one changes" and that
+  `SOURCE_PROTECTION.md` lists them. **Neither is true**: no script verifies them, and the list is in
+  the auth checklist. The git blob hashes there are a manual register.
+- `SYSTEM_SPECIFICATION.md` listed the mobile stack as **JavaScript**. It has been TypeScript for the
+  whole TS campaign.
+
+**What was cut, and what was kept.** Word counts are before → after:
+
+| Document | Before | After | Treatment |
+| --- | --- | --- | --- |
+| `AUTH_SECURITY_MASTER_CHECKLIST.md` | 32 940 | 2 290 | 53 sections → invariants (I-1…I-24), control status, registers, gates, protected-file register, and a map of where the old sections went |
+| `PHASE_HISTORY.md` | 12 425 | 1 090 | narrative → one line per phase, complete through V1 close-out, each pointing at its record |
+| `DEVELOPING_ON_A_PHYSICAL_DEVICE.md` | 7 696 | 4 268 | commands, probes, log tables and failure→fix kept; repeated provenance and duplicated explanations removed |
+| `AUTHENTICATION_AND_USER_VERIFICATION_TARGET_ARCHITECTURE.md` | 4 782 | 1 924 | rules kept; per-phase delivery narratives and generic engineering principles removed |
+| `SOURCE_PROTECTION.md` | 2 507 | 1 332 | measured posture, public-window caveat and limitations kept; 16 recommendations grouped into 11 |
+| `TS-MIGRATION-MANIFEST.md` | 1 733 | 779 | 22-commit table dropped (git holds it); flags, deferred module and snapshot kept |
+| `SECURITY_DEPENDENCY_DECISIONS.md` | 1 859 | 888 | rewritten around today's measured state and npm's proposed "fix" — an SDK **downgrade** |
+| `DESIGN_SYSTEM.md` | 2 425 | 1 955 | token/type/a11y reference kept; six increments of adoption history compressed |
+
+Across all eleven files, `wc -w` moves **319 495 → ≈268 300**, a cut of about **16%**. That figure is
+modest on purpose: roughly **237 000 of what remains is the roadmap**, untouched apart from this
+record. Excluding it, the other ten documents fall from **83 145 to 31 261** — a cut of **62%**, and
+those two numbers are exact because neither file changes while they are written.
+
+**`DEVELOPMENT_ROADMAP.md` and `SYSTEM_SPECIFICATION.md` were deliberately left long.** The roadmap's
+record bodies *are* the evidence — an edited measurement is no longer evidence, and compressing the
+168 records that preceded this one is per-record editorial work, not a sweep (its own §27FM says so). The
+specification is the behavioural contract; it is long because behaviour is. The real fix for both is
+orientation, not deletion: `docs/README.md` now says plainly that the roadmap is an archive and you
+never need to read it to change the project.
+
+**What this pass itself cost:** no source, test, workflow, dependency or configuration file changed.
+
+## Verification
+
+The four documentation guards — section integrity, route inventory, fact drift, issue records — pass,
+**26/26**. The record count and the `CLAUDE.md` index move together to **169**. All **48** relative
+links in the rewritten files resolve. Every figure re-asserted in the new text was read from the code
+this session: `MAX_ACTIVE_SESSIONS_PER_USER = 20`, `SESSION_ABSOLUTE_CAP_DAYS = 14`,
+`JWT_EXPIRES_IN = 1h`, `FIREBASE_REAUTH_WINDOW_SECONDS = 300`; both `npm audit` results were measured,
+not recalled.
+
+**One judgement recorded rather than hidden:** old citations such as "checklist §39" or "§42" in the
+frozen `docs/freebuff/` logs no longer name a section. The new document carries a mapping table (§9)
+so a reader can still resolve them, and the frozen logs were not rewritten.
+
+## Second pass — the rest of the set (2026-10-26, same day)
+
+The eleven files above were not the whole of `docs/`. A second pass read the remaining set — the design
+spec, the guides, the two root documents, `freebuff/` — and changed six things. Only one was about
+length: the rest corrected a statement that had stopped being true, or supplied one that was missing.
+
+| Document | Change | Why |
+| --- | --- | --- |
+| `superpowers/specs/2026-09-18-firebase-auth-design.md` | status block replaced with a dated table of current state | It said **Google Sign-In, linking, unlinking and invitations were all unimplemented**. Three of the four have shipped or been removed: Google Sign-In (device-verified, §27EY), invitations (§27FB–FD), unlink (removed, §27AA); linking exists server-side with no mobile surface. A reader trusting the first paragraph would plan work that is already done or already deleted |
+| `DEVELOPING_ON_A_PHYSICAL_DEVICE.md` | 4 268 → **4 021** | §1–6 (install adb/scrcpy, USB debugging, mirroring, dev-client install, Metro) were the same steps Guides 2 and 3 teach. Folded into those guides; the depth they do not carry — the RSA/`adb devices` table, dev-vs-standalone detection, the three independent signals, the percent-encoded deep link — was kept, and the old **§6a**/**§9b** numbers still resolve, because the roadmap cites them |
+| `guides/7-over-the-air-updates.md` | config snippet `1.0.0` → `1.0.1`; runtime row and one link corrected | `mobile/app.json` is `1.0.1`; the installed binaries are `1.0.0`, which the surrounding text already said. The `ota-native-runtime.json` link pointed at a file that does not exist until a build writes it |
+| `guides/8-play-store-submission.md` | dead build ids marked as deleted | `09d77d3d…`/`4b133d62…` are dead pointers since §27FN; the table is evidence that the parity gate works, not a pair of downloadable artifacts |
+| `guides/README.md` | false protection claim removed | It said the spec, roadmap, phase history and security record are "protected by checksums". Nothing verifies them; the five protected *paths* are in the auth checklist §8 |
+| `SYSTEM_SPECIFICATION.md`, `freebuff/README.md` | status headers | The spec said "Initial Product Specification" and version 1.0 while the app ships 1.0.1; the audit trail had no statement that it is frozen at 2026-09-30 on a branch that no longer exists, so its obsolete test counts and SDK versions read as current |
+
+**Deliberately kept, with reasons.** The **roadmap** and **specification body** stay long (above).
+`docs/superpowers/plans/` and `docs/evidence/` stay: dated plans and captured output are evidence.
+`docs/freebuff/` stays as an **owner decision** (P3-2, §27AL) — the banner added to its README says what
+it is and is not, rather than deleting a record the owner chose to retain. Guides 4 and 6 both cover the
+data commands: guide 4 is the account-and-data walkthrough and guide 6 the script reference, they
+already cross-reference each other, and merging them would put one command in two audiences' way.
+
+## Verification of the second pass
+
+Four documentation guards pass (section integrity, route inventory, fact drift, issue records);
+every relative link across the markdown set resolves, none missing; `check-secrets.mjs` scans 863
+files with 22 controls and finds no credential-shaped content; `git diff --check` is clean. No source,
+test, workflow, dependency or configuration file was touched by either pass.
 
 ---
 

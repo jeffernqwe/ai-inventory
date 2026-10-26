@@ -1,5 +1,7 @@
 # Freebuff Audit Trail — scope, rules and navigation
 
+> **FROZEN — last entry 2026-09-30. Read §0 before anything below.**
+>
 > **AUDIT / TRACEABILITY RECORD OF FREEBUFF ACTIVITY.**
 > This directory is **not** the Inventory AI architecture, **not** the project history, **not** a
 > specification, **not** a roadmap, **not** a security policy and **not** a replacement for
@@ -14,6 +16,37 @@
 > - `docs/DESIGN_SYSTEM.md`, `docs/TS-MIGRATION-MANIFEST.md` — design and migration records
 >
 > Nothing in this directory overrides, corrects, restates or supersedes any of them.
+
+---
+
+## 0. This directory is frozen (added 2026-10-26)
+
+It records one evaluation of Freebuff as a secondary agent, on the branch
+`experiment/freebuff-evaluation` at HEAD `d8b693a` (Phase 32H). **That branch is not the project's
+line of development, and every "current state" statement in these files is a snapshot of September
+2026.** Specifically, and not exhaustively:
+
+- the test counts (45 server suites, 15 mobile suites, 838/21 later) and the dependency state
+  (Expo SDK 57) are superseded; `server/src` is now 160 TypeScript modules on Node 24 and mobile is
+  Expo SDK 58;
+- the Phase 32L unlink work these task records describe was **removed** (roadmap §27AA);
+- the FB-D-101…FB-D-111 documentation-drift observations were mostly **fixed** afterwards — the
+  mobile stack, the route inventory, the EAS build statements and the README endpoints among them.
+
+**Where current state actually lives:** `CLAUDE.md` §1 and its open-items list,
+`docs/DEVELOPMENT_ROADMAP.md`'s newest `§27…` record, and
+`docs/AUTH_SECURITY_MASTER_CHECKLIST.md`. The audit layer was kept deliberately (roadmap §27AL, owner
+decision P3-2) because it is the provenance record for that period, not because it describes today.
+Two parts of it are still load-bearing and are not duplicated elsewhere:
+
+| Kept for | Where |
+| --- | --- |
+| The mandatory *historical ≠ executed* labelling rule (FB-D-005) | §1 below |
+| The measured Firebase facts — client `unlink()` of the **only** provider succeeds, so last-method protection must be server-side; `auth_time` is re-stamped by reauthentication and not by `getIdToken(true)`; provider unlink does not revoke refresh tokens | `tasks/FB-007-*`, `DECISIONS.md` FB-D-120 |
+| Why a freshness refusal answers `409`, not `403` (403 is the client's session-loss signal) | `DECISIONS.md` FB-D-120 |
+| The two test weaknesses the mutation pass found and then closed | `DECISIONS.md` FB-D-121/122 |
+
+Do not extend this directory. New work is recorded in `docs/DEVELOPMENT_ROADMAP.md`.
 
 ---
 

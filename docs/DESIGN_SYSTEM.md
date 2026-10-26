@@ -219,63 +219,25 @@ Colours come from tokens only — never a literal, and never `colors` imported f
 
 ## 7. Adoption status
 
-- **18A**: theme tokens + Provider + 41-file behavior-neutral conversion; primitives built and
-  polished; `SelectField` on `Sheet`. Screens render identically in light.
-- **18B**: dashboard rebuilt on `StatCard`/`SectionHeader`/`ListRow` with a clearer navigation
-  hierarchy; same data, same destinations.
-- **18C**: the three core list screens (products, inventory, purchase orders) adopt
-  `ListScreen`/`ListRow`/`SearchField`/`PressableCard`/`Icon` on one shared row grammar; `ListRow`
-  gains `footer`/`titleStyle`, `ListScreen` gains `emptyAction`/`loadingLabel`, `PressableCard`
-  forwards props, `SearchField` gains `autoCapitalize`. Behavior unchanged.
-- **18D**: the four record-detail screens (product, stock record, purchase order, receive) adopt
-  `SectionHeader`/`StatCard`/`ListRow`: key quantities lead each screen at the `stat` token, row
-  grammars match the lists, and definition rows keep their label/value form. No `mobile/components/`
-  change was needed. Behavior unchanged — no logic, API, navigation, or permission edits, and the
-  claim-first receive is presentation-only.
-- **18E**: the secondary screens — users (index/new/detail), audit, history, categories, locations,
-  suppliers, profile, change-password, edit-name, scan, and the AI hub/new/chat — adopt the same
-  primitives. `RefManage`, `UserForm` and `AiChat` were modernised in place; `Chip` gains its
-  semantic selected state and 44px floor, and `ListScreen` gains an additive `errorTitle` and
-  `footer`. Forms/auth screens are deferred to 18F. Behavior unchanged.
-- **18F**: the forms and auth screens — `ProductForm`, `MovementForm`, `PoForm`, `AuthLayout`, and the
-  routes `login`, `register`, `app/index`, `products/new`, `products/[id]/edit`, `stock-in`,
-  `stock-out`, `adjust`, `purchase-orders/new`, `purchase-orders/[id]/edit` — adopt the same
-  primitives. The three form components now own their own `Screen` (scroll + keyboard avoidance +
-  safe-area padding) and every route renders them bare, so no route nests a second `Screen`; the
-  PO item block uses `Card` + `SectionHeader`, and `MovementForm`'s availability line becomes a
-  `StatCard`. `AuthLayout` gained a centred, reflowing brand block. `AccessDenied`'s 🔒 emoji
-  becomes the semantic `Icon name="lock"`. `lib/theme.js`'s dark `placeholder` was lifted to
-  `#8A93A6` (§2, §7). Behavior unchanged: RBAC gates, validation order, payload shapes, and
-  loading/empty/error copy are preserved.
-- **25**: the two light-theme contrast findings below are closed, by owner decision, with measured
-  values rather than visual judgement. `lib/theme.js`'s light `placeholder` moves `#8A94A6` →
-  `#646E83` (3.06:1 → 5.12:1 on `surface`; 2.70:1 → 4.53:1 on `surfaceMuted`; 2.83:1 → 4.73:1 on
-  `background`) and light `textMuted` moves `#667085` → `#5F697E` (4.97:1 → 5.51:1 on `surface`;
-  4.40:1 → 4.87:1 on `surfaceMuted`; 4.60:1 → 5.10:1 on `background`). The dark theme is unchanged
-  (it already cleared AA at 5.40:1 / 4.76:1). Behavior unchanged: no component, layout, copy or
-  logic edit — two token values only.
-- **27**: `Banner` gains an additive **`success`** tone, using the existing `success` / `successSoft`
-  theme colors — no token was added or changed. Additive in the strict sense: every pre-existing
-  `Banner` call site uses `error`, `warn` or `info`, so no existing screen can render differently.
-  The new tone carries the two password-recovery success states (link requested, password changed).
+The primitives are adopted across the whole app: the theme and 41 importers (18A), the dashboard
+(18B), the three core lists (18C), the four record-detail screens (18D), the fifteen secondary
+screens (18E), and the forms and auth routes (18F). Every one of those increments was
+behaviour-neutral — no API, validation, permission or navigation change — and that is the property
+to preserve when touching a screen again.
 
-### Known issues (reported, not fixed)
+Two later increments changed only token values, both measured rather than judged:
 
-**`SearchField` placeholder clips at 160% font scale (found by the 25 smoke, pre-existing).** On the
-products list the placeholder copy is long enough that at 160% it wraps to a second line, and the
-second line is cut off at the field's bottom edge — only the ascender tops of the final word render.
-It reproduces identically in light and dark, which is what identifies it as a layout issue rather
-than a token issue: 25 changed two hex values and no geometry, and a colour cannot clip text. The
-field's `minHeight: 44` and fixed `paddingVertical: 11` do not grow with the wrapped line, and it is
-the products copy specifically (the longest placeholder in the app) that triggers it. Deliberately
-**not** fixed here: it is outside 25's approved scope, which forbids primitive and layout edits.
-Recorded so it is not rediscovered as a regression.
+- **25** — light `placeholder` `#8A94A6 → #646E83` and light `textMuted` `#667085 → #5F697E`, closing
+  the last two AA failures. Values in §2; `surfaceMuted` is the binding surface and sets the floor.
+- **18F** — the dark `placeholder` was lifted to `#8A93A6`, where it already clears AA.
 
-The two contrast findings previously listed here — light `placeholder` at 3.06:1 / 2.70:1 and light
-`textMuted` at 4.40:1 on `surfaceMuted` — were closed by the **25** entry above; both are now
-measured in the §2 table. The history is kept deliberately: the dark `placeholder` was lifted by
-18F (D1) because 18E reported it, while the light value went un-flagged for the same reason it was
-never fixed — placeholder text is *supplemental* here (every field carries a real label), which is
-why it survived four increments of AA review. It is not, however, exempt: WCAG 1.4.3 excludes only
-incidental text, logotypes and **inactive** components, and the binding surfaces (`SearchField`,
-`SelectField`'s in-sheet search, `AiChat`'s composer) are all live fields.
+**27** added a `success` tone to `Banner` using the existing `success`/`successSoft` tokens. Additive
+in the strict sense: every earlier call site uses `error`, `warn` or `info`.
+
+### Known issue, not fixed
+
+**`SearchField`'s placeholder clips at 160% font scale** on the products list — the longest
+placeholder in the app wraps to a second line that the field's fixed `paddingVertical` and
+`minHeight: 44` do not grow to fit. It reproduces identically in light and dark, which identifies it
+as a layout issue rather than a token one. Recorded so it is not rediscovered as a regression; fixing
+it means letting the field's height follow its content.

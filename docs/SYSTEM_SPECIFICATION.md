@@ -1,9 +1,13 @@
 # Inventory AI — System Specification
 
-**Version:** 1.0  
-**Status:** Initial Product Specification  
-**Target Platforms:** Android + iOS  
-**Architecture:** React Native + Expo + Node.js + Express + MongoDB Atlas
+**Version:** 1.0 (this specification) · the shipped app is **1.0.1** · **Status:** implemented for
+V1 — every behaviour below is live or marked as a non-goal · **Platforms:** Android + iOS (iOS is
+unverified: no macOS host) · **Architecture:** React Native + Expo + Node.js + Express + MongoDB Atlas
+
+> This is the **authoritative statement of required behaviour**. Where the shipped code differs, that
+> is a defect or a recorded change — `docs/DEVELOPMENT_ROADMAP.md` holds the dated record for each
+> change, and `docs/AUTHENTICATION_AND_USER_VERIFICATION_TARGET_ARCHITECTURE.md` describes the auth
+> layer as it actually runs. Do not edit a rule here to match the code without the owner's approval.
 
 ---
 
@@ -70,10 +74,8 @@ These may be considered in future versions.
 
 ## Mobile
 
-- React Native
-- Expo
-- Expo Router
-- JavaScript
+- React Native 0.88 · Expo SDK 58 · Expo Router
+- TypeScript
 - REST API communication
 - Secure local token storage
 

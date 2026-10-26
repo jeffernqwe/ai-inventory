@@ -38,7 +38,7 @@ count the check).
 | **Channel** | compiled into the binary: `development`, `preview`, `production`. An install listens to exactly one. |
 | **Branch** | where a group is stored; here each branch is named after its channel. |
 | **Update group** | one publish: bundle, assets, message, commit, group id. What you roll back or republish. |
-| **Runtime version** | the compatibility label; under `appVersion` policy it is `expo.version` (`1.0.0`). Delivered only on an **exact** match. |
+| **Runtime version** | the compatibility label; under `appVersion` policy it is `expo.version` — `1.0.1` in the tree, `1.0.0` on every installed binary (§3). Delivered only on an **exact** match. |
 | **Embedded bundle** | the JavaScript inside the APK; the fallback that always exists. |
 
 An install receives an update when its **channel** points at the branch **and** its **runtime**
@@ -50,7 +50,7 @@ no push.
 `mobile/app.json`:
 
 ```json
-"version": "1.0.0",
+"version": "1.0.1",
 "runtimeVersion": { "policy": "appVersion" },
 "updates": {
   "url": "https://u.expo.dev/607eca05-1175-43ed-86a0-1829e91c9531",
@@ -374,8 +374,8 @@ after install. With it, the new build stops listening to `1.0.0` — the point.
 
 ### The native-runtime record (added 2026-10-25)
 
-`npm run check:ota` also reads [`mobile/ota-native-runtime.json`](../../mobile/ota-native-runtime.json),
-a committed record of the versions the **last build** was compiled with. It refuses to publish when
+`npm run check:ota` also reads `mobile/ota-native-runtime.json` (not in the tree yet — it is created
+after the first build), a committed record of the versions the **last build** was compiled with. It refuses to publish when
 `expo`, `expo-modules-core` or `react-native` differ from that record, because EAS labels a bundle by
 `appVersion` and cannot see which native modules the phone actually has. Write the file after a build:
 

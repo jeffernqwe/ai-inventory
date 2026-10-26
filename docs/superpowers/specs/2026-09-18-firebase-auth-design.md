@@ -6,14 +6,32 @@
 **Scope:** Documentation only. This phase changes no source code, no dependency, no configuration,
 no environment variable, no database record, and no authentication behaviour.
 
-> **Current status (2026-09-20).** This document is still the design authority, and its scope line
-> above describes **Phase 32A**, not the phases that followed. **Option B** (§5) is the selected
-> architecture, and Phases 32B–32E have since implemented it for email/password (§21, roadmap §27H).
-> **Phase 32F** recorded the multi-provider decisions in **§14A**, which is **authoritative for the
-> current state of the register** — what is resolved, what is open, and what is implemented. Where §14
-> and §14A differ in emphasis, §14A is current. **Google Sign-In, Facebook Login, Apple Sign-In,
-> account linking, account unlinking and invitations remain unimplemented**, and no provider SDK is
-> installed.
+> **Current status (2026-10-26).** These paragraphs are the design record, and the scope line above
+> describes **Phase 32A** only. **Option B** (§5) is the shipped architecture: Firebase proves identity,
+> Mongo `User` decides authorization, and a verified Firebase ID token is exchanged **once** for an
+> ordinary Inventory AI JWT. Where sections disagree, the **latest dated note wins** — each one is
+> appended in place rather than overwritten, so the delta stays visible.
+>
+> **What is current, and what shipped since this was written:**
+>
+> | Feature | State |
+> | --- | --- |
+> | Email/password via native SDK (M1) | **Shipped** (§21, §14A.9, §12 note) |
+> | Google Sign-In (native) | **Shipped, device-verified 2026-10-24** (roadmap §27EY) |
+> | Six-digit email verification | **Shipped** as a custom code flow, AUTH-04 (§27Y) — not Firebase's link |
+> | Password reset by six-digit code | **Shipped** AUTH-06 (§27DY) |
+> | Invitations / joining a business | **Shipped 2026-10-25** (§27FB–§27FD) |
+> | Server-side account **linking** route | **Implemented** (§14B) but **no mobile surface** — unreachable from the app |
+> | Account **unlinking** | **Removed** (Phase A / F-1, §27AA). §14B's unlink plans and the 32L records are void |
+> | Facebook Login, Apple Sign-In | **Not implemented**; each needs an owner-approved phase |
+> | Legacy password login (pre-Firebase accounts) | **Still live**; cannot be retired until those accounts migrate |
+> | §14C Firebase-only architecture | **Locked design, NOT implemented** — no `REMOVE` item has been done |
+>
+> The **only** architecture narrative that describes the code as it runs today is
+> [`docs/AUTHENTICATION_AND_USER_VERIFICATION_TARGET_ARCHITECTURE.md`](../../AUTHENTICATION_AND_USER_VERIFICATION_TARGET_ARCHITECTURE.md);
+> the live guarantee list is [`docs/AUTH_SECURITY_MASTER_CHECKLIST.md`](../../AUTH_SECURITY_MASTER_CHECKLIST.md).
+> §2 below is the **pre-Firebase baseline** and §2.6 is the route inventory a guard reads — keep it
+> exact. Treat §§3–13 as the design that was approved, not as a description of the current tree.
 
 ---
 

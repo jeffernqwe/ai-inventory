@@ -61,6 +61,11 @@ four sentences.
 
 Evidence: [`2026-10-24-release-aab`](../evidence/device-runs/2026-10-24-release-aab/README.md).
 
+> **Both of those build records were deleted from EAS on 2026-10-26** (roadmap §27FN): their ids are
+> now dead pointers and their artifacts answer `400`. The table above is the *evidence that the gate
+> works*, not a pair of files anyone can download. The authoritative store artifact is the **next**
+> build — run §1.1 on it, and record its id only after `eas build:view <id>` resolves.
+
 ## 2. Store listing
 
 | Field | Value |

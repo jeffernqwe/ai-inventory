@@ -479,6 +479,7 @@ anchor (`§27…`) in that file.
 - **§27FL** — The session cap the roadmap had twice recommended and never built (2026-10-25)
 - **§27FM** — The whole V1 surface re-verified, and the front door cut to a page (2026-10-25)
 - **§27FN** — Three EAS questions answered: the vanished production builds, the quota, and the plan gate on signing (2026-10-26)
+- **§27FO** — The documentation set, measured and cut — and four documents that were confidently wrong (2026-10-26)
 
 ---
 

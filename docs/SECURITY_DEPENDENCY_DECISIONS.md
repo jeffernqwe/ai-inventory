@@ -1,264 +1,102 @@
-# Inventory AI — Security Dependency Decisions
+# Security Dependency Decisions
 
-**Version:** 1.0
-**Status:** Living decision record
-**Baseline:** branch `main` @ `6e2b00ddfc2a9d294b38c6ac7123db575e0d372e` (2026-09-30)
+**Status:** living decision record · **Re-measured 2026-10-26** at `main`
 
----
+An advisory that is not being fixed is **named, evidenced and dispositioned**, never left implied.
+This file covers dependency advisories only; application security decisions are in
+[`AUTH_SECURITY_MASTER_CHECKLIST.md`](AUTH_SECURITY_MASTER_CHECKLIST.md), and dated measurements in
+[`DEVELOPMENT_ROADMAP.md`](DEVELOPMENT_ROADMAP.md) §27AK, §27CA, §27CJ, §27FJ.
 
-## 1. What this document is
-
-A record of **dependency-security decisions that were deliberately NOT to be acted on
-automatically** — the advisories Inventory AI has chosen to **accept and document** rather than
-remediate, together with the evidence that justifies each acceptance and the conditions that
-force the decision to be revisited.
-
-It follows the same decision-record convention already used for the password-recovery security
-items B1 / B2 / E3 (`docs/DEVELOPMENT_ROADMAP.md` §27E): a risk that is **not fixed** is
-**named**, **evidenced**, and **explicitly dispositioned** rather than left implied. Where a
-previous document records a decision, this file records **dependency-specific** decisions and
-does not restate or contradict those.
-
-It authorises no implementation work, changes no code, and modifies no configuration or
-manifest.
-
-> **Reading rule that applies throughout.** Four facts are kept strictly separate, because
-> collapsing them is how an accepted risk turns into an unexamined one:
->
-> | Question | Answer for the item below |
-> | --- | --- |
-> | Does a vulnerable package exist in the tree? | **Yes** — 2 moderate audit entries |
-> | Is it a production dependency? | **No** — **optional** |
-> | Is it reachable from application runtime code? | **No** |
-> | Is the vulnerable API actually invoked? | **No** |
+Four questions stay separate for every item, because collapsing them is how an accepted risk becomes
+an unexamined one: does a vulnerable package exist · is it a production dependency · is it reachable
+from application runtime code · is the vulnerable API actually called.
 
 ---
 
-## 2. Decision summary
+## 1. Current result
 
-| ID | Decision | Status |
+| Tree | `npm audit` | Distinct advisories |
 | --- | --- | --- |
-| **D-1** | `uuid@9.0.1` (GHSA-w5hq-g745-h8pq) and the `gaxios@6.7.1` entry it causes are **ACCEPTED AND DOCUMENTED** as residual moderate advisories. They are **optional** and **unreachable** from the Inventory AI runtime path. **No remediation is applied.** | **ACCEPTED** |
-| **D-2** | npm's proposed remediation — **downgrading `gaxios` 6.7.1 → 6.3.0** — is **NOT TAKEN automatically**. A transitive downgrade of a package Inventory AI does not control is not an acceptable automatic change. | **NOT TAKEN** |
-| **D-3** | Forcing `uuid` 11.x via npm **`overrides`** is **REJECTED**, as is `npm audit fix --force`. Both would violate the parent package's declared range (`gaxios@6.7.1` declares `uuid: ^9.0.1`) or introduce unrelated major changes. | **REJECTED** |
+| `server/` | **0** | 0 |
+| `mobile/` | **6 entries, 2 advisories — both high, 0 critical** | `zod`, `node-forge` |
 
-**Residual risk is real but bounded:** 2 moderate advisories remain reported by `npm audit`.
-They are not described here as "fixed", "cleared", or "resolved".
+The server tree is clean. The two moderates it carried in September (`uuid@9.0.1` and the
+`gaxios@6.7.1` edge that pulled it in, GHSA-w5hq-g745-h8pq) are **gone**, closed by the
+`firebase-admin` line moving past the vulnerable `gaxios`; the decision that accepted them is
+therefore closed rather than still standing.
+
+The six mobile entries are **two advisories seen through their dependents** — `expo`,
+`@expo/cli`, `expo-updates` and `@expo/code-signing-certificates` are reported because they carry a
+vulnerable package, not because each has its own defect.
 
 ---
 
-## 3. Current findings
+## 2. The two open advisories
 
-```
-2 moderate severity vulnerabilities | 0 low / 0 high / 0 critical / 0 info
-audited: prod 159 | dev 95 | optional 120 | peer 0 — total 373
-```
-
-| Package | Installed | Vulnerable range | Advisory | Direct dependency? |
+| Advisory | Severity | Installed | Pulled in by | Patched |
 | --- | --- | --- | --- | --- |
-| `uuid` | `9.0.1` | `<11.1.1` | GHSA-w5hq-g745-h8pq — *"Missing buffer bounds check in v3/v5/v6 when `buf` is provided"* — **moderate** | no |
-| `gaxios` | `6.7.1` | `6.4.0 - 6.7.1` | none of its own — flagged **via `uuid`** — **moderate** | no |
+| **GHSA-mrhx-c7xc-m3w5** — `zod` exhausts memory validating an oversized array against a length-unconstrained schema (CWE-770) | high, 7.5 | `3.25.76`, nested at `mobile/node_modules/expo/node_modules/zod` | `expo@58.0.19 → @expo/cli@58.1.15`, which declares `zod: ^3.25.76` | `>= 4.6.6` |
+| **GHSA-86w9-cpqp-85rv** — `node-forge` accepts extra nested `DigestAlgorithm` elements when verifying RSA PKCS#1 v1.5 signatures (CWE-347) | high, 7.5 | `1.4.0` | `expo-updates@58.0.18 → @expo/code-signing-certificates@0.0.7`, which declares `node-forge: ^1.4.0` | **none published** — 1.4.0 is both the newest release and inside `<= 1.4.0` |
 
-This is **one advisory surfacing as two audit entries**: `gaxios` carries no advisory of its
-own; it is listed because it depends on the vulnerable `uuid`.
+**Neither is reachable from application code.** Measured on this tree, not assumed:
 
-`uuid@9.0.1` is additionally **deprecated upstream**:
-
-> `uuid@10 and below is no longer supported. For ESM codebases, update to uuid@latest.
-> For CommonJS codebases, use uuid@11 …`
-
----
-
-## 4. Exact dependency path
-
-```
-firebase-admin@14.4.0                       <- direct, production (server/package.json: ^14.4.0)
-└─ optionalDependencies: @google-cloud/storage ^8.1.0      <- OPTIONAL
-   └─ @google-cloud/storage@8.2.0                           lock: optional: true
-      ├─ gaxios ^6.0.2 -> node_modules/gaxios@6.7.1         lock: optional: true
-      │                    └─ uuid ^9.0.1 -> node_modules/uuid@9.0.1   lock: optional: true
-      ├─ google-auth-library@9.15.1 -> gcp-metadata@6.1.1 -> gaxios ^6.1.1  (deduped)
-      └─ google-auth-library@9.15.1 -> gtoken@7.1.0       -> gaxios ^6.0.0  (deduped)
-```
-
-Both sub-paths resolve to the **same two hoisted copies**. `node_modules/uuid` exists for
-exactly one reason: `node_modules/gaxios@6.7.1`.
-
-**Declaring packages and their exact ranges**
-
-| Declarer | Declares |
-| --- | --- |
-| `firebase-admin@14.4.0` | `@google-cloud/storage: ^8.1.0` — in **`optionalDependencies`** |
-| `@google-cloud/storage@8.2.0` | `gaxios: ^6.0.2` |
-| `gaxios@6.7.1` | `uuid: ^9.0.1` |
-
-For contrast, the non-vulnerable `gaxios@7.x` copies (`7.1.3`, `7.3.1`) arrive through the
-`@google-cloud/firestore@9.2.0 -> google-gax -> google-auth-library@10.x/11.x` path and carry no
-advisory.
+- No file under `mobile/app`, `mobile/lib`, `mobile/components` or `mobile/hooks` imports or requires
+  either package.
+- `node-forge` is required only by `@expo/code-signing-certificates/build/main.js`, a build-time
+  consumer of `expo-updates`' signing tooling — not a module the app loads at runtime.
+- The vulnerable `zod` is **nested inside `expo/node_modules`** for the CLI. The top-level `zod` is
+  `4.6.7`, which is already outside the advisory's range; the CLI cannot use it because it declares a
+  3.x range.
 
 ---
 
-## 5. Classification — optional, not production
+## 3. Decisions
 
-All three packages are **optional**, not production, not development, and not tooling:
-
-| Lock entry | `optional` | `dev` |
+| ID | Decision | State |
 | --- | --- | --- |
-| `node_modules/@google-cloud/storage` @ `8.2.0` | `true` | — |
-| `node_modules/gaxios` @ `6.7.1` | `true` | — |
-| `node_modules/uuid` @ `9.0.1` | `true` | — |
+| **D-4** | **Both open mobile advisories are ACCEPTED AND DOCUMENTED** as residual highs. No remediation is applied. | **ACCEPTED** |
+| **D-5** | **`npm audit fix` is NOT run.** Its proposal is `expo@54.0.38` — a **downgrade of four SDK majors** from the installed 58.0.19. That is not a fix; it would replace the whole supported SDK line with an older one. | **REJECTED** |
+| **D-6** | **npm `overrides` are NOT used** to force `zod` 4.x into `@expo/cli` or to replace `node-forge`. Both would install a dependency the parent never declared, against a consumer that has not been tested with it. | **REJECTED** |
+| **D-7** | The decision is **watched, not remembered**. `scripts/check-upgrade-watches.mjs` carries `zod (advisory)` and `node-forge (advisory)` and reports the gate each one needs to open. | **ACTIVE** |
 
-They are reachable **only** through `firebase-admin`'s **`optionalDependencies`**. npm's own
-audit metadata places them in the **optional** bucket (120), separate from production (159) and
-development (95).
-
----
-
-## 6. Runtime reachability — not reached
-
-**The affected chain is not imported by any Inventory AI runtime code.**
-
-Every Firebase import in `server/src`:
-
-```
-server/src/services/firebase/adminApp.ts:33
-  import { initializeApp, getApps, deleteApp, cert } from 'firebase-admin/app';
-
-server/src/services/firebase/tokenVerifier.ts:37
-  import { getAuth } from 'firebase-admin/auth';
-```
-
-* Inventory AI uses **Firebase Admin App and Auth** — **not Storage, not Firestore**.
-* There is **no** import of `firebase-admin/storage`, `firebase-admin/firestore`, `getStorage`,
-  or `getFirestore` anywhere in `src/`.
-* There is **no** import of `@google-cloud/storage`, `gaxios`, `uuid`, or `google-auth-library`
-  in `src/` or `test/`.
-
-The two entry points actually used — `firebase-admin/app` and `firebase-admin/auth` —
-authenticate through `google-auth-library@10.x -> gaxios@7.x`, which is **not** in the vulnerable
-range. The vulnerable `gaxios@6.7.1` + `uuid@9.0.1` pair exists solely for the Storage subtree
-the application never loads.
-
-### 6.1 The vulnerable API is not invoked either
-
-The advisory concerns `uuid` **v3 / v5 / v6 when a `buf` argument is supplied**. `gaxios` uses
-**only `v4()` with no `buf`** — a single call site:
-
-```
-node_modules/gaxios/build/src/gaxios.js:63    const uuid_1 = require("uuid");
-node_modules/gaxios/build/src/gaxios.js:417   const boundary = (0, uuid_1.v4)();
-```
-
-So even if the Storage subtree were exercised, the function named by the advisory would never
-run. Reachability fails at **two independent levels**: the module is never loaded, and the
-affected function is never called.
+The reasoning is the same for both: the vulnerable API is never invoked by application code, the
+package is confined to build tooling, and every available "fix" trades a non-exploitable advisory for
+a change that could break the Expo toolchain the app is built with. **A dependency upgrade for a
+non-reachable advisory is a real risk taken to remove a theoretical one.**
 
 ---
 
-## 7. Why there is no safe non-downgrade fix
+## 4. When this is revisited
 
-| Route | Availability | Compatible with current parent ranges? |
-| --- | --- | --- |
-| Upgrade `uuid` | fix at **>= 11.1.1** (latest `14.0.2`) | **No** — `gaxios@6.7.1` pins `uuid: ^9.0.1`; 11.x/14.x are out of range |
-| Upgrade `gaxios` to 7.x | **`gaxios@7` removed the `uuid` dependency entirely** (`7.3.1`: `extend`, `node-fetch@^3.3.2`, `https-proxy-agent`) | **No** — `@google-cloud/storage` pins `gaxios: ^6.0.2` |
-| Upgrade `@google-cloud/storage` | latest is **`8.2.0` (already installed)**; **8.x is the entire line** (`8.0.0`, `8.0.1`, `8.1.0`, `8.2.0`) and every 8.x declares `gaxios ^6.0.2`; **no 9.x exists** | **No** — no published Storage version pulls `gaxios` 7 |
-| Upgrade `firebase-admin` | latest **`14.5.0`** still declares `@google-cloud/storage: ^8.1.0` | **No** — would not help even if a direct upgrade were permitted |
-| **Downgrade `gaxios` to <= 6.3.0** | `6.3.0` has **no `uuid` dependency**; the vulnerable range begins at `6.4.0`, where `uuid ^9.0.1` was introduced | **Yes**, within `^6.0.2` — **but this is a downgrade** |
+The acceptance ends automatically when any of these becomes true — the watch script reports the first
+two:
 
-**Conclusion:** no remediation exists that avoids either a downgrade, an out-of-range
-resolution, or an override.
+1. **`@expo/cli` admits `zod >= 4.6.6`** in a published release (then the normal SDK patch train is
+   enough, no override).
+2. **A `node-forge` release is published outside `<= 1.4.0`** *and* `@expo/code-signing-certificates`
+   admits it.
+3. **Either package becomes runtime-reachable** — any import in app source, or a new consumer that
+   loads it in the shipped bundle.
+4. **The advisory is raised in severity**, or a new advisory names the same package.
+5. **An Expo SDK upgrade is planned for any reason** — re-run the audit as part of that work rather
+   than assuming the count is unchanged.
 
----
-
-## 8. npm's proposed remediation — recorded, NOT applied
-
-`npm audit fix --dry-run` (which writes nothing) proposes exactly:
-
-```
-remove  uuid 9.0.1
-change  gaxios 6.7.1 => 6.3.0
-```
-
-| Assessment | Verdict |
-| --- | --- |
-| Major upgrade? | **No** |
-| **Downgrade?** | **YES** — `gaxios` `6.7.1` -> `6.3.0` |
-| Override or unrelated change? | No — a single in-range package move; `fixAvailable` is a plain boolean (`true`), not an `isSemVerMajor` object |
-
-Analytically this **would** clear both entries: `6.3.0` declares no `uuid` dependency, and it
-sits below the vulnerable `6.4.0` boundary. The trailing audit report printed by the dry run
-still lists the two findings only because a dry run writes nothing, so its re-audit reads the
-unchanged on-disk tree.
-
-**This proposal was not applied.** Downgrading a transitive package outside Inventory AI's
-control is not an automatic change, and the rules in force for this decision explicitly
-prohibited downgrades.
+Watch the gate rather than the number: `npm audit` on `mobile/` counts **dependents** as well, so its
+6 entries are not 6 distinct defects.
 
 ---
 
-## 9. Accepted decision
+## 5. Evidence
 
-**D-1 — the residual advisories are ACCEPTED AND DOCUMENTED.**
-
-Rationale, in the order that matters:
-
-1. The chain is **optional** — one advisory behind an `optionalDependencies` entry.
-2. It is **unreachable**: no server source imports the Storage subtree.
-3. The vulnerable API (`uuid` v3/v5/v6 with `buf`) is **never called** — `gaxios` calls `v4()`
-   without `buf`.
-4. The only available fix is a **downgrade**, which is not an acceptable automatic change.
-5. Every upgrade route is blocked by a declared range Inventory AI does not own.
-
-**D-2 — npm's downgrade is NOT TAKEN.**
-
-**D-3 — `overrides` to force `uuid` 11.x and `npm audit fix --force` are REJECTED.**
-
-### 9.1 Revisit triggers — this decision is not permanent
-
-The acceptance **must be revisited** if **any** of the following becomes true:
-
-* The dependency chain changes — for example `@google-cloud/storage` or `firebase-admin`
-  republishes with a range that permits `gaxios` 7.x.
-* The affected packages become **runtime-reachable** — any import of `firebase-admin/storage`,
-  `firebase-admin/firestore`, `@google-cloud/storage`, `gaxios`, or `uuid` in `src/`.
-* A **compatible non-downgrade security fix** becomes available (for example `uuid >= 11.1.1`
-  reachable within a declared parent range, or a `gaxios` 6.x release that drops `uuid`).
-* The advisory's severity is raised, or a new advisory is filed against the same packages.
-* A future upgrade of `firebase-admin` or `@google-cloud/storage` is planned for any reason —
-  the audit result must be re-checked as part of that work rather than assumed unchanged.
-
----
-
-## 10. Evidence base (Phase 7, read-only)
-
-All findings below were produced by **read-only** commands. No file was modified, no dependency
-was installed, upgraded, downgraded, or removed, and no remediation was applied.
+Read-only commands; none of them writes, installs or removes anything.
 
 | # | Command | Result |
 | --- | --- | --- |
-| 1 | `npm audit` and `npm audit --json` | 2 moderate; `uuid` `<11.1.1`, `gaxios` `6.4.0 - 6.7.1` via `uuid` |
-| 2 | `npm ls gaxios uuid` | `firebase-admin` -> `@google-cloud/storage` -> `gaxios@6.7.1` -> `uuid@9.0.1`; gaxios 7.x on the Firestore path |
-| 3 | `npm explain gaxios` and `npm explain uuid` | all paths root at `firebase-admin@14.4.0`; entries marked **`optional`** |
-| 4 | `npm ls --all` | exit 0 — tree matches declarations |
-| 5 | Lockfile inspection | `optional: true` on `@google-cloud/storage`, `gaxios`, `uuid`; `@google-cloud/storage` listed in firebase-admin's `optionalDependencies` |
-| 6 | Source grep of `src/` and `test/` | no imports of Storage, Firestore, `@google-cloud/storage`, `gaxios`, or `uuid` |
-| 7 | `node_modules/gaxios/build/src/gaxios.js` | `require("uuid")` at `:63`; sole use `uuid_1.v4()` at `:417` |
-| 8 | Registry queries via `npm view` | `gaxios` 6.0.2–6.3.0 have **no** `uuid` dependency; `6.4.0`+ require `uuid ^9.0.1`; `gaxios@7.3.1` has none; Storage 8.x = `8.0.0`, `8.0.1`, `8.1.0`, `8.2.0`, all `gaxios ^6.0.2`; no Storage 9.x; `firebase-admin@latest` = `14.5.0`, still `@google-cloud/storage ^8.1.0` |
-| 9 | `npm audit fix --dry-run` | proposes `remove uuid 9.0.1` and `change gaxios 6.7.1 => 6.3.0` — **not applied** |
+| 1 | `npm audit --json` in `server/` | `{low:0, moderate:0, high:0, critical:0, total:0}` |
+| 2 | `npm audit --json` in `mobile/` | `{low:0, moderate:0, high:6, critical:0, total:6}` — the two advisories above |
+| 3 | `npm ls zod node-forge` | `zod@3.25.76` nested under `expo`; `node-forge@1.4.0` under `@expo/code-signing-certificates` |
+| 4 | Source grep of `app/`, `lib/`, `components/`, `hooks/` | no import of either package |
+| 5 | `grep -rln node-forge node_modules/@expo/code-signing-certificates/build` | one file, `main.js` — a build-time consumer |
+| 6 | `node scripts/check-upgrade-watches.mjs` | both advisory gates `DEFERRED`, with the exact release each needs |
 
-**Integrity after every check** (unchanged before and after): `server/package.json`
-`c6f4e119…`, `server/package-lock.json` `56662566…`; `uuid@9.0.1` and `gaxios@6.7.1` still
-installed; dependency tree unmodified.
-
-**Production context.** The commit this baseline records (`6e2b00dd…`) deployed to Render as
-deployment `dep-daufink9v7es73bisu9g` (status `live`), and its build log — running `npm ci`
-against the committed lockfile — reports the same unchanged **`2 moderate severity
-vulnerabilities`**. The advisory count is therefore identical in development and production.
-
----
-
-## 11. Amendment log
-
-| Date | Baseline | Change |
-| --- | --- | --- |
-| 2026-09-30 | `6e2b00dd` | Initial record — D-1 / D-2 / D-3, per the Phase 7 investigation. |
+No credential, token or secret value appears in this record.

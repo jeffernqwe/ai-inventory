@@ -8,7 +8,7 @@ of truth for *what actually happened*, and it is why this file is long.
 
 **How to read it.** Do not read it top to bottom. Either find a record by number (§27FJ, §27DM — the
 numbers are cited from `CLAUDE.md` and from source comments), or use the index: `CLAUDE.md` §7 lists
-all **170** records by the title each gives itself.
+all **171** records by the title each gives itself.
 
 **Current state:** V1 complete and in production testing. The records that answer *where are we now*
 are §27FM (the V1 re-verification), §27FK (the runtime boundary and the blocked build), §27FJ (the two
@@ -21504,6 +21504,101 @@ and OTA code signing (plan-gated). None of them was marked complete.
 Four documentation guards pass; every relative link resolves; `check-secrets.mjs` clean. **No source,
 test, workflow, dependency or configuration file changed** — `server/package.json`,
 `mobile/package.json` and both lockfiles are untouched, which is the point of the record.
+
+---
+
+# 27FQ. The empty state the harness could not read, and the production walk it was hiding (2026-10-26)
+
+**The first smoke run on a signed-in production tenant failed a step that was not a defect.** 6/8,
+exit 1, stopped at `expect product rows on screen` with *"nothing matches, and the screen is in no
+state the harness knows"*. The same screen, read seconds later, was saying *"No products found /
+Add your first product to start tracking stock. / Add product"* — a complete, correct empty state in
+the app's own words.
+
+**The harness knew two of the app's thirteen empty-state titles.** `EMPTY_COPY` held exactly
+`/^Nothing (here yet|to show)\b/i` — the copy the *shared* list shell uses, which is why Inventory
+was read correctly and Products was not. Every other screen names its own `emptyTitle`: `No products
+found`, `No locations yet`, `No suppliers yet`, `No movements yet`, `No active sessions`, `No items`,
+`Nothing left to receive`, … So on a tenant with no data, a screen that had finished loading and had
+nothing to show was reported as a **failed assertion** rather than the BLOCKED verdict the harness
+already has for exactly that case.
+
+**The fix is the shape those titles share, plus a guard that ties it to the app.** The pattern became
+`/^(?:Nothing|No)\b[^.!?]{0,48}$/i` (a short "No …"/"Nothing …" phrase, never a sentence), and
+`server/test/device-harness.test.mjs` now **reads every `title`/`emptyTitle` out of `mobile/app`** and
+requires each one to be recognised — with a floor of eight titles found, so a scan that silently
+returned nothing cannot pass. A rename now breaks a unit test instead of turning an empty list back
+into a false failure. The harness suite went from 58 tests to **59**.
+
+**Re-run, same phone, same tenant: 22/24, exit 2** (`2026-10-26T04-51-29-455Z-smoke`). Every one of
+the seven screens opened and named itself, all five "loaded without an error" assertions passed, and
+the two data assertions reported **BLOCKED** with the copy they saw — `Nothing to show` (Inventory)
+and `No products found` (Products) — because the tenant holds none. Exit 2 is the harness's "could not
+check", and it is the honest answer: nothing about data was proven either way.
+
+## The harness could not write, so the write paths were walked by hand — on production
+
+The tenant has no product, no location and no supplier, so `stock`, `transfer`, `label` and `draft`
+did not apply (`--product` is an id, and no id exists to pass). Rather than seed a tenant to feed a
+harness, the flows were driven through the app itself on the owner's own account, which also tests the
+*create* paths the journeys assume have happened already. Every number below is the app's own
+confirmation line, read off the screen:
+
+| Flow | The app said |
+| --- | --- |
+| Create location "Smoke shelf" | appeared in the list as `Active` |
+| Create product "Smoke Widget" (SKU `SMOKE-1`, 9.99) | detail shows `SKU SMOKE-1`, `Selling price 9.99`, `No stock yet` |
+| Stock in 5 | `Done. Smoke Widget at Smoke shelf: 0 → 5` |
+| Stock out 5 | `… Smoke shelf: 5 → 0` |
+| Stock in 1 | `… Smoke shelf: 0 → 1`; the transfer form then showed **`AVAILABLE TO TRANSFER 1`** |
+| Transfer 1 → "Smoke" | `Smoke shelf: 1 → 0` / `Smoke: 0 → 1` — one confirmation, both legs, one reference `TRF-6adee029e81b7012668a7155` |
+| Transfer 1 back | `Smoke: 1 → 0` / `Smoke shelf: 0 → 1` |
+| Stock out 1 | `… Smoke shelf: 1 → 0` — the tenant ends net **zero**, as the journeys are designed to |
+
+**The ledger agrees, on a different screen.** Inventory history read *"7 movements, newest first"*
+with per-row `from → to`, `+1`/`−1`, timestamps and the **same** transfer reference on both legs of
+each transfer; the Inventory list showed `Smoke Widget, Smoke shelf, 1 available · 1 on hand` beside
+`Smoke Widget, Smoke, 0 available · 0 on hand` — per-location rows, not one total.
+
+## The assistant answered from the ledger, not from the prompt
+
+Asked on the phone, *"How much Smoke Widget stock do I have, and at which locations?"*, the assistant
+answered **"You have 1 Smoke Widget in stock: Smoke shelf – 1 unit available; Smoke – 0 units
+available (out of stock / low‑stock) … That's the total on‑hand quantity across both locations"** and
+printed its own footer, **`Read: Product search · Inventory rows`**. The number matches the ledger and
+the screen, the tools are named, and nothing was written. That is AI tool-calling verified against
+production data, not against a fixture.
+
+## Three device behaviours recorded because they cost time
+
+- **An unlinked Google identity is refused, not provisioned.** Signing in with a Google account that
+  has no `User` row returned to the login screen with *"This sign-in is not linked to an Inventory AI
+  account yet. Create a business account to continue."* — no session, no partial user, no silent
+  sign-up. The exchange resolves by `firebaseUid` only, and this is that rule visible on a screen.
+- **`uiautomator dump` returned `null root node` for several minutes** while ColorOS's
+  `AssistOverlayBottom` / edge-bar window was flagged visible. **HOME then relaunching the app cleared
+  it**; the harness was not at fault and no code changed. Worth knowing before concluding "the phone
+  is broken".
+- **On the product and location forms the inputs are absent from the accessibility dump** while their
+  labels are present, so the flows were driven by geometry (tap below the label) and the typed value
+  then appeared as text. The login and register screens *do* expose their `EditText` nodes. Not chased
+  further and **not claimed as a defect** — recorded because it is both a constraint on this harness
+  and a possible screen-reader question for a later pass.
+
+**Residue, stated plainly:** the production tenant now holds two locations (`Smoke shelf`, `Smoke`),
+one product (`Smoke Widget`, 0 on hand everywhere) and eight ledger rows. Products are archive-only,
+so this is archive-or-keep, not delete. None of it was seeded by a script.
+
+## Verification
+
+`node --test test/device-harness.test.mjs` — **59 pass, 0 fail**. The two runs' reports are in
+`docs/evidence/device-runs/` and the index there lists both, including the one that failed for the
+harness's reason. No application source, dependency or configuration changed: the only code touched
+is `scripts/device/lib.mjs` and its test.
+
+**Unchanged and still open:** both mobile advisories (no patched release exists for either — §27FP),
+the OTA publish gate (`native-record-missing`, no runtime `1.0.1` build), L-17, the Play release,
+iOS verification and OTA code signing. None was marked complete.
 
 ---
 

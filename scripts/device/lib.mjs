@@ -227,7 +227,22 @@ export function fieldBelow(nodes, label) {
  * actually has, and a copy change that breaks it fails the run loudly rather than passing.
  */
 const ERROR_COPY = [/^Something went wrong$/i, /^Unable to load/i, /^Could(n't| not) load/i, /^Try again$/i];
-const EMPTY_COPY = [/^Nothing (here yet|to show)\b/i];
+
+/**
+ * Every empty-state title the app renders, not just the two the list shells share.
+ *
+ * MEASURED 2026-10-26 on an empty tenant: Inventory prints "Nothing to show" and was read
+ * correctly, but Products prints "No products found" and was read as "no state the harness
+ * knows" — so a screen that said, in the app's own words, that it had nothing to show was
+ * reported as a FAILED assertion instead of BLOCKED. The pattern has to follow the copy the
+ * screens actually use, and `emptyTitle` is per-screen: the app carries **thirteen** distinct
+ * ones — "No active sessions", "No items", "No products found", "Nothing left to receive",
+ * "Nothing to show", … — so this matches the shape they share (a short "No …"/"Nothing …"
+ * phrase) rather than a list of endings. `device-harness.test.mjs` reads every `title`/`emptyTitle`
+ * out of the mobile sources and fails if any of them is not recognised here, so a rename cannot
+ * silently turn an empty list back into a false failure.
+ */
+const EMPTY_COPY = [/^(?:Nothing|No)\b[^.!?]{0,48}$/i];
 const LOADING_COPY = [/^Loading\b/i];
 
 /**

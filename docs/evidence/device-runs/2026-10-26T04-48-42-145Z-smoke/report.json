@@ -1,0 +1,56 @@
+{
+  "journey": "smoke",
+  "startedAt": "2026-10-26T04:48:42.145Z",
+  "device": "CPH1969 · Android 11 (API 30) · PV4DDMIZZLTCIVSK",
+  "steps": [
+    {
+      "title": "open inventoryai://dashboard",
+      "status": "pass",
+      "detail": "inventoryai://dashboard",
+      "durationMs": 998
+    },
+    {
+      "title": "expect \"Overview\"",
+      "status": "pass",
+      "detail": "seen after 2350ms",
+      "durationMs": 2350
+    },
+    {
+      "title": "open inventoryai://inventory",
+      "status": "pass",
+      "detail": "inventoryai://inventory",
+      "durationMs": 1010
+    },
+    {
+      "title": "expect \"Inventory\"",
+      "status": "pass",
+      "detail": "seen after 2210ms",
+      "durationMs": 2210
+    },
+    {
+      "title": "expect stock rows on screen",
+      "status": "blocked",
+      "detail": "no stock rows to prove — the screen is showing its empty state (\"Nothing to show\"); this tenant has none, so data was never checked",
+      "durationMs": 16901
+    },
+    {
+      "title": "open inventoryai://products",
+      "status": "pass",
+      "detail": "inventoryai://products",
+      "durationMs": 1001
+    },
+    {
+      "title": "expect \"Products\"",
+      "status": "pass",
+      "detail": "seen after 2114ms",
+      "durationMs": 2114
+    },
+    {
+      "title": "expect product rows on screen",
+      "status": "fail",
+      "detail": "expected product rows, but nothing matches, and the screen is in no state the harness knows; screen showed: Navigate up | Products | r, Scan a barcode | r | Scan a barcode |  | Search by name, SKU or barcode… | All | All | Active",
+      "durationMs": 16524
+    }
+  ],
+  "notes": "evidence: C:\\Users\\jeffe\\inventory-ai\\docs\\evidence\\device-runs\\2026-10-26T04-48-42-145Z-smoke"
+}

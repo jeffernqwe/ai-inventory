@@ -13,8 +13,10 @@
  */
 
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import {
   describeListState,
@@ -524,6 +526,33 @@ describe('a list screen must show data, not just its own heading', () => {
 
     assert.equal(judgeDataRows(empty, { match: INVENTORY_ROW }).verdict, 'empty');
     assert.equal(describeListState(empty).state, 'empty');
+  });
+
+  it('recognises every empty-state title the app actually renders (copy parity)', () => {
+    // MEASURED 2026-10-26, on an empty production tenant: Inventory prints "Nothing to show" and the
+    // harness read it correctly, while Products prints "No products found" — the same fact in the
+    // app's own words — and the run FAILED the step. The fix is a pattern, so the pattern has to be
+    // tied to the copy the screens carry, or the next per-screen title reintroduces the false
+    // failure. This reads `title`/`emptyTitle` values out of the mobile sources and requires each
+    // one to be recognised; a rename that breaks the harness now breaks here first.
+    const appDir = join(fileURLToPath(new URL('../..', import.meta.url)), 'mobile', 'app');
+    const titles = new Set();
+
+    for (const name of readdirSync(appDir, { recursive: true })) {
+      if (!String(name).endsWith('.tsx')) continue;
+      const source = readFileSync(join(appDir, String(name)), 'utf8');
+      for (const match of source.matchAll(/(?:emptyTitle|title)="([^"]+)"/g)) {
+        if (/^(Nothing|No)\b/.test(match[1])) titles.add(match[1]);
+      }
+    }
+
+    // A scan that silently found nothing would pass every assertion below it.
+    assert.ok(titles.size >= 8, `expected the app's empty-state titles, found ${titles.size}`);
+
+    for (const title of titles) {
+      const nodes = parseDump(listDump('Some list', title)).nodes;
+      assert.equal(describeListState(nodes).state, 'empty', `"${title}" must read as the empty state`);
+    }
   });
 
   it('does not mistake a loading screen for an empty one', () => {

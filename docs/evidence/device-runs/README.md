@@ -118,6 +118,29 @@ landed inside a Flate-compressed content stream. `scripts/device/adb.mjs` now re
 first instinct is to blame the app is worse than none, so the evidence of it blaming the app is
 kept.
 
+**2026-10-26 — the same harness against the installed preview build and the production API.** The
+tunnels were only present because the runner requires them; the app's own `EXPO_PUBLIC_API_URL`
+decided where its requests went, and that build talks to `https://ai-inventory-l1mi.onrender.com`.
+Signed in as an owner of a tenant with **no** products, locations or suppliers:
+
+| directory | what it shows | result |
+|---|---|---|
+| `2026-10-26T04-48-42-145Z-smoke` | the **first** run: `expect product rows on screen` FAILED with *"no state the harness knows"* on a screen that was showing `No products found` | **6/8, exit 1** — a harness defect, kept |
+| `2026-10-26T04-51-29-455Z-smoke` | after the fix: 7 screens, 5 `expectClean` passes, both data steps **BLOCKED** on the app's own empty copy | **22/24, exit 2** |
+
+The defect was `EMPTY_COPY` knowing only the shared shell's `Nothing (here yet?|to show)`; the app
+carries **thirteen** per-screen titles, so an empty Products list read as "not loaded". The pattern is
+now the shape they share, and `device-harness.test.mjs` reads every `title`/`emptyTitle` out of
+`mobile/app` and fails if one is unrecognised — roadmap **§27FQ**. Because the tenant had no rows, the
+write journeys could not run (`--product` is an id that did not exist); the create, stock, transfer and
+AI flows were walked through the app itself and their numbers are in that record.
+
+**Two phone behaviours worth having here.** `uiautomator dump` can answer `null root node` for minutes
+while ColorOS's assist overlay window is flagged visible — **HOME + relaunch** cleared it, and it is
+not a harness fault. And on the product/location forms the inputs are missing from the dump while
+their labels are present, so those forms must be driven by geometry (tap below the label) rather than
+by an `EditText` node.
+
 **What these runs do NOT prove.** iOS (no macOS on this host — Phase 30B stays open), physical paper
 (no printer; the PDF decode rules out clipped or distorted bars but it is not a scan of paper), and a
 camera reading a barcode in the room, which stays a manual item — though that too has now been done

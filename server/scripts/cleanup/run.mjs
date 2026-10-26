@@ -42,6 +42,28 @@ export class CleanupIncompleteError extends CleanupSafetyError {
 const noopLog = () => {};
 
 /**
+ * Count every collection, once, for both the preview and the delete.
+ *
+ * WHY THIS IS ONE FUNCTION. The dry run used to carry its own copy of "list the
+ * collections, sort them, count each one" beside the copy inside
+ * `clearMongoDatabase`. Two loops that must agree on what "the whole database"
+ * means is exactly how a preview reports 274,009 documents and the delete removes
+ * a different set. Both now walk this one plan, so they cannot drift.
+ */
+async function countCollections({ listCollectionNames, countDocuments, log = noopLog, label }) {
+  const collections = [...(await listCollectionNames())].sort();
+  const counts = {};
+  let total = 0;
+  for (const name of collections) {
+    const n = await countDocuments(name);
+    counts[name] = n;
+    total += n;
+    log(`${label} ${name} = ${n}`);
+  }
+  return { collections, counts, total };
+}
+
+/**
  * Clear every document in every collection of an already-verified MongoDB
  * database, then verify the result. Does NOT run the guards — `performMongoCleanup`
  * does that; this is the mechanical half.
@@ -55,17 +77,12 @@ const noopLog = () => {};
  * @param {(name: string) => Promise<string[]>} ports.listIndexes
  */
 export async function clearMongoDatabase({ listCollectionNames, countDocuments, deleteMany, listIndexes, log = noopLog }) {
-  const collections = [...(await listCollectionNames())].sort();
-
-  const before = {};
-  let totalBefore = 0;
-  for (const name of collections) {
-    const n = await countDocuments(name);
-    before[name] = n;
-    totalBefore += n;
-    log(`before  ${name} = ${n}`);
-  }
-  log(`before  TOTAL = ${totalBefore}`);
+  const {
+    collections,
+    counts: before,
+    total: totalBefore,
+  } = await countCollections({ listCollectionNames, countDocuments, log, label: 'before' });
+  log(`before TOTAL = ${totalBefore}`);
 
   let totalDeleted = 0;
   for (const name of collections) {
@@ -75,17 +92,12 @@ export async function clearMongoDatabase({ listCollectionNames, countDocuments, 
   }
   log(`deleted TOTAL = ${totalDeleted}`);
 
-  const after = {};
-  let totalAfter = 0;
-  const nonEmpty = [];
-  for (const name of collections) {
-    const n = await countDocuments(name);
-    after[name] = n;
-    totalAfter += n;
-    log(`after   ${name} = ${n}`);
-    if (n !== 0) nonEmpty.push(name);
-  }
-  log(`after   TOTAL = ${totalAfter}`);
+  const {
+    counts: after,
+    total: totalAfter,
+  } = await countCollections({ listCollectionNames, countDocuments, log, label: 'after' });
+  log(`after TOTAL = ${totalAfter}`);
+  const nonEmpty = collections.filter((name) => after[name] !== 0);
 
   if (nonEmpty.length > 0) {
     throw new CleanupIncompleteError(
@@ -132,15 +144,13 @@ export async function performNamedDatabaseCleanup({
   log(`target database verified: ${checked.database}`);
 
   if (dryRun) {
-    const collections = [...(await ports.listCollectionNames())].sort();
-    const counts = {};
-    let total = 0;
-    for (const name of collections) {
-      const n = await ports.countDocuments(name);
-      counts[name] = n;
-      total += n;
-      log(`would delete ${name} = ${n}`);
-    }
+    // The same counter the delete path uses — a preview that builds its own list
+    // is a preview that can disagree with the delete.
+    const { collections, counts, total } = await countCollections({
+      ...ports,
+      log,
+      label: 'would delete',
+    });
     log(`DRY RUN — ${collections.length} collection(s), ${total} document(s); nothing was deleted`);
     return { target: checked.database, dryRun: true, collections: collections.length, total, counts };
   }

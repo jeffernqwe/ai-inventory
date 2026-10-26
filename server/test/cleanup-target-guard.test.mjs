@@ -497,6 +497,36 @@ describe('cleanup — the guarded sequence', () => {
     assert.deepEqual(report.counts, { products: 4, users: 2 });
     assert.equal(db.calls.deleted.length, 0, 'a dry run must not delete');
   });
+
+  it('the dry run and the real run count the same collections, through one plan', async () => {
+    const seed = { products: 4, users: 2, locations: 0 };
+    const previewDb = fakeDb(seed);
+    const realDb = fakeDb(seed);
+
+    const preview = await performNamedDatabaseCleanup({
+      database: DATABASE_NAMES.development,
+      env: envFor(DATABASE_NAMES.development),
+      values: devValues(),
+      dryRun: true,
+      connect: async (name) => ({ liveName: name, ports: previewDb.ports }),
+    });
+    const real = await performNamedDatabaseCleanup({
+      database: DATABASE_NAMES.development,
+      env: envFor(DATABASE_NAMES.development),
+      values: devValues(),
+      connect: async (name) => ({ liveName: name, ports: realDb.ports }),
+    });
+
+    assert.deepEqual(preview.counts, real.before, 'the preview must name the collections the delete counts');
+    assert.equal(preview.total, real.totalBefore);
+    assert.deepEqual(realDb.calls.deleted, Object.keys(preview.counts));
+  });
+
+  it('lists the collections in exactly one place, so the preview cannot drift', () => {
+    const source = readScript('cleanup/run.mjs');
+    const listings = source.match(/await listCollectionNames\(\)/g) ?? [];
+    assert.equal(listings.length, 1, 'preview and delete must share one collection list');
+  });
 });
 
 // ---------------------------------------------------------------------------

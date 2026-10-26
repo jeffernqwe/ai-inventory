@@ -22089,10 +22089,19 @@ the preview proves the destination rather than skipping it. The role cleanup als
 sessions, reset tokens and its audit/assistant extras in separate loops: `removeTenant` already
 walks those plan steps, and a second loop was the drift this change removes.
 
+**The last preview copy — the database-wide one.** The tenant plans were shared, but
+`npm run cleanup -- --target=database` still counted in its own loop in the dry run and again inside
+`clearMongoDatabase` before deleting. Both now call one `countCollections`, so the preview lists the
+same sorted collections, with the same counts, that the delete is about to clear. A new test runs the
+preview and the real cleanup over two copies of one fake database and asserts the two maps are equal,
+and a source guard pins the collection listing to one call site.
+
 **Measured.** The DEMO-2 database suite passed **7/7**, including a new data-only test that compares
 `countTenantDataRemoval` with `clearTenantData` byte for byte and proves the preview deleted nothing.
-The guard/source suites passed **106/106**, the full unit suite passed **1,521 tests, 0 failures**
-(56 DB-backed suites skipped), and `tsc`/`eslint` were clean. In development, two throwaway fixtures
+The guard/source suites passed **125/125**, the full unit suite passed **1,521 tests, 0 failures**
+(56 DB-backed suites skipped), and `tsc`/`eslint` were clean. The shared counter was then verified by
+the DB-backed full suite: **2,284 tests, 0 failures, 0 skipped**, including DEMO-2's teardown and
+AUTH-02's HTTP cases. In development, two throwaway fixtures
 (one role, one demo tenant, each with 9 documents) were previewed at **9** each, then removed at
 **9** each with **0 remaining**; the dry runs deleted nothing. `cleanup:demo` was exercised on a
 third fixture: the preview and the real run both counted/removed **2** data rows, while its user,

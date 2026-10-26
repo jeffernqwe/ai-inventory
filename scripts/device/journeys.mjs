@@ -89,17 +89,19 @@ const smoke = {
 };
 
 /** The label path, without paper: print → the PDF the app writes → decode its bars.
- *  Needs `--product=<id>` for a product whose barcode is a 13-digit EAN-13, and a debuggable
+ *  Needs `--sku=<sku>` for a product whose barcode is a 13-digit EAN-13, and a debuggable
  *  (development) build so the app's own cache can be read. */
 const label = {
   id: 'label',
-  summary: 'Share a product label as a PDF and decode its barcode from the bytes (needs --product).',
+  summary: 'Open a product by SKU, share its label as a PDF and decode the barcode from the bytes (needs --sku).',
   steps: [
-    { open: 'inventoryai://products/{{product}}' },
-    { expect: 'Barcode label' },
+    { findProduct: { sku: '{{sku}}' } },
     // The code the app displays is the expectation the decode is held to — read off the screen
-    // rather than supplied, so the check compares the app with itself.
+    // rather than supplied, so the check compares the app with itself. Read FIRST, because a
+    // product with no EAN-13 is a precondition this run cannot meet (BLOCKED), while the label
+    // heading below is an assertion about a product that has one.
     { readCode: true },
+    { expect: 'Barcode label' },
     { tap: 'Share PDF' },
     { decodeLabel: true },
     { key: 'BACK' },
@@ -141,13 +143,19 @@ const draft = {
  * read back from the dialog — which needs no starting quantity and therefore still means something
  * on the tenth run.
  *
- * Needs `--product=<id>`, `--source=<location name>`.
+ * BOTH LEGS START FROM THE PRODUCT SCREEN. The old version deep-linked straight to
+ * `stock-in?productId=…&lock=1`, which needed an id nobody can read off a phone; this one finds the
+ * product by SKU and taps "Stock In" / "Stock Out" exactly as a person would, so the id comes from
+ * the app's own record and no run has to be told one.
+ *
+ * Needs `--sku=<sku>`, `--source=<location name>`.
  */
 const stock = {
   id: 'stock',
-  summary: 'Move 5 in and 5 out at one location, checking the app\'s own arithmetic (writes, net zero).',
+  summary: 'Find a product by SKU, move 5 in and 5 out at one location, checking the app\'s own arithmetic (writes, net zero).',
   steps: [
-    { open: 'inventoryai://stock-in?productId={{product}}&lock=1' },
+    { findProduct: { sku: '{{sku}}' } },
+    { tap: 'Stock In' },
     { expect: 'Add stock' },
     { tap: 'Choose a location…' },
     { tap: '{{source}}' },
@@ -155,7 +163,7 @@ const stock = {
     { tap: 'Add stock' },
     { movement: { deltas: [5] } },
     { tap: 'OK' },
-    { open: 'inventoryai://stock-out?productId={{product}}&lock=1' },
+    { tap: 'Stock Out' },
     { expect: 'Remove stock' },
     { tap: 'Choose a location…' },
     { tap: '{{source}}' },
@@ -174,14 +182,34 @@ const stock = {
  * `[-1, 1]` for each direction — the order is the app's, and a journey that expected the two in the
  * other order would be asserting a layout rather than the numbers.
  *
- * Needs `--product=<id>`, `--source=<location name>`, `--destination=<other location name>`.
+ * The transfer screen is reached WITHOUT a product id: the product is chosen from the form's own
+ * picker, which lists NAMES. That name is read off the phone by `findProduct` and was proven on the
+ * product screen first, so no id and no guessed name enters the run.
+ *
+ * IT SUPPLIES ITS OWN UNIT. A transfer moves stock that already exists, so on a tenant whose source
+ * location is at zero the form's submit button is disabled ("Only 0 available to move") and the run
+ * reported a failed movement on an app that was right to refuse — measured 2026-10-26. So the
+ * journey stocks one unit in at the source, transfers it across and back, and stocks it out again:
+ * it leaves the tenant exactly as it found it, on a tenant at any starting quantity.
+ *
+ * Needs `--sku=<sku>`, `--source=<location name>`, `--destination=<other location name>`.
  */
 const transfer = {
   id: 'transfer',
-  summary: 'Move 1 unit to another location and back, checking both legs (writes, net zero).',
+  summary:
+    'Find a product by SKU, stock one unit in, move it to another location and back, then stock it out (writes, net zero).',
   steps: [
-    { open: 'inventoryai://transfer?productId={{product}}' },
-    { expect: 'Transfer stock' },
+    { findProduct: { sku: '{{sku}}' } },
+    { tap: 'Stock In' },
+    { tap: 'Choose a location…' },
+    { tap: '{{source}}' },
+    { type: { value: '1', into: 'Quantity' } },
+    { tap: 'Add stock' },
+    { movement: { deltas: [1] } },
+    { tap: 'OK' },
+    { open: 'inventoryai://transfer' },
+    { expect: 'From location' },
+    { pick: { field: 'Choose a product…', sheet: 'Product', option: '{{productName}}' } },
     { tap: 'Choose the source…' },
     { tap: '{{source}}' },
     { tap: 'Choose the destination…' },
@@ -190,8 +218,9 @@ const transfer = {
     { tap: 'Transfer stock' },
     { movement: { deltas: [-1, 1] } },
     { tap: 'OK' },
-    { open: 'inventoryai://transfer?productId={{product}}' },
-    { expect: 'Transfer stock' },
+    { open: 'inventoryai://transfer' },
+    { expect: 'From location' },
+    { pick: { field: 'Choose a product…', sheet: 'Product', option: '{{productName}}' } },
     { tap: 'Choose the source…' },
     { tap: '{{destination}}' },
     { tap: 'Choose the destination…' },
@@ -199,6 +228,14 @@ const transfer = {
     { type: { value: '1', into: 'Quantity' } },
     { tap: 'Transfer stock' },
     { movement: { deltas: [-1, 1] } },
+    { tap: 'OK' },
+    { findProduct: { sku: '{{sku}}' } },
+    { tap: 'Stock Out' },
+    { tap: 'Choose a location…' },
+    { tap: '{{source}}' },
+    { type: { value: '1', into: 'Quantity' } },
+    { tap: 'Remove stock' },
+    { movement: { deltas: [-1] } },
     { tap: 'OK' },
     { shot: 'transfer-done' },
   ],

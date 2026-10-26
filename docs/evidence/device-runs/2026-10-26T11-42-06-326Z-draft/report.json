@@ -1,0 +1,32 @@
+{
+  "journey": "draft",
+  "startedAt": "2026-10-26T11:42:06.326Z",
+  "device": "CPH1969 · Android 11 (API 30) · PV4DDMIZZLTCIVSK",
+  "steps": [
+    {
+      "title": "open inventoryai://purchase-orders/new",
+      "status": "pass",
+      "detail": "inventoryai://purchase-orders/new",
+      "durationMs": 1012
+    },
+    {
+      "title": "expect \"New Purchase Order\"",
+      "status": "pass",
+      "detail": "seen after 2598ms",
+      "durationMs": 2598
+    },
+    {
+      "title": "tap \"Choose a supplier\"",
+      "status": "pass",
+      "detail": "tapped Choose a supplier…, ▾ at 540,549 (re-tapped 3× while the picker loaded)",
+      "durationMs": 17515
+    },
+    {
+      "title": "tap the first row under \"Supplier\"",
+      "status": "fail",
+      "detail": "no sheet opened for \"Supplier\" (a picker with an empty list is disabled); screen showed: Navigate up | New Purchase Order | Supplier * | Choose a supplier…, ▾ | Choose a supplier… | ▾ | Receiving location * | Where stock will land…, ▾ | Where stock will land… | ▾",
+      "durationMs": 2281
+    }
+  ],
+  "notes": "evidence: C:\\Users\\jeffe\\inventory-ai\\docs\\evidence\\device-runs\\2026-10-26T11-42-06-326Z-draft"
+}

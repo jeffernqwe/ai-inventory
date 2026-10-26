@@ -54,7 +54,9 @@ across and 1 back, and both check the app's own `from → to` line (measured: `3
 quantity each time, and asserting a **delta** rather than an absolute number is what lets the same
 steps still mean something on the tenth run. The two runs above were executed **a day apart** and
 reported the **same numbers**, which is that claim measured rather than assumed. They are write journeys, so they need
-`--product=<id> --source=<location> [--destination=<location>] --allow-writes`.
+`--sku=<sku> --source=<location> [--destination=<location>] --allow-writes`. **Since 2026-10-26 no journey takes an
+internal id at all** — the product is found by its SKU through the products search, and the product screen must print
+that SKU back before any step acts on it (§27FR).
 
 **A smoke pass is not proof of a signed-in app — the 2026-10-22 runs are how that changed.**
 `05-53-11` reports 17/17 while the server was refusing every data request with `401 SESSION_EXPIRED`,
@@ -155,11 +157,11 @@ scanned the pack with the app, and the app opened the record for that product.
 
 ```bash
 node scripts/device/run.mjs --list
-node scripts/device/run.mjs --all --product=<product id>   # read-only: smoke + label
+node scripts/device/run.mjs --all --sku=SMOKE-1            # read-only: smoke + label
 node scripts/device/run.mjs --journey=draft --allow-writes # writes to the tenant
-node scripts/device/run.mjs --journey=stock --product=<id> --source="Shop Front" --allow-writes
-node scripts/device/run.mjs --journey=transfer --product=<id> --source="Shop Front" \
-  --destination="Main Warehouse" --allow-writes
+node scripts/device/run.mjs --journey=stock --sku=SMOKE-1 --source="Smoke shelf" --allow-writes
+node scripts/device/run.mjs --journey=transfer --sku=SMOKE-1 --source="Smoke shelf" \
+  --destination="Smoke" --allow-writes
 ```
 
 Exit codes follow the repository's convention: **0** every step passed, **1** a step failed (the app

@@ -8,7 +8,7 @@ of truth for *what actually happened*, and it is why this file is long.
 
 **How to read it.** Do not read it top to bottom. Either find a record by number (§27FJ, §27DM — the
 numbers are cited from `CLAUDE.md` and from source comments), or use the index: `CLAUDE.md` §7 lists
-all **171** records by the title each gives itself.
+all **172** records by the title each gives itself.
 
 **Current state:** V1 complete and in production testing. The records that answer *where are we now*
 are §27FM (the V1 re-verification), §27FK (the runtime boundary and the blocked build), §27FJ (the two
@@ -21606,6 +21606,100 @@ is `scripts/device/lib.mjs` and its test.
 **Unchanged and still open:** both mobile advisories (no patched release exists for either — §27FP),
 the OTA publish gate (`native-record-missing`, no runtime `1.0.1` build), L-17, the Play release,
 iOS verification and OTA code signing. None was marked complete.
+
+---
+
+# 27FR. The journeys stopped needing an id, and four false verdicts fell out of it (2026-10-26)
+
+**The obstacle was a number nobody can see.** `stock`, `transfer` and `label` each took
+`--product=<id>`, an internal ObjectId. The app displays no id anywhere, so the only way to have one
+was to have written it down while seeding the tenant — which made three of the four specialised
+journeys unrunnable by anyone who had not. A stale id was worse than useless: a deep link to a
+deleted product loads a screen that fails for reasons that look exactly like an app defect.
+
+**A SKU is on the screen, so a SKU is what a journey takes.** Two verbs do the work, both of them
+pure-function judgements in `lib.mjs` where CI can assert them:
+
+| Verb | What it does on the phone | The judgement it must pass |
+| --- | --- | --- |
+| `findProduct` | types the SKU into the products search, opens the row | the product screen must print that **exact** SKU before any later step acts (`findProductRow`, anchored so `SMOKE-1` cannot select `SMOKE-10`) |
+| `pick` | opens the form's own picker, scrolls to the option, taps it | the option must match **exactly and once**, the sheet must **close**, and the field must then show it (`optionTarget`, `sameRow`) |
+
+The name `pick` searches for is not supplied: it is the name the product screen printed, read off
+the phone by `findProduct`. `--product` is gone from the runner, and passing it is now an unknown
+option rather than a flag that silently does nothing.
+
+## Measured, on the installed preview build against production
+
+| Journey | Steps | Result | The arithmetic the app itself reported |
+| --- | --- | --- | --- |
+| `smoke` | 24 | **24/24, exit 0** | unchanged by this work — the baseline still holds |
+| `stock` | 18 | **18/18, exit 0** | `0 → 5` then `5 → 0` |
+| `transfer` | 39 | **39/39, exit 0** | stock in `0 → 1`; `1 → 0` / `0 → 1`; back `1 → 0` / `0 → 1`; stock out `1 → 0` |
+| `label` | 2 of 7 | **blocked, exit 2** | `findProduct` passed; `readCode` blocked — this product has no barcode, and the build is not debuggable (`run-as: package not debuggable`) |
+| `draft` | 4 of 14 | **blocked, exit 2** | no sheet opened for `Supplier` — the tenant has no suppliers, so the picker is disabled |
+
+The transfer journey now stocks its own unit in and out. A transfer moves stock that must already
+exist, so on a source location at zero the form's submit is **disabled** ("Only 0 available to
+move"), and the first run at 39 steps reported a failed movement on an app that was right to refuse.
+Supplying one unit and removing it at the end leaves the tenant where it started at any starting
+quantity.
+
+## Four false verdicts, and what now prevents each
+
+1. **"The Products screen has no search box" on an app that was still booting.** A deep link into a
+   cold-started build lands on *Restoring session…*; a 15 s budget called that a missing control
+   and FAILED the step. The wait is 30 s, and the failure text now names the state it found.
+2. **A one-product sheet reported as ambiguous.** Two separate mistakes, both measured: the sheet's
+   search box carries the typed text as its own label (so it counted as a second option), and one
+   row reaches the tree **more than once** (a `ViewGroup` `[0,1422][1080,1575]` and its `TextView`
+   `[48,1467][1032,1530]`). `optionTarget` now skips edit boxes and clusters duplicates by
+   **overlapping band on screen** (`sameRow`) — identity is the row, not the node count.
+3. **`tapFirst` reported PASS by tapping a form row.** On a tenant with no suppliers the picker is
+   **disabled**, so no sheet opens; the form's own `Supplier *` label carries the same word as the
+   sheet heading, so it was taken as one and the control below it was tapped. The purchase order then
+   failed with *"Supplier is required."* — a false green pointing at the wrong control. Every sheet
+   renders a labelled **`Done`**, so `hasSheetClose` is now the gate, and an unopened picker is
+   **BLOCKED** (nothing to choose here) rather than a defect.
+4. **A blocked precondition kept running.** With no barcode the `label` journey blocked at
+   `readCode` and then FAILED the next step with `expected "Barcode label"` — an app defect invented
+   on a product that simply has no barcode. A blocked step now ends the journey, except `expectData`,
+   whose "this tenant has no rows" says nothing about the next screen.
+
+## An app defect found and NOT fixed, on purpose
+
+**A searchable picker hides the results it just filtered.** With the keyboard up, the product sheet
+was 530 px tall and its only row sat in the hierarchy at `[0,1422][1080,1575]` while being painted
+**nowhere** — the screenshot shows empty space above the IME. With the keyboard down the same row is
+at `[0,2055][1080,2208]` and tappable. `BACK` and `ESCAPE` both close the whole sheet (the `Modal`'s
+request-close), so there is no keyboard-only dismissal: type a filter and there is no way to press
+what it found.
+
+It is recorded rather than fixed because **it cannot be verified from here**. The installed app is a
+preview APK of this code; a JavaScript change needs a new build, the free plan's October Android
+quota is spent, and publishing an OTA is exactly what the preflight gate refuses
+(`native-record-missing`). A layout change shipped blind is the failure this repository's records
+exist to prevent. The harness therefore reaches picker rows by **scrolling**, which needs no keyboard
+and is a gesture a person can make.
+
+## Verification
+
+- `node --test test/device-harness.test.mjs` — **71 pass, 0 fail**, including a control per judgement
+  above: a prefix SKU that must not match, the search-box twin, duplicated rows of one option, the
+  form label that is not a sheet, and the two malformed verbs `validateJourneys` must refuse.
+- `node scripts/device/run.mjs --self-test` — **5 journeys, 102 steps, controls pass**.
+- Six device runs of 2026-10-26 in `docs/evidence/device-runs/`, each kept because it proves a
+  different thing: `11-03` stock **18/18**, `11-22` transfer failing at **available 0** (the finding
+  that made the journey supply its own unit), `11-25` transfer **39/39**, `11-35` label **blocked** at
+  `readCode`, `11-36` smoke **24/24**, `11-42` draft **blocked** at the unopened `Supplier` sheet.
+  The intermediate iterations were deleted; their findings are the four fixes above.
+- No application source changed: `mobile/` and `server/src/` are untouched, and the only code edited
+  is `scripts/device/{lib,journeys,run}.mjs` plus its test.
+
+**Unchanged and still open:** both mobile advisories (§27FP — still no patched release), the OTA
+publish gate, L-17, the Play release, iOS verification and OTA code signing. `draft` still needs a
+supplier to exist before it can run, and `label` needs a product with an EAN-13 on a debuggable build.
+None of the three was marked complete.
 
 ---
 

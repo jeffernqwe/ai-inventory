@@ -1,0 +1,242 @@
+{
+  "journey": "transfer",
+  "startedAt": "2026-10-26T11:25:31.920Z",
+  "device": "CPH1969 · Android 11 (API 30) · PV4DDMIZZLTCIVSK",
+  "steps": [
+    {
+      "title": "find the product with SKU SMOKE-1 through the products search",
+      "status": "pass",
+      "detail": "opened Smoke Widget (SKU SMOKE-1) through the products search in 34272ms",
+      "durationMs": 34273
+    },
+    {
+      "title": "tap \"Stock In\"",
+      "status": "pass",
+      "detail": "tapped Stock In at 204,2091 after 1 scroll",
+      "durationMs": 27280
+    },
+    {
+      "title": "tap \"Choose a location…\"",
+      "status": "pass",
+      "detail": "tapped Choose a location…, ▾ at 540,807",
+      "durationMs": 6085
+    },
+    {
+      "title": "tap \"Smoke shelf\"",
+      "status": "pass",
+      "detail": "tapped Smoke shelf at 540,1978",
+      "durationMs": 3859
+    },
+    {
+      "title": "type into the focused field",
+      "status": "pass",
+      "detail": "\"Quantity\" now reads 1, keyboard closed",
+      "durationMs": 22582
+    },
+    {
+      "title": "tap \"Add stock\"",
+      "status": "pass",
+      "detail": "tapped Add stock at 540,1824",
+      "durationMs": 3825
+    },
+    {
+      "title": "check the movement arithmetic (1)",
+      "status": "pass",
+      "detail": "0 → 1 (1)",
+      "durationMs": 2305
+    },
+    {
+      "title": "tap \"OK\"",
+      "status": "pass",
+      "detail": "tapped OK at 873,1303",
+      "durationMs": 4171
+    },
+    {
+      "title": "open inventoryai://transfer",
+      "status": "pass",
+      "detail": "inventoryai://transfer",
+      "durationMs": 1015
+    },
+    {
+      "title": "expect \"From location\"",
+      "status": "pass",
+      "detail": "seen after 2301ms",
+      "durationMs": 2301
+    },
+    {
+      "title": "choose \"Smoke Widget\" from the \"Product\" picker",
+      "status": "pass",
+      "detail": "chose \"Smoke Widget\"",
+      "durationMs": 12626
+    },
+    {
+      "title": "tap \"Choose the source…\"",
+      "status": "pass",
+      "detail": "tapped Choose the source…, ▾ at 540,807",
+      "durationMs": 6032
+    },
+    {
+      "title": "tap \"Smoke shelf\"",
+      "status": "pass",
+      "detail": "tapped Smoke shelf at 540,1978",
+      "durationMs": 3860
+    },
+    {
+      "title": "tap \"Choose the destination…\"",
+      "status": "pass",
+      "detail": "tapped Choose the destination…, ▾ at 540,1371",
+      "durationMs": 15773
+    },
+    {
+      "title": "tap \"Smoke\"",
+      "status": "pass",
+      "detail": "tapped Smoke at 540,2132",
+      "durationMs": 3775
+    },
+    {
+      "title": "type into the focused field",
+      "status": "pass",
+      "detail": "\"Quantity\" now reads 1, keyboard closed",
+      "durationMs": 42751
+    },
+    {
+      "title": "tap \"Transfer stock\"",
+      "status": "pass",
+      "detail": "tapped Transfer stock at 540,2064",
+      "durationMs": 13828
+    },
+    {
+      "title": "check the movement arithmetic (-1, 1)",
+      "status": "pass",
+      "detail": "1 → 0, 0 → 1 (-1, 1)",
+      "durationMs": 2214
+    },
+    {
+      "title": "tap \"OK\"",
+      "status": "pass",
+      "detail": "tapped OK at 873,1356",
+      "durationMs": 4157
+    },
+    {
+      "title": "open inventoryai://transfer",
+      "status": "pass",
+      "detail": "inventoryai://transfer",
+      "durationMs": 1015
+    },
+    {
+      "title": "expect \"From location\"",
+      "status": "pass",
+      "detail": "seen after 2279ms",
+      "durationMs": 2279
+    },
+    {
+      "title": "choose \"Smoke Widget\" from the \"Product\" picker",
+      "status": "pass",
+      "detail": "chose \"Smoke Widget\"",
+      "durationMs": 12772
+    },
+    {
+      "title": "tap \"Choose the source…\"",
+      "status": "pass",
+      "detail": "tapped Choose the source…, ▾ at 540,807",
+      "durationMs": 6397
+    },
+    {
+      "title": "tap \"Smoke\"",
+      "status": "pass",
+      "detail": "tapped Smoke at 540,2132",
+      "durationMs": 3862
+    },
+    {
+      "title": "tap \"Choose the destination…\"",
+      "status": "pass",
+      "detail": "tapped Choose the destination…, ▾ at 540,1371",
+      "durationMs": 16037
+    },
+    {
+      "title": "tap \"Smoke shelf\"",
+      "status": "pass",
+      "detail": "tapped Smoke shelf at 540,1978",
+      "durationMs": 3850
+    },
+    {
+      "title": "type into the focused field",
+      "status": "pass",
+      "detail": "\"Quantity\" now reads 1, keyboard closed",
+      "durationMs": 44164
+    },
+    {
+      "title": "tap \"Transfer stock\"",
+      "status": "pass",
+      "detail": "tapped Transfer stock at 540,2064",
+      "durationMs": 13854
+    },
+    {
+      "title": "check the movement arithmetic (-1, 1)",
+      "status": "pass",
+      "detail": "1 → 0, 0 → 1 (-1, 1)",
+      "durationMs": 2282
+    },
+    {
+      "title": "tap \"OK\"",
+      "status": "pass",
+      "detail": "tapped OK at 873,1356",
+      "durationMs": 4671
+    },
+    {
+      "title": "find the product with SKU SMOKE-1 through the products search",
+      "status": "pass",
+      "detail": "opened Smoke Widget (SKU SMOKE-1) through the products search in 36573ms",
+      "durationMs": 36573
+    },
+    {
+      "title": "tap \"Stock Out\"",
+      "status": "pass",
+      "detail": "tapped Stock Out at 540,2091 after 1 scroll",
+      "durationMs": 28277
+    },
+    {
+      "title": "tap \"Choose a location…\"",
+      "status": "pass",
+      "detail": "tapped Choose a location…, ▾ at 540,807",
+      "durationMs": 6387
+    },
+    {
+      "title": "tap \"Smoke shelf\"",
+      "status": "pass",
+      "detail": "tapped Smoke shelf at 540,1978",
+      "durationMs": 3777
+    },
+    {
+      "title": "type into the focused field",
+      "status": "pass",
+      "detail": "\"Quantity\" now reads 1, keyboard closed",
+      "durationMs": 32527
+    },
+    {
+      "title": "tap \"Remove stock\"",
+      "status": "pass",
+      "detail": "tapped Remove stock at 540,2064",
+      "durationMs": 3792
+    },
+    {
+      "title": "check the movement arithmetic (-1)",
+      "status": "pass",
+      "detail": "1 → 0 (-1)",
+      "durationMs": 2455
+    },
+    {
+      "title": "tap \"OK\"",
+      "status": "pass",
+      "detail": "tapped OK at 873,1303",
+      "durationMs": 4253
+    },
+    {
+      "title": "screenshot \"transfer-done\"",
+      "status": "pass",
+      "detail": "C:\\Users\\jeffe\\inventory-ai\\docs\\evidence\\device-runs\\2026-10-26T11-25-31-920Z-transfer\\transfer-done.png",
+      "durationMs": 808
+    }
+  ],
+  "notes": "evidence: C:\\Users\\jeffe\\inventory-ai\\docs\\evidence\\device-runs\\2026-10-26T11-25-31-920Z-transfer"
+}

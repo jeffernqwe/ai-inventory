@@ -25,7 +25,9 @@ import {
   fieldBelow,
   fillTemplate,
   findNodes,
+  findProductRow,
   findTapTarget,
+  hasSheetClose,
   isBlankDump,
   isUnstableDump,
   judgeDataRows,
@@ -34,6 +36,7 @@ import {
   looksLikePicker,
   looksSessionExpired,
   looksSignedOut,
+  optionTarget,
   parseDump,
   parseMovements,
   quoteForDeviceShell,
@@ -632,7 +635,191 @@ describe('a list screen must show data, not just its own heading', () => {
   });
 });
 
+/**
+ * A products screen as the app renders it: a heading, the search box, and two cards whose meta lines
+ * carry SKUs that share a prefix (`SMOKE-1`, `SMOKE-10`).
+ */
+const PRODUCT_LIST = `<hierarchy rotation="0">
+  <node text="Products" class="android.widget.TextView" clickable="false" bounds="[48,120][400,180]" />
+  <node text="Search by name, SKU or barcode…" class="android.widget.EditText" clickable="true" bounds="[48,300][1032,390]" />
+  <node text="Smoke Widget" class="android.widget.TextView" clickable="false" bounds="[160,470][900,520]" />
+  <node text="SKU SMOKE-1 · Barcode 2000053337540" class="android.widget.TextView" clickable="false" bounds="[160,530][900,570]" />
+  <node text="Smoke Widget XL" class="android.widget.TextView" clickable="false" bounds="[160,700][900,750]" />
+  <node text="SKU SMOKE-10 · Barcode 2000053337541" class="android.widget.TextView" clickable="false" bounds="[160,760][900,800]" />
+</hierarchy>`;
+
+describe('a product is found by SKU, so no run has to be told an internal id', () => {
+  const { nodes } = parseDump(PRODUCT_LIST);
+
+  it('reads the row for a SKU and the name printed above it', () => {
+    const row = findProductRow(nodes, 'SMOKE-1');
+
+    assert.ok(row, 'no row was found for SMOKE-1');
+    assert.equal(row.meta.label, 'SKU SMOKE-1 · Barcode 2000053337540');
+    // The name is a CANDIDATE until the detail screen prints it, and `pick` only ever searches
+    // for a name that screen confirmed.
+    assert.equal(row.name, 'Smoke Widget');
+  });
+
+  it('does not let a SKU match a longer one that starts with it (must trip)', () => {
+    // `SMOKE-1` is a prefix of `SMOKE-10`. A substring match would open the wrong product, and on
+    // a write journey that means moving stock on a product nobody asked about.
+    assert.equal(findProductRow(nodes, 'SMOKE-1').meta.label.includes('SMOKE-10'), false);
+    assert.equal(findProductRow(nodes, 'SMOKE-10').name, 'Smoke Widget XL');
+    assert.equal(findProductRow(nodes, 'SMOKE-'), null);
+    assert.equal(findProductRow(nodes, ''), null);
+  });
+
+  it('does not read the search placeholder as a product row (must trip)', () => {
+    const empty = parseDump(
+      `<hierarchy rotation="0">
+        <node text="Search by name, SKU or barcode…" class="android.widget.EditText" clickable="true" bounds="[48,300][1032,390]" />
+        <node text="No products found" class="android.widget.TextView" clickable="false" bounds="[48,600][1032,660]" />
+      </hierarchy>`,
+    ).nodes;
+
+    assert.equal(findProductRow(empty, 'SKU'), null);
+    assert.equal(findProductRow(empty, 'SMOKE-1'), null);
+  });
+});
+
+describe('a picker option is chosen exactly, or not at all', () => {
+  const sheet = parseDump(
+    `<hierarchy rotation="0">
+      <node text="Product" class="android.widget.TextView" clickable="false" bounds="[48,1500][400,1560]" />
+      <node text="Search…" class="android.widget.EditText" clickable="true" bounds="[48,1600][1032,1690]" />
+      <node text="Smoke Widget" class="android.widget.TextView" clickable="false" bounds="[48,1720][900,1770]" />
+      <node text="Smoke Widget XL" class="android.widget.TextView" clickable="false" bounds="[48,1800][900,1850]" />
+    </hierarchy>`,
+  ).nodes;
+
+  it('returns the single exact option', () => {
+    assert.equal(optionTarget(sheet, 'Smoke Widget').label, 'Smoke Widget');
+  });
+
+  it('refuses a prefix and an absent option (must trip)', () => {
+    // The failure this prevents is a transfer on the wrong product, which is a real inventory
+    // movement: a "closest match" here would be a silent write to something nobody chose.
+    assert.equal(optionTarget(sheet, 'Smoke'), null);
+    assert.equal(optionTarget(sheet, 'Nothing Like This'), null);
+    assert.equal(optionTarget(sheet, ''), null);
+  });
+
+  it("never chooses the sheet's own title, even when an option has that name", () => {
+    // "Product" is the heading. A product may legitimately be called "Product" too, so the title
+    // is excluded by identity: without that, a tap could land on the title, select nothing, and the
+    // failure would surface two steps later as an empty field.
+    const heading = sheet.find((node) => node.label === 'Product');
+
+    assert.equal(optionTarget(sheet, 'Product'), heading);
+    assert.equal(optionTarget(sheet, 'Product', { exclude: heading }), null);
+  });
+
+  it('refuses an ambiguous choice rather than taking the first', () => {
+    const twice = parseDump(
+      `<hierarchy rotation="0">
+        <node text="Smoke Widget" class="android.widget.TextView" clickable="false" bounds="[48,1720][900,1770]" />
+        <node text="Smoke Widget" class="android.widget.TextView" clickable="false" bounds="[48,1800][900,1850]" />
+      </hierarchy>`,
+    ).nodes;
+
+    assert.equal(optionTarget(twice, 'Smoke Widget'), null);
+  });
+
+  it('never chooses the search box that now carries the option\'s text (must trip)', () => {
+    // Measured on the phone 2026-10-26: after typing "Smoke Widget" into the sheet's search box,
+    // the EditText's own text is that name, and counting it as an option made a one-product sheet
+    // read as ambiguous.
+    const typed = parseDump(
+      `<hierarchy rotation="0">
+        <node text="Product" class="android.widget.TextView" clickable="false" bounds="[36,1101][207,1167]" />
+        <node text="Smoke Widget" class="android.widget.EditText" clickable="true" bounds="[48,1275][1032,1386]" />
+        <node text="Smoke Widget" content-desc="Smoke Widget" class="android.view.ViewGroup" clickable="false" bounds="[0,1422][1080,1575]" />
+        <node text="Smoke Widget" class="android.widget.TextView" clickable="false" bounds="[48,1467][1032,1530]" />
+      </hierarchy>`,
+    ).nodes;
+
+    const chosen = optionTarget(typed, 'Smoke Widget');
+    assert.ok(chosen, 'the only real option was refused');
+    assert.equal(chosen.bounds.y1, 1422, 'the choice landed on the search box');
+  });
+
+  it('treats the duplicates of ONE row as one answer (must not refuse a real choice)', () => {
+    // Measured on the phone 2026-10-26: a sheet with a single product exposed four "Smoke Widget"
+    // nodes — the pressable and the text it contains — so counting nodes refused the only option
+    // there was. The row on screen is the identity, not the node.
+    const oneRow = parseDump(
+      `<hierarchy rotation="0">
+        <node text="Smoke Widget" class="android.widget.TextView" clickable="false" bounds="[48,1720][900,1770]" />
+        <node text="" content-desc="Smoke Widget" class="android.widget.Button" clickable="true" bounds="[0,1700][1080,1800]" />
+        <node text="Smoke Widget" class="android.widget.TextView" clickable="false" bounds="[48,1745][900,1795]" />
+      </hierarchy>`,
+    ).nodes;
+
+    const chosen = optionTarget(oneRow, 'Smoke Widget');
+    assert.ok(chosen, 'the only option on the sheet was refused');
+    // The pressable is preferred, because that is the node that handles the tap.
+    assert.equal(chosen.clickable, true);
+  });
+});
+
+describe('a bottom sheet is recognised by its own close control', () => {
+  it('sees the sheet and not the form label that carries the same word', () => {
+    // Measured 2026-10-26: on a tenant with no suppliers the picker is disabled, so no sheet opened —
+    // and `tapFirst` took the form's own "Supplier *" label as the heading, tapped a row under it,
+    // and reported PASS. The purchase order then failed with "Supplier is required.", pointing the
+    // next person at the wrong control.
+    const formOnly = parseDump(
+      `<hierarchy rotation="0">
+        <node text="Supplier *" class="android.widget.TextView" clickable="false" bounds="[48,408][1032,462]" />
+        <node text="Choose a supplier…" class="android.widget.TextView" clickable="false" bounds="[87,484][952,613]" />
+      </hierarchy>`,
+    ).nodes;
+    const sheetOpen = parseDump(
+      `<hierarchy rotation="0">
+        <node text="Supplier" class="android.widget.TextView" clickable="false" bounds="[48,1500][400,1560]" />
+        <node text="Done" class="android.widget.Button" clickable="true" bounds="[915,1500][1020,1560]" />
+      </hierarchy>`,
+    ).nodes;
+
+    assert.equal(hasSheetClose(formOnly), false);
+    assert.equal(hasSheetClose(sheetOpen), true);
+    assert.equal(hasSheetClose([]), false);
+  });
+});
+
 describe('the declared journeys are well formed', () => {
+  it('never asks for an internal product id', () => {
+    // The whole point of `findProduct`: an id is unreadable on a phone, so a journey that needs one
+    // cannot be run by anybody who did not seed the tenant. A `{{product}}` marker here means a step
+    // went back to the id, and `--product` no longer exists to fill it.
+    for (const journey of JOURNEYS) {
+      const text = JSON.stringify(journey.steps);
+      assert.equal(text.includes('{{product}}'), false, `${journey.id} still needs an id`);
+    }
+
+    for (const id of ['label', 'stock', 'transfer']) {
+      const journey = JOURNEYS.find((j) => j.id === id);
+      assert.ok(journey, `${id} journey is missing`);
+      assert.deepEqual(
+        journey.steps[0],
+        { findProduct: { sku: '{{sku}}' } },
+        `${id} must open its product by SKU first`,
+      );
+    }
+
+    // The transfer form's picker filters on the NAME, so it needs the name the phone read back.
+    const transfer = JOURNEYS.find((j) => j.id === 'transfer');
+    const picks = transfer.steps.filter((step) => step.pick);
+    assert.equal(picks.length, 2, 'both legs of the transfer choose the product from its picker');
+    for (const step of picks) {
+      assert.equal(step.pick.option, '{{productName}}');
+      // Never a search term: with the keyboard up a searchable sheet's rows are clipped out of view
+      // (measured 2026-10-26), so a journey that types into it cannot pick anything.
+      assert.equal('search' in step.pick, false);
+    }
+  });
+
   it('accepts its own table', () => {
     assert.deepEqual(validateJourneys(JOURNEYS), []);
   });
@@ -649,6 +836,35 @@ describe('the declared journeys are well formed', () => {
     assert.ok(problems.some((p) => /no steps/.test(p)), problems.join('; '));
     assert.ok(problems.some((p) => /expect.*empty/.test(p)), problems.join('; '));
     assert.ok(problems.some((p) => /unknown step/.test(p)), problems.join('; '));
+  });
+
+  it('rejects a findProduct without a SKU and a pick without its option', () => {
+    // A step that cannot name what it is looking for would search for nothing and then wait, which
+    // reads as a timeout on an app that is fine.
+    const problems = validateJourneys([
+      { id: 'a', summary: 'x', steps: [{ findProduct: {} }] },
+      { id: 'b', summary: 'x', steps: [{ findProduct: { sku: '   ' } }] },
+      { id: 'c', summary: 'x', steps: [{ findProduct: { id: '6adee029e81b7012' } }] },
+      { id: 'd', summary: 'x', steps: [{ pick: { field: 'Choose a product…', sheet: 'Product' } }] },
+      { id: 'e', summary: 'x', steps: [{ pick: { field: '', sheet: 'Product', option: 'A' } }] },
+      { id: 'f', summary: 'x', steps: [{ pick: { field: 'A', sheet: 'B', option: 'C', retries: 2 } }] },
+    ]);
+
+    for (const id of ['a', 'b', 'c', 'd', 'e', 'f']) {
+      assert.ok(problems.some((p) => p.startsWith(`${id}[0]`)), `${id} was accepted: ${problems.join('; ')}`);
+    }
+    assert.deepEqual(
+      validateJourneys([
+        { id: 'ok', summary: 'x', steps: [{ findProduct: { sku: 'SMOKE-1' } }, { pick: { field: 'A', sheet: 'B', option: 'C' } }] },
+      ]),
+      [],
+    );
+    // `search` is refused outright: it is the one thing a picker cannot survive on this device.
+    assert.ok(
+      validateJourneys([{ id: 'g', summary: 'x', steps: [{ pick: { field: 'A', sheet: 'B', option: 'C', search: 'C' } }] }]).some(
+        (p) => p.startsWith('g[0]'),
+      ),
+    );
   });
 
   it('declares a read-only smoke journey that actually asserts screens', () => {

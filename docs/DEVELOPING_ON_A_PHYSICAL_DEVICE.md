@@ -461,13 +461,25 @@ stale process still has to be stopped by hand.
 
 ```bash
 node scripts/device/run.mjs --list
-node scripts/device/run.mjs --all --product=<id>          # read-only: screens + label PDF decode
+node scripts/device/run.mjs                                # read-only: 7 screens, data on 2
+node scripts/device/run.mjs --all --sku=SMOKE-1             # + label PDF decode (needs a barcode)
+node scripts/device/run.mjs --journey=stock --sku=SMOKE-1 --source='Smoke shelf' --allow-writes
+node scripts/device/run.mjs --journey=transfer --sku=SMOKE-1 \
+  --source='Smoke shelf' --destination='Smoke' --allow-writes
 node scripts/device/run.mjs --journey=draft --allow-writes
-node scripts/device/run.mjs --journey=draft --until=9      # stop after step 9, write state.json
+node scripts/device/run.mjs --journey=stock --until=9       # stop after step 9, write state.json
 ```
 
-It needs the phone, the development build and both tunnels, and exits **2** ("could not check") when a
-precondition is missing — signed out, no debuggable build, no fresh PDF. Evidence lives in
+**No journey takes an internal id.** A product is named by its **SKU**, which is something a person
+can read off the product screen: `findProduct` types it into the products search, opens the row, and
+only proceeds once that screen prints the SKU back. The old `--product=<id>` flag is gone, and
+supplying it is rejected as an unknown option. `transfer` then chooses the product in the form's own
+picker by the **name** that screen printed — never a guess, and `optionTarget` refuses an ambiguous
+match rather than moving the wrong product's stock.
+
+It needs the phone and both tunnels, and exits **2** ("could not check") when a precondition is
+missing — signed out, no debuggable build (the `label` journey reads the app's own PDFs), no product
+with that SKU, no barcode on it, or a picker with nothing to choose. Evidence lives in
 [`docs/evidence/device-runs`](evidence/device-runs/README.md).
 
 A passing run means **data, not just screens**: `expectData` steps wait for a server-only label (a
@@ -479,6 +491,22 @@ that may legitimately be empty and fails only if one **stopped on an error**.
 The traps are encoded in it: `exec-out` for binaries (`adb shell cat` rewrote a PDF's newlines and a
 good label was reported undecodable), distrust inverted dump boxes, close the keyboard only when
 `dumpsys input_method` says it is open, and dismiss the app's own confirmation before the next journey.
+
+**A picker's search box hides the results it just filtered — measured 2026-10-26.** With the IME up,
+the product sheet was 530 px tall and its one row sat in the hierarchy at `[0,1422][1080,1575]` while
+being painted **nowhere** (screenshot: empty space above the keyboard); with the keyboard down the
+same row is at `[0,2055][1080,2208]` and tappable. So on this device you can type a filter and then
+not see or press anything it found. `BACK` and `ESCAPE` do not help: both close the whole sheet (the
+`Modal`'s request-close). Until the sheet is fixed, reach a row by **scrolling the list**, which is
+what the harness's `pick` does — it never types into a sheet. This is an app defect, recorded rather
+than worked around silently.
+
+**`Done` is the only proof a sheet is open.** A form's own label carries the same word as the sheet
+heading (`Supplier *`), so on a tenant with **no suppliers** the disabled picker never opened,
+`tapFirst` read the form label as a heading, tapped a row under it and reported **PASS** — the
+purchase order then failed with "Supplier is required.", pointing at the wrong control. The harness
+now requires the sheet's `Done` control before it treats anything as a sheet, and calls an unopened
+picker **BLOCKED** (nothing to choose here) instead of a defect.
 
 ---
 

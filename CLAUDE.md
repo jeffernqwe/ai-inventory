@@ -482,6 +482,7 @@ anchor (`§27…`) in that file.
 - **§27FO** — The documentation set, measured and cut — and four documents that were confidently wrong (2026-10-26)
 - **§27FP** — The advisories re-measured, and no published release can close either (2026-10-26)
 - **§27FQ** — The empty state the harness could not read, and the production walk it was hiding (2026-10-26)
+- **§27FR** — The journeys stopped needing an id, and four false verdicts fell out of it (2026-10-26)
 
 ---
 

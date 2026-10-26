@@ -1,0 +1,20 @@
+{
+  "journey": "label",
+  "startedAt": "2026-10-26T11:35:08.081Z",
+  "device": "CPH1969 · Android 11 (API 30) · PV4DDMIZZLTCIVSK",
+  "steps": [
+    {
+      "title": "find the product with SKU SMOKE-1 through the products search",
+      "status": "pass",
+      "detail": "opened Smoke Widget (SKU SMOKE-1) through the products search in 37030ms",
+      "durationMs": 37032
+    },
+    {
+      "title": "read the barcode off the screen",
+      "status": "blocked",
+      "detail": "no 13-digit barcode on this screen; screen showed: Navigate up | Product | Smoke Widget | Active | SKU | SMOKE-1 | Cost price | 0.00 | Selling price | 9.99",
+      "durationMs": 11891
+    }
+  ],
+  "notes": "evidence: C:\\Users\\jeffe\\inventory-ai\\docs\\evidence\\device-runs\\2026-10-26T11-35-08-081Z-label"
+}

@@ -83,20 +83,25 @@ cd C:/Users/jeffe/inventory-ai
 node scripts/device/run.mjs --list
 node scripts/device/run.mjs --self-test
 node scripts/device/run.mjs                                   # read-only walk, 24 steps
-node scripts/device/run.mjs --all --product=<id>              # + print a label, decode its PDF
+node scripts/device/run.mjs --all --sku=SMOKE-1               # + print a label, decode its PDF
 node scripts/device/run.mjs --journey=draft --allow-writes
-node scripts/device/run.mjs --journey=stock --product=<id> --source="Shop Front" --allow-writes
-node scripts/device/run.mjs --journey=transfer --product=<id> \
-  --source="Shop Front" --destination="Main Warehouse" --allow-writes
+node scripts/device/run.mjs --journey=stock --sku=SMOKE-1 --source="Smoke shelf" --allow-writes
+node scripts/device/run.mjs --journey=transfer --sku=SMOKE-1 \
+  --source="Smoke shelf" --destination="Smoke" --allow-writes
 ```
 
 - Exit **0** all steps passed, **1** a step failed, **2** blocked (no device, no session, no
   debuggable build) — a block is never a pass. `--until=<n>` stops after step `n` and writes
   `state.json`.
-- The write journeys are **net-zero** (`stock` 5 in/5 out, `transfer` 1 across/1 back) and check the
-  app's own confirmation arithmetic.
-- The product must belong to the tenant you are signed in as; another business's id fails at the
-  movement step — tenant isolation working.
+- The write journeys are **net-zero** (`stock` 5 in/5 out; `transfer` stocks 1 in, moves it across
+  and back, then stocks it out) and check the app's own confirmation arithmetic. `transfer` supplies
+  its own unit because a transfer never creates stock.
+- **No journey takes an internal id.** A product is named by its `--sku`, which the harness types into
+  the products search the way a person would, and it proceeds only once the product screen prints
+  that SKU back. The product must belong to the tenant you are signed in as — another business's
+  slug simply has no row, and the run is BLOCKED (exit 2), not failed.
+- A picker whose list is empty (a tenant with no supplier) is **BLOCKED** rather than failed: the app
+  disables it, so there is nothing to tap and nothing was judged.
 - Screens that may legitimately be empty are checked with `expectClean` (not loading, not the error
   state); a screen that never finishes is exit 2.
 - The `label` journey reads the code off the screen, taps *Share PDF*, and decodes the PDF with the

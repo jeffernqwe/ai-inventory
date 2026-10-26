@@ -32,6 +32,8 @@ export const STEP_VERBS = Object.freeze([
   'movement', // check the app's own "from → to" confirmation arithmetic
   'expectData', // wait for rows that could only come from the server
   'expectClean', // wait until the screen is not loading, and fail if it is showing an error
+  'findProduct', // open a product by SKU through the app's own search — no internal id in the run
+  'pick', // open a picker and choose one option by its visible label
 ]);
 
 /** Elements a node's visible label may come from. The app uses both. */
@@ -182,6 +184,114 @@ export function fillTemplate(text, vars = {}) {
 /** The placeholder names a journey step still needs, so a missing flag is reported before a run. */
 export function unfilledPlaceholders(text) {
   return [...String(text ?? '').matchAll(/\{\{(\w+)\}\}/g)].map((match) => match[1]);
+}
+
+/**
+ * Escape a value for use inside a RegExp.
+ *
+ * A SKU is data, not a pattern: `SMOKE-1` must not match `SMOKE-10`, and a SKU carrying `.` or `(`
+ * must not change the meaning of the expression built around it.
+ */
+export function escapeRegExp(value) {
+  return String(value ?? '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * The product row on the Products screen that carries this SKU, and the name printed above it.
+ *
+ * WHY A SKU AND NOT AN ID. Every specialised journey used to take `--product=<id>`, and an internal
+ * id is not something anybody can read off a phone: the app never shows one, and the only way to
+ * learn it was to have written it down when the product was seeded. A run that depends on that is
+ * not repeatable — and the id it was given could belong to a deleted product, which a deep link
+ * would happily accept and then fail to load for reasons that look like an app defect.
+ *
+ * The SKU is on the SKU field of the row's meta line (`SKU SMOKE-1 · Category · Barcode 2000…`),
+ * which is the same line the products screen builds from the record. The match is anchored to a
+ * whole SKU (`^` or `· ` before it, end or ` · ` after it) so `SMOKE-1` cannot select `SMOKE-10`.
+ *
+ * The name is the nearest labelled node above the meta line with the same left edge — `ListRow`
+ * prints the title directly over the meta — and it is a CANDIDATE, not a fact: the caller proves it
+ * on the detail screen before anything acts on it.
+ */
+export function findProductRow(nodes, sku) {
+  const wanted = String(sku ?? '').trim();
+  if (!wanted) return null;
+
+  const pattern = new RegExp(`(?:^|\u00b7 )SKU ${escapeRegExp(wanted)}(?:$| \u00b7 )`);
+  const meta = (nodes ?? []).find((node) => !node.brokenBounds && pattern.test(node.label));
+  if (!meta) return null;
+
+  const above = (nodes ?? [])
+    .filter((node) => node !== meta && !node.brokenBounds && node.label !== meta.label)
+    .filter((node) => node.bounds.y2 <= meta.bounds.y1 + 4)
+    .filter((node) => Math.abs(node.bounds.x1 - meta.bounds.x1) <= 24)
+    .sort((a, b) => b.bounds.y2 - a.bounds.y2);
+
+  return { meta, name: above[0]?.label ?? null };
+}
+
+/**
+ * The one option in an open picker whose label is exactly `label`, or null.
+ *
+ * EXACT, and single. Two exact hits return null rather than the first, and a substring is not good
+ * enough: choosing the wrong row of a picker is not a rendering detail — on the transfer form it
+ * moves the wrong product's stock, and no later assertion can undo that. The caller narrows the
+ * sheet first and turns null into a failed step that quotes what the sheet actually showed.
+ */
+/**
+ * Are two nodes the same visual row?
+ *
+ * A picker row reaches the dump MORE THAN ONCE: the pressable that handles the tap and the text it
+ * contains both carry the label, with the pressable's box taller than the text's. Measured on the
+ * phone 2026-10-26 — the row was a `ViewGroup` [0,1422][1080,1575] and a `TextView`
+ * [48,1467][1032,1530] — so identity is the overlapping band on screen, not the node count and not
+ * a fixed distance between centres.
+ */
+export function sameRow(a, b) {
+  if (!a || !b) return false;
+  const overlapY =
+    Math.min(a.bounds.y2, b.bounds.y2) - Math.max(a.bounds.y1, b.bounds.y1);
+  const shorter = Math.min(a.bounds.y2 - a.bounds.y1, b.bounds.y2 - b.bounds.y1);
+  const overlapX =
+    Math.min(a.bounds.x2, b.bounds.x2) - Math.max(a.bounds.x1, b.bounds.x1);
+  return shorter > 0 && overlapY >= shorter / 2 && overlapX > 0;
+}
+
+/**
+ * The one option in an open picker whose label is exactly `label`, or null.
+ *
+ * `exclude` takes a node or a list of them, for the sheet's TITLE — a node whose label can equal an
+ * option's. It must come from the SAME dump as `nodes`: node objects are rebuilt on every read, so
+ * an identity taken from an earlier screen excludes nothing at all.
+ */
+export function optionTarget(nodes, label, { exclude } = {}) {
+  const wanted = String(label ?? '').trim();
+  if (!wanted) return null;
+
+  const skipped = new Set(Array.isArray(exclude) ? exclude.filter(Boolean) : [exclude].filter(Boolean));
+  const exact = (nodes ?? []).filter(
+    (node) =>
+      !skipped.has(node) &&
+      !node.brokenBounds &&
+      node.label === wanted &&
+      // A picker's options are never edit boxes. The sheet's SEARCH BOX is — and once the name is
+      // typed into it, its text equals the option's name, so measured 2026-10-26 a one-product
+      // sheet was reported as ambiguous because the search field counted as a second option.
+      !/EditText$/.test(node.className ?? ''),
+  );
+  if (!exact.length) return null;
+
+  // One visual row per answer: duplicates of the same row are the same option, while two rows with
+  // the same words are two different things to choose between — and that is the case to refuse.
+  const rows = [];
+  for (const node of exact) {
+    const row = rows.find((candidate) => sameRow(candidate[0], node));
+    if (row) row.push(node);
+    else rows.push([node]);
+  }
+  if (rows.length !== 1) return null;
+
+  return rows[0].find((node) => node.clickable) ?? rows[0][0];
 }
 
 /**
@@ -420,6 +530,20 @@ export function quoteForDeviceShell(value) {
 }
 
 /**
+ * Is a bottom sheet open?
+ *
+ * Every `Sheet` renders a labelled `Done` close control (see `components/Sheet.tsx`), so that word is
+ * the sheet's own signature — and it is the ONLY reliable one. Without it, `tapFirst` treated a form's
+ * own `Supplier *` label as a sheet heading and tapped whatever sat below it: measured 2026-10-26 on
+ * a tenant with no suppliers, where the picker was disabled (nothing to list), no sheet ever opened,
+ * the step reported PASS, and the purchase order failed later with "Supplier is required." — a false
+ * green pointing at the wrong control.
+ */
+export function hasSheetClose(nodes) {
+  return (nodes ?? []).some((node) => node.label === 'Done');
+}
+
+/**
  * Is this label a picker's placeholder? (`Choose a location…`, `Choose a supplier`.)
  *
  * Used only to decide whether a tap that changed nothing is worth repeating: a picker whose options
@@ -581,6 +705,29 @@ export function validateJourneys(journeys) {
 
       if (verb === 'expectClean' && (typeof value !== 'string' || !value.trim())) {
         problems.push(`${at}: expectClean needs the screen's name`);
+      }
+
+      if (verb === 'findProduct') {
+        // A SKU, not an id: `--sku` is something a person can read off the product screen.
+        const spec = value !== null && typeof value === 'object' ? value : null;
+        const valid =
+          spec !== null &&
+          typeof spec.sku === 'string' &&
+          spec.sku.trim() !== '' &&
+          Object.keys(spec).every((key) => key === 'sku');
+        if (!valid) problems.push(`${at}: findProduct needs { sku: 'SKU-1' }`);
+      }
+
+      if (verb === 'pick') {
+        const spec = value !== null && typeof value === 'object' ? value : null;
+        const text = (key) => typeof spec?.[key] === 'string' && spec[key].trim() !== '';
+        const valid =
+          spec !== null &&
+          text('field') &&
+          text('sheet') &&
+          text('option') &&
+          Object.keys(spec).every((key) => ['field', 'sheet', 'option'].includes(key));
+        if (!valid) problems.push(`${at}: pick needs { field, sheet, option }`);
       }
 
       if (verb === 'expectData') {

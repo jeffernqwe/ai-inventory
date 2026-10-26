@@ -1,0 +1,116 @@
+{
+  "journey": "stock",
+  "startedAt": "2026-10-26T11:03:01.213Z",
+  "device": "CPH1969 · Android 11 (API 30) · PV4DDMIZZLTCIVSK",
+  "steps": [
+    {
+      "title": "find the product with SKU SMOKE-1 through the products search",
+      "status": "pass",
+      "detail": "opened Smoke Widget (SKU SMOKE-1) through the products search in 26602ms",
+      "durationMs": 26603
+    },
+    {
+      "title": "tap \"Stock In\"",
+      "status": "pass",
+      "detail": "tapped Stock In at 204,2091 after 1 scroll",
+      "durationMs": 27781
+    },
+    {
+      "title": "expect \"Add stock\"",
+      "status": "pass",
+      "detail": "seen after 2580ms",
+      "durationMs": 2580
+    },
+    {
+      "title": "tap \"Choose a location…\"",
+      "status": "pass",
+      "detail": "tapped Choose a location…, ▾ at 540,807",
+      "durationMs": 6010
+    },
+    {
+      "title": "tap \"Smoke shelf\"",
+      "status": "pass",
+      "detail": "tapped Smoke shelf at 540,1978",
+      "durationMs": 3827
+    },
+    {
+      "title": "type into the focused field",
+      "status": "pass",
+      "detail": "\"Quantity\" now reads 5, keyboard closed",
+      "durationMs": 22849
+    },
+    {
+      "title": "tap \"Add stock\"",
+      "status": "pass",
+      "detail": "tapped Add stock at 540,1824",
+      "durationMs": 3846
+    },
+    {
+      "title": "check the movement arithmetic (5)",
+      "status": "pass",
+      "detail": "0 → 5 (5)",
+      "durationMs": 2130
+    },
+    {
+      "title": "tap \"OK\"",
+      "status": "pass",
+      "detail": "tapped OK at 873,1303",
+      "durationMs": 4275
+    },
+    {
+      "title": "tap \"Stock Out\"",
+      "status": "pass",
+      "detail": "tapped Stock Out at 540,2091",
+      "durationMs": 13674
+    },
+    {
+      "title": "expect \"Remove stock\"",
+      "status": "pass",
+      "detail": "seen after 2240ms",
+      "durationMs": 2240
+    },
+    {
+      "title": "tap \"Choose a location…\"",
+      "status": "pass",
+      "detail": "tapped Choose a location…, ▾ at 540,807",
+      "durationMs": 6189
+    },
+    {
+      "title": "tap \"Smoke shelf\"",
+      "status": "pass",
+      "detail": "tapped Smoke shelf at 540,1978",
+      "durationMs": 3708
+    },
+    {
+      "title": "type into the focused field",
+      "status": "pass",
+      "detail": "\"Quantity\" now reads 5, keyboard closed",
+      "durationMs": 32772
+    },
+    {
+      "title": "tap \"Remove stock\"",
+      "status": "pass",
+      "detail": "tapped Remove stock at 540,2064",
+      "durationMs": 4120
+    },
+    {
+      "title": "check the movement arithmetic (-5)",
+      "status": "pass",
+      "detail": "5 → 0 (-5)",
+      "durationMs": 2308
+    },
+    {
+      "title": "tap \"OK\"",
+      "status": "pass",
+      "detail": "tapped OK at 873,1303",
+      "durationMs": 4158
+    },
+    {
+      "title": "screenshot \"stock-done\"",
+      "status": "pass",
+      "detail": "C:\\Users\\jeffe\\inventory-ai\\docs\\evidence\\device-runs\\2026-10-26T11-03-01-213Z-stock\\stock-done.png",
+      "durationMs": 786
+    }
+  ],
+  "notes": "evidence: C:\\Users\\jeffe\\inventory-ai\\docs\\evidence\\device-runs\\2026-10-26T11-03-01-213Z-stock"
+}

@@ -19,10 +19,15 @@
  *
  *   node scripts/device/run.mjs --list
  *   node scripts/device/run.mjs                      # the read-only smoke journey
- *   node scripts/device/run.mjs --journey=label --product=<product id>
+ *   node scripts/device/run.mjs --journey=label --sku=SMOKE-1
+ *   node scripts/device/run.mjs --journey=stock --sku=SMOKE-1 --source='Smoke shelf' --allow-writes
  *   node scripts/device/run.mjs --journey=draft --allow-writes
  *   node scripts/device/run.mjs --all                # smoke + label (writes excluded)
  *   node scripts/device/run.mjs --self-test          # the harness's own controls, no phone needed
+ *
+ * NO JOURNEY TAKES AN INTERNAL ID. A product is found by its SKU through the products search (the
+ * way a person finds one) and the app's own screen confirms which product is open before a step
+ * acts on it; the transfer form's product is chosen from its picker by the name that screen proved.
  *
  * Exit codes: 0 every step passed, 1 a step failed, 2 could not check (no device, no signed-in
  * session, no debuggable build, no artifact) — never reported as a pass.
@@ -40,13 +45,16 @@ import {
   fieldBelow,
   fillTemplate,
   findNodes,
+  findProductRow,
   findTapTarget,
+  hasSheetClose,
   judgeDataRows,
   judgeSettled,
   looksAtDevLauncher,
   looksLikePicker,
   looksSessionExpired,
   looksSignedOut,
+  optionTarget,
   parseMovements,
   rowsMatching,
   summariseRun,
@@ -62,8 +70,15 @@ import { decodeEan13Bits, decodeEan13FromPdf } from '../verify-label-barcode.mjs
 const ROOT = resolve(new URL('../..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'));
 const DEFAULT_EVIDENCE = join(ROOT, 'docs', 'evidence', 'device-runs');
 
-/** Labels that are sheet chrome rather than a row a journey wants to tap. */
-const CHROME = new Set(['Done', 'Dismiss', 'Search…', 'Search...', 'Cancel', 'Close', '×']);
+/**
+ * Labels that are sheet chrome rather than a row a journey wants to tap.
+ *
+ * `No options available.` belongs here: a picker whose list is empty prints it where the rows would
+ * be, and tapping it selects nothing — the journey then failed a step later, on a form with an empty
+ * field, which reads like a broken form. As chrome, `tapFirst` reports "the sheet had no rows" and
+ * names the real precondition (a tenant with no supplier yet).
+ */
+const CHROME = new Set(['Done', 'Dismiss', 'Search…', 'Search...', 'Cancel', 'Close', '×', 'No options available.']);
 
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 
@@ -88,8 +103,8 @@ function parseArgs(argv) {
       case 'allow-writes':
         args.allowWrites = true;
         break;
-      case 'product':
-        args.product = value;
+      case 'sku':
+        args.sku = value;
         break;
       case 'source':
         args.source = value;
@@ -150,6 +165,14 @@ function titleOf(step, ctx) {
   if (verb === 'movement') return `check the movement arithmetic (${value?.deltas?.join(', ')})`;
   if (verb === 'expectData') return `expect ${value?.what ?? 'rows'} on screen`;
   if (verb === 'expectClean') return `expect ${value} to load without an error`;
+  if (verb === 'findProduct') {
+    const sku = ctx ? fillTemplate(value?.sku ?? '', templateVars(ctx)) : (value?.sku ?? '');
+    return `find the product with SKU ${sku} through the products search`;
+  }
+  if (verb === 'pick') {
+    const option = ctx ? fillTemplate(value?.option ?? '', templateVars(ctx)) : (value?.option ?? '');
+    return `choose "${option}" from the "${value?.sheet}" picker`;
+  }
   return verb;
 }
 
@@ -163,7 +186,14 @@ function visibleLabels(screen, limit = 10) {
 
 /** The run's flags, as template values. */
 function templateVars(ctx) {
-  return { product: ctx.product, source: ctx.source, destination: ctx.destination };
+  return {
+    // `productName` is read off the phone by `findProduct`, not supplied: the transfer form's
+    // product picker filters on the NAME, so the name is the handle a picker needs.
+    sku: ctx.sku,
+    productName: ctx.productName,
+    source: ctx.source,
+    destination: ctx.destination,
+  };
 }
 
 /**
@@ -275,6 +305,22 @@ async function runStep(step, ctx) {
       if (resolved.missing) return { status: 'blocked', detail: `tapFirst ${value} ${resolved.missing}` };
       const heading = resolved.text;
       const screen = await device.readScreen(adbArgs);
+
+      // A SHEET MUST ACTUALLY BE OPEN. The same words also label the form field the sheet belongs
+      // to (`Supplier *`), so without this a disabled picker — one whose list is empty, which
+      // happens on a tenant with nothing to choose — looked like a sheet and this tapped a form row.
+      if (!hasSheetClose(screen.nodes)) {
+        // BLOCKED, not failed: a picker renders disabled when it has nothing to list, so a tenant
+        // with no suppliers (or no locations) cannot open it — a precondition. The message names
+        // both possibilities rather than deciding which one it is.
+        return {
+          status: 'blocked',
+          detail:
+            `no sheet opened for "${heading}" — a picker with an empty list is disabled, so this ` +
+            `tenant may have nothing to choose here; nothing was judged. Screen showed: ${visibleLabels(screen)}`,
+        };
+      }
+
       const anchor = findTapTarget(screen.nodes, heading, { exact: true }) ?? findTapTarget(screen.nodes, heading);
       if (!anchor) {
         return { status: 'fail', detail: `no sheet heading "${heading}"; screen showed: ${visibleLabels(screen)}` };
@@ -289,6 +335,16 @@ async function runStep(step, ctx) {
       }
       device.tap(row.center.x, row.center.y, adbArgs);
       await sleep(800);
+
+      // And the sheet must CLOSE: a tap that selected nothing leaves it open, and the next step then
+      // fails on a form the sheet is covering — the wrong control, one step late.
+      const after = await device.readScreen(adbArgs);
+      if (hasSheetClose(after.nodes)) {
+        return {
+          status: 'fail',
+          detail: `tapped "${row.label}" but the "${heading}" sheet stayed open — nothing was chosen`,
+        };
+      }
       return { status: 'pass', detail: `tapped "${row.label}"` };
     }
 
@@ -577,6 +633,265 @@ async function runStep(step, ctx) {
       }
     }
 
+    case 'findProduct': {
+      // OPEN A PRODUCT BY SKU, THROUGH THE APP'S OWN SEARCH.
+      //
+      // The specialised journeys used to need `--product=<id>`, and an id is not a fact anybody can
+      // read off a phone: the app shows none, so the only way to have one was to have written it
+      // down at seed time. A run that depends on that is not a run a person can repeat, and a stale
+      // id makes a deep link load a product that no longer exists — which looks like an app defect.
+      //
+      // A user finds a product by typing its SKU into the products search. This does the same, then
+      // PROVES the destination from the detail screen's own SKU value before any later step acts on
+      // it. Nothing about the id is guessed, recorded or hard-coded.
+      const skuText = resolveStepText(value?.sku, ctx);
+      if (skuText.missing) return { status: 'blocked', detail: `findProduct ${value?.sku} ${skuText.missing}` };
+      const sku = skuText.text;
+      ctx.sku = sku;
+      const began = Date.now();
+
+      device.openRoute('inventoryai://products', adbArgs);
+      await sleep(1200);
+
+      const SEARCH = 'Search by name, SKU or barcode…';
+      // 30s, not the step timeout: a deep link into a cold-started build lands on the app's
+      // "Restoring session…" screen first, and the products list does not exist until that
+      // finishes. Measured 2026-10-26 — a 15s budget called it "no search box" while the app was
+      // still booting, which reads like a missing control.
+      const searchDeadline = Date.now() + Math.max(ctx.timeoutMs, 30_000);
+      let screen = null;
+      let field = null;
+      while (Date.now() < searchDeadline && !field) {
+        try {
+          screen = await device.readScreen(adbArgs);
+        } catch {
+          await sleep(500);
+          continue;
+        }
+        field =
+          screen.nodes.find((node) => node.label === SEARCH && !node.brokenBounds) ??
+          // A previous journey (or a person) may have left text in it, which makes the typed text
+          // its label; the search box is still the first editable field on the screen.
+          screen.nodes.find(
+            (node) => !node.brokenBounds && node.clickable && /EditText$/.test(node.className ?? ''),
+          ) ??
+          null;
+        if (!field) await sleep(500);
+      }
+      if (!field) {
+        return {
+          status: 'fail',
+          detail: `the Products screen has no search box; screen showed: ${
+            screen ? visibleLabels(screen) : 'nothing readable'
+          }`,
+        };
+      }
+
+      // Leftover text would be APPENDED to, so clear what is there before typing.
+      const leftover = field.label === SEARCH ? '' : field.label;
+      device.tap(field.center.x, field.center.y, adbArgs);
+      await sleep(500);
+      if (leftover) {
+        device.pressKey('123', adbArgs); // KEYCODE_MOVE_END
+        for (let i = 0; i < leftover.length; i += 1) device.pressKey('DEL', adbArgs);
+        await sleep(300);
+      }
+      device.typeText(escapeInputText(sku), adbArgs);
+      await sleep(1200);
+
+      // The keyboard covers the lower half of the list; close it only when it is actually up, or
+      // BACK would leave the screen instead (the trap the device guide records).
+      if (device.keyboardShown(adbArgs)) {
+        device.pressKey('BACK', adbArgs);
+        await sleep(800);
+      }
+
+      let row = null;
+      const listDeadline = Date.now() + Math.max(ctx.timeoutMs, 12_000);
+      while (Date.now() < listDeadline) {
+        try {
+          screen = await device.readScreen(adbArgs);
+          row = findProductRow(screen.nodes, sku);
+        } catch {
+          row = null;
+        }
+        if (row) break;
+        await sleep(600);
+      }
+      if (!row) {
+        // No such product in this tenant is a PRECONDITION, not an app defect.
+        return {
+          status: 'blocked',
+          detail: `no product row for SKU ${sku} (the list is ${
+            screen ? describeListState(screen.nodes).state : 'unreadable'
+          }); screen showed: ${screen ? visibleLabels(screen) : 'nothing readable'}`,
+        };
+      }
+
+      device.tap(row.meta.center.x, row.meta.center.y, adbArgs);
+      await sleep(1200);
+
+      // The proof: the detail screen prints the SKU as its own value, so an exact node is the app
+      // confirming which product is open.
+      let detail = null;
+      const detailDeadline = Date.now() + Math.max(ctx.timeoutMs, 12_000);
+      while (Date.now() < detailDeadline) {
+        try {
+          const read = await device.readScreen(adbArgs);
+          if (read.nodes.some((node) => node.label === sku)) {
+            detail = read;
+            break;
+          }
+        } catch {
+          // An unreadable screen is not evidence either way; keep trying.
+        }
+        await sleep(500);
+      }
+      if (!detail) {
+        return {
+          status: 'fail',
+          detail: `tapped the row for SKU ${sku} but the product screen does not show that SKU; screen showed: ${
+            screen ? visibleLabels(screen) : 'nothing readable'
+          }`,
+        };
+      }
+
+      // Only a name this screen also prints is kept: `pick` must never search for a guess.
+      ctx.productName = row.name && detail.nodes.some((node) => node.label === row.name) ? row.name : null;
+      return {
+        status: 'pass',
+        detail: `opened ${ctx.productName ?? '(name not readable)'} (SKU ${sku}) through the products search in ${
+          Date.now() - began
+        }ms`,
+      };
+    }
+
+    case 'pick': {
+      // Choose one option from a picker by its VISIBLE label, scrolling the list to find it.
+      //
+      // The transfer form's product picker lists names, so a journey that knows only a SKU cannot
+      // use it — which is why this takes the name `findProduct` read off the phone. `optionTarget`
+      // refuses an ambiguous choice rather than tapping the first hit: on this form the wrong row
+      // moves the wrong product's stock, and no later assertion can undo that.
+      //
+      // IT NEVER TYPES INTO THE SHEET'S SEARCH BOX. Measured on the phone 2026-10-26: with the IME
+      // up, a searchable picker's list is squeezed to nothing and its rows are clipped out of view —
+      // the row was in the hierarchy at y 1422–1575 and painted nowhere (screenshot), while the same
+      // sheet with the keyboard down shows it at 2055–2208. BACK and ESCAPE close the whole sheet
+      // (the Modal's request-close), so there is no way to dismiss the IME and keep the results.
+      // Scrolling the list needs no keyboard, so the choice is one a person can actually make.
+      const spec = value ?? {};
+      const want = {};
+      for (const key of ['field', 'sheet', 'option']) {
+        if (spec[key] === undefined) continue;
+        const resolved = resolveStepText(spec[key], ctx);
+        if (resolved.missing) return { status: 'blocked', detail: `pick ${key} ${spec[key]} ${resolved.missing}` };
+        want[key] = resolved.text;
+      }
+
+      let screen = await device.readScreen(adbArgs);
+      let trigger = findTapTarget(screen.nodes, want.field);
+      let scrolled = 0;
+      while (!trigger && scrolled < 2) {
+        device.swipe(540, 1700, 540, 900, adbArgs);
+        await sleep(700);
+        screen = await device.readScreen(adbArgs);
+        trigger = findTapTarget(screen.nodes, want.field);
+        scrolled += 1;
+      }
+      if (!trigger) {
+        return { status: 'fail', detail: `no field labelled "${want.field}"; screen showed: ${visibleLabels(screen)}` };
+      }
+
+      device.tap(trigger.center.x, trigger.center.y, adbArgs);
+      await sleep(800);
+
+      let heading = null;
+      const sheetDeadline = Date.now() + Math.max(ctx.timeoutMs, 8_000);
+      while (Date.now() < sheetDeadline && !heading) {
+        try {
+          screen = await device.readScreen(adbArgs);
+          heading = findNodes(screen.nodes, want.sheet, { exact: true })[0] ?? null;
+        } catch {
+          heading = null;
+        }
+        if (!heading) await sleep(400);
+      }
+      if (!heading) {
+        return {
+          status: 'fail',
+          detail: `the "${want.field}" sheet did not open ("${want.sheet}" is not on screen); screen showed: ${
+            screen ? visibleLabels(screen) : 'nothing readable'
+          }`,
+        };
+      }
+
+      // ONE dump for both the exclusion and the choice: node objects are rebuilt on every read, so
+      // a heading taken from an earlier screen would exclude nothing.
+      screen = await device.readScreen(adbArgs);
+      let headingNow = findNodes(screen.nodes, want.sheet, { exact: true })[0] ?? null;
+      let option = optionTarget(screen.nodes, want.option, { exclude: headingNow });
+
+      // Not on screen yet: scroll the sheet's list, which is how a person reaches a row in a picker
+      // with more products than fit. Bounded, and every attempt re-reads, so the sheet is never
+      // scrolled past the answer and tapped blind.
+      let listScrolls = 0;
+      while (!option && listScrolls < 8) {
+        const anchor = headingNow?.center.y ?? 1200;
+        device.swipe(540, Math.round(anchor + 400), 540, Math.round(anchor + 150), adbArgs);
+        await sleep(700);
+        screen = await device.readScreen(adbArgs);
+        headingNow = findNodes(screen.nodes, want.sheet, { exact: true })[0] ?? null;
+        option = optionTarget(screen.nodes, want.option, { exclude: headingNow });
+        listScrolls += 1;
+      }
+
+      if (!option) {
+        return {
+          status: 'fail',
+          detail: `no single "${want.option}" in the "${want.sheet}" sheet${
+            listScrolls ? ` after ${listScrolls} scroll(s)` : ''
+          }; screen showed: ${visibleLabels(screen)}`,
+        };
+      }
+
+      device.tap(option.center.x, option.center.y, adbArgs);
+      await sleep(900);
+
+      // THE SHEET MUST CLOSE. Checking only that the words are on screen was a false pass: the
+      // sheet still lists the option, so a tap that selected nothing looked exactly like one that
+      // did, and the next step failed on a form the open sheet was covering.
+      let closed = null;
+      const closeBy = Date.now() + 6_000;
+      while (Date.now() < closeBy) {
+        try {
+          closed = await device.readScreen(adbArgs);
+        } catch {
+          closed = null;
+        }
+        if (closed && !findNodes(closed.nodes, want.sheet, { exact: true }).length) break;
+        closed = null;
+        await sleep(400);
+      }
+      if (!closed) {
+        return {
+          status: 'fail',
+          detail: `tapped "${want.option}" but the "${want.sheet}" sheet is still open — nothing was chosen`,
+        };
+      }
+
+      if (!findNodes(closed.nodes, want.option).length) {
+        return {
+          status: 'fail',
+          detail: `the sheet closed but the field does not show "${want.option}"; screen showed: ${visibleLabels(closed)}`,
+        };
+      }
+      return {
+        status: 'pass',
+        detail: `chose "${want.option}"${listScrolls ? ` after ${listScrolls} scroll(s)` : ''}`,
+      };
+    }
+
     default:
       return { status: 'fail', detail: `the runner has no implementation for "${verb}"` };
   }
@@ -610,7 +925,8 @@ async function runJourney(journey, options) {
     outDir,
     serial: options.serial,
     adbPath: options.adbPath,
-    product: options.product,
+    sku: options.sku,
+    productName: null,
     source: options.source,
     destination: options.destination,
     timeoutMs: options.timeoutMs,
@@ -656,7 +972,12 @@ async function runJourney(journey, options) {
       record.status === 'pass' ? '' : ` — ${record.detail}`
     }`);
 
+    // A BLOCKED PRECONDITION ENDS THE JOURNEY, except for `expectData`: "this tenant has no rows"
+    // says nothing about the next screen, but "this product has no barcode" means the steps after
+    // it were never reached — and running them reported `expected "Barcode label"` as an app defect
+    // on a product that simply has no barcode (measured 2026-10-26, the first `label` run by SKU).
     if (record.status === 'fail' && !options.keepGoing) break;
+    if (record.status === 'blocked' && !step.expectData && !options.keepGoing) break;
 
     // `--until=N` stops after step N and writes what is on screen. A journey that fails mid-form
     // is otherwise only visible as a list of labels, and guessing the next control costs device
@@ -738,6 +1059,8 @@ function selfTest() {
     [{ id: 'x', summary: 's', steps: [{ teleport: 1 }] }],
     [{ id: 'x', summary: 's', steps: [] }],
     [{ id: 'x', summary: 's', steps: [{ tap: 'A', expect: 'B' }] }],
+    [{ id: 'x', summary: 's', steps: [{ findProduct: {} }] }],
+    [{ id: 'x', summary: 's', steps: [{ pick: { field: 'A', sheet: 'B' } }] }],
   ];
   for (const table of bad) {
     if (validateJourneys(table).length === 0) problems.push(`control not caught: ${JSON.stringify(table)}`);

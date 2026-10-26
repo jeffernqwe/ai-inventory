@@ -1,0 +1,74 @@
+{
+  "journey": "transfer",
+  "startedAt": "2026-10-26T11:22:00.689Z",
+  "device": "CPH1969 · Android 11 (API 30) · PV4DDMIZZLTCIVSK",
+  "steps": [
+    {
+      "title": "find the product with SKU SMOKE-1 through the products search",
+      "status": "pass",
+      "detail": "opened Smoke Widget (SKU SMOKE-1) through the products search in 33877ms",
+      "durationMs": 33879
+    },
+    {
+      "title": "open inventoryai://transfer",
+      "status": "pass",
+      "detail": "inventoryai://transfer",
+      "durationMs": 1009
+    },
+    {
+      "title": "expect \"From location\"",
+      "status": "pass",
+      "detail": "seen after 2186ms",
+      "durationMs": 2186
+    },
+    {
+      "title": "choose \"Smoke Widget\" from the \"Product\" picker",
+      "status": "pass",
+      "detail": "chose \"Smoke Widget\"",
+      "durationMs": 12680
+    },
+    {
+      "title": "tap \"Choose the source…\"",
+      "status": "pass",
+      "detail": "tapped Choose the source…, ▾ at 540,807",
+      "durationMs": 6017
+    },
+    {
+      "title": "tap \"Smoke shelf\"",
+      "status": "pass",
+      "detail": "tapped Smoke shelf at 540,1978",
+      "durationMs": 4574
+    },
+    {
+      "title": "tap \"Choose the destination…\"",
+      "status": "pass",
+      "detail": "tapped Choose the destination…, ▾ at 540,1371",
+      "durationMs": 16097
+    },
+    {
+      "title": "tap \"Smoke\"",
+      "status": "pass",
+      "detail": "tapped Smoke at 540,2132",
+      "durationMs": 3842
+    },
+    {
+      "title": "type into the focused field",
+      "status": "pass",
+      "detail": "\"Quantity\" now reads 1, keyboard closed",
+      "durationMs": 41942
+    },
+    {
+      "title": "tap \"Transfer stock\"",
+      "status": "pass",
+      "detail": "tapped Transfer stock at 540,2136",
+      "durationMs": 14242
+    },
+    {
+      "title": "check the movement arithmetic (-1, 1)",
+      "status": "fail",
+      "detail": "expected 2 movement(s), saw 0; screen showed: Navigate up | Transfer Stock | Smoke Widget, ▾ | Smoke Widget | ▾ | From location * | Smoke shelf, ▾ | Smoke shelf | ▾ | AVAILABLE TO TRANSFER",
+      "durationMs": 26143
+    }
+  ],
+  "notes": "evidence: C:\\Users\\jeffe\\inventory-ai\\docs\\evidence\\device-runs\\2026-10-26T11-22-00-689Z-transfer"
+}

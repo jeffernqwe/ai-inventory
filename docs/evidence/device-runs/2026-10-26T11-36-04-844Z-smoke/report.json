@@ -1,0 +1,152 @@
+{
+  "journey": "smoke",
+  "startedAt": "2026-10-26T11:36:04.844Z",
+  "device": "CPH1969 · Android 11 (API 30) · PV4DDMIZZLTCIVSK",
+  "steps": [
+    {
+      "title": "open inventoryai://dashboard",
+      "status": "pass",
+      "detail": "inventoryai://dashboard",
+      "durationMs": 1021
+    },
+    {
+      "title": "expect \"Overview\"",
+      "status": "pass",
+      "detail": "seen after 2718ms",
+      "durationMs": 2719
+    },
+    {
+      "title": "open inventoryai://inventory",
+      "status": "pass",
+      "detail": "inventoryai://inventory",
+      "durationMs": 1004
+    },
+    {
+      "title": "expect \"Inventory\"",
+      "status": "pass",
+      "detail": "seen after 2283ms",
+      "durationMs": 2283
+    },
+    {
+      "title": "expect stock rows on screen",
+      "status": "pass",
+      "detail": "4 row(s), e.g. \", Smoke Widget, Smoke shelf, 0 available · 0 on hand, Low, Out\"",
+      "durationMs": 2149
+    },
+    {
+      "title": "open inventoryai://products",
+      "status": "pass",
+      "detail": "inventoryai://products",
+      "durationMs": 1011
+    },
+    {
+      "title": "expect \"Products\"",
+      "status": "pass",
+      "detail": "seen after 2274ms",
+      "durationMs": 2274
+    },
+    {
+      "title": "expect product rows on screen",
+      "status": "pass",
+      "detail": "1 row(s), e.g. \"SKU SMOKE-1\"",
+      "durationMs": 2329
+    },
+    {
+      "title": "open inventoryai://purchase-orders",
+      "status": "pass",
+      "detail": "inventoryai://purchase-orders",
+      "durationMs": 1015
+    },
+    {
+      "title": "expect \"Purchase Orders\"",
+      "status": "pass",
+      "detail": "seen after 3000ms",
+      "durationMs": 3000
+    },
+    {
+      "title": "expect Purchase Orders to load without an error",
+      "status": "pass",
+      "detail": "settled without an error state",
+      "durationMs": 2595
+    },
+    {
+      "title": "open inventoryai://suppliers",
+      "status": "pass",
+      "detail": "inventoryai://suppliers",
+      "durationMs": 1011
+    },
+    {
+      "title": "expect \"Suppliers\"",
+      "status": "pass",
+      "detail": "seen after 2441ms",
+      "durationMs": 2441
+    },
+    {
+      "title": "expect Suppliers to load without an error",
+      "status": "pass",
+      "detail": "settled without an error state",
+      "durationMs": 2160
+    },
+    {
+      "title": "open inventoryai://restock",
+      "status": "pass",
+      "detail": "inventoryai://restock",
+      "durationMs": 1013
+    },
+    {
+      "title": "expect \"Restock\"",
+      "status": "pass",
+      "detail": "seen after 2271ms",
+      "durationMs": 2271
+    },
+    {
+      "title": "expect Restock to load without an error",
+      "status": "pass",
+      "detail": "settled without an error state",
+      "durationMs": 2490
+    },
+    {
+      "title": "open inventoryai://ai",
+      "status": "pass",
+      "detail": "inventoryai://ai",
+      "durationMs": 1001
+    },
+    {
+      "title": "expect \"AI Assistant\"",
+      "status": "pass",
+      "detail": "seen after 2166ms",
+      "durationMs": 2166
+    },
+    {
+      "title": "expect AI Assistant to load without an error",
+      "status": "pass",
+      "detail": "settled without an error state",
+      "durationMs": 2278
+    },
+    {
+      "title": "open inventoryai://audit",
+      "status": "pass",
+      "detail": "inventoryai://audit",
+      "durationMs": 1024
+    },
+    {
+      "title": "expect \"Audit\"",
+      "status": "pass",
+      "detail": "seen after 2333ms",
+      "durationMs": 2333
+    },
+    {
+      "title": "expect Audit to load without an error",
+      "status": "pass",
+      "detail": "settled without an error state",
+      "durationMs": 2307
+    },
+    {
+      "title": "screenshot \"smoke-final\"",
+      "status": "pass",
+      "detail": "C:\\Users\\jeffe\\inventory-ai\\docs\\evidence\\device-runs\\2026-10-26T11-36-04-844Z-smoke\\smoke-final.png",
+      "durationMs": 936
+    }
+  ],
+  "notes": "evidence: C:\\Users\\jeffe\\inventory-ai\\docs\\evidence\\device-runs\\2026-10-26T11-36-04-844Z-smoke"
+}

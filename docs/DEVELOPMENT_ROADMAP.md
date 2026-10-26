@@ -8,7 +8,7 @@ of truth for *what actually happened*, and it is why this file is long.
 
 **How to read it.** Do not read it top to bottom. Either find a record by number (§27FJ, §27DM — the
 numbers are cited from `CLAUDE.md` and from source comments), or use the index: `CLAUDE.md` §7 lists
-all **169** records by the title each gives itself.
+all **170** records by the title each gives itself.
 
 **Current state:** V1 complete and in production testing. The records that answer *where are we now*
 are §27FM (the V1 re-verification), §27FK (the runtime boundary and the blocked build), §27FJ (the two
@@ -21387,6 +21387,76 @@ Four documentation guards pass (section integrity, route inventory, fact drift, 
 every relative link across the markdown set resolves, none missing; `check-secrets.mjs` scans 863
 files with 22 controls and finds no credential-shaped content; `git diff --check` is clean. No source,
 test, workflow, dependency or configuration file was touched by either pass.
+
+---
+
+# 27FP. The advisories re-measured, and no published release can close either (2026-10-26)
+
+**The question was whether a compatible fix had appeared.** None has — and that is now a measurement
+rather than a standing assumption. Every package that could carry a fix was asked for its newest
+published version, from `mobile/`:
+
+| Package | Installed | Newest published | What it declares |
+| --- | --- | --- | --- |
+| `@expo/cli` | 58.1.15 | **58.1.15** | `zod: ^3.25.76` |
+| `expo` | 58.0.19 | **58.0.19** | `@expo/cli: ^58.1.15` |
+| `expo-updates` | 58.0.18 | **58.0.18** | `@expo/code-signing-certificates: ^0.0.7` |
+| `@expo/code-signing-certificates` | 0.0.7 | **0.0.7** | `node-forge: ^1.4.0` |
+| `node-forge` | 1.4.0 | **1.4.0** | itself inside the advisory's `<= 1.4.0` — **no patched release exists** |
+
+A patch inside the current line therefore cannot clear either advisory. Only an `overrides` entry
+could, and **D-6 refuses that**: it would install a major the consumer never declared (zod 3 → 4) or
+a package that does not exist (a patched forge). `npm audit fix` remains the four-SDK-major downgrade
+D-5 rejected. **No dependency was changed.**
+
+**Reachability, named rather than assumed.** The two packages are confined more tightly than "build
+tooling" suggests:
+
+- **zod** — imported by exactly **two** files in `@expo/cli`, `start/server/createMCPDevToolsExtensionSchema.js`
+  and `start/server/DevToolsPlugin.schema.js`: the DevTools/MCP plugin-manifest validation that
+  `expo start` runs on the developer machine. Nothing under `mobile/app|lib|components|hooks` imports it.
+- **node-forge** — required only by `@expo/code-signing-certificates/build/main.js`, which `expo-updates`
+  reaches from two **CLI scripts** (`cli/build/configureCodeSigningAsync.js`,
+  `cli/build/generateCodeSigningAsync.js`) and **not** from `expo-updates/build/index.js`, the module the
+  app imports. Code signing is off in this project (§27FN), so neither script runs here.
+
+`npm audit` on 2026-10-26: **`server/` 0**, **`mobile/` 6 entries = 2 advisories**, both high. The
+six are dependents, not six defects. D-4 stands, now with D-8 recording that no release can change it.
+
+## Production, measured the same day
+
+The deployed service answered: `GET /api/health` **200** (`db: connected`, `environment: production`,
+`commit: 11a9c49`), `/api/health/live` and `/api/health/ready` **200** in ~0.2 s, `/privacy`, `/terms`
+and `/account-deletion` **200 text/html**, `/auth/reset` **400** without an `oobCode` (correct — it is a
+one-time-code consumer, not a landing page), and `/api/auth/me` without a token **401 `AUTH_REQUIRED`**.
+The first request took **32.6 s** on a cold instance and every later one was fast; that is the Free
+plan spinning up, not a fault.
+
+**The commit is the right one.** `11a9c49` is the last commit that touches `server/`; the two
+documentation pushes after it (`9d02b1a`, `85b42dc`) change no server file, so Render correctly did not
+deploy them. A docs push skipping the deploy is the designed behaviour, not a broken connection.
+
+## The phone could not be tested, and that is a block rather than a pass
+
+`adb devices` returned an empty list and `node scripts/device/run.mjs` exited **2** with
+`cannot check: no device attached`. The harness itself is intact — `--self-test` answers
+`5 journeys, 83 steps, controls pass` — and `--list` enumerates smoke, label, draft, stock and
+transfer. Nothing on-device was verified in this pass; the OPPO run waits for the phone to be plugged in.
+
+## The OTA gate still refuses, as designed
+
+`npm run check:ota` at `85b42dc` answers exactly one finding — `native-record-missing`, because
+`ota-native-runtime.json` does not exist and no build has claimed runtime `1.0.1` — and prints
+**NOT ready to publish**. Nothing was published and the guard was not bypassed.
+
+**Unchanged and still open:** L-17 (console-only reset action URL), the Play release, iOS verification,
+and OTA code signing (plan-gated). None of them was marked complete.
+
+## Verification
+
+Four documentation guards pass; every relative link resolves; `check-secrets.mjs` clean. **No source,
+test, workflow, dependency or configuration file changed** — `server/package.json`,
+`mobile/package.json` and both lockfiles are untouched, which is the point of the record.
 
 ---
 

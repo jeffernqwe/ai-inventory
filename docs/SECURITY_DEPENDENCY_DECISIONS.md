@@ -42,11 +42,15 @@ vulnerable package, not because each has its own defect.
 
 - No file under `mobile/app`, `mobile/lib`, `mobile/components` or `mobile/hooks` imports or requires
   either package.
-- `node-forge` is required only by `@expo/code-signing-certificates/build/main.js`, a build-time
-  consumer of `expo-updates`' signing tooling — not a module the app loads at runtime.
-- The vulnerable `zod` is **nested inside `expo/node_modules`** for the CLI. The top-level `zod` is
-  `4.6.7`, which is already outside the advisory's range; the CLI cannot use it because it declares a
-  3.x range.
+- `node-forge` is required only by `@expo/code-signing-certificates/build/main.js`. Inside
+  `expo-updates` that package is reached from **two CLI scripts** — `cli/build/configureCodeSigningAsync.js`
+  and `cli/build/generateCodeSigningAsync.js` — and **not** from `expo-updates/build/index.js`, the
+  module the app imports. Code signing is not enabled for this project (§27FN), so neither script runs here.
+- The vulnerable `zod` is **nested inside `expo/node_modules`** for the CLI, where exactly **two** files
+  import it: `start/server/createMCPDevToolsExtensionSchema.js` and `start/server/DevToolsPlugin.schema.js`
+  — the DevTools/MCP plugin-manifest validation that `expo start` performs on the developer machine.
+  The top-level `zod` is `4.6.7`, already outside the advisory's range; the CLI cannot use it because
+  it declares a 3.x range.
 
 ---
 
@@ -58,6 +62,7 @@ vulnerable package, not because each has its own defect.
 | **D-5** | **`npm audit fix` is NOT run.** Its proposal is `expo@54.0.38` — a **downgrade of four SDK majors** from the installed 58.0.19. That is not a fix; it would replace the whole supported SDK line with an older one. | **REJECTED** |
 | **D-6** | **npm `overrides` are NOT used** to force `zod` 4.x into `@expo/cli` or to replace `node-forge`. Both would install a dependency the parent never declared, against a consumer that has not been tested with it. | **REJECTED** |
 | **D-7** | The decision is **watched, not remembered**. `scripts/check-upgrade-watches.mjs` carries `zod (advisory)` and `node-forge (advisory)` and reports the gate each one needs to open. | **ACTIVE** |
+| **D-8** | **No published release can clear either advisory today.** Checked 2026-10-26: `@expo/cli` 58.1.15, `expo` 58.0.19, `expo-updates` 58.0.18, `@expo/code-signing-certificates` 0.0.7 and `node-forge` 1.4.0 are each the **newest published version**, and the two consumers still declare `zod ^3.25.76` and `node-forge ^1.4.0`. A patch inside the current line cannot reach either advisory; only an override could, and D-6 refuses that. | **MEASURED** |
 
 The reasoning is the same for both: the vulnerable API is never invoked by application code, the
 package is confined to build tooling, and every available "fix" trades a non-exploitable advisory for
@@ -98,5 +103,7 @@ Read-only commands; none of them writes, installs or removes anything.
 | 4 | Source grep of `app/`, `lib/`, `components/`, `hooks/` | no import of either package |
 | 5 | `grep -rln node-forge node_modules/@expo/code-signing-certificates/build` | one file, `main.js` — a build-time consumer |
 | 6 | `node scripts/check-upgrade-watches.mjs` | both advisory gates `DEFERRED`, with the exact release each needs |
+| 7 | `npm view <pkg> version` for `@expo/cli`, `expo`, `expo-updates`, `@expo/code-signing-certificates`, `node-forge` | each answer equals the installed version — no newer release exists (D-8) |
+| 8 | `grep -rln zod` in `@expo/cli/build/src` and `code-signing-certificates` in `expo-updates` | zod: two DevTools-schema files; node-forge: two `cli/build` scripts, never `expo-updates/build/index.js` |
 
 No credential, token or secret value appears in this record.

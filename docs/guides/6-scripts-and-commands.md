@@ -132,7 +132,7 @@ guards (D, G.1, H).
 |---|---|
 | Data in the account you sign in with (dev) | `seed --plan=demo` — A |
 | The same in production | `seed --plan=demo --business=…` — G.2 |
-| Empty it again, keeping the login | `cleanup:demo -- --email=… --business=…` — G.2 |
+| Empty it again, keeping the login | `cleanup:demo -- --database=… --email=… --business=…` — G.2 |
 | A throwaway measurement tenant (no login) | `seed:perf` — D |
 | A large tenant you can sign into, in a named database | `seed:perf-tenant` — G.1 |
 | Several accounts at different sizes | `seed:accounts` — E |
@@ -666,9 +666,9 @@ per process (reset on restart) and public but contain no names, paths, users or 
 | `npm run audit:indexes` | are declared indexes really there | ✅ reads |
 | `npm run backup:db` | recoverable copy (needs `BACKUP_DIR` outside the project) | ✅ reads; safe on production |
 | `npm run restore:db -- --from=…` | put a copy back (needs `CONFIRM=restore-db`) | ⚠️⚠️ test/dev only; `--dry-run` |
-| `npm run seed:demo -- --email=…` | sample data in your account | ⚠️ replaces that business |
-| `npm run seed:demo -- --database=… --business=… --email=…` | the same in production | ⚠️ named business only; password untouched |
-| `npm run cleanup:demo -- --email=… --business=…` | empty one tenant, keep its login (`--dry-run`) | ⚠️ scoped, verified |
+| `npm run seed -- --plan=demo --database=… --email=…` | sample data in your account | ⚠️ replaces that business; 2 phrases dev / 3 prod |
+| `npm run seed -- --plan=demo --database=… --business=… --email=…` | the same in production | ⚠️ named business only; password untouched |
+| `npm run cleanup:demo -- --database=… --email=… --business=…` | empty one tenant, keep its login (`--dry-run`) | ⚠️ scoped, verified; 2 phrases dev / 3 prod |
 | `npm run seed -- --plan=… --database=…` | any plan; **2 phrases** in development, **3** in production | ⚠️ resets that tenant's data |
 | `npm run seed:accounts` | several accounts, no SKUs (`--accounts=…`) | ⚠️ those accounts only |
 | `npm run seed:roles` | one login per role, ~900 documents | ⚠️ that fixture only |

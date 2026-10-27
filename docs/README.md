@@ -21,13 +21,14 @@ documents.
 | [1-run-on-your-laptop.md](guides/1-run-on-your-laptop.md) | Starting the backend and the app, and proving they work |
 | [2-run-on-your-phone.md](guides/2-run-on-your-phone.md) | Getting the app onto a real Android phone |
 | [3-see-your-phone-on-your-laptop.md](guides/3-see-your-phone-on-your-laptop.md) | Mirroring the phone into a laptop window |
-| [4-test-accounts-and-mock-data.md](guides/4-test-accounts-and-mock-data.md) | Which accounts exist, how sample data is seeded, what is safe to delete |
+| [4-test-accounts-and-mock-data.md](guides/4-test-accounts-and-mock-data.md) | Which accounts exist, what data each one holds, and what the sample data contains |
 | [5-words-explained.md](guides/5-words-explained.md) | Glossary, A–Z |
-| [6-scripts-and-commands.md](guides/6-scripts-and-commands.md) | Every npm script, what it prints, what is safe to run |
+| [6-scripts-and-commands.md](guides/6-scripts-and-commands.md) | Every command that is not about data: start, check, measure, maintain |
 | [7-over-the-air-updates.md](guides/7-over-the-air-updates.md) | Publishing an update without a rebuild, and rolling one back |
 | [8-play-store-submission.md](guides/8-play-store-submission.md) | Building and submitting the Android release |
-| [9-seeding-data.md](guides/9-seeding-data.md) | One command for development and production, the phrases each needs, verification |
-| [10-deleting-data.md](guides/10-deleting-data.md) | One command for clearing a database or a login, the same phrase rule, what is not replaced |
+| [9-seeding-data.md](guides/9-seeding-data.md) | Putting data in: the commands, the database rule, the phrases, verification |
+| [10-deleting-data.md](guides/10-deleting-data.md) | Taking data out: database wipes and tenant cleanups, the same phrase rule, what is verified |
+| [11-firebase-identities.md](guides/11-firebase-identities.md) | Which commands create logins, and how to delete one without locking an account out |
 
 ## 2. What the system is — reference
 

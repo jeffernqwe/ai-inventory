@@ -214,18 +214,43 @@ describe('perf tenant — one plan drives both the preview and the deletion', ()
   });
 });
 
-describe('perf tenant — the guide shows the same three phrases', () => {
-  const guide = readFileSync(new URL('../../docs/guides/6-scripts-and-commands.md', import.meta.url), 'utf8');
-  const section = guide.slice(guide.indexOf('#### G.1 A tenant of its own'));
+describe('perf tenant — the guides show the same three phrases', () => {
+  // Guide 9 owns every seeding command and Guide 10 every cleanup, so each example is pinned in
+  // the guide that owns it. Each section is BOUNDED (heading to the next heading) rather than
+  // running to the end of the file, so a phrase that survives elsewhere in the same guide cannot
+  // make this pass for the wrong reason.
+  const guideSection = (file, from, to) => {
+    const text = readFileSync(new URL(`../../docs/guides/${file}`, import.meta.url), 'utf8');
+    const start = text.indexOf(from);
+    const end = text.indexOf(to);
+    return start === -1 || end === -1 || end < start ? '' : text.slice(start, end);
+  };
+
+  const seedSection = guideSection(
+    '9-seeding-data.md',
+    '### The sign-in-able measurement tenant',
+    '## The two tools on their own guards',
+  );
+  const cleanupSection = guideSection(
+    '10-deleting-data.md',
+    '## The tenant-scoped cleanups',
+    '## Order: database first, identities second',
+  );
+
+  it('both sections this test reads still exist', () => {
+    assert.ok(seedSection.length > 400, 'Guide 9 no longer has the seed:perf-tenant section this test pins');
+    assert.ok(cleanupSection.length > 400, 'Guide 10 no longer has the perf-tenant cleanup example');
+  });
 
   it('the seed example names the database and the production phrase', () => {
-    assert.match(section, /SEED_DB_CONFIRM=inventoryai_prod_db/);
-    assert.match(section, /SEED_PROD_CONFIRM=SEED-PRODUCTION-DATA/);
+    assert.match(seedSection, /SEED_DB_CONFIRM=inventoryai_prod_db/);
+    assert.match(seedSection, /SEED_PROD_CONFIRM=SEED-PRODUCTION-DATA/);
   });
 
   it('the cleanup example names the database, the production phrase, and the dry run', () => {
-    assert.match(section, /CLEANUP_DB_CONFIRM=inventoryai_prod_db/);
-    assert.match(section, /CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA/);
-    assert.match(section, /--dry-run/);
+    assert.match(cleanupSection, /npm run cleanup:perf-tenant/);
+    assert.match(cleanupSection, /CLEANUP_DB_CONFIRM=inventoryai_prod_db/);
+    assert.match(cleanupSection, /CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA/);
+    assert.match(cleanupSection, /--dry-run/);
   });
 });

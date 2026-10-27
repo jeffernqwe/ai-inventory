@@ -87,7 +87,6 @@ export function assertDemoTarget({
   requestedDatabase,
   confirm,
   confirmPhrase,
-  command,
 }) {
   const resolved = String(resolvedDbName ?? '').trim();
   const requested = String(requestedDatabase ?? '').trim();
@@ -117,7 +116,14 @@ export function assertDemoTarget({
     );
   }
   if (String(confirm ?? '').trim() !== confirmPhrase) {
-    throw new DemoTenantError(`set ${command} confirmation to "${confirmPhrase}" to proceed.`);
+    // Name the ENVIRONMENT VARIABLE, not the command. The old message said
+    // `set seed:demo-tenant confirmation to "seed:demo-tenant"`, which never told the operator
+    // what to export; the shell needs the variable name and the value, and the confirmation phrase
+    // is still named so the refusal cannot read as a missing flag instead of a missing phrase.
+    throw new DemoTenantError(
+      `set SEED_CONFIRM=${confirmPhrase} to proceed — the confirmation phrase is required. ` +
+        'Nothing was written or deleted.',
+    );
   }
   return resolved;
 }

@@ -69,7 +69,7 @@ import {
   findSeedTenantIds,
 } from './perf/lib.mjs';
 import { assertSeedTarget } from './seed/guard.mjs';
-import { clearTenantData } from '../src/services/tenantTeardown.service.ts';
+import { clearTenantData, countTenantDataRemoval } from '../src/services/tenantTeardown.service.ts';
 import { makeRandom, resolveIdentity, seedTenant } from './seed/lib.mjs';
 
 const COMMAND = 'seed:perf-tenant';
@@ -226,6 +226,7 @@ async function verifyTenant(businessId, expected) {
 async function main() {
   const size = Number.parseInt(argValue('--size') ?? String(DEFAULT_SIZE), 10);
   const seed = Number.parseInt(argValue('--seed') ?? '1', 10);
+  const dryRun = process.argv.includes('--dry-run');
 
   let database;
   try {
@@ -246,7 +247,9 @@ async function main() {
   if (!Number.isInteger(seed) || seed < 0) {
     fail('--seed must be a non-negative integer. Nothing was written.');
   }
-  if (!process.env.DEMO_ACCOUNT_PASSWORD) {
+  // Only a real run needs the credential: it is what `resolveIdentity` sets on the login. A preview
+  // creates no identity, so demanding it there would block the preview for no reason.
+  if (!dryRun && !process.env.DEMO_ACCOUNT_PASSWORD) {
     fail(
       'set DEMO_ACCOUNT_PASSWORD to the credential this tenant should be signable with. It is ' +
         'refreshed on every run, never written to a file and never printed. Nothing was written.',
@@ -257,8 +260,40 @@ async function main() {
   console.log(`[${COMMAND}] database : ${database}${production ? '   (PRODUCTION)' : ''}`);
   console.log(`[${COMMAND}] tenant   : "${SEED_BUSINESS_NAME}" / ${SEED_OWNER_EMAIL}`);
   console.log(`[${COMMAND}] size     : ${size} document(s), PRNG seed ${seed} (reproducible)`);
+  if (dryRun) console.log(`[${COMMAND}] mode     : DRY RUN — counting only, nothing will be written`);
 
   await mongoose.connect(env.mongodbUri, { dbName: env.mongodbDbName });
+
+  if (dryRun) {
+    // The preview stops BEFORE `resolveIdentity`: that call creates the Firebase identity when it is
+    // absent and refreshes its password when DEMO_ACCOUNT_PASSWORD is set, so it is a write even
+    // though nothing in MongoDB changes. A preview may not touch either store.
+    const ids = await findSeedTenantIds();
+    if (ids.length > 1) {
+      fail(
+        `${ids.length} businesses match the seed fingerprints (${ids.join(', ')}). Refusing to ` +
+          'guess which is the test tenant. Nothing was written.',
+      );
+    }
+    if (!ids.length) {
+      console.log(`[${COMMAND}] tenant   : would be CREATED (no seed tenant exists yet)`);
+    } else {
+      const { total, counts } = await countTenantDataRemoval(ids);
+      console.log(`[${COMMAND}] tenant   : ${ids[0]} would be REPLACED`);
+      for (const [collection, count] of Object.entries(counts)) {
+        if (count > 0) console.log(`[${COMMAND}]   ${collection.padEnd(24)} ${count}`);
+      }
+      console.log(`[${COMMAND}] would clear ${total} document(s), then write the new dataset.`);
+    }
+    console.log(
+      `[${COMMAND}] firebase : not touched by this preview; a real run creates or refreshes ` +
+        `${SEED_OWNER_EMAIL}`,
+    );
+    console.log(`[${COMMAND}] DRY RUN complete — nothing was written.`);
+    await mongoose.disconnect();
+    return;
+  }
+
   const started = Date.now();
 
   const identity = await resolveIdentity(SEED_OWNER_EMAIL);

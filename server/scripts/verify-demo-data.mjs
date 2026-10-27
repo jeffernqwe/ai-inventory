@@ -44,7 +44,22 @@ import User from '../src/models/user.model.ts';
 import { SeedSafetyError, assertNamedReadTarget } from './perf/lib.mjs';
 
 const COMMAND = 'verify:demo';
-const email = process.argv.find((a) => a.startsWith('--email='))?.slice('--email='.length) ?? process.argv[2];
+
+// A MISSING ADDRESS MUST STOP HERE, BEFORE THE CONNECTION. `User.findOne({ email: undefined })`
+// drops the key, so the query becomes `findOne({})` — the first user in the database — and a run
+// that forgot the flag would verify, and could pass, an account nobody named. Measured 2026-10-27:
+// the old code reached the connection first, so the only symptom was a network error. It is
+// reported as "could not check" (exit 2) because nothing has been read and nothing is claimed.
+// The positional form (`npm run verify:demo -- you@example.com`) is kept, but a POSITIONAL FLAG is
+// not an address: `-- --database=…` alone used to be read as the email.
+const emailFlag = process.argv.find((a) => a.startsWith('--email='))?.slice('--email='.length);
+const positional = process.argv[2] && !process.argv[2].startsWith('--') ? process.argv[2] : undefined;
+const email = String(emailFlag ?? positional ?? '').trim();
+if (!email) {
+  console.error(`[${COMMAND}] --email=<address> is required, and nothing was read.`);
+  console.error(`[${COMMAND}] NOT VERIFIED (exit 2) — no account was named.`);
+  process.exit(2);
+}
 
 // Which database these numbers came from has to be answerable before the first query.
 // A refusal here is NOT a data problem, so it takes the same exit code as an

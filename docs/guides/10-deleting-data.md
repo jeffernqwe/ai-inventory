@@ -1,10 +1,28 @@
 # 10. Deleting data
 
-One command removes data. Development and production use the **same command**; only the database
-changes, and production costs one more confirmation phrase. This is the mirror of
-[Guide 9](9-seeding-data.md), and it follows the same rules.
+Everything about removing data from MongoDB: the commands, which database they act on, the
+confirmation phrases, what is verified afterwards, and the order that keeps accounts usable. Seeding
+is [Guide 9](9-seeding-data.md); deleting Firebase logins is [Guide 11](11-firebase-identities.md).
 
 Run everything from `server/`.
+
+---
+
+## Which command?
+
+| You want | Command |
+|---|---|
+| Every document in a database | `npm run cleanup -- --target=database --database=<name>` |
+| One tenant's data, keeping its login | `npm run cleanup:demo -- --database=<name> --email=… --business=…` |
+| The measurement tenant removed | `npm run cleanup:perf-tenant -- --database=<name>` |
+| The fixed-figure demo tenant removed | `npm run cleanup:demo-tenant -- --database=<name>` |
+| The role fixture removed | `npm run cleanup:roles -- --database=<name>` |
+| The no-login measurement tenant removed | `npm run cleanup:perf` |
+| A Firebase login removed | [Guide 11](11-firebase-identities.md) |
+
+The first is the dispatcher; the rest are one tenant each. **Every one of them needs the destination
+named and the phrases supplied, and every one has a `--dry-run`** — including `cleanup:perf`, which
+cannot reach production at all.
 
 ---
 
@@ -17,7 +35,7 @@ npm run cleanup -- --target=<database|firebase> --database=<name> [options]
 | Target | Deletes | Keeps |
 |---|---|---|
 | `database` | every document in that database | the database, its collections and indexes |
-| `firebase` | **only** the logins you name with `--email=` | every other login, and MongoDB |
+| `firebase` | **only** the logins you name with `--email=` | every other login, and MongoDB ([Guide 11](11-firebase-identities.md)) |
 
 `--target` is required: there is no default, so a forgotten flag cannot pick one for you.
 
@@ -55,12 +73,35 @@ NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db
 
 | Target database | Required |
 |---|---|
-| Development | `CLEANUP_CONFIRM=<cleanup:database\|cleanup:firebase>` and `CLEANUP_DB_CONFIRM=inventoryai_dev_db` |
+| Development | `CLEANUP_CONFIRM=<the command's phrase>` and `CLEANUP_DB_CONFIRM=inventoryai_dev_db` |
 | Production | both of the above, plus `CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA` |
 
-Each phrase answers a different question — *which command*, *where*, *is this real* — so one
-habitual export cannot reach production. A refusal names **every** missing phrase and says how many
-that target needs.
+Each phrase answers a different question — *which command*, *where*, *is this real* — so one habitual
+export cannot reach production. A refusal names **every** missing phrase and says how many that target
+needs.
+
+The phrase is the command's own name:
+
+| Command | `CLEANUP_CONFIRM` |
+|---|---|
+| `cleanup -- --target=database` | `cleanup:database` |
+| `cleanup -- --target=firebase` | `cleanup:firebase` |
+| `cleanup:demo` | `cleanup:demo-account` |
+| `cleanup:perf-tenant` | `cleanup:perf-tenant` |
+| `cleanup:demo-tenant` | `cleanup:demo-tenant` |
+| `cleanup:roles` | `cleanup:roles` |
+| `cleanup:test-firebase` | `cleanup:test-firebase` ([Guide 11](11-firebase-identities.md)) |
+
+A phrase that belongs to a different command is refused, so `CLEANUP_CONFIRM=cleanup:database` cannot
+run `--target=firebase`.
+
+`cleanup:test-firebase` is the exception to the table above: it takes no `--database=` and no
+`CLEANUP_DB_CONFIRM`. It is guarded by a development-only shell and the exact Firebase project id
+instead — [Guide 11](11-firebase-identities.md).
+
+---
+
+## Clearing a whole database
 
 ```bash
 # development: look first, then delete
@@ -69,62 +110,62 @@ CLEANUP_CONFIRM=cleanup:database CLEANUP_DB_CONFIRM=inventoryai_dev_db \
 CLEANUP_CONFIRM=cleanup:database CLEANUP_DB_CONFIRM=inventoryai_dev_db \
   npm run cleanup -- --target=database --database=inventoryai_dev_db
 
-# production: three phrases
+# production: three phrases, and only when you mean it
 NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
   CLEANUP_CONFIRM=cleanup:database CLEANUP_DB_CONFIRM=inventoryai_prod_db \
   CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA \
   npm run cleanup -- --target=database --database=inventoryai_prod_db
 ```
 
-`--dry-run` counts what would be deleted and stops. It still requires the phrases, because a dry run
-is there to prove the destination rather than to skip it. `--yes` is accepted and does nothing —
-there is no interactive prompt any more.
+- `--dry-run` counts every collection it would empty and stops. It still requires the phrases,
+  because a dry run is there to prove the destination rather than to skip it.
+- The preview and the real run share **one** collection list and one counting function, so the numbers
+  cannot drift apart.
+- `--yes` is accepted and does nothing — there is no interactive prompt any more.
+- Structure, collections and indexes survive; documents do not. Clearing far more than you expect is
+  what the dry run is for.
 
-**Clearing a database deletes its `users` rows too.** That is why a fresh start is always
-*database first, logins second*: once the rows are gone, no login is left stranded.
+**Clearing a database deletes its `users` rows too.** That is why a fresh start is always *database
+first, logins second*: once the rows are gone, no login is left stranded.
 
 ---
 
-## Deleting a login
+## Emptying one tenant, keeping its login
+
+`cleanup:demo` removes one named tenant's data — inventory, movements, products, categories,
+locations, suppliers, purchase orders, audit rows, invitations and assistant conversations — and
+leaves the user, the business row and sessions in place. It never deletes an identity.
 
 ```bash
-CLEANUP_CONFIRM=cleanup:firebase CLEANUP_DB_CONFIRM=inventoryai_dev_db \
-  npm run cleanup -- --target=firebase --database=inventoryai_dev_db \
-  --email=person@example.com --dry-run
+NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
+  CLEANUP_CONFIRM=cleanup:demo-account CLEANUP_DB_CONFIRM=inventoryai_prod_db \
+  CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA \
+  npm run cleanup:demo -- --database=inventoryai_prod_db \
+  --email=YOUR_EMAIL --business=THE_BUSINESS_ID --dry-run
 ```
 
-`--email=` repeats (or takes a comma-separated list). The command prints one verdict per address:
+Both identifiers are required and must **agree** — the email and the business id are two fingerprints
+of the same tenant. Drop `--dry-run` to delete. A real run re-reads afterwards and prints
+`verification found 0 remaining`.
 
-| Verdict | Meaning |
-|---|---|
-| `will delete` | an identity exists and nothing references the address |
-| `REFUSED — still linked to a MongoDB user` | a user row still owns it; the whole run stops |
-| `ORPHANED — identity already gone, database row remains` | the damage is already done; the row must go first |
-| `no identity` | nothing to delete |
-
-**It checks both databases.** One Firebase project serves development and production, so the same
-address can be referenced twice. Both are counted, by `firebaseUid` **and** by the address, and a
-refusal names the database(s) still holding it. Deleting a login whose row survives leaves an address
-that can neither sign in nor register, and nothing in the app can repair it — that is the outcome the
-check exists to prevent.
+Measured on production 2026-10-25: 80 006 documents removed (36 104 inventory, 23 966 movements,
+18 000 products, 1 600 purchase orders, 300 suppliers, 24 categories, 6 locations, 4 assistant
+messages, 1 conversation, 1 audit row), 0 remaining; the login and business row still signed in.
 
 ---
 
-## What is not replaced
+## The tenant-scoped cleanups
 
-The tenant-scoped cleanups delete one named tenant rather than a database. `cleanup:demo`,
-`cleanup:perf-tenant`, `cleanup:demo-tenant` and `cleanup:roles` follow the same phrase rule as the
-command above: **two phrases in development, three in production**, plus `--database=`. `cleanup:perf`
-is development-only, and `cleanup:test-firebase` is a test helper rather than a production tool.
+All four follow the same rule: `--database=` required, **two phrases in development, three in
+production**, and a `--dry-run` that counts the same teardown plan as the real run.
 
-| Command | Removes |
-|---|---|
-| `cleanup:demo` | one tenant's data, keeping its login (`--dry-run`, `--database=`; 2 phrases dev / 3 prod) |
-| `cleanup:perf-tenant` | the sign-in-able measurement tenant (`--dry-run`, `--database=`; 2 phrases dev / 3 prod); proves `0 remaining` and keeps the Firebase identity |
-| `cleanup:demo-tenant` | the `seed:demo-tenant` fixture (`--dry-run`, `--database=`; 2 phrases dev / 3 prod); proves `0 remaining` and keeps the Firebase identity |
-| `cleanup:roles` | the role fixture (`--dry-run`, `--database=`; 2 phrases dev / 3 prod); keeps its four identities unless `--delete-firebase` |
-| `cleanup:perf` | the data-only measurement tenant (development only, its own phrase); proves `0 remaining` |
-| `cleanup:test-firebase` | every login in the approved project — test helper, not a production tool |
+| Command | Removes | Keeps |
+|---|---|---|
+| `cleanup:demo` | one tenant's data (`--email=`, `--business=`) | user, business row, sessions, login |
+| `cleanup:perf-tenant` | the `seed:perf-tenant` tenant | the Firebase identity |
+| `cleanup:demo-tenant` | the `seed:demo-tenant` fixture | the Firebase identity |
+| `cleanup:roles` | the role fixture tenant | its four identities unless `--delete-firebase` |
+| `cleanup:perf` | the no-login `seed:perf` tenant (`--dry-run`; development only, its own `SEED_CONFIRM=seed-perf-ai`) | — |
 
 ```bash
 # the sign-in-able tenant: preview the count first
@@ -133,22 +174,51 @@ NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
   CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA \
   npm run cleanup:perf-tenant -- --database=inventoryai_prod_db --dry-run
 
-# the fixtures use the same rule, with their own first phrase; dry-run first
-NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
-  CLEANUP_CONFIRM=cleanup:demo-tenant CLEANUP_DB_CONFIRM=inventoryai_prod_db \
-  CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA \
-  npm run cleanup:demo-tenant -- --database=inventoryai_prod_db --dry-run
+# the fixtures use the same rule, with their own first phrase
+CLEANUP_CONFIRM=cleanup:demo-tenant CLEANUP_DB_CONFIRM=inventoryai_dev_db \
+  npm run cleanup:demo-tenant -- --database=inventoryai_dev_db --dry-run
 
-NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
-  CLEANUP_CONFIRM=cleanup:roles CLEANUP_DB_CONFIRM=inventoryai_prod_db \
-  CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA \
-  npm run cleanup:roles -- --database=inventoryai_prod_db --dry-run
+CLEANUP_CONFIRM=cleanup:roles CLEANUP_DB_CONFIRM=inventoryai_dev_db \
+  npm run cleanup:roles -- --database=inventoryai_dev_db --dry-run
 ```
 
-`--dry-run` walks the same teardown plan as the real run, counts every collection it would delete
-and stops. It costs the same phrases as the real run, because it proves the destination rather than
-skipping it. Drop `--dry-run` to delete; a real run then re-counts to `0 remaining` over that same
-plan.
+`--dry-run` walks the same teardown plan as the real run, lists every collection it would delete and
+stops. Drop `--dry-run` to delete; a real run then re-counts to `0 remaining` over that same plan, and
+**fails** if anything still references the tenant. A command that deletes rows without proving that is
+how a "temporary" tenant survives forever.
+
+`cleanup:perf --dry-run` counts that tenant over the same plan and deletes nothing; without the flag
+it removes the rows and proves `0 remaining`. It says `nothing to clean` when nothing was ever seeded,
+and exits 0 either way. `cleanup:roles --delete-firebase` removes the four identities **only after** the
+database rows are gone, and only after re-querying that no user row still uses the addresses.
+
+---
+
+## Order: database first, identities second
+
+A Firebase identity whose MongoDB user row survives is the one unrecoverable state in this project:
+the address can neither sign in nor register, and nothing in the app repairs it. So:
+
+1. Delete the MongoDB rows — a tenant-scoped cleanup, or `--target=database`.
+2. Then delete the identities — `--target=firebase` ([Guide 11](11-firebase-identities.md)).
+
+The second command refuses when step 1 has not happened, so the order is a check rather than a
+convention. `cleanup:perf-tenant`, `cleanup:demo-tenant` and `cleanup:roles` keep the identities by
+default for the same reason.
+
+---
+
+## Proving it worked
+
+| After | Run | Expect |
+|---|---|---|
+| a tenant cleanup | the command again with `--dry-run` | every collection at 0, or `nothing to clean` |
+| a tenant cleanup | `npm run verify:demo -- --email=… --database=…` | exit 0, or `no such account` if the rows are gone |
+| a database wipe | `npm run seed -- … --dry-run` or a fresh seed | a clean target; the app shows an empty business |
+| firebase deletion | the same `--target=firebase` line with `--dry-run` | `no identity` for each address |
+
+Cleanups prove themselves: each real run re-queries the same plan and prints `0 remaining`. Nothing
+here needs a phrase to check, because reading changes nothing.
 
 ---
 
@@ -156,12 +226,16 @@ plan.
 
 | Message | Do |
 |---|---|
-| `two confirmation phrase(s) are required` | set `CLEANUP_CONFIRM=cleanup:<target>` and `CLEANUP_DB_CONFIRM=<database>` |
+| `two confirmation phrase(s) are required` | set `CLEANUP_CONFIRM=<the command>` and `CLEANUP_DB_CONFIRM=<database>` |
 | `three confirmation phrase(s) … CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA` | add the third phrase |
 | `--database is "…" but this process resolved "…"` | set `MONGODB_DB_NAME` to match; do not retype the flag |
 | `MONGODB_URI names the database "…"` | the URI points the shell at another database; fix it before retrying |
 | `is the test database … "npm test" owns` | name development or production |
-| `still have a MongoDB user` | clear the database first, then the login |
-| `NO Firebase identity … a MongoDB user still owns the address` | clear the database first; Firebase cannot fix it |
+| `CLEANUP_CONFIRM names "…", but this run is [cleanup:firebase]` | the phrase belongs to the other target; use the target's own phrase |
+| `no such tenant` / `nothing to clean` | the fixture is not in that database — check `--database=` first |
+| `verification failed: N document(s) still reference the fixture tenant` | the delete was partial; re-run and read the collections named |
+| `still have a MongoDB user` | clear the database first, then the login ([Guide 11](11-firebase-identities.md)) |
 
-Full command reference: [Guide 6, Part 6](6-scripts-and-commands.md). Seeding: [Guide 9](9-seeding-data.md).
+← [Guides index](README.md) · Related: [9. Seeding data](9-seeding-data.md) ·
+[11. Firebase identities](11-firebase-identities.md) · [4. Test accounts](4-test-accounts-and-mock-data.md) ·
+[6. Everything else](6-scripts-and-commands.md)

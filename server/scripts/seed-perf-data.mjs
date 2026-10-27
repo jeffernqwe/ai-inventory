@@ -106,6 +106,10 @@ function assertDeterministic(seed) {
 async function main() {
   const size = Number.parseInt(argValue('--size') ?? '', 10);
   const seed = Number.parseInt(argValue('--seed') ?? '1', 10);
+  // The dataset depends on nothing already stored, so the preview needs no connection at all: the
+  // plan IS the whole answer. `--dry-run` used to be silently ignored here (the flag was only
+  // mentioned for the cleanup), which on a live database meant writing during a "preview".
+  const dryRun = process.argv.includes('--dry-run');
 
   assertSafeTarget(env, COMMAND);
   if (!Number.isInteger(size) || size < 1 || size > 200000) {
@@ -119,6 +123,12 @@ async function main() {
   console.log(`[${COMMAND}] database : ${env.mongodbDbName}`);
   console.log(`[${COMMAND}] products : ${size}   locations: ${LOCATIONS.length}   categories: ${CATEGORY_NAMES.length}`);
   console.log(`[${COMMAND}] PRNG seed: ${seed} (the dataset is reproducible)`);
+
+  if (dryRun) {
+    console.log(`[${COMMAND}] mode     : DRY RUN — would replace any existing seed tenant`);
+    console.log(`[${COMMAND}] DRY RUN — no connection was opened and nothing was written.`);
+    return;
+  }
 
   await mongoose.connect(env.mongodbUri, { dbName: env.mongodbDbName });
 

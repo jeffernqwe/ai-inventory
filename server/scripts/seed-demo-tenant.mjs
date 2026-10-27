@@ -31,11 +31,14 @@ import 'dotenv/config';
 import mongoose from 'mongoose';
 
 import env from '../src/config/env.ts';
+import { countTenantDataRemoval } from '../src/services/tenantTeardown.service.ts';
 import {
   DEMO_SEED_CONFIRM,
   DemoTenantError,
   assertDemoTarget,
+  findDemoTenant,
   isProductionDatabase,
+  planSeed,
   seedDemoTenant,
   verifyDemoTenant,
 } from './demo/lib.mjs';
@@ -59,20 +62,54 @@ function pad(value, width) {
 }
 
 async function main() {
+  const dryRun = process.argv.includes('--dry-run');
   const database = assertDemoTarget({
     mongodbUri: env.mongodbUri,
     resolvedDbName: env.mongodbDbName,
     requestedDatabase: argValue('--database'),
     confirm: process.env.SEED_CONFIRM,
     confirmPhrase: DEMO_SEED_CONFIRM,
-    command: COMMAND,
   });
 
   console.log(`[${COMMAND}] database : ${database}${isProductionDatabase(database) ? '   (PRODUCTION)' : ''}`);
   console.log(`[${COMMAND}] tenant   : "${DEMO_TENANT.businessName}" / ${DEMO_TENANT.email}`);
   console.log(`[${COMMAND}]           ${DEMO_TENANT.ownerName}, ${DEMO_TENANT.role}`);
+  if (dryRun) console.log(`[${COMMAND}] mode     : DRY RUN — counting only, nothing will be written`);
 
   await mongoose.connect(env.mongodbUri, { dbName: env.mongodbDbName });
+
+  if (dryRun) {
+    // The preview stops BEFORE `seedDemoTenant`, which resolves the identity (creating it when it
+    // is absent, with the password from DEMO_ACCOUNT_PASSWORD) and clears the tenant's data. A
+    // preview may not write to either store, so it reports the plan and the rows that would go.
+    const plan = planSeed(await findDemoTenant());
+    if (plan.action === 'refuse') {
+      console.log(`[${COMMAND}] ${plan.reason}`);
+      await mongoose.disconnect();
+      return;
+    }
+    const what = {
+      create: 'would CREATE a new tenant',
+      'attach-user': `would ATTACH the owner to ${plan.businessId}`,
+      reset: `${plan.businessId} would be REPLACED`,
+    }[plan.action];
+    console.log(`[${COMMAND}] tenant   : ${what}`);
+    if (plan.businessId) {
+      const { total, counts } = await countTenantDataRemoval([plan.businessId]);
+      for (const [collection, count] of Object.entries(counts)) {
+        if (count > 0) console.log(`[${COMMAND}]   ${collection.padEnd(24)} ${count}`);
+      }
+      console.log(`[${COMMAND}] would clear ${total} document(s), then write the fixture again.`);
+    }
+    console.log(
+      `[${COMMAND}] firebase : not touched by this preview; a real run creates or refreshes ` +
+        `${DEMO_TENANT.email}`,
+    );
+    console.log(`[${COMMAND}] DRY RUN complete — nothing was written.`);
+    await mongoose.disconnect();
+    return;
+  }
+
   const started = Date.now();
 
   const result = await seedDemoTenant();

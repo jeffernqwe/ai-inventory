@@ -71,7 +71,8 @@ Result line, verbatim:
 - **Not proven:** a phone signed in to this tenant (the OPPO run is separate evidence), the same
   spread at 60,000+ products, or provider latency on a day with less allowance left.
 - The tenant was left in place at the end of the run so the owner could sign in to it; `cleanup:perf-tenant`
-  removes it and proves 0 documents remain. See guide 6, Part 3G.
+  removes it and proves 0 documents remain. See [guide 9](../../guides/9-seeding-data.md) (the seed)
+  and [guide 10](../../guides/10-deleting-data.md) (the cleanup).
 
 ## Repeat at 80,000 documents, and the full teardown
 
@@ -123,7 +124,7 @@ Result line, verbatim:
 
 ### The teardown
 
-`cleanup:demo` (guide 6, G.2) emptied the tenant and kept the account:
+`cleanup:demo` ([guide 10](../../guides/10-deleting-data.md)) emptied the tenant and kept the account:
 
 ```text
 [cleanup:demo]   ai_messages              4

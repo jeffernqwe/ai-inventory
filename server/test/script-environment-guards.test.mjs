@@ -578,3 +578,64 @@ describe('every data-touching script calls one of the guards', () => {
     }
   });
 });
+
+describe('command audit — the refusals and previews fixed on 2026-10-27', () => {
+  const read = (name) => readFileSync(new URL(`../scripts/${name}`, import.meta.url), 'utf8');
+
+  it('verify:demo refuses a missing address BEFORE it connects', () => {
+    // `User.findOne({ email: undefined })` drops the key, so the query becomes `findOne({})` —
+    // the first user in the database. A run that forgot the flag would verify, and could pass,
+    // an account nobody named. Ordering is the fix: the refusal has to precede the connection.
+    const source = read('verify-demo-data.mjs');
+    const refusal = source.indexOf('--email=<address> is required');
+    const connect = source.indexOf('await mongoose.connect(');
+    assert.notEqual(refusal, -1, 'the required-address refusal is gone');
+    assert.ok(refusal < connect, 'the address must be validated before the connection opens');
+    // A positional FLAG is not an address: `-- --database=…` used to be read as the email.
+    assert.match(source, /process\.argv\[2\] && !process\.argv\[2\]\.startsWith\('--'\)/);
+  });
+
+  it('the demo-tenant refusal names SEED_CONFIRM, not only the command', () => {
+    // The old message read `set seed:demo-tenant confirmation to "seed:demo-tenant"`, which never
+    // told the operator what to export.
+    const lib = read('demo/lib.mjs');
+    assert.match(lib, /set SEED_CONFIRM=\$\{confirmPhrase\} to proceed/);
+    assert.equal(
+      /\$\{command\} confirmation to/.test(lib),
+      false,
+      'the message must name the variable the operator has to export',
+    );
+  });
+
+  it('every data-writing command reads --dry-run, and previews before it can write', () => {
+    // `--dry-run` was silently ignored by four commands. On a live database that meant a "preview"
+    // wrote rows (`seed:perf-tenant`, `seed:demo-tenant`, `seed:perf`) or deleted every identity
+    // (`cleanup:test-firebase`). Each now has a preview that stops before its first write, and the
+    // anchor below IS that first write — so a branch moved after it fails here.
+    const cases = [
+      ['seed-perf-tenant.mjs', 'const identity = await resolveIdentity(SEED_OWNER_EMAIL);'],
+      ['seed-demo-tenant.mjs', 'const result = await seedDemoTenant();'],
+      ['seed-perf-data.mjs', 'await mongoose.connect('],
+      ['cleanup-test-firebase.mjs', 'await performFirebaseCleanup({'],
+    ];
+    for (const [name, firstWrite] of cases) {
+      const source = read(name);
+      const flag = source.indexOf("process.argv.includes('--dry-run')");
+      const write = source.indexOf(firstWrite);
+      assert.notEqual(flag, -1, `${name} does not read --dry-run`);
+      assert.notEqual(write, -1, `${name}: the anchor ${firstWrite} is gone`);
+      assert.ok(flag < write, `${name} previews only after it can write`);
+    }
+  });
+
+  it('cleanup:perf previews with the same plan it deletes', () => {
+    // Every other cleanup has a preview; this one did not. The count must come from the shared
+    // teardown plan, so the preview cannot describe a different tenant from the delete.
+    const source = read('cleanup-perf-data.mjs');
+    assert.match(source, /process\.argv\.includes\('--dry-run'\)/);
+    const preview = source.indexOf('countTenantRemoval(ids)');
+    const remove = source.indexOf('removeTenant(ids)');
+    assert.notEqual(preview, -1, 'the dry run must count the shared teardown plan');
+    assert.ok(preview < remove, 'the preview must be decided before anything is removed');
+  });
+});

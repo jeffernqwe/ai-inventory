@@ -8,7 +8,7 @@ of truth for *what actually happened*, and it is why this file is long.
 
 **How to read it.** Do not read it top to bottom. Either find a record by number (§27FJ, §27DM — the
 numbers are cited from `CLAUDE.md` and from source comments), or use the index: `CLAUDE.md` §7 lists
-all **179** records by the title each gives itself.
+all **181** records by the title each gives itself.
 
 **Current state:** V1 complete and in production testing. The records that answer *where are we now*
 are §27FM (the V1 re-verification), §27FK (the runtime boundary and the blocked build), §27FJ (the two
@@ -22107,6 +22107,79 @@ AUTH-02's HTTP cases. In development, two throwaway fixtures
 third fixture: the preview and the real run both counted/removed **2** data rows, while its user,
 session and business row stayed behind as designed. No production row was read or deleted in this
 pass.
+
+---
+
+# 27FZ. Each topic gets one guide, and the data commands move into theirs (2026-10-27)
+
+**The finding.** Five guides each carried part of the same rule. Guide 4 explained the accounts and
+then reproduced the seeding and cleanup commands; Guide 6 promised "every script" and reprinted both
+families in full — two nearly identical tables of the same commands; Guides 9 and 10 owned the rules
+but not every command that used them; Firebase deletion was mentioned in three places and explained in
+none. The cost is maintenance, not length: the perf-tenant production example existed twice, so a
+change to its phrases had to be made in both or drift.
+
+**What changed — one subject per guide.**
+
+| Guide | Owns | No longer contains |
+|---|---|---|
+| 4. Test accounts and mock data | which accounts exist, which tenant each owns, what the seeded data looks like, the irreversible rule | seeding and cleanup command lines |
+| 6. Scripts and commands | start, check, measure, maintain, CI, backup and restore | the two data families, replaced by a pointer table |
+| 9. Seeding data | every seeder: the one command, the plans, the database rule, the phrases, verification, the tools with their own guards | — |
+| 10. Deleting data | every MongoDB deletion: the dispatcher, the tenant cleanups, the ordering rule, verification | Firebase identity detail |
+| 11. Firebase identities (new) | which commands create logins, how they are verified, how to delete one, both refusals, the test-project wipe | — |
+
+**What is guarded.** `perf-tenant-workflow.test.mjs` pinned the perf-tenant example to Guide 6's G.1.
+It now reads the two guides that own each half — the seed in Guide 9, the cleanup in Guide 10 — and
+bounds each section at the next heading, so a phrase surviving elsewhere in the same file cannot
+satisfy it. A one-off link check over the guide set (file and heading) resolved every relative link; it
+is not a committed test.
+
+**Measured.** The documentation guards (fact drift, section integrity, route inventory, issue records),
+the plan/seed/cleanup guards and the perf-tenant suite: **165 tests, 165 passed, 0 failed**. The link
+check resolved every relative link across **12** guide files. No command, script or dataset changed in
+this pass.
+
+---
+
+# 27GA. The command audit — one false pass, one bad message, and four flags that were ignored (2026-10-27)
+
+**What was checked.** Every `npm run` name in the documentation against both `package.json` files, and
+every script target on disk. 44 distinct names appear in prose; the only ones that are not scripts are
+`cleanup:test-mongodb` and `cleanup:dev-mongodb` (quoted by a dated record as *removed*) and one
+illustrative placeholder. Every guard path was then exercised against a dead URI, so nothing connected.
+
+**The defects.**
+
+1. **`verify:demo` could pass the wrong account.** With no `--email`, `User.findOne({ email: undefined })`
+   drops the key, so the query became `findOne({})` — the first user in the database. A run that forgot
+   the flag would verify, and could exit 0 for, an account nobody named. It now refuses **before
+   connecting**, with exit 2. Measured: `npm run verify:demo` and `-- --database=…` both answer
+   `--email=<address> is required, and nothing was read` and exit 2.
+2. **The demo-tenant refusal named no variable.** It read `set seed:demo-tenant confirmation to
+   "seed:demo-tenant"`, which never told the operator what to export. It now reads
+   `set SEED_CONFIRM=seed-demo-tenant to proceed`.
+3. **Four data commands accepted `--dry-run` and ignored it** — `seed:perf-tenant`, `seed:demo-tenant`,
+   `seed:perf` and `cleanup:test-firebase`. On a live database the first three would have **written**
+   during a preview, and the last would have prompted to delete every identity. Each now previews and
+   stops before its first write. Measured: `seed:perf` opened no connection; `seed:perf-tenant` and
+   `seed:demo-tenant` reported create/replace without touching Firebase and without needing the
+   password; `cleanup:test-firebase --dry-run` counted 2 identities and deleted none.
+4. **`cleanup:perf` was the only cleanup with no preview.** It now counts the shared teardown plan:
+   measured 517 documents previewed twice (identical both times), then 517 removed with `0 remaining`,
+   then `nothing to clean`.
+
+**Documentation.** Guide 6 described `npm run android` as `expo start --android`; the script is
+`expo run:android` — a **native build**, not a Metro launch. Guides 9, 10 and 11 now show the new
+previews and state which ones read the database and that none touches Firebase.
+
+**Guarded.** `script-environment-guards.test.mjs` gained a command-audit suite: each of the four
+previews must read `--dry-run` and its branch must appear **before** its first write; `cleanup:perf`
+must count before it removes; the demo refusal must name `SEED_CONFIRM`; and `verify:demo`'s refusal
+must precede its connection.
+
+**Measured.** Unit suite **1472 passed, 0 failed, 56 skipped**; database suite **824 passed, 0 failed,
+95 skipped**; `eslint` and `tsc --noEmit` clean.
 
 ---
 

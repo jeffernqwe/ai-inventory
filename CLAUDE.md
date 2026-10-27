@@ -497,6 +497,8 @@ anchor (`§27…`) in that file.
 - **§27FW** — The scoped cleanup that was cheaper than the rule (2026-10-26)
 - **§27FX** — The fixture cleanups take the rule, and the dry run counts (2026-10-27)
 - **§27FY** — The preview and the delete share one plan (2026-10-27)
+- **§27FZ** — Each topic gets one guide, and the data commands move into theirs (2026-10-27)
+- **§27GA** — The command audit — one false pass, one bad message, and four flags that were ignored (2026-10-27)
 
 ---
 

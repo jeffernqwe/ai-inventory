@@ -11,6 +11,7 @@
 // prints credentials — only counts and the (non-secret) project id.
 //
 // Usage:
+//   npm run cleanup:test-firebase -- --dry-run     count the identities, delete none
 //   npm run cleanup:test-firebase
 //   npm run cleanup:test-firebase -- --yes
 //   CLEANUP_CONFIRM=cleanup:test-firebase npm run cleanup:test-firebase
@@ -57,6 +58,10 @@ function prompt(question) {
 }
 
 async function main() {
+  // `--dry-run` was silently ignored before this: the flag appeared to preview and then prompted to
+  // delete every identity. It now lists them and stops, before the prompt and before any deletion.
+  const dryRun = process.argv.includes('--dry-run');
+
   // Guards run BEFORE anything else — no banner, no Admin app, no network.
   assertNonProductionEnv(process.env.NODE_ENV);
 
@@ -84,6 +89,14 @@ async function main() {
     } while (pageToken);
     return uids;
   };
+
+  if (dryRun) {
+    const uids = await listUserIds();
+    console.log(
+      `[${COMMAND_NAME}] DRY RUN — would delete ${uids.length} identity(ies); nothing was deleted.`,
+    );
+    return;
+  }
 
   // `--yes` does NOT skip the confirmation phrase; it only skips the interactive
   // read, so the phrase must still be supplied explicitly via CLEANUP_CONFIRM.

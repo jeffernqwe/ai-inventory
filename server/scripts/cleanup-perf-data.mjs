@@ -11,7 +11,13 @@
 // matches nothing, and the verification step would then report 0 rows found).
 //
 // Usage:
+//   SEED_CONFIRM=seed-perf-ai npm run cleanup:perf -- --dry-run
 //   SEED_CONFIRM=seed-perf-ai npm run cleanup:perf
+//
+// `--dry-run` counts the same teardown plan `removeTenant` executes and stops, which is what every
+// other cleanup in this project offers. It was the last one without a preview: development-only and
+// scoped, so the omission was safe, but an operator who learnt the rule everywhere else had no way to
+// count this tenant before removing it.
 //
 // Safe to run when nothing was ever seeded: it reports that and exits 0.
 
@@ -19,7 +25,14 @@ import 'dotenv/config';
 import mongoose from 'mongoose';
 
 import env from '../src/config/env.ts';
-import { SeedSafetyError, assertSafeTarget, countTenantLeftovers, findSeedTenantIds, removeTenant } from './perf/lib.mjs';
+import {
+  SeedSafetyError,
+  assertSafeTarget,
+  countTenantLeftovers,
+  countTenantRemoval,
+  findSeedTenantIds,
+  removeTenant,
+} from './perf/lib.mjs';
 
 const COMMAND = 'cleanup:perf';
 
@@ -29,6 +42,8 @@ function fail(message) {
 }
 
 async function main() {
+  const dryRun = process.argv.includes('--dry-run');
+
   assertSafeTarget(env, COMMAND);
 
   await mongoose.connect(env.mongodbUri, { dbName: env.mongodbDbName });
@@ -42,6 +57,20 @@ async function main() {
 
   console.log(`[${COMMAND}] database  : ${env.mongodbDbName}`);
   console.log(`[${COMMAND}] tenant(s) : ${ids.join(', ')}`);
+  if (dryRun) console.log(`[${COMMAND}] mode      : DRY RUN — counting only, nothing will be deleted`);
+
+  if (dryRun) {
+    // The same teardown plan `removeTenant` walks, counted rather than executed. One plan means the
+    // preview and the delete cannot disagree about what "this tenant" is.
+    const { total, counts } = await countTenantRemoval(ids);
+    for (const [collection, count] of Object.entries(counts)) {
+      if (count > 0) console.log(`[${COMMAND}]   ${collection.padEnd(24)} ${count}`);
+    }
+    console.log(`[${COMMAND}] DRY RUN — would remove ${total} document(s); nothing was deleted.`);
+    console.log(`[${COMMAND}] identity  : seed:perf creates no Firebase login, so none is involved`);
+    await mongoose.disconnect();
+    return;
+  }
 
   const { removed, counts } = await removeTenant(ids);
   for (const [collection, count] of Object.entries(counts)) {

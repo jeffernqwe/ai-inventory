@@ -84,7 +84,8 @@
 //     npm run seed:accounts -- --database=inventoryai_dev_db --accounts="new@example.com:500"
 //
 // Teardown: `npm run cleanup:three` / `npm run cleanup:account` — the data goes, the login
-// and the business row stay. See docs/guides/10-deleting-data.md.
+// and the business row stay. See docs/guides/11-deleting-development.md and
+// docs/guides/12-deleting-production.md.
 
 import 'dotenv/config';
 import mongoose from 'mongoose';

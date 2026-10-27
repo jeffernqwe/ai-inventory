@@ -1,8 +1,9 @@
-# 11. Firebase identities
+# 13. Firebase identities
 
 Firebase holds the logins; MongoDB holds the data. This guide is about the logins only — which commands
-create them, how to delete one safely, and how to prove it. Data is [Guide 9](9-seeding-data.md) and
-[Guide 10](10-deleting-data.md); the fixtures themselves are [Guide 4](4-test-accounts-and-mock-data.md).
+create them, how to delete one safely, and how to prove it. Data is [Guide 9](9-seeding-development.md),
+[Guide 10](10-seeding-production.md), [Guide 11](11-deleting-development.md) and
+[Guide 12](12-deleting-production.md); the fixtures themselves are [Guide 4](4-test-accounts-and-mock-data.md).
 
 Run everything from `server/`.
 
@@ -60,7 +61,7 @@ No command creates an identity on its own. The seeders do, as part of their own 
   a user by `firebaseUid` only. `check:accounts` refuses the same way, with `NOT CHECKED (exit 2)`, so
   it never reports "no identity" for an account that exists elsewhere.
 - `seed --plan=demo` on a database row that carries a **stale** uid refuses rather than re-linking it;
-  see [Guide 9](9-seeding-data.md).
+  see [Guide 9](9-seeding-development.md) and [Guide 10](10-seeding-production.md).
 
 ---
 
@@ -78,7 +79,8 @@ CLEANUP_CONFIRM=cleanup:firebase CLEANUP_DB_CONFIRM=inventoryai_dev_db \
 - `--email=` repeats, or takes a comma-separated list. At least one is required.
 - `--database=` is required and must equal the database this shell resolved; **two phrases in
   development, three in production** (`CLEANUP_CONFIRM=cleanup:firebase`, `CLEANUP_DB_CONFIRM`,
-  and `CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA`). The same rule as [Guide 10](10-deleting-data.md).
+  and `CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA`). The same rule as [Guide 11](11-deleting-development.md)
+  and [Guide 12](12-deleting-production.md).
 - The Firebase project must be exactly the approved project — `inventoryai-d0d20` — and must not look
   like a production project. Any other id is refused.
 - It authorises nothing else: it cannot delete a login you did not name, and it never touches MongoDB.
@@ -186,7 +188,7 @@ environment.
 |---|---|---|
 | `--email=<address> is required` | no address named | add `--email=`, repeatable or comma-separated |
 | `"…" is not an address` | a value has no `@` | fix the value; nothing was deleted |
-| `two/three confirmation phrase(s) …` | a phrase is missing or wrong | the message lists all of them ([Guide 10](10-deleting-data.md)) |
+| `two/three confirmation phrase(s) …` | a phrase is missing or wrong | the message lists all of them ([Guide 11](11-deleting-development.md)) |
 | `Firebase is not configured` | the project cannot be verified | set the Firebase admin credentials |
 | `Firebase project must be exactly "inventoryai-d0d20"` | the shell points at another project | fix `FIREBASE_PROJECT_ID`; nothing was deleted |
 | `still have a MongoDB user: …` | the ordering rule was broken | clear those rows first, then retry |
@@ -205,5 +207,8 @@ environment.
   to prevent.
 
 ← [Guides index](README.md) · Related: [4. Test accounts](4-test-accounts-and-mock-data.md) ·
-[9. Seeding data](9-seeding-data.md) · [10. Deleting data](10-deleting-data.md) ·
+[9. Seeding data — development](9-seeding-development.md) ·
+[10. Seeding data — production](10-seeding-production.md) ·
+[11. Deleting data — development](11-deleting-development.md) ·
+[12. Deleting data — production](12-deleting-production.md) ·
 [6. Everything else](6-scripts-and-commands.md)

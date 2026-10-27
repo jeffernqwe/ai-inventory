@@ -5,7 +5,7 @@
 // them accounts: the MongoDB user row, the business row, its members, their sessions and the
 // Firebase identity. This is the other half of `seed:accounts` / `seed:three` — the way back
 // to an empty business without deleting a login, which is the one unrecoverable direction
-// (§27BB / F-50, docs/guides/11-firebase-identities.md).
+// (§27BB / F-50, docs/guides/13-firebase-identities.md).
 //
 // WHAT IT REMOVES — exactly the business-owned rows `clearTenantData` defines, the same list
 // every other cleanup and account deletion use: inventory, movements, purchase orders,
@@ -36,7 +36,8 @@
 // not even with a flag. Deleting a login whose database row has gone is what
 // `cleanup -- --target=database` (database first) and then
 // `cleanup -- --target=firebase` (identities second) are for, and the second refuses while a
-// row still owns the address. See docs/guides/10-deleting-data.md and 11-firebase-identities.md.
+// row still owns the address. See docs/guides/11-deleting-development.md, 12-deleting-production.md
+// and 13-firebase-identities.md.
 //
 // Usage (development — TWO phrases):
 //   CLEANUP_CONFIRM=cleanup-three-accounts CLEANUP_DB_CONFIRM=inventoryai_dev_db \

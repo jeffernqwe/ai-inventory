@@ -215,10 +215,11 @@ describe('perf tenant — one plan drives both the preview and the deletion', ()
 });
 
 describe('perf tenant — the guides show the same three phrases', () => {
-  // Guide 9 owns every seeding command and Guide 10 every cleanup, so each example is pinned in
-  // the guide that owns it. Each section is BOUNDED (heading to the next heading) rather than
-  // running to the end of the file, so a phrase that survives elsewhere in the same guide cannot
-  // make this pass for the wrong reason.
+  // Since 2026-10-27 the data commands have one guide per half and per environment: Guide 9 seeds
+  // development, Guide 10 seeds production, Guide 11 deletes development and Guide 12 deletes
+  // production. The production examples are pinned where they live. Each section is BOUNDED
+  // (heading to the next heading) rather than running to the end of the file, so a phrase that
+  // survives elsewhere in the same guide cannot make this pass for the wrong reason.
   const guideSection = (file, from, to) => {
     const text = readFileSync(new URL(`../../docs/guides/${file}`, import.meta.url), 'utf8');
     const start = text.indexOf(from);
@@ -227,19 +228,19 @@ describe('perf tenant — the guides show the same three phrases', () => {
   };
 
   const seedSection = guideSection(
-    '9-seeding-data.md',
-    '### The sign-in-able measurement tenant',
-    '## The two tools on their own guards',
+    '10-seeding-production.md',
+    '### The measurement tenant (`seed:perf-tenant`)',
+    '### The fixed-figure demo tenant',
   );
   const cleanupSection = guideSection(
-    '10-deleting-data.md',
-    '## The tenant-scoped cleanups',
-    '## Order: database first, identities second',
+    '12-deleting-production.md',
+    '## The measurement tenant (`cleanup:perf-tenant`)',
+    '## The space a delete does not give back',
   );
 
   it('both sections this test reads still exist', () => {
-    assert.ok(seedSection.length > 400, 'Guide 9 no longer has the seed:perf-tenant section this test pins');
-    assert.ok(cleanupSection.length > 400, 'Guide 10 no longer has the perf-tenant cleanup example');
+    assert.ok(seedSection.length > 400, 'Guide 10 no longer has the seed:perf-tenant section this test pins');
+    assert.ok(cleanupSection.length > 400, 'Guide 12 no longer has the perf-tenant cleanup example');
   });
 
   it('the seed example names the database and the production phrase', () => {

@@ -8,7 +8,7 @@ of truth for *what actually happened*, and it is why this file is long.
 
 **How to read it.** Do not read it top to bottom. Either find a record by number (§27FJ, §27DM — the
 numbers are cited from `CLAUDE.md` and from source comments), or use the index: `CLAUDE.md` §7 lists
-all **185** records by the title each gives itself.
+all **186** records by the title each gives itself.
 
 **Current state:** V1 complete and in production testing. The records that answer *where are we now*
 are §27FM (the V1 re-verification), §27FK (the runtime boundary and the blocked build), §27FJ (the two
@@ -21819,7 +21819,7 @@ documents / 68 products in 2,349 ms** through `npm run seed --plan=accounts` wit
 re-verified afterwards and still holds its **1,125 products** untouched — the refusal happens before any
 tenant is cleared.
 
-**Documentation.** New [Guide 9](../guides/9-seeding-data.md) — the database, the phrases, the one
+**Documentation.** New [Guide 9](guides/9-seeding-development.md) — the database, the phrases, the one
 command, dry run, verification, what resets versus what is read-only, and large-data practice — plus
 the seeding examples in Guides 4 and 6 rewritten to commands that actually run.
 
@@ -21909,7 +21909,7 @@ nothing, a dry run that deletes nothing, and two source scans proving the guards
 scripts do not. `seed-target-guard.test.mjs` gained the same two URI cases (**21 pass**), because a
 stale connection string is the same hazard on the write path.
 
-**Documentation.** New [Guide 10](../guides/10-deleting-data.md) — the one command, the two targets, the
+**Documentation.** New [Guide 10](guides/11-deleting-development.md) — the one command, the two targets, the
 phrases, the ordering rule and what is *not* replaced — plus Guides 4 and 6 rewritten to commands that
 actually run, and `scripts/cleanup/README.md` reduced to the same rule. Guide 6's old "production needs
 two phrases" section was replaced, not amended: it described a message that no longer exists.
@@ -22434,6 +22434,44 @@ kept). The SKU/barcode rule held in production too: **0 of 170 000** products ca
 **What this adds to the guides.** Guide 10 now says that a cleanup frees documents but not index
 allocation, names the measured figures, and gives the reclaim (rebuild the three indexes, then
 `audit:indexes`) — so the next large re-seed is not refused by residue nobody can see.
+
+# 27GF. The data guides split by environment — four files where two stood, and the Firebase guide renumbered (2026-10-27)
+
+**What was asked for.** The owner asked for the data documentation to be split by environment: separate
+guides for seeding the development and the production database, and separate guides for deleting from
+each. The two files that existed — Guide 9 (seeding) and Guide 10 (deleting) — each covered both
+environments, so an operator working in one of them read the other's phrases and refusals to find their
+own.
+
+**What changed.** Guides 9–12 are now one topic per environment: `9-seeding-development.md`,
+`10-seeding-production.md`, `11-deleting-development.md`, `12-deleting-production.md`. The Firebase guide
+moved from 11 to `13-firebase-identities.md`, which keeps the reading order. The two old files are gone
+and their content is redistributed rather than copied: Guide 9 owns every development seeding command
+including the fixtures, Guide 10 the production rule (three phrases, tenants named by id, the presets
+that are refused, the measured 755 555-document run), Guide 11 the development cleanups, and Guide 12
+the production ones plus the index-allocation note (§27GE) that a delete does not reclaim.
+
+**What the split costs, stated rather than discovered.** The three rules that are identical in both
+environments — the database named twice, two phrases in development and three in production, and
+`--dry-run` counting through the run's own plan — now appear once per guide instead of once per topic.
+Each statement is shorter and links across to its sibling; nothing checks that the copies still agree, so
+the next factual change to any of them must touch both. That is the trade the owner asked for.
+
+**Records written before the split cite the old numbers.** A citation to **Guide 9**, **Guide 10** or
+**Guide 11** in a record above this one refers to the files as they were: Guide 9 is now Guides 9 and 10
+(seeding, per environment), Guide 10 is now Guides 11 and 12 (deleting, per environment), and Guide 11 is
+now Guide 13.
+
+**Every reference moved with them.** The guides index, `docs/README.md`, Guides 4 and 6, the production
+scale evidence README, and two script comments (`seed-accounts.mjs`, `cleanup-accounts.mjs`). The two
+inline links inside §27FZ's own record were repaired in place — paths only, no prose.
+
+**Verified.** `npm run test:unit`: **1555 tests, 1499 pass, 0 fail, 56 skipped**, including the
+`perf-tenant-workflow` guide test retargeted to the production guides — it reads two bounded sections,
+`10-seeding-production.md` § the measurement tenant and `12-deleting-production.md` § the measurement
+tenant, and still finds all three phrases in each — plus the documentation guards
+(`phase-docs-fact-drift`, `phase-docs-section-integrity`), which also read this file's stated record
+count and the index in `CLAUDE.md`.
 
 ---
 

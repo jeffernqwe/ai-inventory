@@ -26,9 +26,11 @@ documents.
 | [6-scripts-and-commands.md](guides/6-scripts-and-commands.md) | Every command that is not about data: start, check, measure, maintain |
 | [7-over-the-air-updates.md](guides/7-over-the-air-updates.md) | Publishing an update without a rebuild, and rolling one back |
 | [8-play-store-submission.md](guides/8-play-store-submission.md) | Building and submitting the Android release |
-| [9-seeding-data.md](guides/9-seeding-data.md) | Putting data in: the commands, the database rule, the phrases, verification |
-| [10-deleting-data.md](guides/10-deleting-data.md) | Taking data out: database wipes and tenant cleanups, the same phrase rule, what is verified |
-| [11-firebase-identities.md](guides/11-firebase-identities.md) | Which commands create logins, and how to delete one without locking an account out |
+| [9-seeding-development.md](guides/9-seeding-development.md) | Putting data into the development database: the commands, the database rule, the two phrases, verification |
+| [10-seeding-production.md](guides/10-seeding-production.md) | Putting data into the production database: the three phrases, the named tenants, what is refused |
+| [11-deleting-development.md](guides/11-deleting-development.md) | Taking data out of the development database: wipes and tenant cleanups, what is verified |
+| [12-deleting-production.md](guides/12-deleting-production.md) | Taking data out of the production database: the same rules, and the space a delete does not free |
+| [13-firebase-identities.md](guides/13-firebase-identities.md) | Which commands create logins, and how to delete one without locking an account out |
 
 ## 2. What the system is — reference
 

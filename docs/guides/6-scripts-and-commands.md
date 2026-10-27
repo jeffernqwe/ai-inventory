@@ -6,9 +6,11 @@ their own guides.
 
 | For | Read |
 |---|---|
-| Seeding data | [9. Seeding data](9-seeding-data.md) |
-| Deleting data | [10. Deleting data](10-deleting-data.md) |
-| Firebase logins | [11. Firebase identities](11-firebase-identities.md) |
+| Seeding data — development | [9. Seeding data — development](9-seeding-development.md) |
+| Seeding data — production | [10. Seeding data — production](10-seeding-production.md) |
+| Deleting data — development | [11. Deleting data — development](11-deleting-development.md) |
+| Deleting data — production | [12. Deleting data — production](12-deleting-production.md) |
+| Firebase logins | [13. Firebase identities](13-firebase-identities.md) |
 | Which accounts exist | [4. Test accounts and mock data](4-test-accounts-and-mock-data.md) |
 | A word you do not know | [5. Words explained](5-words-explained.md) |
 
@@ -130,18 +132,18 @@ copy of each rule:
 
 | Task | Guide | The command, in one line |
 |---|---|---|
-| Check which accounts exist before writing | [9](9-seeding-data.md) | `npm run check:accounts [--with-production]` — reads only |
-| Seed a tenant, any database | [9](9-seeding-data.md) | `npm run seed -- --plan=demo\|accounts\|roles --database=…` |
-| Seed the three comparison accounts | [9](9-seeding-data.md) | `npm run seed:three -- --database=…` (preset) |
-| Seed accounts you name | [9](9-seeding-data.md) | `npm run seed:accounts -- --database=… --accounts="a@x.com:30000,…"` |
-| Delete accounts' data, keeping the logins | [10](10-deleting-data.md) | `npm run cleanup:three` / `cleanup:account -- --accounts=…` |
-| Seed the fixed-figure demo tenant | [9](9-seeding-data.md) | `npm run seed:demo-tenant -- --database=…` |
-| Seed a large tenant you can sign into | [9](9-seeding-data.md) | `npm run seed:perf-tenant -- --database=… --size=…` |
-| Seed the no-login measurement tenant | [9](9-seeding-data.md) | `npm run seed:perf -- --size=…` |
-| Read a seed back | [9](9-seeding-data.md) | `npm run verify:demo -- --email=…` / `verify:roles -- --business=…` |
-| Clear a whole database | [10](10-deleting-data.md) | `npm run cleanup -- --target=database --database=…` |
-| Empty one tenant | [10](10-deleting-data.md) | `npm run cleanup:demo\|cleanup:roles\|…` |
-| Delete a Firebase login | [11](11-firebase-identities.md) | `npm run cleanup -- --target=firebase --database=… --email=…` |
+| Check which accounts exist before writing | [9](9-seeding-development.md) | `npm run check:accounts [--with-production]` — reads only |
+| Seed a tenant, any database | [9](9-seeding-development.md) / [10](10-seeding-production.md) | `npm run seed -- --plan=demo\|accounts\|roles --database=…` |
+| Seed the three comparison accounts | [9](9-seeding-development.md) | `npm run seed:three -- --database=…` (preset; development only) |
+| Seed accounts you name | [9](9-seeding-development.md) / [10](10-seeding-production.md) | `npm run seed:accounts -- --database=… --accounts="a@x.com:30000,…"` |
+| Delete accounts' data, keeping the logins | [11](11-deleting-development.md) / [12](12-deleting-production.md) | `npm run cleanup:three` / `cleanup:account -- --accounts=…` |
+| Seed the fixed-figure demo tenant | [9](9-seeding-development.md) | `npm run seed:demo-tenant -- --database=…` |
+| Seed a large tenant you can sign into | [9](9-seeding-development.md) / [10](10-seeding-production.md) | `npm run seed:perf-tenant -- --database=… --size=…` |
+| Seed the no-login measurement tenant | [9](9-seeding-development.md) | `npm run seed:perf -- --size=…` |
+| Read a seed back | [9](9-seeding-development.md) | `npm run verify:demo -- --email=…` / `verify:roles -- --business=…` |
+| Clear a whole database | [11](11-deleting-development.md) / [12](12-deleting-production.md) | `npm run cleanup -- --target=database --database=…` |
+| Empty one tenant | [11](11-deleting-development.md) | `npm run cleanup:demo\|cleanup:roles\|…` |
+| Delete a Firebase login | [13](13-firebase-identities.md) | `npm run cleanup -- --target=firebase --database=… --email=…` |
 
 Two facts worth carrying between the guides, because every one of them depends on them:
 
@@ -155,13 +157,14 @@ Two facts worth carrying between the guides, because every one of them depends o
 The three comparison accounts ([Guide 4](4-test-accounts-and-mock-data.md)) exist to answer one
 question: does the assistant stay correct and fast as a catalogue grows?
 
-1. **Clear both stores, in this order** — database first ([Guide 10](10-deleting-data.md)), then the
-   three identities by address ([Guide 11](11-firebase-identities.md)). The second command refuses
+1. **Clear both stores, in this order** — database first ([Guide 11](11-deleting-development.md) /
+   [Guide 12](12-deleting-production.md)), then the three identities by address
+   ([Guide 13](13-firebase-identities.md)). The second command refuses
    while any user row still owns an address, which is why the order is a check and not advice.
 2. **Register all three in the app** — Create Account → the 6-digit code from the mailbox → dashboard.
 3. **Check them** with `npm run check:accounts` — read-only, and it names the `businessId` production
-   needs ([Guide 9](9-seeding-data.md)).
-4. **Seed them** with `npm run seed:three` ([Guide 9](9-seeding-data.md)). Dry-run first; production
+   needs ([Guide 9](9-seeding-development.md)).
+4. **Seed them** with `npm run seed:three` ([Guide 9](9-seeding-development.md)). Dry-run first; production
    refuses the preset and wants every account named with the tenant it owns.
 5. **Generate a barcode** on one seeded product: both seeders leave SKUs and barcodes blank on purpose,
    so the app's own generation is what assigns them.
@@ -344,14 +347,14 @@ design. Also automatic: `npm install` in `mobile/` applies a `postinstall` patch
 
 ## Part 6 — Destructive commands
 
-Three guides hold all of it; nothing here repeats their rules.
+The guides it points at hold all of it; nothing here repeats their rules.
 
 | Family | What it destroys | Guide |
 |---|---|---|
-| `npm run cleanup -- --target=database` | every document in one named database, **logins included** | [10](10-deleting-data.md) |
-| the tenant cleanups (`cleanup:demo`, `cleanup:perf-tenant`, `cleanup:demo-tenant`, `cleanup:roles`, `cleanup:perf`) | one named tenant, verified afterwards | [10](10-deleting-data.md) |
-| the accounts cleanups (`cleanup:three`, `cleanup:account`) | the seeded data of the accounts you name — **their logins and business rows are kept** | [10](10-deleting-data.md) |
-| `npm run cleanup -- --target=firebase` and `cleanup:test-firebase` | Firebase identities — **irreversible** | [11](11-firebase-identities.md) |
+| `npm run cleanup -- --target=database` | every document in one named database, **logins included** | [11](11-deleting-development.md) / [12](12-deleting-production.md) |
+| the tenant cleanups (`cleanup:demo`, `cleanup:perf-tenant`, `cleanup:demo-tenant`, `cleanup:roles`, `cleanup:perf`) | one named tenant, verified afterwards | [11](11-deleting-development.md) |
+| the accounts cleanups (`cleanup:three`, `cleanup:account`) | the seeded data of the accounts you name — **their logins and business rows are kept** | [11](11-deleting-development.md) / [12](12-deleting-production.md) |
+| `npm run cleanup -- --target=firebase` and `cleanup:test-firebase` | Firebase identities — **irreversible** | [13](13-firebase-identities.md) |
 | `npm run restore:db` | the development or test database (it drops collections) | Part 5 above |
 
 The shape they share: the target is named on the command line, the name must equal what the process
@@ -365,7 +368,7 @@ Two things a reader arriving here usually wants to know:
   `npm run` on them now fails with "missing script".
 - **Order matters when logins are involved.** Clear the database first, delete identities second, or the
   address is locked out for good. The command refuses in the wrong order rather than trusting the
-  operator — [Guide 11](11-firebase-identities.md).
+  operator — [Guide 13](13-firebase-identities.md).
 
 ## Part 7 — What runs by itself
 
@@ -395,8 +398,8 @@ process (reset on restart) and public but contain no names, paths, users or mess
 | `npm run perf:measure`, `perf:golden` | query timings / answer fingerprints | ✅ reads |
 | `npm run perf:turns` | real turns (`--login` for a deployment) | ⚠️ spends AI quota |
 | `npm run check:accounts`, `verify:demo`, `verify:roles` | whether the accounts exist, and read a seed back | ✅ reads |
-| `npm run seed`, `seed:demo`, `seed:accounts`, `seed:three`, `seed:roles`, `seed:demo-tenant`, `seed:perf`, `seed:perf-tenant` | sample data in | → [Guide 9](9-seeding-data.md) |
-| `npm run cleanup`, `cleanup:demo`, `cleanup:roles`, `cleanup:demo-tenant`, `cleanup:perf`, `cleanup:perf-tenant`, `cleanup:account`, `cleanup:three`, `cleanup:test-firebase` | data and identities out | → [Guides 10](10-deleting-data.md) and [11](11-firebase-identities.md) |
+| `npm run seed`, `seed:demo`, `seed:accounts`, `seed:three`, `seed:roles`, `seed:demo-tenant`, `seed:perf`, `seed:perf-tenant` | sample data in | → [Guides 9](9-seeding-development.md) and [10](10-seeding-production.md) |
+| `npm run cleanup`, `cleanup:demo`, `cleanup:roles`, `cleanup:demo-tenant`, `cleanup:perf`, `cleanup:perf-tenant`, `cleanup:account`, `cleanup:three`, `cleanup:test-firebase` | data and identities out | → [Guides 11](11-deleting-development.md), [12](12-deleting-production.md) and [13](13-firebase-identities.md) |
 
 **`mobile/`**: `npx expo start --dev-client`, `npm start`, `npm run android|ios|web`, `npm run typecheck`,
 `npm run lint`, `npm test`, `npm run test:watch`, `npm run check:build-env`,
@@ -408,8 +411,9 @@ process (reset on restart) and public but contain no names, paths, users or mess
 
 ## Part 9 — When a command refuses
 
-Data commands explain their own refusals: [Guide 9](9-seeding-data.md), [Guide 10](10-deleting-data.md),
-[Guide 11](11-firebase-identities.md). The rest:
+Data commands explain their own refusals: [Guide 9](9-seeding-development.md),
+[Guide 10](10-seeding-production.md), [Guide 11](11-deleting-development.md),
+[Guide 12](12-deleting-production.md), [Guide 13](13-firebase-identities.md). The rest:
 
 | Message | Meaning | Do |
 |---|---|---|
@@ -424,5 +428,8 @@ Data commands explain their own refusals: [Guide 9](9-seeding-data.md), [Guide 1
 | `measuring against "…" needs PERF_TURNS_CONFIRM='perf-turns:production'` | `perf:turns` aimed at production without its phrase | add that phrase **and** `--database=` |
 
 ← [Guides index](README.md) · Related: [4. Test accounts](4-test-accounts-and-mock-data.md) ·
-[5. Words explained](5-words-explained.md) · [9. Seeding data](9-seeding-data.md) ·
-[10. Deleting data](10-deleting-data.md) · [11. Firebase identities](11-firebase-identities.md)
+[5. Words explained](5-words-explained.md) · [9. Seeding data — development](9-seeding-development.md) ·
+[10. Seeding data — production](10-seeding-production.md) ·
+[11. Deleting data — development](11-deleting-development.md) ·
+[12. Deleting data — production](12-deleting-production.md) ·
+[13. Firebase identities](13-firebase-identities.md)

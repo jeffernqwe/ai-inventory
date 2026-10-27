@@ -11,16 +11,19 @@ technical documents listed at the bottom; if they disagree with a guide, they wi
 | Run the app on a real phone | [2. Running on a phone](2-run-on-your-phone.md) |
 | See the phone's screen on the laptop | [3. Mirroring the phone](3-see-your-phone-on-your-laptop.md) |
 | Understand test accounts and what data each one holds | [4. Test accounts and mock data](4-test-accounts-and-mock-data.md) |
-| Put data in, verify it, or seed production | [9. Seeding data](9-seeding-data.md) |
-| Delete a database or one tenant | [10. Deleting data](10-deleting-data.md) |
-| Work with Firebase logins | [11. Firebase identities](11-firebase-identities.md) |
+| Put data into the development database | [9. Seeding data — development](9-seeding-development.md) |
+| Put data into the production database | [10. Seeding data — production](10-seeding-production.md) |
+| Delete data from the development database | [11. Deleting data — development](11-deleting-development.md) |
+| Delete data from the production database | [12. Deleting data — production](12-deleting-production.md) |
+| Work with Firebase logins | [13. Firebase identities](13-firebase-identities.md) |
 | Look up any other command or script | [6. Scripts and commands](6-scripts-and-commands.md) |
 | Update an installed app without reinstalling it | [7. Updating the app](7-over-the-air-updates.md) |
 | Prepare the Google Play submission | [8. Preparing the Play submission](8-play-store-submission.md) |
 | Look up a word | [5. Words explained](5-words-explained.md) |
 
-Guides 5 and 6 are references — jump to the word or command you need. Guides 9, 10 and 11 own the data
-commands (put it in, take it out, handle logins), so Guide 6 does not repeat them.
+Guides 5 and 6 are references — jump to the word or command you need. Guides 9–13 own the data commands
+— one guide for each half in each environment (put it in, take it out), one for the logins — so Guide 6
+does not repeat them.
 
 ## Five things to know first
 
@@ -33,7 +36,7 @@ commands (put it in, take it out, handle logins), so Guide 6 does not repeat the
 4. **Nothing here is destructive by default.** Dangerous commands are marked ⚠️ and require a
    confirmation phrase.
 5. **Only sign-ins you know the password to can sign in.** Deleting a login while its database record
-   exists locks that account out permanently (Guide 11).
+   exists locks that account out permanently (Guide 13).
 
 ## Command conventions
 

@@ -5,9 +5,11 @@ reference — the commands live in their own guides:
 
 | For | Read |
 |---|---|
-| Putting data in | [9. Seeding data](9-seeding-data.md) |
-| Removing data | [10. Deleting data](10-deleting-data.md) |
-| Firebase logins | [11. Firebase identities](11-firebase-identities.md) |
+| Putting data in — development | [9. Seeding data — development](9-seeding-development.md) |
+| Putting data in — production | [10. Seeding data — production](10-seeding-production.md) |
+| Removing data — development | [11. Deleting data — development](11-deleting-development.md) |
+| Removing data — production | [12. Deleting data — production](12-deleting-production.md) |
+| Firebase logins | [13. Firebase identities](13-firebase-identities.md) |
 | Everything else | [6. Scripts and commands](6-scripts-and-commands.md) |
 
 ---
@@ -25,7 +27,7 @@ Three consequences:
 
 1. **Deleting a login while its database record exists locks that person out permanently.** The app
    refuses to register the address again, and nothing can repair it. **This is the one irreversible
-   mistake here** — [Guide 11](11-firebase-identities.md) explains the checks that prevent it.
+   mistake here** — [Guide 13](13-firebase-identities.md) explains the checks that prevent it.
    Clearing MongoDB is safe; clearing Firebase is not.
 2. **Sample data belongs to a business, not an email.** Every row carries its business, and every query
    filters by it, so tenants never see each other.
@@ -43,8 +45,9 @@ Three consequences:
 | **`inventoryai_prod_db`** | the deployed server and shipped app | ⚠️ only by **naming** the database (`--database=`) |
 
 Development and production use the same commands. Production costs a third confirmation phrase, and
-every command must name its database. The rule in full: [Guide 9](9-seeding-data.md) (writing) and
-[Guide 10](10-deleting-data.md) (deleting).
+every command must name its database. The rule in full: [Guide 9](9-seeding-development.md) and
+[Guide 10](10-seeding-production.md) (writing), [Guide 11](11-deleting-development.md) and
+[Guide 12](12-deleting-production.md) (deleting).
 
 ---
 
@@ -81,7 +84,8 @@ They exist to answer one question: does the assistant stay correct and fast as a
 walkthrough is in [Guide 6](6-scripts-and-commands.md#comparing-the-assistant-across-tenants). The
 addresses and sizes are fixed in `server/scripts/seed/lib.mjs`, and three commands read that one list:
 `check:accounts` (do they exist?), `seed:three` (fill them) and `cleanup:three` (empty them, keeping the
-logins) — all three in [Guide 9](9-seeding-data.md) and [Guide 10](10-deleting-data.md).
+logins) — all three in [Guide 9](9-seeding-development.md)/[Guide 10](10-seeding-production.md) and
+[Guide 11](11-deleting-development.md)/[Guide 12](12-deleting-production.md).
 
 ---
 
@@ -124,7 +128,7 @@ re-registered. `cleanup:test-firebase` deletes **every** login in the project, i
 
 You then sign in and get a brand-new empty business, exactly like a first-time user. There is no way to
 delete one user from the app, and none should be added — register a new address instead. When an
-identity genuinely must go, [Guide 11](11-firebase-identities.md) has the guarded command and the
+identity genuinely must go, [Guide 13](13-firebase-identities.md) has the guarded command and the
 refusals that make the ordering impossible to get wrong.
 
 ---
@@ -133,12 +137,12 @@ refusals that make the ordering impossible to get wrong.
 
 | Want | Do |
 |---|---|
-| Fresh sample data in your own tenant | `seed --plan=demo --database=…` — [Guide 9](9-seeding-data.md) |
-| Your data gone, logins kept | `cleanup:demo --database=… --email=… --business=…`, which removes one tenant and keeps its login — [Guide 10](10-deleting-data.md) |
-| Your data gone and a brand-new business | `cleanup -- --target=database --database=…`, then sign in again; this removes **every** tenant in that database — [Guide 10](10-deleting-data.md) |
-| One fixture tenant gone | its own cleanup (`cleanup:roles`, `cleanup:demo-tenant`, `cleanup:perf-tenant`, `cleanup:perf`) — [Guide 10](10-deleting-data.md) |
+| Fresh sample data in your own tenant | `seed --plan=demo --database=…` — [Guide 9](9-seeding-development.md) |
+| Your data gone, logins kept | `cleanup:demo --database=… --email=… --business=…`, which removes one tenant and keeps its login — [Guide 11](11-deleting-development.md) |
+| Your data gone and a brand-new business | `cleanup -- --target=database --database=…`, then sign in again; this removes **every** tenant in that database — [Guide 11](11-deleting-development.md) |
+| One fixture tenant gone | its own cleanup (`cleanup:roles`, `cleanup:demo-tenant`, `cleanup:perf-tenant`, `cleanup:perf`) — [Guide 11](11-deleting-development.md) |
 | A truly new user | register a new address in the app — a new empty business |
-| A login gone, deliberately | [Guide 11](11-firebase-identities.md) — database first, identity second |
+| A login gone, deliberately | [Guide 13](13-firebase-identities.md) — database first, identity second |
 
 Ignore `--target=database` against `inventoryai_prod_db`, and `cleanup:test-firebase`, without a
 specific reason.
@@ -152,6 +156,8 @@ specific reason.
 **fixture** (small fixed test data) · **environment** (development/test/production) ·
 **destructive** (permanent). The full glossary is [Guide 5](5-words-explained.md).
 
-← [Guides index](README.md) · Related: [9. Seeding data](9-seeding-data.md) ·
-[10. Deleting data](10-deleting-data.md) · [11. Firebase identities](11-firebase-identities.md) ·
-[5. Words explained](5-words-explained.md)
+← [Guides index](README.md) · Related: [9. Seeding data — development](9-seeding-development.md) ·
+[10. Seeding data — production](10-seeding-production.md) ·
+[11. Deleting data — development](11-deleting-development.md) ·
+[12. Deleting data — production](12-deleting-production.md) ·
+[13. Firebase identities](13-firebase-identities.md) · [5. Words explained](5-words-explained.md)

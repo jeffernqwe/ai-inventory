@@ -1,0 +1,386 @@
+# 9. Seeding data — development
+
+Putting sample data into **`inventoryai_dev_db`**, the database this laptop's backend and the phone use.
+Production is [Guide 10](10-seeding-production.md); deleting data is [Guide 11](11-deleting-development.md)
+and [Guide 12](12-deleting-production.md); Firebase logins are [Guide 13](13-firebase-identities.md); the
+accounts themselves are [Guide 4](4-test-accounts-and-mock-data.md).
+
+Run everything from `server/`.
+
+---
+
+## The development rule
+
+- **Name the database twice, and let it agree.** `--database=inventoryai_dev_db` must equal what
+  `MONGODB_DB_NAME` resolved. If they disagree, the run refuses *before connecting* — so a typo in one
+  cannot quietly seed the other. Only `inventoryai_dev_db` and `inventoryai_prod_db` are seedable;
+  `inventoryai_test_db` is refused because `npm test` clears it.
+- **Two phrases:** `SEED_CONFIRM` (what is written) and `SEED_DB_CONFIRM=inventoryai_dev_db` (where).
+  Production adds a third — see [Guide 10](10-seeding-production.md).
+- **`--dry-run` is available everywhere.** It checks the target and the phrases, prints the plan, and
+  writes nothing.
+- **Seeders never delete a login, a business row or a Firebase identity.** Re-running one replaces that
+  tenant's *data*; it is the documented way to start over.
+
+---
+
+## Which command?
+
+| You want | Command |
+|---|---|
+| To know which accounts exist before writing | `npm run check:accounts` |
+| Data in the three comparison accounts | `npm run seed:three -- --database=inventoryai_dev_db` |
+| Data in accounts you name, by size | `npm run seed:accounts -- --database=inventoryai_dev_db --accounts="a@x.com:30000,b@y.com:50000"` |
+| Data in the account you sign in with | `npm run seed -- --plan=demo --database=inventoryai_dev_db --email=YOU@example.com` |
+| One working login per role | `npm run seed -- --plan=roles --database=inventoryai_dev_db` |
+| A small tenant with fixed figures | `npm run seed:demo-tenant -- --database=inventoryai_dev_db` |
+| A large tenant you can sign into | `npm run seed:perf-tenant -- --database=inventoryai_dev_db --size=60000` |
+| A disposable tenant with no login | `npm run seed:perf -- --size=1000` |
+
+`seed --plan=…` is the one command; `seed:demo`, `seed:three` and `seed:accounts` are that script with the
+plan or the preset already chosen. `seed:perf-tenant`, `seed:demo-tenant` and `seed:perf` are separate
+commands with their own terms.
+
+### The phrase each command uses
+
+| Command | `SEED_CONFIRM` |
+|---|---|
+| `seed -- --plan=demo` | `seed-demo-account` |
+| `seed:three` | `seed-three-accounts` |
+| `seed:accounts`, `seed -- --plan=accounts` | `seed-accounts` |
+| `seed -- --plan=roles`, `seed:roles` | `seed-roles` |
+| `seed:perf-tenant` | `seed:perf-tenant` |
+| `seed:demo-tenant` | `seed-demo-tenant` (one phrase, its own guard) |
+| `seed:perf` | `seed-perf-ai` (its own guard) |
+
+A phrase that belongs to a different command is refused, so `SEED_CONFIRM=seed-roles` cannot seed the demo
+plan.
+
+---
+
+## Before you write: check the accounts
+
+```bash
+npm run check:accounts                       # the development database
+npm run check:accounts -- --with-production   # …and what production holds
+npm run check:accounts -- --accounts="a@x.com,b@y.com"
+```
+
+Read-only, and it needs no phrase because it changes nothing. For every address it prints the Firebase
+identity (uid, verified, enabled, how it signs in), the user row in each database (role, business, the
+stored uid) and how many documents a seed would reset. Exit codes: **0** every account ready, **1**
+something missing or mismatched (a state, not an error), **2** could not check.
+
+`MISSING` means there is no row yet: a seed would **create** that tenant. `STALE LINK`, `NOT LINKED` and
+`NO BUSINESS` are states a seed refuses on.
+
+---
+
+## The three comparison accounts (`seed:three`)
+
+```bash
+# preview — the plan only, nothing connected
+SEED_CONFIRM=seed-three-accounts SEED_DB_CONFIRM=inventoryai_dev_db \
+  npm run seed:three -- --database=inventoryai_dev_db --dry-run
+
+# write
+SEED_CONFIRM=seed-three-accounts SEED_DB_CONFIRM=inventoryai_dev_db \
+  npm run seed:three -- --database=inventoryai_dev_db
+```
+
+| Account | Products | ≈ Documents |
+|---|---|---|
+| `jefferndullamalinaozxc@gmail.com` | 30 000 | 133 333 |
+| `jefferndullamalinao@gmail.com` | 50 000 | 222 222 |
+| `jeffernmalinaoqwe@gmail.com` | 90 000 | 400 000 |
+
+The addresses and sizes live together in `server/scripts/seed/lib.mjs`, and `check:accounts` and
+`cleanup:three` read the same list — so all three commands describe the same three tenants.
+
+**Registering an account creates ONE row, in the database that app is talking to.** The Firebase identity
+is shared by both databases, so each account needs at most one registration and the other side is a seed:
+`check:accounts` reports `MISSING` there and this command creates it. That is why a fresh development
+database reads `MISSING` for accounts that already exist in production — nothing is wrong, and nothing
+needs registering twice.
+
+---
+
+## Accounts you name (`seed:accounts`)
+
+```bash
+SEED_CONFIRM=seed-accounts SEED_DB_CONFIRM=inventoryai_dev_db \
+  npm run seed:accounts -- --database=inventoryai_dev_db \
+    --accounts="a@x.com:100000,b@y.com:40000" --dry-run
+```
+
+- **A size is PRODUCTS**, and every entry needs one: `--accounts="address:products[:businessId]"`.
+  The dry run prints the products *and* the documents each entry will write. `:400000d` asks in
+  **documents** instead. The `:businessId` third field is only needed in production
+  ([Guide 10](10-seeding-production.md)).
+- **An address that already has a verified identity needs no `DEMO_ACCOUNT_PASSWORD`.** That variable
+  exists only to create an identity that does not exist yet. An account registered in the app is reused as
+  it is — the run reads its `uid` from Firebase and writes nothing back, so a Google-only login seeds
+  exactly like a password one and no credential is changed.
+- **No SKUs or barcodes are generated**, so the app's own barcode generation is what assigns them — that is
+  deliberate, and worth one product per run. `--include-sku` generates them too.
+- Each account gets its own business; the command refuses if two accounts resolve to the same one.
+- A missing login stops the run (unless you supply `DEMO_ACCOUNT_PASSWORD`); an existing password is never
+  changed.
+- The ceiling is **112 500 products ≈ 500 000 documents** per account. A million products is refused with
+  its reason: ≈4 400 000 documents, built in memory before a single row is inserted. A plan of 90 000
+  products or more prints a `LARGE RUN` line with an estimated duration before it starts.
+
+---
+
+## The account you sign in with (`seed --plan=demo`)
+
+```bash
+SEED_CONFIRM=seed-demo-account SEED_DB_CONFIRM=inventoryai_dev_db \
+  npm run seed -- --plan=demo --database=inventoryai_dev_db \
+  --email=you@example.com --total=80000
+```
+
+`--total=80000` is the default (range **100–400 000**, in **documents**); `--seed=1` makes the data identical
+every run. `--email=` must be the address you sign in with — the tenant is found through the Firebase UID.
+Expect `OK` and `TOTAL 80000 (target 80000)`.
+
+For a brand-new address the login is created; supply its password through a setting, never on the command
+line:
+
+```bash
+DEMO_ACCOUNT_PASSWORD='choose-a-strong-password' \
+  SEED_CONFIRM=seed-demo-account SEED_DB_CONFIRM=inventoryai_dev_db \
+  npm run seed -- --plan=demo --database=inventoryai_dev_db \
+  --email=tester-1@example.com --total=500
+```
+
+---
+
+## One login per role (`seed --plan=roles`)
+
+```bash
+ROLE_TEST_PASSWORD='choose-a-password' SEED_CONFIRM=seed-roles SEED_DB_CONFIRM=inventoryai_dev_db \
+  npm run seed -- --plan=roles --database=inventoryai_dev_db --dry-run
+ROLE_TEST_PASSWORD='choose-a-password' SEED_CONFIRM=seed-roles SEED_DB_CONFIRM=inventoryai_dev_db \
+  npm run seed -- --plan=roles --database=inventoryai_dev_db
+
+npm run verify:roles -- --business=<id the seeder printed>
+```
+
+| Role | Address |
+|---|---|
+| OWNER | `role-owner@example.invalid` |
+| ADMIN | `role-admin@example.invalid` |
+| MANAGER | `role-manager@example.invalid` |
+| STAFF | `role-staff@example.invalid` |
+
+One tenant, `ROLE TEST — role boundary fixture (do not use)`, ~900 documents (≈200 products). The
+`.invalid` addresses cannot receive mail, so the four logins are marked verified through Firebase's admin
+interface — the same write the app makes after a real code. `verify:roles` checks **96 cells** (route ×
+role) and exits 0 only when all match; add `--signin` with `FIREBASE_WEB_API_KEY` and `ROLE_TEST_PASSWORD`
+to prove the real sign-in path.
+
+ADMIN's visible restriction is in **Users**: no creating another ADMIN, no changing its own role, no
+editing an ADMIN or the OWNER.
+
+---
+
+## The fixed-figure demo tenant (`seed:demo-tenant`)
+
+Its own tool with **one phrase** — it does not follow the two/three-phrase rule.
+
+```bash
+DEMO_ACCOUNT_PASSWORD='<password>' SEED_CONFIRM=seed-demo-tenant \
+  npm run seed:demo-tenant -- --database=inventoryai_dev_db --dry-run   # preview first
+DEMO_ACCOUNT_PASSWORD='<password>' SEED_CONFIRM=seed-demo-tenant \
+  npm run seed:demo-tenant -- --database=inventoryai_dev_db
+```
+
+- The database must be **named** and must equal the resolved one; the test database is refused.
+- **One phrase**, `SEED_CONFIRM=seed-demo-tenant` — there is no `SEED_DB_CONFIRM` for this tool.
+- It may also run against production, because the database is named and matched.
+- The password is set on every run.
+
+Sign in as `demo-preview@example.invalid` (owner `Demo Tester`). Every figure is fixed:
+
+| | |
+|---|---|
+| Products | **6** active, 5 with stock (Demo Desk Lamp has no inventory row) |
+| On hand | **112 units** |
+| Locations | **Demo Warehouse 75** (4 products) · **Demo Shop 30** (2) · **Demo Van 7** (1) |
+| Health | 3 healthy · 3 at/below minimum · **1 out of stock** |
+| Restock | Demo Desk Lamp (0 vs min 3) · Demo Coffee Beans 1kg (4 vs 10) · Demo Paper Cups 100pk (15 vs 20) |
+| Ledger | 9 movements, each ending at the figures above |
+
+The seeder prints these figures itself; compare them with the screen. Teardown is `cleanup:demo-tenant`
+([Guide 11](11-deleting-development.md)), which keeps the Firebase identity.
+
+---
+
+## The measurement tenants
+
+### `seed:perf-tenant` — a large tenant with a working login
+
+```bash
+DEMO_ACCOUNT_PASSWORD='choose-a-password' SEED_CONFIRM=seed:perf-tenant \
+  SEED_DB_CONFIRM=inventoryai_dev_db \
+  npm run seed:perf-tenant -- --database=inventoryai_dev_db --size=60000 --dry-run
+
+DEMO_ACCOUNT_PASSWORD='choose-a-password' SEED_CONFIRM=seed:perf-tenant \
+  SEED_DB_CONFIRM=inventoryai_dev_db \
+  npm run seed:perf-tenant -- --database=inventoryai_dev_db --size=60000
+```
+
+- It follows the **same two/three-phrase rule** as everything above; the production form is in
+  [Guide 10](10-seeding-production.md).
+- `--size` is **documents**, 50–400 000, default 4 000; products land at ≈22 %. Deterministic (`--seed`,
+  default 1). SKUs are `SEEDSKU-…`.
+- It creates a verified OWNER login (`perf-seed-ai@example.invalid`) in that tenant only, and refreshes its
+  password from `DEMO_ACCOUNT_PASSWORD` on every run.
+- Re-counts every collection, re-checks every movement's arithmetic and requires its anchor before saying
+  `OK`.
+- Its teardown is `cleanup:perf-tenant` ([Guide 11](11-deleting-development.md)); it keeps the identity.
+
+Measured on production 2026-10-25: `--size=60000` → 13 500 products, 27 200 inventory rows, 17 836 movements,
+1 200 purchase orders in **110 s**.
+
+### `seed:perf` — no login, development only
+
+```bash
+SEED_CONFIRM=seed-perf-ai npm run seed:perf -- --size=1000 --dry-run   # products, 1–200000
+SEED_CONFIRM=seed-perf-ai npm run seed:perf -- --size=1000
+SEED_CONFIRM=seed-perf-ai npm run cleanup:perf -- --dry-run            # count it first
+SEED_CONFIRM=seed-perf-ai npm run cleanup:perf
+```
+
+Named `PERF SEED — AI assistant stress test (do not use)`, **no Firebase identity**, so it cannot be signed
+into. It prints the `businessId` the query measurements need. Development only: its guard refuses production
+outright. `cleanup:perf` proves `0 remaining` and says `nothing to clean` when there was nothing.
+
+---
+
+## Dry run — plan without writing
+
+Add `--dry-run` to any plan. The target and all phrases are still checked; nothing is connected to and
+nothing is written, so it is the safe way to prove a command before running it for real.
+
+Every seeder previews, and each preview stops before its first write:
+
+| Command | What the preview reports |
+|---|---|
+| `seed --plan=…` | the plan, the target and the phrase count — **no connection is opened** |
+| `seed:three` / `seed:accounts` | the products **and** the documents each entry will write, resets included |
+| `seed:perf` | the size, the tenant and the fact that any previous seed tenant would be replaced — no connection |
+| `seed:perf-tenant` | whether the tenant would be created or replaced, and how many documents would be cleared |
+| `seed:demo-tenant` | whether the tenant would be created, attached or replaced, and how many documents would be cleared |
+
+The last two read the database to count (they need it to know what exists) and **never touch Firebase**; a
+real run is what creates or refreshes the login. Neither needs the password to preview.
+
+`--dry-run` is not a verification: it reports what *would* happen. Verification reads the rows back.
+
+---
+
+## Verify — read-only, always
+
+```bash
+npm run verify:demo -- --email=you@example.com --database=inventoryai_dev_db
+```
+
+It reads the database and checks counts, ledger arithmetic (`newQuantity = previous ± quantity`) and
+referential integrity (inventory → product/location, receipts → real movements). It writes nothing, so it
+needs no phrase. Exit codes are a contract:
+
+- **0** verified — the data is what the seeder claimed
+- **1** a violation was found — the data is wrong
+- **2** not verified — the database or account could not be read (not a data problem)
+
+Run it after every seed. It is the only thing that proves the rows, rather than the seeder's own count of
+its inserts. `verify:roles` is the equivalent for the role fixture.
+
+---
+
+## What resets and what does not
+
+| Command | Existing data | Account rows | Firebase identities |
+|---|---|---|---|
+| `seed --plan=demo` | **replaced** for that one tenant | created if absent, else kept | never deleted; created only if absent |
+| `seed:three` / `seed:accounts` | **replaced** for each named tenant | same | same |
+| `seed --plan=roles` | **replaced** for the role fixture tenant | four role logins reused | same |
+| `seed:perf-tenant` | **replaced** for its own tenant | created if absent | created if absent; password refreshed |
+| `seed:demo-tenant` | **replaced** for the demo tenant | created if absent | created if absent; password set |
+| `seed:perf` | **replaced** for its own tenant | recreated, no login | never touched |
+| `verify:demo` / `verify:roles` | untouched | untouched | untouched |
+
+Every write is scoped by `businessId`, so no tenant's data is ever removed by another tenant's seed.
+
+---
+
+## Sizes, units and ceilings
+
+**Two units, and each command says which it uses.** `--accounts` (and `seed:three`) count **products** — the
+number the app's own product list shows. `seed --plan=demo --total` and `seed:perf-tenant --size` count
+**documents** (all seven collections), and products land at roughly 22.5 % of that (`--total=80000` ≈ 18 000
+products). Every command prints both figures, so nothing has to be converted by hand.
+
+| Want | Command | Ceiling |
+|---|---|---|
+| Your own account, big | `--plan=demo --email=you@example.com --total=80000` (documents) | 400 000 |
+| The three fixed accounts | `seed:three` (30 000 / 50 000 / 90 000 products) | — |
+| Your own list, by product count | `seed:accounts --accounts="a@x.com:100000,b@x.com:40000"` | 112 500 each |
+| A size given in documents | `seed:accounts --accounts="a@x.com:444444d"` | 500 000 each |
+| The measurement tenant | `seed:perf-tenant --size=60000` (documents) | 400 000 |
+
+The dataset is deterministic (`--seed=1` by default), so two measurements describe the same tenant. Seed in
+the morning rather than mid-measurement: a run replaces the tenant's data, and the assistant would be
+measured against a half-written catalogue.
+
+**The cluster is shared.** Development and production live on the same 512 MB Atlas M0, so a full development
+copy of the three comparison accounts (~338 MB) on top of a full production one exceeds the ceiling, and an
+M0 that runs out of storage **blocks writes**. Seed one environment at full size at a time, or keep
+development smaller — [Guide 12 § The space a delete does not give back](12-deleting-production.md) has the
+measurements.
+
+---
+
+## When it refuses
+
+| Message | Meaning | Do |
+|---|---|---|
+| `--plan=<demo\|accounts\|roles> is required` | no plan chosen | add `--plan=…` |
+| `--accounts="address:products[:businessId],…" is required` | a bare `seed:accounts` named nothing | add the list, or use `seed:three` for the fixed three |
+| `asks for 1,000,000 products. The ceiling is 112,500` | over the ceiling | ask for 112 500 or fewer, or split the plan across accounts |
+| `two/three confirmation phrase(s) … SEED_CONFIRM=seed-three-accounts` | the preset is its own mode, so it wants its own phrase | export the phrase the refusal names — the mode decides which |
+| `--database=<name> is required` | the target was not named | add `--database=` with the resolved name |
+| `--database is "…" but this process resolved "…"` | the flag and `MONGODB_DB_NAME` disagree | set `MONGODB_DB_NAME` to the database you mean |
+| `MONGODB_URI names the database "…"` | the connection string is configured for the other database | fix the URI or the environment; nothing was written |
+| `two/three confirmation phrase(s) … missing or wrong` | a phrase is absent or mistyped | the message lists every one it needs |
+| `set SEED_CONFIRM=<phrase> to proceed` | a tool with its own guard wants its own phrase | use `seed-perf-ai` or `seed-demo-tenant` as appropriate |
+| `--total must be a whole number …` | a size or seed is not a whole number | digits only; `900abc` and `1.5` are refused rather than read as 900 and 1 |
+| `the read-back does not match what was written` | an insert was partly rejected | nothing is reported as done; re-run and read the collections named |
+| `test database … npm test clears` | the test database was selected | use `inventoryai_dev_db` |
+| `not a seeding target` | an unknown database name | only `inventoryai_dev_db` / `inventoryai_prod_db` |
+| `this shell is configured for Firebase project "…"` | the credentials name a project other than the approved one | fix `FIREBASE_PROJECT_ID` (or the service account); nothing was read or written |
+| `--email=<address> is required, and nothing was read` (`verify:demo`) | the verifier was run without an address | add `--email=`; it refuses before connecting, so nothing was read |
+| `no Firebase identity exists … DEMO_ACCOUNT_PASSWORD is not set` | the address has no login | register it first (recommended) or set the password |
+| `the database account for … is linked to Firebase uid …` | the Firebase identity was deleted and re-created under the same address, so the row still holds the old uid | see below — the seeder will not re-link it for you |
+
+### If an account is stranded
+
+That last message is a **data state**, not a command mistake: the database row carries a `firebaseUid` that
+no longer exists in Firebase. Measured on 2026-10-26, all three development accounts were in it. Such a row
+can neither sign in (the exchange resolves by `firebaseUid` only) nor register again (`409 EMAIL_IN_USE`),
+and re-pointing an identity link is an identity operation — deliberately not something a data seeder
+performs as a side effect.
+
+The ways out are deliberate ones: seed a **different** address, or repair the link through an approved flow.
+Do not "fix" it by deleting the Firebase identity; that keeps the address unusable
+([Guide 13](13-firebase-identities.md)).
+
+---
+
+← [Guides index](README.md) · Related: [4. Test accounts](4-test-accounts-and-mock-data.md) ·
+[10. Seeding data — production](10-seeding-production.md) ·
+[11. Deleting data — development](11-deleting-development.md) ·
+[12. Deleting data — production](12-deleting-production.md) ·
+[13. Firebase identities](13-firebase-identities.md) · [6. Everything else](6-scripts-and-commands.md)

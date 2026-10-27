@@ -37,6 +37,18 @@ the window open; closing it stops the backend.
 Expect database lines and then the port, **4000**. If the database is unreachable you get a warning
 line and the backend stays up, answering `503` for anything needing data.
 
+The boot lines also include one integration report, and a warning when something is switched on
+without its settings — a warning never stops the server:
+
+```text
+[config] integrations mail=off firebase=on emailVerification=off ai=on(openrouter)
+[config] warning: email verification is ENABLED but mail is not configured: … Set MAIL_PROVIDER,
+MAIL_FROM and BREVO_API_KEY on this host.
+```
+
+The deployed host prints the same lines in its log; its settings live in its dashboard
+(Render → Environment), never in this project.
+
 ## Step 2 — prove it works
 
 ```bash
@@ -73,8 +85,9 @@ npm run test:unit     # fast, no database
 npm test              # everything, including database tests
 ```
 
-The full run uses a throwaway test database, and guards refuse to point it at development or
-production. Expect a summary ending in **0 failures**; a healthy run takes a few minutes.
+Expect a summary ending in **0 failures**; a healthy run takes a few minutes. The full run uses a
+throwaway test database, and guards refuse to point it at development or production. Every other
+check and test is listed in [Guide 6](6-scripts-and-commands.md).
 
 ## Step 5 — stop
 

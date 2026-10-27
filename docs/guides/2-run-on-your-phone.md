@@ -54,28 +54,19 @@ adb devices
 ## Before Step 4 — does the build have its settings?
 
 A phone build is assembled in EAS from `mobile/eas.json` **and** the **EAS environment** for that
-profile. Missing settings do not fail a build — the trap. (On 2026-10-15 the `production` environment
-was empty, so a production build had no Firebase settings and silently used the old password path.)
+profile, and a missing setting does not fail a build — the trap. (On 2026-10-15 the `production`
+environment was empty, so a production build had no Firebase settings and silently used the old
+password path.)
 
 ```bash
 cd C:/Users/jeffe/inventory-ai/mobile
 node scripts/check-build-env.mjs --live     # exits 1 and names every missing setting
-npx eas env:list --environment production   # names only, never values
 ```
 
-It checks `EXPO_PUBLIC_API_URL` (must be a public `https://` address for a release build), the four
-Firebase values (**all four or none**), and the two Google files (`GOOGLE_SERVICES_JSON`,
-`GOOGLE_SERVICE_INFO_PLIST`). Without `--live` it checks only what is written in the project.
-
-The backend shows the same kind of gap at startup, as a warning it does not refuse to boot on:
-
-```text
-[config] integrations mail=off firebase=on emailVerification=off ai=on(openrouter)
-[config] warning: email verification is ENABLED but mail is not configured: … Set MAIL_PROVIDER,
-MAIL_FROM and BREVO_API_KEY on this host.
-```
-
-Both live in the host's dashboard (Render → Environment), never in this project.
+Exit 0 means every setting that profile needs is present. What it checks, and which EAS variable each
+one comes from: [Guide 6](6-scripts-and-commands.md) (the command) and
+[Guide 7 § EAS environments](7-over-the-air-updates.md) (the variables). The host's own settings live
+in its dashboard (Render → Environment), never in this project.
 
 ## Step 4 — put a development build on the phone
 

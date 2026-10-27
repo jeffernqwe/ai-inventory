@@ -6,46 +6,21 @@ scrcpy will not either.
 
 ## Step 1 — install (once ever)
 
-Use **PowerShell** or **Windows Terminal**, not WSL (WSL cannot see USB devices).
+Install `adb` and get the phone authorised first: [Guide 2, Steps 1–3](2-run-on-your-phone.md)
+installs it, turns on USB debugging, and ends with `adb devices` printing `device`. Mirroring needs
+nothing more of the phone than that.
+
+Then scrcpy, in **PowerShell** or **Windows Terminal**, not WSL (WSL cannot see USB devices):
 
 ```powershell
-adb version
 scrcpy --version
-```
-
-Install whatever is missing — no administrator rights needed:
-
-```powershell
-winget install --id Google.PlatformTools -e
 winget install --id Genymobile.scrcpy -e --accept-source-agreements --accept-package-agreements
 ```
 
 **Open a NEW terminal window afterwards** — an open window does not see the installer's updated
 program list, which is the usual cause of "installed but not recognised".
 
-## Step 2 — enable USB debugging (once per phone)
-
-1. **Settings → About device** → tap **Build number** seven times.
-2. **Settings → System settings → Developer options** (OPPO/ColorOS: often *Additional settings*) →
-   turn on **USB debugging**, and **Stay awake** so the screen does not lock mid-session.
-
-## Step 3 — plug in and authorise (once per laptop)
-
-Use a cable that carries **data**. Accept *"Allow USB debugging?"* with **Always allow from this
-computer**, then:
-
-```bash
-adb devices
-```
-
-| Prints | Meaning | Do |
-|---|---|---|
-| `PV4DDMIZZLTCIVSK   device` | Ready | Continue |
-| `...   unauthorized` | Prompt not accepted | Unlock and accept; or *Revoke USB debugging authorizations* and replug |
-| `...   offline` | Stale connection | `adb reconnect`, or `adb kill-server` and replug |
-| *(nothing)* | Laptop cannot see the phone | Cable, port, USB mode, USB debugging |
-
-## Step 4 — start mirroring
+## Step 2 — start mirroring
 
 Use its own terminal window (the window you launch from becomes scrcpy's console, and closing it
 stops the mirror).
@@ -64,7 +39,7 @@ Extras: `--no-audio` (no audio stream), `--record=session.mp4` (save a video for
 `-w` (ask the phone to stay awake — on OPPO/Realme/Vivo this needs *"USB debugging (Security
 settings)"* enabled, so prefer the *Stay awake* toggle from Step 2).
 
-## Step 5 — prove it is working
+## Step 3 — prove it is working
 
 A window appearing is not proof. A real run prints:
 
@@ -81,7 +56,7 @@ INFO: Texture: 472x1024
 adb shell ps -A | findstr app_process   # two shell-owned entries = scrcpy helper running
 ```
 
-## Step 6 — driving the phone
+## Step 4 — driving the phone
 
 | Phone | Laptop |
 |---|---|

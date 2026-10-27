@@ -35,7 +35,8 @@ A finished store build cannot do that; its code is sealed inside.
 **EAS** — Expo's cloud build service. Builds happen there, not on the laptop.
 
 **environment** — which copy you point at: **development** (laptop + app), **test** (automated tests
-only), **production** (the real deployment). Dangerous commands refuse production by default.
+only), **production** (the real deployment). A destructive command needs a third confirmation phrase
+before it will touch production ([Guide 12](12-deleting-production.md)).
 
 **endpoint** — a web address on the backend that does one job, such as "log in".
 

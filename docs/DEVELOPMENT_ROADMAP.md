@@ -8,7 +8,7 @@ of truth for *what actually happened*, and it is why this file is long.
 
 **How to read it.** Do not read it top to bottom. Either find a record by number (§27FJ, §27DM — the
 numbers are cited from `CLAUDE.md` and from source comments), or use the index: `CLAUDE.md` §7 lists
-all **186** records by the title each gives itself.
+all **187** records by the title each gives itself.
 
 **Current state:** V1 complete and in production testing. The records that answer *where are we now*
 are §27FM (the V1 re-verification), §27FK (the runtime boundary and the blocked build), §27FJ (the two
@@ -22472,6 +22472,55 @@ inline links inside §27FZ's own record were repaired in place — paths only, n
 tenant, and still finds all three phrases in each — plus the documentation guards
 (`phase-docs-fact-drift`, `phase-docs-section-integrity`), which also read this file's stated record
 count and the index in `CLAUDE.md`.
+
+# 27GG. The guides audited for misfiled content, and the data guides' commands put under a guard (2026-10-27)
+
+**What was asked for.** After Guide 4 was cut down to account facts, the owner asked for the same
+review of every other guide: content that belongs to another guide, moved, with the reads that follow
+pitched at the reader who needs them.
+
+**What was misfiled, and where it went.**
+
+- **Guide 3 (mirroring) repeated Guide 2's adb setup** — the platform-tools install, the USB-debugging
+  steps and the whole `adb devices` authorisation table. Guide 2 now owns it (it is the guide that gets
+  a phone working), Guide 3 keeps a pointer to its Steps 1–3 plus its own scrcpy install, and its steps
+  renumber 1–4.
+- **Guide 2's pre-build section carried the `check-build-env` rules** — what `--live` checks, the
+  "all four or none" Firebase rule, the two Google file variables — and the `eas env:list` mechanics.
+  The command and its rules now sit in Guide 6 (which owns every non-data command), the EAS variables
+  in Guide 7 §4; Guide 2 keeps the trap, the one command, and links. Nothing was lost: the rules lived
+  only in Guide 2 before.
+- **The backend's boot contract** (the integration report and the *enabled-but-not-configured* warning)
+  moved from Guide 2, where it illustrated a different point, to Guide 1, which describes what
+  `npm start` prints.
+- **Guide 1's test step** pointed at none of it: it now names Guide 6 as the owner of every other check,
+  keeping only the getting-started pair.
+- **Guide 5's `environment` entry said destructive commands "refuse production by default"** — not the
+  rule, which is a third confirmation phrase, and the entry now points at Guide 12.
+
+**What was deliberately left alone.** Guide 7 §14 and Guide 8 §0 both state the plan's build quota and
+cost, because each turns on it (code signing is gated by the plan; the next AAB waits on the same
+quota); and Guide 6's Part 8 lists every data command in one table, because an index that sent the
+reader to four guides for four names would be worse than the summary. Duplication that a reader needs
+where they are standing is not the defect this audit was for.
+
+**The guard.** `server/test/data-guide-commands.test.mjs` (registered in `run-tests.mjs`'s PURE_UNIT
+set) reads Guides 9–13 and compares every `npm run …` they print with `server/package.json`'s scripts,
+so a command renamed or removed in the manifest fails here rather than at the reader's terminal. Its
+stated limits: it reads only `npm run …` (a bare name in prose, the five removed scripts Guide 11 names
+as removed, and every `npx`/`eas` command are out of scope), it cannot judge whether a command is used
+correctly, and the mobile guides are excluded because their commands belong to `mobile/package.json`.
+The extractor and the comparison are controlled in both directions, and the five removed cleanup
+scripts are refused by name.
+
+**The guards caught this work twice.** The section-integrity guard failed on the first run after the
+guard was registered, because the new line in `run-tests.mjs` cited §27GG before this record existed —
+the citation and the record landed together, which is the property that guard was written for. And the
+fact-drift guard is what keeps this file's own record count and the `CLAUDE.md` index in step with the
+records declared here.
+
+**Verified.** `npm run test:unit`: **1564 tests, 1508 pass, 0 fail, 56 skipped**, including the new
+suite and the documentation guards.
 
 ---
 

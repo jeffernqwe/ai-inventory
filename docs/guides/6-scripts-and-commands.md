@@ -77,6 +77,13 @@ node scripts/check-build-env.mjs --live  # …and what the EAS environment holds
 an explicit `OK`. Database tests use the throwaway `inventoryai_test_db` and **fail loudly** if it is
 unreachable — a green run means they really ran.
 
+`check:build-env` verifies what a build profile needs: `EXPO_PUBLIC_API_URL` (a public `https://`
+address for a release build), the four Firebase values (**all four or none**), and the two Google
+files EAS supplies as file variables (`GOOGLE_SERVICES_JSON`, `GOOGLE_SERVICE_INFO_PLIST`). Without
+`--live` it checks only what is written in the project; with it, what the EAS environment holds
+([Guide 7 § EAS environments](7-over-the-air-updates.md), and [Guide 2](2-run-on-your-phone.md) for
+the build that needs them).
+
 ### Label barcode — does it decode?
 
 ```bash

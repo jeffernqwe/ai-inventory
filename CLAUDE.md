@@ -284,6 +284,14 @@ below has the measurement.
   per-selector `cleanup:*-mongodb` scripts and `cleanup:firebase-accounts` no longer exist. Read the
   refusal rather than working around it — it names every phrase that is missing and how many the
   target requires.
+- **A plan is counted in PRODUCTS; a `--total` is DOCUMENTS.** `npm run seed:three` and
+  `npm run seed:accounts --accounts="a@x.com:30000"` size each tenant by its **product** count (the
+  generator prints the derived document figure beside it; `address:400000d` asks in documents instead),
+  while `seed --plan=demo --total` and `seed:perf-tenant --size` stay documents. `npm run check:accounts
+  [--with-production]` is the read-only pre-flight that says which accounts exist in which database and
+  how many documents a seed would reset — it reads a FIXED list of databases and needs no phrase, so it
+  cannot be pointed anywhere. `cleanup:account` / `cleanup:three` remove that data again and keep every
+  login, business row and Firebase identity.
 - **OTA code signing is plan-gated**, not a config switch: Expo allows it on the Production ($199/mo)
   or Enterprise plans only. A binary carrying a certificate **rejects** any unsigned publish, so
   enabling `codeSigningCertificate` before the plan exists would freeze every install on its old
@@ -499,6 +507,7 @@ anchor (`§27…`) in that file.
 - **§27FY** — The preview and the delete share one plan (2026-10-27)
 - **§27FZ** — Each topic gets one guide, and the data commands move into theirs (2026-10-27)
 - **§27GA** — The command audit — one false pass, one bad message, and four flags that were ignored (2026-10-27)
+- **§27GB** — The three accounts by address — a products-sized plan, a pre-flight check, and a cleanup that keeps every login (2026-10-27)
 
 ---
 

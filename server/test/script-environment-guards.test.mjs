@@ -511,6 +511,7 @@ describe('every data-touching script calls one of the guards', () => {
     'seed-demo-tenant.mjs',
     'cleanup-demo-tenant.mjs',
     'seed-accounts.mjs',
+    'cleanup-accounts.mjs',
     'seed-role-accounts.mjs',
     'cleanup-role-accounts.mjs',
     'seed-perf-tenant.mjs',

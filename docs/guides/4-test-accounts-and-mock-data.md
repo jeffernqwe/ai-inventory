@@ -54,7 +54,7 @@ every command must name its database. The rule in full: [Guide 9](9-seeding-data
 |---|---|---|
 | **Your own address** | `seed --plan=demo` | one tenant sized by `--total` (default 80 000 documents) |
 | **A throwaway tester** (`tester-1@example.com`, …) | `seed --plan=demo` with a new address | its own separate tenant; a fresh address per tester |
-| **Three comparison accounts** | `seed --plan=accounts` | approximately 5 000 / 44 000 / 225 000 documents |
+| **Three comparison accounts** | `npm run seed:three` | 30 000 / 50 000 / 90 000 products — ≈133 000 / 222 000 / 400 000 documents |
 | **`demo-preview@example.invalid`** | `seed:demo-tenant` | the small fixed-figure demo tenant (6 products, 112 units) |
 | **`role-owner@…` / `role-admin@…` / `role-manager@…` / `role-staff@…`** | `seed:roles` | one tenant, one working login per role, ~900 documents |
 | **`perf-seed-ai@example.invalid`** | `seed:perf-tenant` | a large measurement tenant you can sign into |
@@ -71,15 +71,17 @@ role, no editing an ADMIN or the OWNER.
 
 ### The three comparison accounts
 
-| Account | Documents | Products |
+| Account | Products | ≈ Documents |
 |---|---|---|
-| `jefferndullamalinaozxc@gmail.com` | ≈5 000 | ≈1 100 |
-| `jefferndullamalinao@gmail.com` | ≈44 000 | ≈9 900 |
-| `jeffernmalinaoqwe@gmail.com` | ≈225 000 | ≈50 600 |
+| `jefferndullamalinaozxc@gmail.com` | 30 000 | 133 333 |
+| `jefferndullamalinao@gmail.com` | 50 000 | 222 222 |
+| `jeffernmalinaoqwe@gmail.com` | 90 000 | 400 000 |
 
 They exist to answer one question: does the assistant stay correct and fast as a catalogue grows? The
-walkthrough is in [Guide 6](6-scripts-and-commands.md#comparing-the-assistant-across-tenants); the
-sizes are seeded with `--plan=accounts` ([Guide 9](9-seeding-data.md)).
+walkthrough is in [Guide 6](6-scripts-and-commands.md#comparing-the-assistant-across-tenants). The
+addresses and sizes are fixed in `server/scripts/seed/lib.mjs`, and three commands read that one list:
+`check:accounts` (do they exist?), `seed:three` (fill them) and `cleanup:three` (empty them, keeping the
+logins) — all three in [Guide 9](9-seeding-data.md) and [Guide 10](10-deleting-data.md).
 
 ---
 
@@ -108,8 +110,8 @@ for what is actually stored.
 | `seed:roles` | ~900 documents (≈200 products), four logins, one tenant |
 | `seed:perf` / `seed:perf-tenant` | `--size` documents (products ≈22 %), deterministic SKUs `SEEDSKU-…` |
 
-No SKUs or barcodes are seeded by `--plan=accounts`, so the app's own barcode generation is what
-assigns them — that is deliberate, and worth one product per run.
+No SKUs or barcodes are seeded by `seed:three` / `seed:accounts`, so the app's own barcode generation is
+what assigns them — that is deliberate, and worth one product per run.
 
 ---
 

@@ -130,7 +130,11 @@ copy of each rule:
 
 | Task | Guide | The command, in one line |
 |---|---|---|
+| Check which accounts exist before writing | [9](9-seeding-data.md) | `npm run check:accounts [--with-production]` — reads only |
 | Seed a tenant, any database | [9](9-seeding-data.md) | `npm run seed -- --plan=demo\|accounts\|roles --database=…` |
+| Seed the three comparison accounts | [9](9-seeding-data.md) | `npm run seed:three -- --database=…` (preset) |
+| Seed accounts you name | [9](9-seeding-data.md) | `npm run seed:accounts -- --database=… --accounts="a@x.com:30000,…"` |
+| Delete accounts' data, keeping the logins | [10](10-deleting-data.md) | `npm run cleanup:three` / `cleanup:account -- --accounts=…` |
 | Seed the fixed-figure demo tenant | [9](9-seeding-data.md) | `npm run seed:demo-tenant -- --database=…` |
 | Seed a large tenant you can sign into | [9](9-seeding-data.md) | `npm run seed:perf-tenant -- --database=… --size=…` |
 | Seed the no-login measurement tenant | [9](9-seeding-data.md) | `npm run seed:perf -- --size=…` |
@@ -155,10 +159,13 @@ question: does the assistant stay correct and fast as a catalogue grows?
    three identities by address ([Guide 11](11-firebase-identities.md)). The second command refuses
    while any user row still owns an address, which is why the order is a check and not advice.
 2. **Register all three in the app** — Create Account → the 6-digit code from the mailbox → dashboard.
-3. **Seed them** with `--plan=accounts` ([Guide 9](9-seeding-data.md)). Dry-run first.
-4. **Generate a barcode** on one seeded product: `--plan=accounts` leaves SKUs and barcodes blank on
-   purpose, so the app's own generation is what assigns them.
-5. **Compare** the sizes:
+3. **Check them** with `npm run check:accounts` — read-only, and it names the `businessId` production
+   needs ([Guide 9](9-seeding-data.md)).
+4. **Seed them** with `npm run seed:three` ([Guide 9](9-seeding-data.md)). Dry-run first; production
+   refuses the preset and wants every account named with the tenant it owns.
+5. **Generate a barcode** on one seeded product: both seeders leave SKUs and barcodes blank on purpose,
+   so the app's own generation is what assigns them.
+6. **Compare** the sizes:
 
 ```bash
 npm run perf:measure -- --business=<id> --label=small
@@ -343,6 +350,7 @@ Three guides hold all of it; nothing here repeats their rules.
 |---|---|---|
 | `npm run cleanup -- --target=database` | every document in one named database, **logins included** | [10](10-deleting-data.md) |
 | the tenant cleanups (`cleanup:demo`, `cleanup:perf-tenant`, `cleanup:demo-tenant`, `cleanup:roles`, `cleanup:perf`) | one named tenant, verified afterwards | [10](10-deleting-data.md) |
+| the accounts cleanups (`cleanup:three`, `cleanup:account`) | the seeded data of the accounts you name — **their logins and business rows are kept** | [10](10-deleting-data.md) |
 | `npm run cleanup -- --target=firebase` and `cleanup:test-firebase` | Firebase identities — **irreversible** | [11](11-firebase-identities.md) |
 | `npm run restore:db` | the development or test database (it drops collections) | Part 5 above |
 
@@ -386,8 +394,9 @@ process (reset on restart) and public but contain no names, paths, users or mess
 | `npm run ai:usage`, `ai:models`, `ai:check`, `ai:health` | cost, allowance, models, health | ✅ reads |
 | `npm run perf:measure`, `perf:golden` | query timings / answer fingerprints | ✅ reads |
 | `npm run perf:turns` | real turns (`--login` for a deployment) | ⚠️ spends AI quota |
-| `npm run seed`, `seed:demo`, `seed:accounts`, `seed:roles`, `seed:demo-tenant`, `seed:perf`, `seed:perf-tenant`, `verify:demo`, `verify:roles` | sample data in, and read back | → [Guide 9](9-seeding-data.md) |
-| `npm run cleanup`, `cleanup:demo`, `cleanup:roles`, `cleanup:demo-tenant`, `cleanup:perf`, `cleanup:perf-tenant`, `cleanup:test-firebase` | data and identities out | → [Guides 10](10-deleting-data.md) and [11](11-firebase-identities.md) |
+| `npm run check:accounts`, `verify:demo`, `verify:roles` | whether the accounts exist, and read a seed back | ✅ reads |
+| `npm run seed`, `seed:demo`, `seed:accounts`, `seed:three`, `seed:roles`, `seed:demo-tenant`, `seed:perf`, `seed:perf-tenant` | sample data in | → [Guide 9](9-seeding-data.md) |
+| `npm run cleanup`, `cleanup:demo`, `cleanup:roles`, `cleanup:demo-tenant`, `cleanup:perf`, `cleanup:perf-tenant`, `cleanup:account`, `cleanup:three`, `cleanup:test-firebase` | data and identities out | → [Guides 10](10-deleting-data.md) and [11](11-firebase-identities.md) |
 
 **`mobile/`**: `npx expo start --dev-client`, `npm start`, `npm run android|ios|web`, `npm run typecheck`,
 `npm run lint`, `npm test`, `npm run test:watch`, `npm run check:build-env`,

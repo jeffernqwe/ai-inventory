@@ -7,22 +7,29 @@ Firebase identities are [Guide 11](11-firebase-identities.md); the accounts them
 
 Run everything from `server/`.
 
+**The order for the three comparison accounts** ([Guide 4](4-test-accounts-and-mock-data.md)): register
+them in the app → `check:accounts` → `seed:three` → test the app → `cleanup:three`
+([Guide 10](10-deleting-data.md)). Each step is below, in that order.
+
 ---
 
 ## Which command?
 
 | You want | Command |
 |---|---|
+| To know which accounts exist before writing | `npm run check:accounts [--with-production]` |
+| Data in the three comparison accounts | `npm run seed:three -- --database=<name>` |
+| Data in accounts you name | `npm run seed:accounts -- --database=<name> --accounts="a@x.com:30000,b@y.com:50000"` |
 | Data in the account you sign in with | `npm run seed -- --plan=demo --database=<name> --email=YOUR_EMAIL` |
-| Several accounts at different sizes | `npm run seed -- --plan=accounts --database=<name>` |
 | One working login per role | `npm run seed -- --plan=roles --database=<name>` |
 | A small demo tenant with fixed figures | `npm run seed:demo-tenant -- --database=<name>` |
 | A large, sign-in-able tenant of its own | `npm run seed:perf-tenant -- --database=<name> --size=<documents>` |
 | A disposable tenant with no login (measurement only) | `npm run seed:perf -- --size=<products>` |
 
-The first three are one command with a plan chosen. The last three are separate commands:
-`seed:perf-tenant` follows the **same** two/three-phrase rule, while `seed:perf` and `seed:demo-tenant`
-state their own terms — both documented below.
+`check:accounts` writes nothing at all. `seed:three` and `seed:accounts` are one script in two modes — the
+preset and your own list — and **both size a tenant in products**. `seed --plan=demo` and `seed:roles` are
+plans of the one `seed` command; `seed:perf-tenant`, `seed:demo-tenant` and `seed:perf` are separate
+commands with their own terms. All of them are documented below.
 
 ---
 
@@ -38,8 +45,10 @@ npm run seed -- --plan=<demo|accounts|roles> --database=<name> [options]
 | `accounts` | several tenants, each at its own size | comparing speed and answers across tenants of different sizes |
 | `roles` | one isolated tenant with a working login per role | seeing what OWNER / ADMIN / MANAGER / STAFF can actually do |
 
-`npm run seed:demo`, `seed:accounts` and `seed:roles` are the same command with the plan already
-chosen, and they take the same phrases. `npm run seed -- --plan demo` (a space) is accepted too.
+`npm run seed:demo` and `seed:roles` are the same command with the plan already chosen, and they take
+the same phrases. `npm run seed -- --plan demo` (a space) is accepted too. The accounts plan is the one
+that needs its list spelled out — `npm run seed -- --plan=accounts --accounts="a@x.com:30000"` — and its
+preset for the three fixed accounts is `npm run seed:three`.
 
 Every plan **counts its dataset back** from the database before it prints `OK`: the seven
 collections, through the tenant's own filter. A partly-rejected insert therefore fails the run instead
@@ -122,23 +131,59 @@ DEMO_ACCOUNT_PASSWORD='choose-a-strong-password' \
   --email=tester-1@example.com --total=500
 ```
 
-### Several accounts
+### Checking the accounts first
+
+```bash
+npm run check:accounts                       # the development database
+npm run check:accounts -- --with-production   # …and what production holds
+npm run check:accounts -- --accounts="a@x.com,b@y.com"
+```
+
+Read-only, and it needs no phrase because it changes nothing. For every address it prints the Firebase
+identity (uid, verified, enabled, how it signs in), the user row in each database (role, business, the
+stored uid) and how many documents a seed would reset — counted through the same plan `cleanup:account`
+executes, so the two can never describe different rows. It names the `businessId` a production run must
+use, prints the seeding command for you, and exits **0** when every account is ready, **1** when
+something is missing or mismatched, **2** when it could not check. `MISSING` means no row yet: a seed
+would create that tenant. `STALE LINK`, `NOT LINKED` and `NO BUSINESS` are states a seed refuses on.
+
+### The three comparison accounts (`seed:three`)
+
+```bash
+SEED_CONFIRM=seed-three-accounts SEED_DB_CONFIRM=inventoryai_dev_db \
+  npm run seed:three -- --database=inventoryai_dev_db --dry-run   # the plan only
+SEED_CONFIRM=seed-three-accounts SEED_DB_CONFIRM=inventoryai_dev_db \
+  npm run seed:three -- --database=inventoryai_dev_db
+```
+
+| Account | Products | ≈ Documents |
+|---|---|---|
+| `jefferndullamalinaozxc@gmail.com` | 30 000 | 133 333 |
+| `jefferndullamalinao@gmail.com` | 50 000 | 222 222 |
+| `jeffernmalinaoqwe@gmail.com` | 90 000 | 400 000 |
+
+The addresses and the sizes live together in `server/scripts/seed/lib.mjs`, and `check:accounts` and
+`cleanup:three` read the same list — so all three commands describe the same three tenants.
+
+### Your own accounts (`seed:accounts`)
 
 ```bash
 SEED_CONFIRM=seed-accounts SEED_DB_CONFIRM=inventoryai_dev_db \
-  npm run seed -- --plan=accounts --database=inventoryai_dev_db --dry-run   # plan only
-SEED_CONFIRM=seed-accounts SEED_DB_CONFIRM=inventoryai_dev_db \
-  npm run seed -- --plan=accounts --database=inventoryai_dev_db
+  npm run seed:accounts -- --database=inventoryai_dev_db \
+    --accounts="a@x.com:100000,b@y.com:40000" --dry-run
 ```
 
-- Default sizes: small ≈ 5 000 documents (≈1 100 products), medium ≈ 44 000 (≈9 900), large ≈ 225 000
-  (≈50 600).
-- **No SKUs or barcodes** are generated, so the app's own barcode generation is exercised.
-  `--include-sku` generates them too.
-- `--accounts="a@x.com:5000,b@x.com:44000"` replaces the plan; a size is required per entry.
+- **A size is PRODUCTS**, and every entry needs one: `--accounts="address:products[:businessId]"`.
+  The dry run prints the products *and* the documents each entry will write. `:400000d` asks in
+  **documents** instead.
+- **No SKUs or barcodes** are generated, so the app's own barcode generation is what assigns them —
+  that is deliberate, and worth one product per run. `--include-sku` generates them too.
 - Each account gets its own business; the command refuses if two accounts resolve to the same one.
 - A missing login stops the run (unless you supply `DEMO_ACCOUNT_PASSWORD`); an existing password is
   never changed.
+- The ceiling is **112 500 products ≈ 500 000 documents** per account. A million products is refused
+  with its reason: ≈4 400 000 documents, built in memory before a single row is inserted. A plan of
+  90 000 products or more prints a `LARGE RUN` line with an estimated duration before it starts.
 
 ### One login per role
 
@@ -189,9 +234,12 @@ brand-new tenant has no id to name. An existing login's password is never rewrit
 Expect `database … (PRODUCTION)`, the tenant line, `scope : replacing the DATA of business …`, the
 counts, `OK`, and `password NOT changed on a production run`. Name, members and roles are untouched.
 
-`--plan=accounts` refuses its default three-account plan in production: every account must be given
-as `--accounts="address:documents[:businessId],…"`. `--plan=roles` owns its own fixture tenant and
-needs no `--business=`. PowerShell adds `$env:NODE_ENV='production'`, `$env:MONGODB_DB_NAME`,
+**In production, no preset runs.** `seed:three` (and `seed --plan=accounts` with no list) is refused
+because it would reset three real businesses in one command. Every account is named instead, with the
+tenant it already owns: `--accounts="address:products:<businessId>,…"`. `npm run check:accounts
+--with-production` prints that exact line with the ids filled in, and leaves an account that does not
+exist yet unnamed — creating one deletes nothing. `--plan=roles` owns its own fixture tenant and needs
+no `--business=`. PowerShell adds `$env:NODE_ENV='production'`, `$env:MONGODB_DB_NAME`,
 `$env:SEED_PROD_CONFIRM` and clears all four afterwards.
 
 ### The sign-in-able measurement tenant (`seed:perf-tenant`)
@@ -325,7 +373,7 @@ of its inserts. `verify:roles` is the equivalent for the role fixture.
 | Command | Existing data | Account rows | Firebase identities |
 |---|---|---|---|
 | `seed --plan=demo` | **replaced** for that one tenant | created if absent, else kept | never deleted; created only if absent |
-| `seed --plan=accounts` | **replaced** for each named tenant | same | same |
+| `seed:three` / `seed --plan=accounts --accounts=…` | **replaced** for each named tenant | same | same |
 | `seed --plan=roles` | **replaced** for the role fixture tenant | four role logins reused | same |
 | `seed:perf-tenant` | **replaced** for its own tenant | created if absent | created if absent; password refreshed |
 | `seed:demo-tenant` | **replaced** for the demo tenant | created if absent | created if absent; password set |
@@ -340,14 +388,18 @@ tenant's data — every write is scoped by `businessId`.
 
 ## Large data, safely
 
-`--total` is documents, and products land at roughly 22.5 % of it (80 000 documents ≈ 18 000 products).
-The range is 100–400 000 for `demo` and `accounts`; the role fixture takes 100–20 000.
+**Two units, and each command says which it uses.** `--accounts` (and `seed:three`) count **products** —
+the number the app's own product list shows. `seed --plan=demo --total` and `seed:perf-tenant --size`
+count **documents** (all seven collections), and products land at roughly 22.5 % of that
+(`--total=80000` ≈ 18 000 products). Every command prints both figures, so nothing has to be converted
+by hand.
 
-| Want | Command |
-|---|---|
-| Your own account, big | `--plan=demo --email=you@example.com --total=80000` |
-| Three sizes at once | `--plan=accounts` (defaults 5 000 / 44 000 / 225 000) |
-| Choose the sizes | `--plan=accounts --accounts="a@x.com:5000,b@x.com:44000,c@x.com:225000"` |
+| Want | Command | Ceiling |
+|---|---|---|
+| Your own account, big | `--plan=demo --email=you@example.com --total=80000` (documents) | 400 000 |
+| The three fixed accounts | `seed:three` (30 000 / 50 000 / 90 000 products) | — |
+| Your own list, by product count | `seed:accounts --accounts="a@x.com:100000,b@x.com:40000"` | 112 500 each |
+| A size given in documents | `seed:accounts --accounts="a@x.com:444444d"` | 500 000 each |
 
 The dataset is deterministic (`--seed=1` by default), so two measurements describe the same tenant.
 Seed in the morning rather than mid-measurement: a run replaces the tenant's data, and the assistant
@@ -360,6 +412,10 @@ would be measured against a half-written catalogue.
 | Message | Meaning | Do |
 |---|---|---|
 | `--plan=<demo\|accounts\|roles> is required` | no plan chosen | add `--plan=…` |
+| `--accounts="address:products[:businessId],…" is required` | a bare `seed:accounts` named nothing | add the list, or use `seed:three` for the fixed three |
+| `asks for 1,000,000 products. The ceiling is 112,500` | over the ceiling | ask for 112 500 or fewer, or split the plan across accounts |
+| `two/three confirmation phrase(s) … SEED_CONFIRM=seed-three-accounts` | the preset is its own mode, so it wants its own phrase | export the phrase the refusal names — the mode decides which |
+| `the seed:three preset … is refused in production` | a preset against real data | name every account: `--accounts="address:products:<businessId>,…"` |
 | `--database=<name> is required` | the target was not named | add `--database=` with the resolved name |
 | `--database is "…" but this process resolved "…"` | the flag and `MONGODB_DB_NAME` disagree | set `MONGODB_DB_NAME` to the database you mean |
 | `MONGODB_URI names the database "…"` | the connection string is configured for the other database | fix the URI or the environment; nothing was written |

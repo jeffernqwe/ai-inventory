@@ -13,6 +13,8 @@ Run everything from `server/`.
 | You want | Command |
 |---|---|
 | Every document in a database | `npm run cleanup -- --target=database --database=<name>` |
+| The three comparison accounts' data | `npm run cleanup:three -- --database=<name>` |
+| The data of accounts you name | `npm run cleanup:account -- --database=<name> --accounts="a@x.com,b@y.com"` |
 | One tenant's data, keeping its login | `npm run cleanup:demo -- --database=<name> --email=… --business=…` |
 | The measurement tenant removed | `npm run cleanup:perf-tenant -- --database=<name>` |
 | The fixed-figure demo tenant removed | `npm run cleanup:demo-tenant -- --database=<name>` |
@@ -90,6 +92,8 @@ The phrase is the command's own name:
 | `cleanup:perf-tenant` | `cleanup:perf-tenant` |
 | `cleanup:demo-tenant` | `cleanup:demo-tenant` |
 | `cleanup:roles` | `cleanup:roles` |
+| `cleanup:three` | `cleanup-three-accounts` |
+| `cleanup:account` | `cleanup-account-data` |
 | `cleanup:test-firebase` | `cleanup:test-firebase` ([Guide 11](11-firebase-identities.md)) |
 
 A phrase that belongs to a different command is refused, so `CLEANUP_CONFIRM=cleanup:database` cannot
@@ -154,14 +158,50 @@ messages, 1 conversation, 1 audit row), 0 remaining; the login and business row 
 
 ---
 
+---
+
+## Emptying the accounts you name
+
+`cleanup:three` and `cleanup:account` remove the seeded inventory data of accounts **by address** — the
+other half of `seed:three` and `seed:accounts` — and keep everything that makes them accounts: the
+login, the business row, its members and their sessions.
+
+```bash
+# the three comparison accounts: preview, then the same line without --dry-run
+CLEANUP_CONFIRM=cleanup-three-accounts CLEANUP_DB_CONFIRM=inventoryai_dev_db \
+  npm run cleanup:three -- --database=inventoryai_dev_db --dry-run
+
+# accounts you name
+CLEANUP_CONFIRM=cleanup-account-data CLEANUP_DB_CONFIRM=inventoryai_dev_db \
+  npm run cleanup:account -- --database=inventoryai_dev_db \
+    --accounts="a@x.com,b@y.com" --dry-run
+```
+
+- **Production names every tenant:** `--accounts="address:<businessId>,…"`, and the id must be the
+  tenant that account actually owns. The preset is refused there, exactly as the seeder's is. The id
+  is the one `npm run check:accounts --with-production` prints.
+- The preview counts through the **same** plan the deletion executes, per collection and per account,
+  and deletes nothing.
+- A real run re-counts every tenant afterwards and prints `0 remaining`; anything left **fails** the run
+  rather than being reported as done.
+- An address with no account in that database is reported as `nothing to delete` and skipped. That is an
+  answer rather than a failure, and the run still exits 0.
+- It never deletes a user row, a business row, a session or a Firebase identity. Removing a login is a
+  separate, deliberate operation — database first, then `--target=firebase` — which refuses while any
+  row still owns the address ([Guide 11](11-firebase-identities.md)).
+
+---
+
 ## The tenant-scoped cleanups
 
-All four follow the same rule: `--database=` required, **two phrases in development, three in
+All of them follow the same rule: `--database=` required, **two phrases in development, three in
 production**, and a `--dry-run` that counts the same teardown plan as the real run.
 
 | Command | Removes | Keeps |
 |---|---|---|
 | `cleanup:demo` | one tenant's data (`--email=`, `--business=`) | user, business row, sessions, login |
+| `cleanup:three` | the three comparison accounts' data (preset; development only) | their logins, business rows and identities |
+| `cleanup:account` | the data of the accounts in `--accounts=` | same |
 | `cleanup:perf-tenant` | the `seed:perf-tenant` tenant | the Firebase identity |
 | `cleanup:demo-tenant` | the `seed:demo-tenant` fixture | the Firebase identity |
 | `cleanup:roles` | the role fixture tenant | its four identities unless `--delete-firebase` |
@@ -214,6 +254,7 @@ default for the same reason.
 |---|---|---|
 | a tenant cleanup | the command again with `--dry-run` | every collection at 0, or `nothing to clean` |
 | a tenant cleanup | `npm run verify:demo -- --email=… --database=…` | exit 0, or `no such account` if the rows are gone |
+| an accounts cleanup | `npm run check:accounts --with-production` | the accounts are still `READY`, with 0 documents a seed would reset |
 | a database wipe | `npm run seed -- … --dry-run` or a fresh seed | a clean target; the app shows an empty business |
 | firebase deletion | the same `--target=firebase` line with `--dry-run` | `no identity` for each address |
 
@@ -233,6 +274,10 @@ here needs a phrase to check, because reading changes nothing.
 | `is the test database … "npm test" owns` | name development or production |
 | `CLEANUP_CONFIRM names "…", but this run is [cleanup:firebase]` | the phrase belongs to the other target; use the target's own phrase |
 | `no such tenant` / `nothing to clean` | the fixture is not in that database — check `--database=` first |
+| `--accounts="address[:businessId],…" is required` | a bare `cleanup:account` named nothing | add the list, or use `cleanup:three` |
+| `must name its tenant in production` | a production run gave an address without its businessId | add `:businessId` (the one `check:accounts` prints) |
+| `the cleanup:three preset … is refused in production` | a preset against real businesses | name every account with `--accounts=` |
+| `belongs to business …, not …` | the id named is not the tenant that account owns | nothing was deleted; use the account's own id |
 | `verification failed: N document(s) still reference the fixture tenant` | the delete was partial; re-run and read the collections named |
 | `still have a MongoDB user` | clear the database first, then the login ([Guide 11](11-firebase-identities.md)) |
 

@@ -1,0 +1,271 @@
+/**
+ * The three-account workflow — DB-FREE.
+ *
+ * WHAT THIS PINS. Seeding by address is the owner's whole workflow: check the accounts, seed
+ * them by PRODUCT count, then delete that data by address. Three things can go wrong without a
+ * database, and all three are asserted here:
+ *
+ *   1. THE UNIT. A plan is counted in products and the generator is sized in documents, so a
+ *      conversion that lands one product off would seed a dataset nobody asked for and report
+ *      it as the size that was asked for. The round trip is checked over every small size and
+ *      over the real ones.
+ *   2. THE PHRASES. Each mode demands its own phrase (`seed:three` vs `seed:accounts`,
+ *      `cleanup:three` vs `cleanup:account`), and a phrase that belongs to one mode must not
+ *      satisfy another.
+ *   3. WHAT THE SCRIPTS MAY DO. `check:accounts` writes nothing at all; `cleanup-accounts.mjs`
+ *      removes tenant data and never a login, a business row or an identity (F-50).
+ *
+ * Reading source is deliberate: these are CLI contracts, and the assertions are the ones a
+ * reviewer would make by hand. No connection, no network, no Firebase.
+ */
+
+import { describe, it } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+
+import {
+  COMPARISON_ACCOUNTS,
+  MAX_DOCUMENTS,
+  MAX_PRODUCTS,
+  MIN_PRODUCTS,
+  documentsForProducts,
+  productsForDocuments,
+} from '../scripts/seed/lib.mjs';
+
+const read = (name) => readFileSync(new URL(`../scripts/${name}`, import.meta.url), 'utf8');
+const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+
+/** What `seedTenant` will actually write, in products, for a document budget. */
+const achievedProducts = (total) => Math.max(5, Math.round(total * 0.225));
+
+describe('the product size is exact, not approximate', () => {
+  it('every small size round-trips through the document budget', () => {
+    // `seedTenant` floors at 5 products, so that is where the walk starts.
+    for (let products = MIN_PRODUCTS; products <= 2000; products += 1) {
+      const total = documentsForProducts(products);
+      assert.equal(
+        achievedProducts(total),
+        products,
+        `asking for ${products} products produced ${achievedProducts(total)}`,
+      );
+      // The document floor belongs to a DOCUMENT count, not to this direction: a small
+      // product count legitimately maps to a budget under `MIN_DOCUMENTS` (100 documents is
+      // already 23 products), and applying it here would make "5 products" unsatisfiable.
+      assert.ok(Number.isInteger(total) && total > 0, `${products} products became ${total}`);
+    }
+  });
+
+  it('the sizes this workflow is used at round-trip exactly', () => {
+    for (const products of [30000, 50000, 90000, 100000]) {
+      const total = documentsForProducts(products);
+      assert.equal(achievedProducts(total), products);
+      assert.equal(productsForDocuments(total), products);
+    }
+  });
+
+  it('the two ceilings are the same ceiling', () => {
+    // 112 500 products ≈ 500 000 documents. If one moved without the other, the ceiling would
+    // refuse a size it can express, or accept one it cannot.
+    assert.equal(documentsForProducts(MAX_PRODUCTS), MAX_DOCUMENTS);
+    assert.equal(productsForDocuments(MAX_DOCUMENTS), MAX_PRODUCTS);
+    assert.equal(MAX_PRODUCTS, 112500);
+    assert.equal(MAX_DOCUMENTS, 500000);
+  });
+
+  it('one million products is above the ceiling, and the refusal says why', () => {
+    assert.ok(1000000 > MAX_PRODUCTS);
+    const source = read('seed-accounts.mjs');
+    assert.match(
+      source,
+      /one million products would be/,
+      'the ceiling must name the reason a million is refused, not only the range',
+    );
+  });
+
+  it('the three fixed accounts are one definition, with the sizes in products', () => {
+    assert.deepEqual(
+      COMPARISON_ACCOUNTS.map((a) => [a.email, a.products, a.tier]),
+      [
+        ['jefferndullamalinaozxc@gmail.com', 30000, 'small'],
+        ['jefferndullamalinao@gmail.com', 50000, 'medium'],
+        ['jeffernmalinaoqwe@gmail.com', 90000, 'large'],
+      ],
+    );
+    assert.equal(new Set(COMPARISON_ACCOUNTS.map((a) => a.email)).size, COMPARISON_ACCOUNTS.length);
+    for (const account of COMPARISON_ACCOUNTS) {
+      assert.ok(account.products >= MIN_PRODUCTS && account.products <= MAX_PRODUCTS);
+    }
+  });
+});
+
+describe('the seeder has two modes and two phrases', () => {
+  const source = read('seed-accounts.mjs');
+
+  it('the list phrase and the preset phrase are distinct, and both are declared', () => {
+    assert.match(source, /const CONFIRM_PHRASE = 'seed-accounts'/);
+    assert.match(source, /const PRESET_PHRASE = 'seed-three-accounts'/);
+    assert.notEqual('seed-accounts', 'seed-three-accounts');
+  });
+
+  it('the preset is the same script with the flag baked in, and the command says which mode it is in', () => {
+    assert.equal(packageJson.scripts['seed:three'], 'node scripts/seed-accounts.mjs --preset=three');
+    assert.equal(packageJson.scripts['seed:accounts'], 'node scripts/seed-accounts.mjs');
+    assert.match(source, /const PRESET_ALIAS = 'seed:three'/);
+    assert.match(source, /preset \? PRESET_PHRASE : CONFIRM_PHRASE/);
+  });
+
+  it('a bare seed:accounts names nothing, so it refuses instead of guessing a list', () => {
+    assert.match(source, /--accounts="address:products\[:businessId\],…" is required/);
+    assert.match(source, /pass either --preset=\$\{PRESET\} or --accounts=…, not both/);
+  });
+
+  it('the preset is refused in production, where every tenant must be named', () => {
+    assert.match(
+      source,
+      /the \$\{PRESET_ALIAS\} preset is a development convenience and is refused in production/,
+    );
+    assert.match(source, /--accounts="address:products:<businessId>,…"/);
+  });
+
+  it('the preview opens no connection', () => {
+    const dryIndex = source.indexOf('dry run complete — no connection was opened');
+    const connectIndex = source.indexOf('mongoose.connect(');
+    assert.ok(dryIndex > -1, 'the dry-run branch is missing');
+    assert.ok(connectIndex > -1, 'the script never connects, which cannot be right');
+    assert.ok(dryIndex < connectIndex, 'the dry run runs AFTER the connection is opened');
+  });
+
+  it('the plan entry syntax is products, with documents available and marked', () => {
+    assert.match(source, /address:products:businessId/);
+    assert.match(source, /^\s*const inDocuments = \/\^\\d\+d\$\//m);
+    assert.match(source, /--accounts document size for/);
+    assert.match(source, /--accounts product size for/);
+  });
+
+  it('the write path is the shared core, and it is read back', () => {
+    for (const call of ['seedTenant(', 'clearTenantData(', 'readTenantCounts(', 'countDisagreements(', 'ensureTenantForIdentity(', 'assertTenantNamedForReset(', 'assertSeedTarget(']) {
+      assert.ok(source.includes(call), `seed-accounts.mjs no longer calls ${call}`);
+    }
+    assert.match(source, /resolveIdentity\([^)]*refreshPassword: !production/);
+  });
+});
+
+describe('the cleanup removes data and never an account', () => {
+  const source = read('cleanup-accounts.mjs');
+
+  it('the phrases match the modes, and are distinct from each other', () => {
+    assert.match(source, /const CONFIRM_PHRASE = 'cleanup-account-data'/);
+    assert.match(source, /const PRESET_PHRASE = 'cleanup-three-accounts'/);
+    assert.equal(packageJson.scripts['cleanup:account'], 'node scripts/cleanup-accounts.mjs');
+    assert.equal(packageJson.scripts['cleanup:three'], 'node scripts/cleanup-accounts.mjs --preset=three');
+  });
+
+  it("the phrase families do not cross: a seeder's phrase is never a cleanup's", () => {
+    const seedPhrases = ['seed-accounts', 'seed-three-accounts'];
+    const cleanupPhrases = ['cleanup-account-data', 'cleanup-three-accounts'];
+    for (const phrase of cleanupPhrases) assert.equal(seedPhrases.includes(phrase), false, phrase);
+  });
+
+  it('it empties tenant data through the shared teardown, and counts with its other half', () => {
+    assert.match(source, /assertScopedCleanupTarget\(/);
+    assert.match(source, /clearTenantData\(\[entry\.businessId\]\)/);
+    assert.match(source, /countTenantDataRemoval\(\[user\.businessId\]\)/);
+    // The preview walks the SAME plan the delete executes, so the numbers cannot drift.
+    assert.ok(
+      source.indexOf('countTenantDataRemoval(') < source.indexOf('clearTenantData(['),
+      'the counting half no longer runs before the deleting half',
+    );
+  });
+
+  it('it never removes a user, a business row, a session or a Firebase identity', () => {
+    for (const forbidden of [
+      'removeTenant(',
+      'auth.deleteUser(',
+      'auth.createUser(',
+      'auth.updateUser(',
+      'User.deleteOne(',
+      'User.deleteMany(',
+      'Business.deleteOne(',
+      'Session.deleteMany(',
+    ]) {
+      assert.equal(source.includes(forbidden), false, `cleanup-accounts.mjs calls ${forbidden}`);
+    }
+    assert.match(source, /never deletes an identity/);
+  });
+
+  it('production names every tenant, and the id must be the account it claims', () => {
+    assert.match(source, /must name its tenant in production/);
+    assert.match(source, /const PRESET_ALIAS = 'cleanup:three'/);
+    assert.match(source, /is refused in production/);
+    assert.match(source, /belongs to business \$\{String\(user\.businessId\)\}, not/);
+  });
+
+  it('a verification failure is a failure, not a note', () => {
+    assert.match(source, /remaining !== 0/);
+    assert.match(source, /The removal is incomplete/);
+  });
+});
+
+describe('the check answers questions and changes nothing', () => {
+  const source = read('check-accounts.mjs');
+
+  it('it is wired to one npm command and defaults to the three fixed accounts', () => {
+    assert.equal(packageJson.scripts['check:accounts'], 'node scripts/check-accounts.mjs');
+    assert.match(source, /COMPARISON_ACCOUNTS\.map\(\(account\) => account\.email\)/);
+  });
+
+  it('it writes nothing to either store', () => {
+    for (const forbidden of [
+      'insertMany(',
+      'updateOne(',
+      'updateMany(',
+      'deleteOne(',
+      'deleteMany(',
+      'findOneAndUpdate(',
+      'clearTenantData(',
+      'removeTenant(',
+      'auth.createUser(',
+      'auth.deleteUser(',
+      'auth.updateUser(',
+      'auth.revokeRefreshTokens(',
+      'Business.create(',
+      'User.create(',
+    ]) {
+      assert.equal(source.includes(forbidden), false, `check-accounts.mjs calls ${forbidden}`);
+    }
+    assert.match(source, /READ-ONLY — nothing is created, changed or deleted/);
+  });
+
+  it('the databases are a fixed list, and production is read only when it is asked for', () => {
+    // The list itself, not a mention of the names anywhere in the file: what it READS is what
+    // this asserts, and the test database must not be in it.
+    const list = source.match(/const databases = \[([\s\S]*?)\];/);
+    assert.ok(list, 'the fixed read list is missing');
+    assert.match(list[1], /DATABASE_NAMES\.development/);
+    assert.match(list[1], /DATABASE_NAMES\.production/);
+    assert.equal(
+      /DATABASE_NAMES\.test/.test(list[1]),
+      false,
+      'the test database is in the read list, and npm test owns it',
+    );
+    assert.match(source, /--with-production/);
+    // No `--database=` flag: the tool cannot be pointed at a database nobody named, which is
+    // why it needs no phrase. Reading production without asking is what this prevents.
+    assert.equal(
+      /argValue\('--database'\)/.test(source),
+      false,
+      'check-accounts.mjs parses --database, so its target is no longer a fixed list',
+    );
+  });
+
+  it('it names the Firebase project it asked, so the answer is checkable', () => {
+    assert.match(source, /firebaseConfig\(\)\.projectId/);
+    assert.match(source, /the project this shell is configured for/);
+  });
+
+  it('exit codes are a contract: ready, not ready, not checked', () => {
+    assert.match(source, /process\.exit\(0\)/);
+    assert.match(source, /process\.exit\(1\)/);
+    assert.match(source, /NOT CHECKED \(exit 2\)/);
+  });
+});

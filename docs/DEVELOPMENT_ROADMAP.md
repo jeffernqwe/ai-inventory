@@ -8,7 +8,7 @@ of truth for *what actually happened*, and it is why this file is long.
 
 **How to read it.** Do not read it top to bottom. Either find a record by number (§27FJ, §27DM — the
 numbers are cited from `CLAUDE.md` and from source comments), or use the index: `CLAUDE.md` §7 lists
-all **181** records by the title each gives itself.
+all **182** records by the title each gives itself.
 
 **Current state:** V1 complete and in production testing. The records that answer *where are we now*
 are §27FM (the V1 re-verification), §27FK (the runtime boundary and the blocked build), §27FJ (the two
@@ -22180,6 +22180,103 @@ must precede its connection.
 
 **Measured.** Unit suite **1472 passed, 0 failed, 56 skipped**; database suite **824 passed, 0 failed,
 95 skipped**; `eslint` and `tsc --noEmit` clean.
+
+---
+
+# 27GB. The three accounts by address — a products-sized plan, a pre-flight check, and a cleanup that keeps every login (2026-10-27)
+
+**What was asked for.** One workflow for the owner's own accounts: check that they exist, seed them by
+product count, and delete that data again by address — the same three steps in development and in
+production, with distinct confirmation phrases for each, and nothing that deletes a login by accident.
+
+**What already existed, and was reused rather than rewritten.** `seed:accounts` was already the
+several-accounts seeder, already defaulted to these three addresses, already wrote no SKUs or barcodes
+(so the app's own barcode generation is what first assigns a code), already reset only the tenants it
+resolved, and already refused to touch Firebase. `clearTenantData` / `countTenantDataRemoval` were
+already the one teardown plan every cleanup and account deletion shares. The gaps were the unit, the
+pre-flight check and the deletion by address.
+
+**The unit was documents, and a person thinks in products.** `--accounts="a@x.com:225000"` meant
+225 000 DOCUMENTS (~50 600 products). Entries and the preset are now counted in **products** — the
+number the app's own product list shows — and the console prints the derived document figure beside
+every entry, so both numbers are true. A `d` suffix still asks for documents
+(`address:400000d`), and products → documents goes through `documentsForProducts`, which verifies the
+round trip rather than assuming it: the generator rounds too, so the budget moves a document until the
+product count is exact.
+
+**A real defect, found by that round-trip test.** The first version floored the document budget at
+`MIN_DOCUMENTS` (100), which is already 23 products — so "5 products" was unsatisfiable and the
+conversion threw instead of returning a budget. The floor belongs to a DOCUMENT count; it was removed
+from that direction. The test walks every size from 5 to 2 000 and asserts the product count that comes
+back is the one that was asked for.
+
+**The ceiling is stated, not guessed at.** 112 500 products ≈ 500 000 documents, because the whole plan
+is built in memory before it is inserted. One million products (≈4 400 000 documents) is refused with
+that reason in the message, and a plan at or above 90 000 products prints a LARGE RUN warning with the
+measured rate it is estimated from (production seeded 80 000 documents in 171 s on 2026-10-25) and the
+honest note that this size has not been measured end to end.
+
+**Three new commands, and two new phrases.** `check:accounts` reads the Firebase identity and the user
+row in a FIXED list of databases — development, plus production when `--with-production` asks — and
+prints, through the same teardown plan a cleanup executes, how many documents a seed would reset. It
+writes nothing, so it needs no phrase; exit 0 ready / 1 not ready / 2 not checked. `cleanup:account`
+and `cleanup:three` remove tenant data only, require a businessId per account in production, and never
+delete a user row, a business row, a session or an identity. The phrases: `seed-three-accounts`,
+`seed-accounts`, `cleanup-account-data`, `cleanup-three-accounts` — two in development, three in
+production, and a phrase from the other family is refused.
+
+**Measured (all read-only; no production write was performed).**
+
+* The preset plan: 30 000 / 50 000 / 90 000 products → 133 333 / 222 222 / 400 000 documents, and it
+  prints the LARGE RUN line for the 170 000-product total.
+* A custom plan: `:100000` → 100 000 products ≈ 444 444 documents; `:50000d` → 50 000 documents ≈
+  11 250 products.
+* The refusals, each naming what to set: a bare `seed:accounts`; `:1000000` (the ceiling); an entry with
+  no size; `seed:three` with `SEED_CONFIRM=seed-accounts`; `cleanup:three` with a seeder's phrase.
+* `check:accounts`: **0 of 3** account/database pairs are READY in the development database alone, and
+  **1 of 6** once production is read. Account 1 has an identity and owns
+  `6adfb57dcd2aa24e547d0f02` ("royal kludge", 0 products / 19 documents) in **production**, with no row
+  in development; accounts 2 and 3 have no identity and no row anywhere yet. The production seeding
+  command it prints names the existing tenant by id and leaves the two that do not exist unnamed —
+  which is exactly the rule the seeder enforces.
+* `cleanup:three --dry-run`: the three addresses are not in the development database, so it reported
+  `nothing to delete` and exit 0 without touching anything.
+
+**Guarded.** `accounts-workflow.test.mjs` (new, DB-free): the conversion round trip, the two modes and
+their phrases, the ceiling's reason, the preview running before the connection, and the source guards —
+`check:accounts` calls none of the write primitives, reads a fixed list, and takes no `--database=` flag;
+`cleanup-accounts.mjs` calls `clearTenantData`/`countTenantDataRemoval` and none of `removeTenant`,
+`auth.deleteUser`, `User.delete*/Business.delete*` or `Session.deleteMany`.
+`cleanup-accounts.mjs` was added to the data-touching list in `script-environment-guards.test.mjs` and
+the new file classified in `run-tests.mjs`.
+
+**A guard caught this record's own citation.** The first run of the unit suite refused `§27GB` in a
+source comment because no such record existed yet — the section-integrity guard doing exactly its job,
+and the reason this record was written before the guides.
+
+**Measured.** Unit suite **1551 passed, 0 failed, 56 skipped**; `eslint` and `tsc --noEmit` clean.
+
+**Not done here.** No production data was written or deleted: the only production touch was the
+read-only `check:accounts --with-production`. The database suite was not re-run (nothing in this change
+touches a model, a route or a service's query).
+
+**The documentation pass, and the full suite.** Every guide that names these accounts was brought onto
+the new commands: Guide 4 now states the preset's real sizes (30 000 / 50 000 / 90 000 products —
+≈133 000 / 222 000 / 400 000 documents, replacing a stale 5 000 / 44 000 / 225 000) and points at the
+three commands that read one list; Guide 6 gained `check:accounts` in its data table and the read-only
+row it belongs to; Guides 9 and 10 already owned the seeding and deletion halves. The full suite
+(**2312 tests, 380 suites**) then ran green except one assertion — the roadmap's own record-count
+sentence, which still said **181** where the file now declares **182**. That is the fact-drift guard
+working on the file that declares its own totals; the sentence was corrected and the three
+documentation-integrity files re-run clean (15/15). `typecheck`, `eslint`, `check:extensions`,
+`check:specifiers` and the secret guard (897 files) were clean.
+
+**The deletion half measured against production, read-only.** `cleanup:account --dry-run` there named
+the one tenant production holds — `jefferndullamalinaozxc@gmail.com`, 19 documents (all `audit_logs`),
+business `6adfb57dcd2aa24e547d0f02` — and deleted nothing. The four refusals were each exercised and
+each names what to set: the preset in production; an address without its businessId; a businessId the
+account does not own (`belongs to business …, not …`); and a run with no phrase at all. Re-counting what
+remains still fails a real run rather than reporting it as done.
 
 ---
 

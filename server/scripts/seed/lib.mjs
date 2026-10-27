@@ -152,6 +152,79 @@ export function parseCount(value, { name, min, max, fallback }) {
 }
 
 /**
+ * The three comparison accounts, in PRODUCTS — the unit a person actually thinks in.
+ *
+ * WHY ONE DEFINITION, IN THIS FILE. The seeder, the cleanup and the pre-flight check all
+ * have to agree on WHICH accounts this workflow owns and how big each one is: a checker
+ * that lists a different set from the seeder is worse than no checker. The list is read by
+ * `seed-accounts.mjs`, `cleanup-accounts.mjs` and `check-accounts.mjs`, so all three
+ * describe the same three tenants.
+ *
+ * Sizes are PRODUCTS. `seedTenant` takes DOCUMENTS (its `total` — the seven collections
+ * together), and products land at ~22.5 % of that, so `documentsForProducts` converts and
+ * the console prints both numbers for every entry.
+ */
+export const COMPARISON_ACCOUNTS = Object.freeze([
+  { email: 'jefferndullamalinaozxc@gmail.com', products: 30000, tier: 'small' },
+  { email: 'jefferndullamalinao@gmail.com', products: 50000, tier: 'medium' },
+  { email: 'jeffernmalinaoqwe@gmail.com', products: 90000, tier: 'large' },
+]);
+
+/** The share of a seeded tenant that is products (the rest is stock, movements, POs, …). */
+export const PRODUCTS_SHARE = 0.225;
+
+/** Five is where `seedTenant` floors `productCount`, so it is also the smallest plan here. */
+export const MIN_PRODUCTS = 5;
+
+/**
+ * The ceiling, in products, and why it is not one million.
+ *
+ * 112 500 products ≈ 500 000 documents, which the generator can still hold in memory and
+ * write in bounded chunks. One million products would be ≈4.4 million documents — the
+ * whole plan is built in memory before it is inserted, so that size is refused rather than
+ * attempted: the run would either exhaust the process or, on the deployed tier, the storage
+ * allowance, and neither failure would be pleasant to discover halfway through a replace.
+ */
+export const MAX_PRODUCTS = 112500;
+
+/** The smallest `--total` in documents that `seedTenant` accepts as a serious dataset. */
+export const MIN_DOCUMENTS = 100;
+
+/** 112 500 products, expressed in documents. The two ceilings are the same ceiling. */
+export const MAX_DOCUMENTS = 500000;
+
+/** What a document count (`--total`, or a `d`-suffixed plan entry) yields in products. */
+export function productsForDocuments(total) {
+  return Math.max(5, Math.round(Number(total) * PRODUCTS_SHARE));
+}
+
+/**
+ * The document budget that produces EXACTLY `products` products.
+ *
+ * Both sides round, so the round trip is checked rather than assumed: `seedTenant` computes
+ * `max(5, round(total * 0.225))`, and a document figure that lands one product off would be
+ * reported as a dataset nobody asked for. The loop moves the budget by a document or two
+ * until the product count is exact, which is why every caller can print both numbers and
+ * mean them.
+ */
+export function documentsForProducts(products) {
+  const wanted = Math.max(1, Math.round(Number(products)));
+  // No floor from `MIN_DOCUMENTS` here: that bound validates a DOCUMENT count, and applying
+  // it to a small product count would make the request unsatisfiable (100 documents is
+  // already 23 products, so "5 products" could never be met).
+  let total = Math.max(1, Math.round(wanted / PRODUCTS_SHARE));
+
+  for (let i = 0; i < 8; i += 1) {
+    const achieved = Math.max(5, Math.round(total * PRODUCTS_SHARE));
+    if (achieved === wanted) return total;
+    total += achieved < wanted ? 1 : -1;
+  }
+  throw new SeedSafetyError(
+    `${String(products)} products cannot be expressed as a document budget. Nothing was written.`,
+  );
+}
+
+/**
  * Insert in bounded chunks: one 30 000-document batch would approach the 16 MB
  * command limit. Re-exported so both CLIs share the bound.
  */
@@ -700,6 +773,14 @@ export function countDisagreements(written, readBack) {
 }
 
 export default {
+  COMPARISON_ACCOUNTS,
+  PRODUCTS_SHARE,
+  MIN_PRODUCTS,
+  MAX_PRODUCTS,
+  MIN_DOCUMENTS,
+  MAX_DOCUMENTS,
+  productsForDocuments,
+  documentsForProducts,
   makeRandom,
   intBetween,
   pick,

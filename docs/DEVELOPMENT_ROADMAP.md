@@ -8,7 +8,7 @@ of truth for *what actually happened*, and it is why this file is long.
 
 **How to read it.** Do not read it top to bottom. Either find a record by number (§27FJ, §27DM — the
 numbers are cited from `CLAUDE.md` and from source comments), or use the index: `CLAUDE.md` §7 lists
-all **184** records by the title each gives itself.
+all **185** records by the title each gives itself.
 
 **Current state:** V1 complete and in production testing. The records that answer *where are we now*
 are §27FM (the V1 re-verification), §27FK (the runtime boundary and the blocked build), §27FJ (the two
@@ -22388,6 +22388,52 @@ the FIRST seed gave them — `AI TEST CUSTOM — 300 seeded products` — becaus
 when it CREATES one. That is the rule that keeps a production run from rewriting a real business's
 name (`royal kludge`, `inplay`, `rak gears` are untouched), and no figure, query, check or measurement
 reads the name. The three production tenants, which the next run fills, carry their own.
+
+---
+
+# 27GE. The 512 MB ceiling was the real constraint, and the index allocation was hiding in it (2026-10-27)
+
+**What was asked for.** Seed production at 30 000 / 50 000 / 90 000 products for the three accounts
+and verify each tenant. The run was stopped **before its first write**, for a measured reason.
+
+**The measurement that stopped it.** The cluster is Atlas M0, whose documented ceiling is **512 MB of
+data plus indexes** (§27BZ's own arithmetic). The development copy of exactly this dataset measured
+**337.7 MB**, taking the cluster to **349.9 MB** of 512. A second copy in production would have been
+~688 MB — and an M0 that runs out of storage does not degrade, it **blocks writes** (the 2026-10-18
+incident, `using 520 MB of 512 MB. Writes are blocked on your cluster.`). So the deployed app would
+have lost the ability to record a movement or an AI turn. Nothing was written; the owner chose to
+empty development first.
+
+**What emptying actually freed, and what it did not.** `cleanup:three` removed all 755 555 documents
+and re-counted every tenant at 0 remaining — and the counted figure fell only **337.7 → 214.4 MB**.
+The residue was **index allocation**: three collections holding **zero documents** still counted
+`inventory` **94.8 MB**, `inventory_transactions` **77.3 MB** and `products` **39.9 MB**. Disk went
+*up* in the same window (205.5 → 266.2 MB) because the deletes were journalled while the allocation
+stayed. A delete frees documents; it does not return the space their indexes were given.
+
+**Reclaiming it.** Dropping those three indexes and rebuilding them from the models' own declarations
+(`dropIndexes()` + `syncIndexes()` per model) took them to **7.2 / 13.2 / 9.2 MB**, index allocation
+across the database from **215.1 MB to ~30 MB**, and the cluster from 226.5 MB to **44.9 MB**. The
+declaration is the source of truth, so a rebuild cannot invent or lose an index — proved rather than
+assumed with `npm run audit:indexes`: **71 declared indexes across 17 collections, 0 disagreements**.
+
+**The production seed, then.** One run, `EXIT=0`, 755 555 documents into the three named tenants:
+133 333 in 203 s, 222 222 in 423 s, 400 000 in 759 s (**23 min 6 s** total — slower than development's
+18 min 51 s on the same cluster). Every identity was reported `already existed, verified`, so **nothing
+was written to Firebase**, and the production rule held: no existing password was rewritten, and each
+tenant was emptied only after being named by id. A mid-run sample read **255.8 MB**, matching the
+projection; the final cluster stands at **379.9 MB of 512 MB — 132.1 MB free**.
+
+**Verified independently.** `verify:demo` returned OK for all three tenants — counts, ledger
+arithmetic and referential integrity — and the stock-health figures are **identical to development's**
+(4 656 / 1 892, 7 623 / 3 030, 13 683 / 5 481), which is the PRNG seed doing what it promises across two
+environments. `check:accounts --with-production` reads production READY at 30 000 / 133 335, 50 000 /
+222 224 and 90 000 documents, and development READY at **zero** (login, business row and identity
+kept). The SKU/barcode rule held in production too: **0 of 170 000** products carry either field.
+
+**What this adds to the guides.** Guide 10 now says that a cleanup frees documents but not index
+allocation, names the measured figures, and gives the reclaim (rebuild the three indexes, then
+`audit:indexes`) — so the next large re-seed is not refused by residue nobody can see.
 
 ---
 

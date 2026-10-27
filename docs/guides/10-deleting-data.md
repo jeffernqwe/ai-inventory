@@ -248,6 +248,28 @@ default for the same reason.
 
 ---
 
+## The space a delete does not give back
+
+A cleanup removes documents, not the space their **indexes** were allocated. Measured 2026-10-27 on
+the 512 MB Atlas M0 cluster: after removing 755,555 documents the counted figure fell only from
+337 MB to 214 MB, and those 214 MB were three *empty* collections' index allocation — `inventory`
+94.8 MB, `inventory_transactions` 77.3 MB, `products` 39.9 MB. Atlas counts **data plus indexes**, so
+that residue is why a re-seed can still be refused as too large.
+
+**The cleanup is still complete** — every document is gone and the run printed `0 remaining`; only the
+allocation stays. To reclaim it, rebuild those three indexes on the empty collections and prove the
+declaration came back:
+
+- drop them, then rebuild from the models' own declarations (`dropIndexes()` followed by
+  `syncIndexes()` on `Product`, `Inventory` and `InventoryTransaction`, against the database being
+  reclaimed) — measured effect: 39.8 / 94.6 / 77.3 MB → 7.2 / 13.2 / 9.2 MB;
+- `npm run audit:indexes` — expect `0 disagreements`, `every declared index matches the database`.
+
+The declaration is the source of truth, so a rebuild cannot invent or lose an index; that check is
+what proves it. Do it before a large re-seed, not after the cluster refuses the write.
+
+---
+
 ## Proving it worked
 
 | After | Run | Expect |

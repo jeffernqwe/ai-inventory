@@ -512,6 +512,7 @@ anchor (`§27…`) in that file.
 - **§27GB** — The three accounts by address — a products-sized plan, a pre-flight check, and a cleanup that keeps every login (2026-10-27)
 - **§27GC** — The three accounts registered, and the whole workflow run against them (2026-10-27)
 - **§27GD** — The preset seeded for real in development — and the 27-minute estimate corrected (2026-10-27)
+- **§27GE** — The 512 MB ceiling was the real constraint, and the index allocation was hiding in it (2026-10-27)
 
 ---
 

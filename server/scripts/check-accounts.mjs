@@ -44,6 +44,7 @@ import { firebaseConfig, isFirebaseConfigured } from '../src/config/firebase.ts'
 import { getFirebaseAdminApp } from '../src/services/firebase/adminApp.ts';
 import { getAuth } from 'firebase-admin/auth';
 import { SeedSafetyError, countTenantDataRemoval } from './perf/lib.mjs';
+import { assertSeedFirebaseProject } from './seed/guard.mjs';
 import { COMPARISON_ACCOUNTS, normaliseEmail } from './seed/lib.mjs';
 
 const COMMAND = 'check:accounts';
@@ -219,6 +220,14 @@ async function main() {
 
   if (!isFirebaseConfigured()) {
     fail('Firebase is not configured, so the identities cannot be checked. NOT CHECKED (exit 2).');
+  }
+  // The answer depends on WHICH identity authority is being read: pointed at another project, this
+  // tool would report "no identity" for accounts that exist. That is a wrong answer, not a missing
+  // one, so it stops here rather than printing verdicts it cannot stand behind.
+  try {
+    assertSeedFirebaseProject(firebaseConfig().projectId);
+  } catch (err) {
+    fail(`${err.message} NOT CHECKED (exit 2).`);
   }
   const projectId = firebaseConfig().projectId;
   const auth = getAuth(getFirebaseAdminApp());

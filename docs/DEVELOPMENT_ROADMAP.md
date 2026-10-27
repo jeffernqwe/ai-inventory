@@ -22278,6 +22278,24 @@ each names what to set: the preset in production; an address without its busines
 account does not own (`belongs to business …, not …`); and a run with no phrase at all. Re-counting what
 remains still fails a real run rather than reporting it as done.
 
+**A seed writes to TWO stores, and only one of them was ever named.** Deletion has pinned its Firebase
+project since the cleanup guard existed (`assertFirebaseProject`, `inventoryai-d0d20`), but seeding
+took the project from the shell's credentials and named nothing — so a shell pointed elsewhere would
+create the login THERE while the tenant landed here, and the two could never be joined, because the
+application resolves a user by `firebaseUid` only. The result would have read as an account that
+exists and cannot sign in. `assertSeedFirebaseProject` now runs inside `resolveIdentity`, the one
+function every seeder creates or refreshes an identity through, and it runs **before the first read**,
+so a refused run has touched neither store; the approved id is imported from the cleanup guard rather
+than restated, because two literals would be two opinions. `check:accounts` refuses the same way — a
+wrong project makes it report `MISSING` for accounts that exist, which is a wrong answer rather than a
+missing one — and exits 2, its "not checked" code.
+
+**Measured for that pin.** The normal shell (service-account JSON) resolves `inventoryai-d0d20` and
+`check:accounts` proceeds unchanged; with the credentials pointed at another project it stops before
+connecting and exits **2** (`this shell is configured for Firebase project "some-other-project", but a
+seed creates identities only in "inventoryai-d0d20"`), while a normally-configured run over the same
+accounts exits **1**, its not-ready code. Both refusal paths print that nothing was read or written.
+
 ---
 
 # 28. Phase Gate System

@@ -32,6 +32,12 @@
 import { DATABASE_NAMES } from '../../src/config/env.ts';
 import { databaseNameInUri } from '../lib/mongo-uri.mjs';
 import { SeedSafetyError } from '../perf/lib.mjs';
+// The approved project id is a fact about the project, not about a command, so it is read from the
+// cleanup guard that owns it rather than restated here. Two literals would be two opinions.
+import { APPROVED_TEST_FIREBASE_PROJECT_ID } from '../cleanup/lib.mjs';
+
+/** The one Firebase project a seeding run may create identities in. */
+export const APPROVED_FIREBASE_PROJECT_ID = APPROVED_TEST_FIREBASE_PROJECT_ID;
 
 /** The phrase naming WHAT is seeded. Unchanged: each plan keeps its own. */
 export const SEED_CONFIRM_ENV = 'SEED_CONFIRM';
@@ -42,6 +48,37 @@ export const SEED_DB_CONFIRM_ENV = 'SEED_DB_CONFIRM';
 /** The phrase acknowledging that the target holds real data. Production only. */
 export const SEED_PROD_CONFIRM_ENV = 'SEED_PROD_CONFIRM';
 export const SEED_PROD_CONFIRM_PHRASE = 'SEED-PRODUCTION-DATA';
+
+/**
+ * Guard — the identity authority is the OTHER store a seed writes to, and nothing named it.
+ *
+ * WHY THIS EXISTS. Every guard above names WHERE the data goes (a database, resolved and matched).
+ * The Firebase project was left to the shell's credentials, so a shell configured for a different
+ * project would create the login THERE while the tenant landed here — and the application joins the
+ * two by `firebaseUid` only, so nothing would ever match them up. The result reads as an account
+ * that exists and cannot sign in.
+ *
+ * Exact match, no wildcard, and it runs before the first read of Firebase, so a refused run has
+ * touched neither store.
+ */
+export function assertSeedFirebaseProject(projectId, expected = APPROVED_FIREBASE_PROJECT_ID) {
+  const value = String(projectId ?? '').trim();
+  if (!value) {
+    throw new SeedSafetyError(
+      'the Firebase project id is empty, so the identity authority cannot be verified ' +
+        '[seed]. Nothing was written.',
+    );
+  }
+  if (value !== expected) {
+    throw new SeedSafetyError(
+      `this shell is configured for Firebase project "${value}", but a seed creates identities ` +
+        `only in "${expected}", which is the project the application verifies tokens against ` +
+        '[seed]. Point FIREBASE_PROJECT_ID (and the service account) at the approved project. ' +
+        'Nothing was written.',
+    );
+  }
+  return value;
+}
 
 /**
  * The plans, and the script each one is. `npm run seed --plan=<key>` dispatches on

@@ -80,6 +80,12 @@ Production can only be selected with **both** of these, which `config/env.ts` en
 NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db
 ```
 
+**The Firebase project is pinned as well.** A seed creates logins, and the app joins a login to a
+tenant by `firebaseUid` only — so a login created in another project could never match the tenant
+written here. Identities are created in the approved project (`inventoryai-d0d20`) and nowhere else;
+a shell configured for a different one is refused before the first read
+([Guide 11](11-firebase-identities.md)).
+
 ---
 
 ## The confirmation phrases
@@ -425,6 +431,7 @@ would be measured against a half-written catalogue.
 | `the read-back does not match what was written` | an insert was partly rejected | nothing is reported as done; re-run and read the collections named |
 | `test database … npm test clears` | the test database was selected | use development or production |
 | `not a seeding target` | an unknown database name | only `inventoryai_dev_db` / `inventoryai_prod_db` |
+| `this shell is configured for Firebase project "…"` | the credentials name a project other than the approved one | fix `FIREBASE_PROJECT_ID` (or the service account); nothing was read or written |
 | `--email=<address> is required, and nothing was read` (`verify:demo`) | the verifier was run without an address | add `--email=`; it refuses before connecting, so nothing was read |
 | `no Firebase identity exists … DEMO_ACCOUNT_PASSWORD is not set` | the address has no login | register it first (recommended) or set the password |
 | `the database account for … is linked to Firebase uid …` | the Firebase identity was deleted and re-created under the same address, so the row still holds the old uid | see below — the seeder will not re-link it for you |

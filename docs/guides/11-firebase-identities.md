@@ -54,6 +54,11 @@ No command creates an identity on its own. The seeders do, as part of their own 
   `seed:demo-tenant`) may rotate theirs, because the address exists only for that fixture.
 - **A password is never accepted on the command line, printed, or written to a file** — set
   `DEMO_ACCOUNT_PASSWORD` / `ROLE_TEST_PASSWORD` in the environment.
+- **The project is pinned.** Every seeder creates its identity in the approved project
+  (`inventoryai-d0d20`) through one function, and refuses when the shell's credentials name another
+  one — a login in a different project could never be joined to the tenant, because the app resolves
+  a user by `firebaseUid` only. `check:accounts` refuses the same way, with `NOT CHECKED (exit 2)`, so
+  it never reports "no identity" for an account that exists elsewhere.
 - `seed --plan=demo` on a database row that carries a **stale** uid refuses rather than re-linking it;
   see [Guide 9](9-seeding-data.md).
 

@@ -291,7 +291,9 @@ below has the measurement.
   [--with-production]` is the read-only pre-flight that says which accounts exist in which database and
   how many documents a seed would reset — it reads a FIXED list of databases and needs no phrase, so it
   cannot be pointed anywhere. `cleanup:account` / `cleanup:three` remove that data again and keep every
-  login, business row and Firebase identity.
+  login, business row and Firebase identity. **The Firebase project is pinned, not inherited**: a seed
+  creates its login in the approved project (`inventoryai-d0d20`) or refuses, because a login created
+  in another project could never be joined to the tenant (the app resolves a user by `firebaseUid`).
 - **OTA code signing is plan-gated**, not a config switch: Expo allows it on the Production ($199/mo)
   or Enterprise plans only. A binary carrying a certificate **rejects** any unsigned publish, so
   enabling `codeSigningCertificate` before the plan exists would freeze every install on its old

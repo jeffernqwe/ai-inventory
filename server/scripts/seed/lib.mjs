@@ -26,6 +26,7 @@ import PurchaseOrder from '../../src/models/purchaseOrder.model.ts';
 import Supplier from '../../src/models/supplier.model.ts';
 import User from '../../src/models/user.model.ts';
 import { SeedSafetyError } from '../perf/lib.mjs';
+import { assertSeedFirebaseProject } from './guard.mjs';
 
 const LOCATION_NAMES = [
   'Main Warehouse', 'Shop Front', 'Overflow Store', 'Cold Room', 'Returns Bay', 'Transit Hub',
@@ -283,7 +284,12 @@ export async function insertChunked(model, docs, chunkSize = DEFAULT_CHUNK_SIZE)
 export async function resolveIdentity(email, { refreshPassword = true } = {}) {
   const { getFirebaseAdminApp } = await import('../../src/services/firebase/adminApp.ts');
   const { getAuth } = await import('firebase-admin/auth');
-  const auth = getAuth(getFirebaseAdminApp());
+  const app = getFirebaseAdminApp();
+  // WHICH identity authority, checked before the first read: the shell's credentials decide the
+  // project, and an identity created in the wrong one could never be joined to the tenant written
+  // here (the application resolves a user by `firebaseUid` only). See `assertSeedFirebaseProject`.
+  assertSeedFirebaseProject(app.options?.projectId);
+  const auth = getAuth(app);
   const address = normaliseEmail(email);
 
   const password = process.env.DEMO_ACCOUNT_PASSWORD;

@@ -14,6 +14,10 @@
  *      satisfy another.
  *   3. WHAT THE SCRIPTS MAY DO. `check:accounts` writes nothing at all; `cleanup-accounts.mjs`
  *      removes tenant data and never a login, a business row or an identity (F-50).
+ *   4. WHICH IDENTITY AUTHORITY. A seed writes to two stores, and only one of them was ever
+ *      named: the Firebase project came from the shell's credentials. A login created in the
+ *      wrong project could never be joined to the tenant written here, so the project is
+ *      pinned — before the first read — and every seeder goes through one function.
  *
  * Reading source is deliberate: these are CLI contracts, and the assertions are the ones a
  * reviewer would make by hand. No connection, no network, no Firebase.
@@ -31,6 +35,8 @@ import {
   documentsForProducts,
   productsForDocuments,
 } from '../scripts/seed/lib.mjs';
+import { APPROVED_FIREBASE_PROJECT_ID, assertSeedFirebaseProject } from '../scripts/seed/guard.mjs';
+import { SeedSafetyError } from '../scripts/perf/lib.mjs';
 
 const read = (name) => readFileSync(new URL(`../scripts/${name}`, import.meta.url), 'utf8');
 const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
@@ -263,9 +269,48 @@ describe('the check answers questions and changes nothing', () => {
     assert.match(source, /the project this shell is configured for/);
   });
 
+  it('it refuses to answer from the wrong project rather than reporting no identity', () => {
+    // Pointed at another project it would report MISSING for accounts that exist — a wrong
+    // answer, not a missing one. It stops instead, with the not-checked exit code.
+    assert.match(source, /assertSeedFirebaseProject\(firebaseConfig\(\)\.projectId\)/);
+    assert.match(source, /NOT CHECKED \(exit 2\)/);
+  });
+
   it('exit codes are a contract: ready, not ready, not checked', () => {
     assert.match(source, /process\.exit\(0\)/);
     assert.match(source, /process\.exit\(1\)/);
     assert.match(source, /NOT CHECKED \(exit 2\)/);
+  });
+});
+
+describe('the identity authority is pinned, not inherited from the shell', () => {
+  it('the approved project is imported from the guard that owns it, never restated', () => {
+    const source = read('seed/guard.mjs');
+    assert.match(source, /import \{ APPROVED_TEST_FIREBASE_PROJECT_ID \} from '\.\.\/cleanup\/lib\.mjs'/);
+    assert.match(source, /export const APPROVED_FIREBASE_PROJECT_ID = APPROVED_TEST_FIREBASE_PROJECT_ID;/);
+    assert.equal(
+      /inventoryai-d0d20/.test(source),
+      false,
+      'seed/guard.mjs restates the project id as a literal, so the two halves can drift',
+    );
+  });
+
+  it('it accepts the approved project and refuses every other answer', () => {
+    assert.equal(assertSeedFirebaseProject('inventoryai-d0d20'), 'inventoryai-d0d20');
+    assert.equal(assertSeedFirebaseProject(APPROVED_FIREBASE_PROJECT_ID), APPROVED_FIREBASE_PROJECT_ID);
+    for (const bad of ['', '   ', null, undefined, 'inventoryai-prod', 'inventoryai-d0d20x']) {
+      assert.throws(() => assertSeedFirebaseProject(bad), SeedSafetyError, `accepted ${JSON.stringify(bad)}`);
+    }
+    // A neighbouring project id is the realistic mistake, and it is not a prefix match.
+    assert.throws(() => assertSeedFirebaseProject('inventoryai-d0d20-staging'), /Nothing was written/);
+  });
+
+  it('the identity is checked before the first read of Firebase', () => {
+    const source = read('seed/lib.mjs');
+    const check = source.indexOf('assertSeedFirebaseProject(app.options?.projectId)');
+    const firstRead = source.indexOf('auth.getUserByEmail(address)');
+    assert.ok(check > -1, 'resolveIdentity no longer pins the Firebase project');
+    assert.ok(firstRead > -1, 'resolveIdentity no longer reads the identity by address');
+    assert.ok(check < firstRead, 'resolveIdentity reads Firebase before it checks which project it is');
   });
 });

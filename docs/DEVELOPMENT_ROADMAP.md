@@ -8,7 +8,7 @@ of truth for *what actually happened*, and it is why this file is long.
 
 **How to read it.** Do not read it top to bottom. Either find a record by number (§27FJ, §27DM — the
 numbers are cited from `CLAUDE.md` and from source comments), or use the index: `CLAUDE.md` §7 lists
-all **182** records by the title each gives itself.
+all **183** records by the title each gives itself.
 
 **Current state:** V1 complete and in production testing. The records that answer *where are we now*
 are §27FM (the V1 re-verification), §27FK (the runtime boundary and the blocked build), §27FJ (the two
@@ -22295,6 +22295,60 @@ missing one — and exits 2, its "not checked" code.
 connecting and exits **2** (`this shell is configured for Firebase project "some-other-project", but a
 seed creates identities only in "inventoryai-d0d20"`), while a normally-configured run over the same
 accounts exits **1**, its not-ready code. Both refusal paths print that nothing was read or written.
+
+---
+
+# 27GC. The three accounts registered, and the whole workflow run against them (2026-10-27)
+
+**What was asked for.** The owner created the three comparison accounts in the Inventory AI app and
+asked for the read-only checks to be run against them, the seeding and cleanup halves to be tested
+safely, SKUs and barcodes to stay empty, and the exact next commands — with no large production run
+and no destructive operation started without approval.
+
+**Where they landed, measured.** All three registered through the installed app, which talks to the
+deployed API, so every row is in **production** and every identity is verified and Google-only
+(`google.com`, no password provider):
+
+| Account | Firebase | Production tenant | Seed would reset |
+|---|---|---|---|
+| `jefferndullamalinaozxc@gmail.com` | verified, google+password | `6adfb57dcd2aa24e547d0f02` "royal kludge" | 20 documents |
+| `jefferndullamalinao@gmail.com` | verified, google | `6ae07d878f20644de675d4dd` "inplay" | 2 documents |
+| `jeffernmalinaoqwe@gmail.com` | verified, google | `6ae07daa8f20644de675d4e2` "rak gears" | 2 documents |
+
+Development held no row for any of them — the state the check calls `MISSING`, "a seed would CREATE
+the tenant and print its id". `check:accounts --with-production` read **3 of 6** pairs READY at that
+point. The production counts are audit rows the registrations themselves wrote; none of them is
+inventory.
+
+**The chain proved end to end, in development, at a deliberately small size.** A custom plan of 300
+products per account created three dev tenants (1 333 documents each, ~6.5 s each, `OK`), which is
+the path that had never been exercised for real: an EXISTING identity (Google-only, no password) →
+tenant created in the named database → data written → ready. No Firebase write happened — an identity
+that already exists is reused, so no credential is created, refreshed or touched, and
+`DEMO_ACCOUNT_PASSWORD` was neither needed nor set. `check:accounts --with-production` then read
+**6 of 6** pairs READY, and `verify:demo` on one tenant returned OK — counts, ledger arithmetic and
+referential integrity all hold.
+
+**The SKU/barcode requirement was measured, not assumed.** A read-only count over all three dev
+tenants found the `sku` field present on **0** of 900 products and `barcode` on **0**: both absent
+rather than blanked, which is the state the app's own barcode action needs to assign the first code.
+
+**The five refusals, re-measured against the real ids (all read-only).** A production entry without
+its `businessId`; an account given a tenant it does not own (`belongs to business 6ae07d87…, not
+6adfb57d…`); the `cleanup:three` preset in production; a run with no phrase; and an address that is
+not one of the three (`nothing to delete`). Each named what to set and deleted nothing.
+
+**Nothing was written to or deleted from production.** The production dry run printed all three
+named tenants and `no connection was opened`; the production cleanup dry run counted **24 documents
+across 3 tenants**, every one of them `audit_logs`, and deleted nothing. The two large runs
+(`seed:three` in development — 170 000 products ≈ 755 555 documents, ≈27 minutes — and the named
+plan in production) and the first real cleanup are the owner's to start.
+
+**Two guide facts this run exposed**, now in Guide 9: an address that already has a verified identity
+needs no `DEMO_ACCOUNT_PASSWORD` (that variable only creates an identity, and a Google-only login
+seeds exactly like a password one), and registering an account creates ONE row in the database that
+app is talking to — the other side is a seed, which is why a fresh database reads `MISSING` for
+accounts that already exist elsewhere and nothing needs registering twice.
 
 ---
 

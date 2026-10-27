@@ -171,6 +171,12 @@ SEED_CONFIRM=seed-three-accounts SEED_DB_CONFIRM=inventoryai_dev_db \
 The addresses and the sizes live together in `server/scripts/seed/lib.mjs`, and `check:accounts` and
 `cleanup:three` read the same list — so all three commands describe the same three tenants.
 
+**Registering an account creates ONE row, in the database that app is talking to.** The Firebase
+identity is shared by both databases, so each account needs at most one registration and the other
+side is a seed: `check:accounts` reports `MISSING` there ("a seed would CREATE the tenant"), and this
+command creates it. That is why a fresh development database reads `MISSING` for accounts that
+already exist in production — nothing is wrong, and nothing needs registering twice.
+
 ### Your own accounts (`seed:accounts`)
 
 ```bash
@@ -182,6 +188,10 @@ SEED_CONFIRM=seed-accounts SEED_DB_CONFIRM=inventoryai_dev_db \
 - **A size is PRODUCTS**, and every entry needs one: `--accounts="address:products[:businessId]"`.
   The dry run prints the products *and* the documents each entry will write. `:400000d` asks in
   **documents** instead.
+- **An address that already has a verified identity needs no `DEMO_ACCOUNT_PASSWORD`.** That variable
+  exists only to create an identity that does not exist yet. An account registered in the app is
+  reused as it is — the run reads its `uid` from Firebase and writes nothing back to Firebase, so a
+  Google-only login (no password) seeds exactly like a password one, and no credential is changed.
 - **No SKUs or barcodes** are generated, so the app's own barcode generation is what assigns them —
   that is deliberate, and worth one product per run. `--include-sku` generates them too.
 - Each account gets its own business; the command refuses if two accounts resolve to the same one.

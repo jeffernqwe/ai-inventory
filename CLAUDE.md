@@ -515,6 +515,7 @@ anchor (`§27…`) in that file.
 - **§27GE** — The 512 MB ceiling was the real constraint, and the index allocation was hiding in it (2026-10-27)
 - **§27GF** — The data guides split by environment — four files where two stood, and the Firebase guide renumbered (2026-10-27)
 - **§27GG** — The guides audited for misfiled content, and the data guides' commands put under a guard (2026-10-27)
+- **§27GH** — The reference documents measured against the tree — three stale sentences, four undocumented variables, and the tables that were already right (2026-10-27)
 
 ---
 

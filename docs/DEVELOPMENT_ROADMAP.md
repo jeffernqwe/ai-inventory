@@ -8,7 +8,7 @@ of truth for *what actually happened*, and it is why this file is long.
 
 **How to read it.** Do not read it top to bottom. Either find a record by number (§27FJ, §27DM — the
 numbers are cited from `CLAUDE.md` and from source comments), or use the index: `CLAUDE.md` §7 lists
-all **187** records by the title each gives itself.
+all **188** records by the title each gives itself.
 
 **Current state:** V1 complete and in production testing. The records that answer *where are we now*
 are §27FM (the V1 re-verification), §27FK (the runtime boundary and the blocked build), §27FJ (the two
@@ -22521,6 +22521,84 @@ records declared here.
 
 **Verified.** `npm run test:unit`: **1564 tests, 1508 pass, 0 fail, 56 skipped**, including the new
 suite and the documentation guards.
+
+---
+
+# 27GH. The reference documents measured against the tree — three stale sentences, four undocumented variables, and the tables that were already right (2026-10-27)
+
+**What was asked for.** The same audit the guides got (§27GG), applied to the **reference**
+format: not "is this misplaced?" but "is this still true?" — every figure a document states that the
+tree can measure, checked against the tree rather than read and believed.
+
+**How it was checked.** By reading the documents' claims against files, not by re-reading the claims:
+`git hash-object` against `git rev-parse HEAD:<path>` for the protected register; a parser over
+`docs/DESIGN_SYSTEM.md`'s two tables against `mobile/lib/theme.ts`; the `npm run …` names printed in
+every document against the two `package.json` script registries; and `UPPER_SNAKE` config names against
+both `.env.example` files. Three of the four are mechanical, which is the point: a claim that can be
+measured should be measured by something that runs again.
+
+**Three stale sentences, and one stale number.**
+
+1. **`server/.env.example` was missing two rate-limit pairs.** `rateLimit.ts` reads **36**
+   `AUTH_*_RATE_LIMIT_*` names; the template named **32**. `AUTH_INVITATION_SEND_RATE_LIMIT_*`
+   (3600000 / 20, per account) and `AUTH_INVITATION_PREVIEW_RATE_LIMIT_*` (3600000 / 60, per IP, for
+   the public `GET /api/auth/invitations/:token`) shipped with the invitation surface on 2026-10-25
+   and were documented nowhere — a production knob with no name in the repository, which the project's
+   own rule (`the repository holds the **names**`) exists to prevent. Both pairs are now in the
+   template with the comment style the other blocks use. No value was ever missing, which is why
+   nothing else noticed.
+2. **`README.md` stated the old count** — `(32 variables, 16 pairs)`. It agreed with the *file* and
+   disagreed with the *code*, so the number and the list were both stale and only one of them was a
+   number. Now `(36 variables, 18 pairs)`, and both are guarded.
+3. **`SECURITY.md` still listed the RNFirebase PII log as Open.** ISS-02 was patched on 2026-10-10
+   (§27AJ) and verified in the shipped dex and on a device on 2026-10-12 (§27BA); the checklist's own
+   sensitive-logging row reads resolved. The disclosure page was asking readers to consider reporting a
+   finding that had been closed for two weeks.
+4. **`docs/TS-MIGRATION-MANIFEST.md` named a file that does not name the module.** §3 listed the places
+   that spell `services/entitlement.service.js` — "`CLAUDE.md`, `README.md`, the Phase 10 record".
+   `README.md` does not contain that string; `SYSTEM_SPECIFICATION.md`, `constants/plans.ts` and the
+   Phase 10 test's import do. The sentence's conclusion was right; its list was wrong, and a list that
+   sends a reader to check three files that are not the three would fail the reader who did check.
+5. **`docs/README.md` sized the roadmap at "~21,000 lines"** — a figure that moves every time a record
+   is appended (it is over 22,700 now, and this record makes it more). Reworded to "over 20,000", which
+   stays true without being re-measured.
+
+**What was measured and found already right — recorded so the check does not have to be repeated.**
+
+- **All five protected paths** match the register in `AUTH_SECURITY_MASTER_CHECKLIST.md` §8, by
+  `git hash-object` against `HEAD` (the two dated plans included).
+- **`DESIGN_SYSTEM.md`'s tables match `mobile/lib/theme.ts` exactly** — 38 colour cells and all 10 type
+  rows, 0 mismatches. The token table is hand-written prose about code that the theme comments already
+  discuss in ratios; it is the document most likely to drift, and it has not.
+- **Every `npm run …` name in the documents resolves** to a script, apart from two false positives that
+  were checked by hand: the five `cleanup:*-mongodb` names in dated records (quoted as removed by a
+  later record, §27FS/§27FT) and Guide 6's deliberate `some:command` placeholder.
+- **The two open advisories, the accepted decisions and the watch** agree across `SECURITY.md`,
+  `SECURITY_DEPENDENCY_DECISIONS.md`, `README.md` and `CLAUDE.md` — same packages, same severities,
+  2 open, no in-range fix.
+
+**The guard, extended rather than duplicated.** `server/test/phase-docs-fact-drift.test.mjs` gains two
+assertions over files it did not previously read: **every rate-limit variable the server reads is named
+in `server/.env.example`**, and **README's stated count is the template's count** — the second alone
+would have passed while the first failed (both were 32), which is why the two lists are compared rather
+than two numbers. Its stated limits are unchanged and now wider: it parses six files, it still cannot
+see a plan or a judgement, and the control that compares a count now compares a **planted** template
+rather than the live one — the first version of that control moved with the tree and stopped failing
+whenever the tree broke in the same direction.
+
+**Proved on the real tree, not promised.** The two invitation pairs were renamed out of template form
+and README's count reverted to 32/16: the missing-name test failed and named all four variables, the
+count test **passed** (both sides read 32), and every other test in the file stayed green. Both files
+were then restored byte-identically (md5 `8314c926…` / `d97d7871…`, verified with `md5sum -c`) and the
+suite re-ran 9/9, exit 0.
+
+**Left alone, deliberately.** `docs/SOURCE_PROTECTION.md`'s claims are GitHub-side (visibility, forks,
+branch protection) and no repository file can measure them — the document already says so and lists the
+settings it could not read. `docs/freebuff/*` is frozen at its dates by its own statement, the dated
+plans and evidence directories are records, and the roadmap's historical command names are history
+rather than instructions.
+
+**Verified.** The full unit suite, run in the committed state.
 
 ---
 

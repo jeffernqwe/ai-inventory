@@ -53,7 +53,7 @@ date they were written. **Read them for an audit, not for orientation.**
 
 | Document | Records |
 | --- | --- |
-| [`DEVELOPMENT_ROADMAP.md`](DEVELOPMENT_ROADMAP.md) | Every increment, in order, with its evidence — ~21,000 lines. Find a record by number; `CLAUDE.md` indexes all of them by title |
+| [`DEVELOPMENT_ROADMAP.md`](DEVELOPMENT_ROADMAP.md) | Every increment, in order, with its evidence — over 20,000 lines. Find a record by number; `CLAUDE.md` indexes all of them by title |
 | [`PHASE_HISTORY.md`](PHASE_HISTORY.md) | One line per phase, with the roadmap record it points to |
 | [`TS-MIGRATION-MANIFEST.md`](TS-MIGRATION-MANIFEST.md) | The completed TypeScript migration and the one module left in JavaScript |
 | [`superpowers/`](superpowers/) | Dated plans and design specs written before work began |

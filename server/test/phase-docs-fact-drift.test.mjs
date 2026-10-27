@@ -28,6 +28,12 @@
  *    document that says the two differ, under that policy, describes a build that cannot work.
  *  * The record count stated in the roadmap's header equals the number of `27…` records declared in
  *    it, and the index in `CLAUDE.md` lists exactly those anchors — no missing one, no invented one.
+ *  * Every `AUTH_*_RATE_LIMIT_*` variable the server **reads** appears in `server/.env.example`, and
+ *    the count `README.md` states is the count that file holds. Added after the 2026-10-27 review
+ *    found README claiming 32 variables / 16 pairs and the template holding exactly 32, while
+ *    `rateLimit.ts` read **36** — the two invitation limiters had never been documented, so a
+ *    production knob existed that no document named. A number and its list were both stale, and
+ *    only one of them was a number.
  *
  * WHAT IT IS NOT, so its green is not read as more than it is:
  *
@@ -41,7 +47,9 @@
  *    no longer read its figure, and the assertion below reports the sentence it wanted — the same
  *    contract as the §2.6 route-inventory guard, for the same reason: a loose pattern that matched a
  *    reworded sentence and compared the wrong number would be worse than a loud refusal.
- *  * **It reads two files for facts and one for counts**; the roadmap's own body prose is not parsed.
+ *  * **It parses the files that can answer it** — `CLAUDE.md`, the roadmap, `mobile/app.json`,
+ *    `README.md`, `server/.env.example` and `server/src/middlewares/rateLimit.ts`; the roadmap's own
+ *    body prose is not parsed.
  */
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -55,6 +63,9 @@ const repoRoot = path.resolve(here, '..', '..');
 const CLAUDE_PATH = path.join(repoRoot, 'CLAUDE.md');
 const ROADMAP_PATH = path.join(repoRoot, 'docs', 'DEVELOPMENT_ROADMAP.md');
 const APP_JSON_PATH = path.join(repoRoot, 'mobile', 'app.json');
+const README_PATH = path.join(repoRoot, 'README.md');
+const ENV_EXAMPLE_PATH = path.join(repoRoot, 'server', '.env.example');
+const RATE_LIMIT_PATH = path.join(repoRoot, 'server', 'src', 'middlewares', 'rateLimit.ts');
 const SRC_DIR = path.join(repoRoot, 'server', 'src');
 
 /** Whitespace-normalised text, so a sentence wrapped across lines still matches. */
@@ -101,9 +112,31 @@ function statedRecordCount(raw) {
   return m ? Number(m[1]) : null;
 }
 
+/** README's `AUTH_*_RATE_LIMIT_*` claim — "N variables, M pairs". Or null. */
+function statedRateLimitCounts(raw) {
+  const m = flat(raw).match(/`AUTH_\*_RATE_LIMIT_\*` \((\d+) variables, (\d+) pairs\)/);
+  return m ? { variables: Number(m[1]), pairs: Number(m[2]) } : null;
+}
+
+/**
+ * The `AUTH_*_RATE_LIMIT_*` names a text carries, sorted.
+ *
+ * `documentedAsComments` reads only whole `# NAME=value` template lines, so a name merely mentioned
+ * in a sentence is not counted as documented — the template's job is to name every knob.
+ */
+function rateLimitNames(raw, documentedAsComments = false) {
+  const re = documentedAsComments
+    ? /^#\s*(AUTH_[A-Z0-9_]*RATE_LIMIT[A-Z0-9_]*)/gm
+    : /(AUTH_[A-Z0-9_]*RATE_LIMIT[A-Z0-9_]*)/g;
+  return [...new Set([...String(raw).matchAll(re)].map((m) => m[1]))].sort();
+}
+
 const claude = readFileSync(CLAUDE_PATH, 'utf8');
 const roadmap = readFileSync(ROADMAP_PATH, 'utf8');
 const appJson = JSON.parse(readFileSync(APP_JSON_PATH, 'utf8'));
+const readme = readFileSync(README_PATH, 'utf8');
+const envExample = readFileSync(ENV_EXAMPLE_PATH, 'utf8');
+const rateLimitSource = readFileSync(RATE_LIMIT_PATH, 'utf8');
 
 const STATED_MODULES = statedModuleCount(claude);
 const STATED_VERSIONS = statedMobileVersions(claude);
@@ -111,6 +144,9 @@ const MEASURED_MODULES = measuredTsModules();
 const DECLARED = declaredRecords(roadmap);
 const INDEXED = indexedRecords(claude);
 const STATED_RECORDS = statedRecordCount(roadmap);
+const STATED_RATE_LIMITS = statedRateLimitCounts(readme);
+const DOCUMENTED_RATE_LIMITS = rateLimitNames(envExample, true);
+const READ_RATE_LIMITS = rateLimitNames(rateLimitSource);
 
 describe('documentation fact drift', () => {
   test('every figure this guard reads is actually present', () => {
@@ -118,6 +154,15 @@ describe('documentation fact drift', () => {
     assert.notEqual(STATED_MODULES, null, 'CLAUDE.md no longer states the `server/src` `.ts` module count');
     assert.notEqual(STATED_VERSIONS, null, 'CLAUDE.md no longer states the mobile version and runtime');
     assert.notEqual(STATED_RECORDS, null, 'the roadmap header no longer states the record count');
+    assert.notEqual(STATED_RATE_LIMITS, null, 'README no longer states the `AUTH_*_RATE_LIMIT_*` count');
+    assert.ok(
+      DOCUMENTED_RATE_LIMITS.length > 20,
+      `server/.env.example named only ${DOCUMENTED_RATE_LIMITS.length} rate-limit variables — the parser is not reading it`
+    );
+    assert.ok(
+      READ_RATE_LIMITS.length > 20,
+      `rateLimit.ts named only ${READ_RATE_LIMITS.length} rate-limit variables — the parser is not reading it`
+    );
     assert.ok(DECLARED.length > 70, `expected >70 declared records, found ${DECLARED.length}`);
     assert.ok(MEASURED_MODULES > 100, `the module walk found only ${MEASURED_MODULES} files — it is not reading server/src`);
   });
@@ -178,6 +223,37 @@ describe('documentation fact drift', () => {
     );
   });
 
+  test('★ every rate-limit variable the server reads is named in server/.env.example', () => {
+    // The defect this pins: `AUTH_INVITATION_SEND_RATE_LIMIT_*` and `AUTH_INVITATION_PREVIEW_RATE_LIMIT_*`
+    // were read by the server and documented nowhere, so a deployment knob existed with no name in the
+    // repository. A number in a README cannot catch that; the two lists compared can.
+    const missing = READ_RATE_LIMITS.filter((name) => !DOCUMENTED_RATE_LIMITS.includes(name));
+    assert.deepEqual(
+      missing,
+      [],
+      `the server reads ${missing.join(', ')} but server/.env.example does not name ${missing.length === 1 ? 'it' : 'them'}. ` +
+        'Add the names (names only, never a value) — the template is the repository\'s one list of knobs.'
+    );
+  });
+
+  test('★ README states the rate-limit count the env template holds', () => {
+    assert.equal(
+      STATED_RATE_LIMITS.variables,
+      DOCUMENTED_RATE_LIMITS.length,
+      `README states ${STATED_RATE_LIMITS.variables} rate-limit variables; server/.env.example names ${DOCUMENTED_RATE_LIMITS.length}.`
+    );
+    assert.equal(
+      STATED_RATE_LIMITS.pairs,
+      DOCUMENTED_RATE_LIMITS.length / 2,
+      `README states ${STATED_RATE_LIMITS.pairs} pairs; the template's ${DOCUMENTED_RATE_LIMITS.length} names are ${DOCUMENTED_RATE_LIMITS.length / 2} pairs.`
+    );
+    assert.equal(
+      DOCUMENTED_RATE_LIMITS.length % 2,
+      0,
+      'a rate-limit knob is missing its window/max partner — every limiter is declared as a pair'
+    );
+  });
+
   test('the parsers can fail — in-test controls in both directions', () => {
     // Each parser is shown reporting a planted wrong value and then agreeing with a right one, so a
     // function that returned a constant could not pass the assertions above.
@@ -194,6 +270,30 @@ describe('documentation fact drift', () => {
     assert.equal(statedModuleCount('`server/src` contains some TypeScript modules'), null);
     assert.equal(statedMobileVersions('mobile is at its released version'), null);
     assert.equal(statedRecordCount('a long list of records follows'), null);
+
+    assert.deepEqual(statedRateLimitCounts('| `AUTH_*_RATE_LIMIT_*` (32 variables, 16 pairs) | x |'), {
+      variables: 32,
+      pairs: 16,
+    });
+    // The count control compares against a planted template rather than the live one: a control that
+    // moved with the tree would stop failing the moment the tree broke in the same direction.
+    assert.equal(rateLimitNames('# AUTH_LOGIN_RATE_LIMIT_MAX=10\n# AUTH_LOGIN_RATE_LIMIT_WINDOW_MS=900000', true).length, 2);
+    assert.notEqual(statedRateLimitCounts('| `AUTH_*_RATE_LIMIT_*` (32 variables, 16 pairs) | x |').variables, 2);
+    assert.equal(statedRateLimitCounts('the rate limits are configurable'), null);
+
+    // The name comparison is controlled on a planted snippet: a variable the code reads and the
+    // template does not name is reported, which is the assertion above working in the finding
+    // direction. The identifier is assembled from parts for the same reason the anchors above are.
+    const PLANTED_VAR = 'AUTH_' + 'PLANTED_RATE_LIMIT_MAX';
+    assert.deepEqual(rateLimitNames(`process.env.${PLANTED_VAR}, 1`), [PLANTED_VAR]);
+    assert.deepEqual(
+      rateLimitNames(`process.env.${PLANTED_VAR}, 1`).filter((n) => !DOCUMENTED_RATE_LIMITS.includes(n)),
+      [PLANTED_VAR],
+      'a read variable absent from the template must be reported'
+    );
+    // And the template parser refuses a name that appears only in prose.
+    assert.deepEqual(rateLimitNames(`# see ${PLANTED_VAR} for the limit`, true), []);
+    assert.deepEqual(rateLimitNames(`# ${PLANTED_VAR}=1`, true), [PLANTED_VAR]);
 
     // The count extraction is controlled too, on a planted document. The identifier is assembled
     // from parts rather than written out: this file is inside the corpus the section-integrity guard

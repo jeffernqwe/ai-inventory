@@ -84,8 +84,9 @@ resolved.
 - **Its specifiers are current.** They were updated to `.ts` as their targets migrated, so it
   participates in the module graph correctly.
 
-Every place this repository names `services/entitlement.service.js` — `CLAUDE.md`, `README.md`, the
-Phase 10 record — is **correct**. Those are not stale `.js` references and must not be rewritten to
+Every place this repository names `services/entitlement.service.js` — `CLAUDE.md`,
+`SYSTEM_SPECIFICATION.md`, `constants/plans.ts`, the Phase 10 record and the Phase 10 test's own
+import — is **correct**. Those are not stale `.js` references and must not be rewritten to
 `.ts`. Migrating the file belongs to the V4 work that will give it a call path.
 
 ---

@@ -8,7 +8,7 @@ of truth for *what actually happened*, and it is why this file is long.
 
 **How to read it.** Do not read it top to bottom. Either find a record by number (§27FJ, §27DM — the
 numbers are cited from `CLAUDE.md` and from source comments), or use the index: `CLAUDE.md` §7 lists
-all **183** records by the title each gives itself.
+all **184** records by the title each gives itself.
 
 **Current state:** V1 complete and in production testing. The records that answer *where are we now*
 are §27FM (the V1 re-verification), §27FK (the runtime boundary and the blocked build), §27FJ (the two
@@ -22349,6 +22349,45 @@ needs no `DEMO_ACCOUNT_PASSWORD` (that variable only creates an identity, and a 
 seeds exactly like a password one), and registering an account creates ONE row in the database that
 app is talking to — the other side is a seed, which is why a fresh database reads `MISSING` for
 accounts that already exist elsewhere and nothing needs registering twice.
+
+---
+
+# 27GD. The preset seeded for real in development — and the 27-minute estimate corrected (2026-10-27)
+
+**What was asked for.** Run `seed:three` at 30 000 / 50 000 / 90 000 products for the three accounts
+and verify each tenant afterwards.
+
+**Measured.** `EXIT=0`, one run, 755 555 documents across three tenants:
+
+| Tenant | Products | Documents | Time | Rate |
+|---|---|---|---|---|
+| small `jefferndullamalinaozxc@gmail.com` | 30 000 | 133 333 | 170 682 ms | 781 docs/s |
+| medium `jefferndullamalinao@gmail.com` | 50 000 | 222 222 | 372 982 ms | 596 docs/s |
+| large `jeffernmalinaoqwe@gmail.com` | 90 000 | 400 000 | 587 461 ms | 681 docs/s |
+| **total** | **170 000** | **755 555** | **1 131 s (18 min 51 s)** | — |
+
+So the `LARGE RUN` warning's **27 minutes was conservative**, and it says why: that estimate was built
+on the 470 documents/s measured on 2026-10-25 from a 60 000-document PRODUCTION run, while this shape
+ran at 596–781 documents/s. The warning is still right to exist — the plan was held in memory (the
+seeder's process was at **~370 MB** while writing the 400 000-document tenant). Each tenant's previous
+data was reset first (`removed 1333 previous document(s)`), and **nothing was written to Firebase**: all
+three identities were reported `already existed, verified`.
+
+**Verified independently of the seeder's own report.** `verify:demo` ran against each tenant and
+returned OK three times — counts, ledger arithmetic and referential integrity. `check:accounts
+--with-production` then read **6 of 6** pairs READY with the development counts exactly as seeded
+(30 000 / 50 000 / 90 000 products; 133 333 / 222 222 / 400 000 documents), and stock health scales with
+the catalogue as expected (4 656 / 7 623 / 13 683 at or below minimum; 1 892 / 3 030 / 5 481 at zero).
+
+**The SKU/barcode rule held at scale.** A read-only count over all **170 000** seeded products found
+`0` carrying a `sku` and `0` carrying a `barcode` — the fields are absent, which is the state the app's
+own barcode action needs to assign the first code.
+
+**One cosmetic consequence, deliberately left alone.** The development tenants still carry the name
+the FIRST seed gave them — `AI TEST CUSTOM — 300 seeded products` — because a seeder names a tenant only
+when it CREATES one. That is the rule that keeps a production run from rewriting a real business's
+name (`royal kludge`, `inplay`, `rak gears` are untouched), and no figure, query, check or measurement
+reads the name. The three production tenants, which the next run fills, carry their own.
 
 ---
 

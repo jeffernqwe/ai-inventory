@@ -511,6 +511,7 @@ anchor (`§27…`) in that file.
 - **§27GA** — The command audit — one false pass, one bad message, and four flags that were ignored (2026-10-27)
 - **§27GB** — The three accounts by address — a products-sized plan, a pre-flight check, and a cleanup that keeps every login (2026-10-27)
 - **§27GC** — The three accounts registered, and the whole workflow run against them (2026-10-27)
+- **§27GD** — The preset seeded for real in development — and the 27-minute estimate corrected (2026-10-27)
 
 ---
 

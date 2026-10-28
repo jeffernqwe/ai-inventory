@@ -189,9 +189,9 @@ Play requires **both** an in-app path and a web URL.
 | name, real email, password hash, Firebase identity, all sessions, reset/verification records, AI conversations and messages | the business's stock, movements, purchase orders and audit trail, with the person's `userId` set to `null`; the `User` row survives anonymously |
 
 Ownership decides the rest: if another member remains, records stay, and a sole OWNER is refused
-`409 LAST_OWNER_TRANSFER_REQUIRED` until someone else is made owner; if nobody remains, the account
-**and the whole business** are deleted, which the screen states before the button. A repeat request
-converges (`changed: false`).
+`409 LAST_OWNER_TRANSFER_REQUIRED` until someone else is made owner; if nobody else remains and the
+caller is the OWNER, the account **and the whole business** are deleted, which the screen states
+before the button. A repeat request converges (`changed: false`).
 
 Measured on production 2026-10-24 with a disposable tenant: 12/12 checks (register 201, sign-in 200,
 STAFF 201/200, mistyped word 400, wrong password 400 `INVALID_CURRENT_PASSWORD`, session still valid

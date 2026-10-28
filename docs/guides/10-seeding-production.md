@@ -40,22 +40,26 @@ PowerShell keeps variables until you clear them, so set, run, then clear `NODE_E
 npm run check:accounts -- --with-production
 ```
 
-It reads **the production database only** and Firebase, prints each account's tenant id, and prints the
-exact seeding line — `address:products`, with **no id to copy**. `--with-production` selects production
-instead of development, so a tenant that exists only in development never fails this check. Exit **0** every
-account ready, **1** missing or mismatched, **2** could not check.
+It reads **the production database only** and Firebase, prints each account's tenant id and current
+size, and shows the size a `seed:accounts` line would use. `--with-production` selects production
+instead of development, so a tenant that exists only in development never fails this check. Exit **0**
+every account ready, **1** missing or mismatched, **2** could not check.
 
 | Account | Products | ≈ Documents | `businessId` |
 |---|---|---|---|
-| `jefferndullamalinaozxc@gmail.com` | 30 000 | 133 333 | `6adfb57dcd2aa24e547d0f02` |
-| `jefferndullamalinao@gmail.com` | 50 000 | 222 222 | `6ae07d878f20644de675d4dd` |
-| `jeffernmalinaoqwe@gmail.com` | 90 000 | 400 000 | `6ae07daa8f20644de675d4e2` |
+| `jefferndullamalinaozxc@gmail.com` | 5 000 | 22 222 | `6ae15d1b6f2be6b817771e97` |
+| `jefferndullamalinao@gmail.com` | 10 000 | 44 444 | `6ae15dc16f2be6b817771e9c` |
+| `jeffernmalinaoqwe@gmail.com` | 15 000 | 66 667 | `6ae15e926f2be6b817771ea2` |
 
-The id shown is the tenant's own `_id`, not the login's. You no longer type it: the seeder resolves the
-address to that row, and refuses unless the account is the tenant's **OWNER**. The older
-`address:products:<businessId>` form still works, and a supplied id that does not match the resolved tenant
-is refused — the lookup is the source, an id is only a claim it checks. A production address with **no
-tenant is refused** too: registration in the app creates it, a seeder does not.
+These are the live production tenants as measured on **2026-10-29**. The `seed:three` preset remains
+30 000 / 50 000 / 90 000, but it is development-only; a production run always names its sizes. The
+example in "Seeding the three accounts" below uses the current sizes.
+
+The id is the tenant's own `_id`, not the login's. `seed:accounts` resolves the address to that row and
+needs no id; `seed --plan=demo` still names it with `--business=<id>`. A supplied id is checked against
+the resolved tenant and refused if it disagrees — the lookup is the source, an id is only a claim it
+checks. A production address with **no tenant is refused** too: registration in the app creates it, a
+seeder does not.
 
 ---
 
@@ -82,7 +86,7 @@ NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
   SEED_CONFIRM=seed-accounts SEED_DB_CONFIRM=inventoryai_prod_db \
   SEED_PROD_CONFIRM=SEED-PRODUCTION-DATA \
   npm run seed:accounts -- --database=inventoryai_prod_db --dry-run \
-    --accounts="jefferndullamalinaozxc@gmail.com:30000,jefferndullamalinao@gmail.com:50000,jeffernmalinaoqwe@gmail.com:90000"
+    --accounts="jefferndullamalinaozxc@gmail.com:5000,jefferndullamalinao@gmail.com:10000,jeffernmalinaoqwe@gmail.com:15000"
 
 # EXECUTE — the same line without --dry-run
 ```
@@ -94,8 +98,11 @@ NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
 - Expect `database … (PRODUCTION)`, a tenant line per account, `scope : replacing the DATA of business …`,
   the counts, `OK`, and `password NOT changed on a production run`. Name, members and roles are untouched.
 - **No SKUs or barcodes** are generated unless you ask for `--include-sku`.
-- Measured 2026-10-27: all three wrote **755 555 documents** in **23 min 6 s**, and every identity was
-  reported `already existed, verified` — nothing was written to Firebase.
+- Measured 2026-10-29: the current **5 000 / 10 000 / 15 000** tenants hold **22 222 / 44 444 /
+  66 667 documents** (133 333 in all), and `verify:demo` returned **SUCCESS** for each with 0 bad ledger
+  rows and 0 missing references. The earlier 30 000 / 50 000 / 90 000 run on 2026-10-27 wrote
+  **755 555 documents** in **23 min 6 s**, and every identity was reported `already existed, verified`
+  — nothing was written to Firebase.
 
 ---
 
@@ -155,7 +162,7 @@ NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
 - `--size` is **documents**, 50–400 000, default 4 000; products land at ≈22 %. Deterministic (`--seed`,
   default 1). SKUs are `SEEDSKU-…`.
 - It creates a verified OWNER login (`perf-seed-ai@example.invalid`) in that tenant only, and refreshes its
-  password from `DEMO_ACCOUNT_PASSWORD` on every run.
+  password from `DEMO_ACCOUNT_PASSWORD` when that variable is supplied.
 - Re-counts every collection, re-checks every movement's arithmetic and requires its anchor before saying
   `OK`.
 - Its teardown is `cleanup:perf-tenant` ([Guide 12](12-deleting-production.md)); it keeps the identity.
@@ -193,19 +200,24 @@ NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
 ```
 
 Reads counts, ledger arithmetic and referential integrity; writes nothing, needs no phrase. Exit **0**
-verified, **1** a violation, **2** could not read (not a data problem). Measured 2026-10-27: all three
-tenants returned OK, and their stock-health figures were **identical to development's** (4 656 / 1 892,
-7 623 / 3 030, 13 683 / 5 481) — the PRNG seed doing what it promises across two environments.
+verified, **1** a violation **or an empty tenant** (an empty tenant cannot verify a seeded dataset),
+**2** could not read (a missing account or business, or the database — not a data problem). Measured
+2026-10-29 on the current tenants: all three returned **SUCCESS**, with **0** bad ledger rows and **0**
+missing references; stock health was 781 low / 320 out, 1 535 / 612 and 2 315 / 929. The earlier
+30 000 / 50 000 / 90 000 run measured 4 656 / 1 892, 7 623 / 3 030 and 13 683 / 5 481 — the PRNG seed
+doing what it promises across two environments and two sizes.
 
 ---
 
 ## Room on the cluster
 
 The cluster is Atlas M0: **512 MB of data plus indexes**, shared by development and production. Measured
-2026-10-27, production holds the three seeded tenants at **379.9 MB of 512 MB — 132.1 MB free**. A full
-development copy of the same three datasets needs ~338 MB, and seeding it while production is full would
-pass the ceiling — and an M0 that runs out of storage does **not** degrade, it **blocks writes** (the
-2026-10-18 incident).
+2026-10-29, `inventoryai_prod_db` reports **32.0 MB of document data (16.0 MB stored) and 59.0 MB of
+indexes** — **91.0 MB of the 512 MB** by `dbStats`, with the current 5 000 / 10 000 / 15 000
+tenants. At the preset's 30 000 / 50 000 / 90 000 sizes the same three tenants measured **379.9 MB** on
+2026-10-27, so a full development copy of those full-size datasets (~338 MB) alongside a full
+production copy still does not fit; an M0 that runs out of storage does **not** degrade, it **blocks
+writes** (the 2026-10-18 incident).
 
 So: seed the environment you are working in at full size, and keep the other small; or empty one first
 ([Guide 12](12-deleting-production.md)). A delete frees documents but **not** the space their indexes were
@@ -219,9 +231,9 @@ allocated — that guide has the numbers and the reclaim.
 |---|---|---|---|
 | `seed --plan=demo --business=<id>` | **replaced** for that tenant | kept; created if absent | never deleted; password never rewritten |
 | `seed:accounts` (resolved tenants) | **replaced** for each account's own tenant | kept | never deleted |
-| `seed:perf-tenant` | **replaced** for its own tenant | kept | created if absent; its own password refreshed |
+| `seed:perf-tenant` | **replaced** for its own tenant | kept | created if absent; its own password refreshed when `DEMO_ACCOUNT_PASSWORD` is supplied |
 | `seed --plan=roles` | **replaced** for the role fixture tenant | four role logins reused | reused |
-| `seed:demo-tenant` | **replaced** for the demo tenant | kept | password set on every run |
+| `seed:demo-tenant` | **replaced** for the demo tenant | kept | password set when `DEMO_ACCOUNT_PASSWORD` is supplied |
 | `verify:demo` / `verify:roles` / `check:accounts` | untouched | untouched | untouched |
 
 ---

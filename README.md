@@ -79,9 +79,10 @@ Values live in the Render dashboard and the EAS dashboard; the repository holds 
 | `MONGODB_URI`, `JWT_SECRET` (≥ 32 chars) | **required** — boot exits without them |
 | `JWT_EXPIRES_IN`, `JWT_ISSUER`, `JWT_AUDIENCE` | optional; `1h`, `inventory-ai`, `inventory-ai-api` |
 | `FIREBASE_SERVICE_ACCOUNT_JSON` (preferred) or `FIREBASE_PROJECT_ID` + `FIREBASE_CLIENT_EMAIL` + `FIREBASE_PRIVATE_KEY` | **all-or-nothing**; none = Firebase disabled, partial = boot fails |
+| `EMAIL_VERIFICATION_CODE_PEPPER` | required for the six-digit verification and in-app reset-code flows; those routes answer 503 without it |
 | `AI_PROVIDER` + `OPENROUTER_API_KEY` + `OPENROUTER_BASE_URL` + `AI_MODEL_OPENROUTER` | AI is disabled when unset; the model has **no default** |
 | `AI_FALLBACK_MODELS_OPENROUTER`, `AI_MODEL_FAILURE_THRESHOLD`, `AI_MODEL_COOLDOWN_MS`, `AI_MODEL_HEALTH_TTL_MS`, `AI_QUOTA_BLOCK_MS`, `AI_ATTEMPT_MAX_MS`, `AI_HEALTH_ALERT_EMAIL` (+ `AI_HEALTH_WATCH_*`) | optional failover, health and alerting tuning |
-| `MAIL_PROVIDER`, `MAIL_FROM`, `BREVO_API_KEY`, `PASSWORD_RESET_URL` | optional; missing config disables password recovery only (503) |
+| `MAIL_PROVIDER`, `MAIL_FROM`, `BREVO_API_KEY`, `PASSWORD_RESET_URL` | optional; missing mail config disables recovery (503); `PASSWORD_RESET_URL` is only for the emailed-link path |
 | `AUTH_*_RATE_LIMIT_*` (36 variables, 18 pairs) | optional; the documented defaults are the production values |
 | `TRUST_PROXY` | **effectively required** — set `1` |
 | `CORS_ORIGINS`, `JSON_BODY_LIMIT`, `SHUTDOWN_TIMEOUT_MS`, `LOG_REQUESTS` | optional; defaults are the production values |
@@ -169,6 +170,6 @@ guides describe; start there.
 
 ## Status
 
-V1 is feature-complete and running in production testing. Known open items (iOS verification, push
-notifications, export/reporting, the store release) are tracked in the roadmap's latest section;
-nothing in this README is a promise about a date.
+V1 is feature-complete and running in production testing. Known open items — iOS verification and the
+Play release — are tracked in the roadmap's latest section; push notifications and export/reporting
+are future scope, not built. Nothing in this README is a promise about a date.

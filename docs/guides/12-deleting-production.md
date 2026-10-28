@@ -175,7 +175,7 @@ fit.
 | After | Run | Expect |
 |---|---|---|
 | a tenant cleanup | the command again with `--dry-run` | every collection at 0, or `nothing to clean` |
-| a tenant cleanup | `verify:demo` with the production environment | exit 0, or `no such account` if the rows are gone |
+| a tenant cleanup | `verify:demo` with the production environment | `FAILED — the tenant is empty` (exit 1) is the proof the data is gone; exit 2 if the rows are gone too |
 | an accounts cleanup | `npm run check:accounts -- --with-production` | the accounts are still `READY`, with 0 documents a seed would reset |
 | a database wipe | `npm run seed -- … --dry-run` | a clean target; the app shows an empty business |
 | firebase deletion | the `--target=firebase` line with `--dry-run` | `no identity` for each address ([Guide 13](13-firebase-identities.md)) |
@@ -186,7 +186,9 @@ NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
 ```
 
 Cleanups prove themselves: each real run re-queries the same plan and prints `0 remaining`. Nothing here
-needs a phrase to check, because reading changes nothing.
+needs a phrase to check, because reading changes nothing. An empty tenant is not a verification pass:
+`verify:demo` exists to check a seeded dataset, so it reports that state as a failure (exit 1). Read it
+as the deletion's proof, not as a data defect.
 
 ---
 

@@ -57,35 +57,39 @@ every command must name its database. The rule in full: [Guide 9](9-seeding-deve
 |---|---|---|
 | **Your own address** | `seed --plan=demo` | one tenant sized by `--total` (default 80 000 documents) |
 | **A throwaway tester** (`tester-1@example.com`, …) | `seed --plan=demo` with a new address | its own separate tenant; a fresh address per tester |
-| **Three comparison accounts** | `npm run seed:three` | 30 000 / 50 000 / 90 000 products — ≈133 000 / 222 000 / 400 000 documents |
+| **Three comparison accounts** | `npm run seed:three` (development) / `seed:accounts` (production) | the preset's 30 000 / 50 000 / 90 000 products — ≈133 000 / 222 000 / 400 000 documents; the live production tenants are 5 000 / 10 000 / 15 000 (≈22 222 / 44 444 / 66 667) |
 | **`demo-preview@example.invalid`** | `seed:demo-tenant` | the small fixed-figure demo tenant (6 products, 112 units) |
 | **`role-owner@…` / `role-admin@…` / `role-manager@…` / `role-staff@…`** | `seed:roles` | one tenant, one working login per role, ~900 documents |
 | **`perf-seed-ai@example.invalid`** | `seed:perf-tenant` | a large measurement tenant you can sign into |
 | *no login* | `seed:perf` | a measurement tenant that cannot be signed into |
 
-All addresses end in the reserved `example.invalid` domain, which can never receive mail. Their logins
-are marked verified through Firebase's admin interface — the same write the app makes after a real
-code — so no rule is weakened and no mailbox is needed. Passwords come from
-`DEMO_ACCOUNT_PASSWORD` / `ROLE_TEST_PASSWORD`, never from the command line.
+The fixtures the project creates use the reserved `example.invalid` domain, which can never receive
+mail. Their logins are marked verified through Firebase's admin interface — the same write the app
+makes after a real code — so no rule is weakened and no mailbox is needed. The `@example.com`
+addresses in examples stand for an address you control, not a project fixture; seeding one creates
+its login without sending any mail. Passwords come from `DEMO_ACCOUNT_PASSWORD` /
+`ROLE_TEST_PASSWORD`, never from the command line.
 
 The role fixture's value is the boundary, not the data: `verify:roles` checks **96 cells** (route ×
 role). ADMIN's visible restriction is in **Users** — no creating another ADMIN, no changing its own
 role, no editing an ADMIN or the OWNER.
 
-### The three comparison accounts
+### The three comparison accounts (preset sizes)
 
-| Account | Products | ≈ Documents |
+| Account | Preset products | ≈ Documents |
 |---|---|---|
 | `jefferndullamalinaozxc@gmail.com` | 30 000 | 133 333 |
 | `jefferndullamalinao@gmail.com` | 50 000 | 222 222 |
 | `jeffernmalinaoqwe@gmail.com` | 90 000 | 400 000 |
 
-They exist to answer one question: does the assistant stay correct and fast as a catalogue grows? The
-walkthrough is in [Guide 6](6-scripts-and-commands.md#comparing-the-assistant-across-tenants). The
-addresses and sizes are fixed in `server/scripts/seed/lib.mjs`, and three commands read that one list:
-`check:accounts` (do they exist?), `seed:three` (fill them) and `cleanup:three` (empty them, keeping the
-logins) — all three in [Guide 9](9-seeding-development.md)/[Guide 10](10-seeding-production.md) and
-[Guide 11](11-deleting-development.md)/[Guide 12](12-deleting-production.md).
+That table is the preset `seed:three` writes **in development**. Production refuses the preset, so the
+live production tenants are seeded with explicit sizes — currently 5 000 / 10 000 / 15 000, measured
+2026-10-29. They exist to answer one question: does the assistant stay correct and fast as a catalogue
+grows? The walkthrough is in [Guide 6](6-scripts-and-commands.md#comparing-the-assistant-across-tenants).
+The addresses and preset sizes are fixed in `server/scripts/seed/lib.mjs`, and three commands read that
+one list: `check:accounts` (do they exist?), `seed:three` (fill them) and `cleanup:three` (empty them,
+keeping the logins) — all three in [Guide 9](9-seeding-development.md)/[Guide 10](10-seeding-production.md)
+and [Guide 11](11-deleting-development.md)/[Guide 12](12-deleting-production.md).
 
 ---
 
@@ -124,12 +128,24 @@ what assigns them — that is deliberate, and worth one product per run.
 A deleted login whose database record survives can never sign in again, and the address cannot be
 re-registered. `cleanup:test-firebase` deletes **every** login in the project, including yours.
 
-> **Clear MongoDB for a fresh start. Leave Firebase alone.**
+> **Never delete a Firebase identity while a MongoDB user row still uses its address.**
 
-You then sign in and get a brand-new empty business, exactly like a first-time user. There is no way to
-delete one user from the app, and none should be added — register a new address instead. When an
-identity genuinely must go, [Guide 13](13-firebase-identities.md) has the guarded command and the
-refusals that make the ordering impossible to get wrong.
+There are two safe ways to start over:
+
+- **Same login, empty business:** a tenant-scoped cleanup such as `cleanup:demo` removes that tenant's
+  data but keeps its user row, business row and login. Sign in again and the business is empty —
+  [Guide 11](11-deleting-development.md).
+- **Genuinely new account and business:** in the app, **Profile → Delete account** deletes the Firebase
+  identity and the personal data; when you are the only active member **and** its OWNER, the business
+  closes with the account, and the address can be registered again. [Guide 8](8-play-store-submission.md) §6.3
+  describes the flow.
+
+Registering a new address is still the simplest way to get a separate tenant, and the app has no admin
+control that deletes somebody else's account. Do **not** clear the whole database and expect to sign in
+afterwards: `cleanup -- --target=database` deletes the `users` rows and strands every login
+([Guide 11](11-deleting-development.md)). When an identity genuinely must go through the admin
+commands, [Guide 13](13-firebase-identities.md) has the guarded command and the refusals that make the
+ordering impossible to get wrong.
 
 ---
 
@@ -138,8 +154,9 @@ refusals that make the ordering impossible to get wrong.
 | Want | Do |
 |---|---|
 | Fresh sample data in your own tenant | `seed --plan=demo --database=…` — [Guide 9](9-seeding-development.md) |
-| Your data gone, logins kept | `cleanup:demo --database=… --email=… --business=…`, which removes one tenant and keeps its login — [Guide 11](11-deleting-development.md) |
-| Your data gone and a brand-new business | `cleanup -- --target=database --database=…`, then sign in again; this removes **every** tenant in that database — [Guide 11](11-deleting-development.md) |
+| Your data gone, same login and business | `cleanup:demo --database=… --email=… --business=…`, which removes one tenant and keeps its login — [Guide 11](11-deleting-development.md) |
+| A genuinely new account and business | Profile → **Delete account**, then register again or use a new address — [Guide 8](8-play-store-submission.md) §6.3 |
+| **Every** tenant in a database gone | `cleanup -- --target=database --database=…` — ⚠️ this also deletes the `users` rows and strands every login, so it is not a fresh-start path — [Guide 11](11-deleting-development.md) |
 | One fixture tenant gone | its own cleanup (`cleanup:roles`, `cleanup:demo-tenant`, `cleanup:perf-tenant`, `cleanup:perf`) — [Guide 11](11-deleting-development.md) |
 | A truly new user | register a new address in the app — a new empty business |
 | A login gone, deliberately | [Guide 13](13-firebase-identities.md) — database first, identity second |

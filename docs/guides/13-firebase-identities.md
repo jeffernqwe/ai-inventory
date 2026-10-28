@@ -33,6 +33,11 @@ re-registered (`409 EMAIL_IN_USE`). Nothing in the app can repair it.
 That rule is enforced, not just documented: the commands below refuse when any user row in either
 database still references the address.
 
+The app's own **Profile → Delete account** is the supported self-service path and is not this admin
+operation: the server deletes the Firebase identity first, then closes the account (and the business
+when the caller is its only active member **and** OWNER), so the address can be registered again. Do not reproduce
+it by deleting an identity from the console while the row survives.
+
 ---
 
 ## Which commands create identities
@@ -44,8 +49,8 @@ No command creates an identity on its own. The seeders do, as part of their own 
 | `seed --plan=demo` / `seed:demo` | the `--email=` you pass | `DEMO_ACCOUNT_PASSWORD`, on creation only | yes |
 | `seed --plan=accounts` | each address in `--accounts=` | `DEMO_ACCOUNT_PASSWORD` | yes |
 | `seed --plan=roles` / `seed:roles` | the four `role-*@example.invalid` addresses | `ROLE_TEST_PASSWORD` | yes |
-| `seed:perf-tenant` | `perf-seed-ai@example.invalid` | `DEMO_ACCOUNT_PASSWORD`, refreshed every run | yes |
-| `seed:demo-tenant` | `demo-preview@example.invalid` | `DEMO_ACCOUNT_PASSWORD`, set every run | yes |
+| `seed:perf-tenant` | `perf-seed-ai@example.invalid` | `DEMO_ACCOUNT_PASSWORD`, refreshed when supplied | yes |
+| `seed:demo-tenant` | `demo-preview@example.invalid` | `DEMO_ACCOUNT_PASSWORD`, set when supplied | yes |
 | `seed:perf` | — (no identity) | — | — |
 
 - **`emailVerified: true`** is set through Firebase's admin interface, which is the same write the app
@@ -125,11 +130,11 @@ still a reference by email, so it blocks the delete just the same.
 
 ---
 
-## One command that deletes identities by itself
+## One cleanup command that deletes identities by itself
 
 `cleanup:roles --delete-firebase` removes the four role identities, but only after the tenant's rows
-are gone and only after re-querying that no user still uses the addresses. It is the one automatic
-identity deletion, and it is safe in that order:
+are gone and only after re-querying that no user still uses the addresses. Apart from the app's own
+**Delete account**, it is the one automatic identity deletion, and it is safe in that order:
 
 ```bash
 CLEANUP_CONFIRM=cleanup:roles CLEANUP_DB_CONFIRM=inventoryai_dev_db \
@@ -160,8 +165,10 @@ This deletes **every** identity in `inventoryai-d0d20`, including yours. It guar
 - deleting only Firebase users: it never touches MongoDB, and it never creates a user.
 
 Use it only to reset the test project itself (for example after a device run has littered it with
-throwaway registrations). **Not** a way to start over with your own account: that is
-`cleanup -- --target=database` plus a fresh sign-in, which leaves every identity in place
+throwaway registrations). **Not** a way to start over with your own account. For that, use **Profile →
+Delete account** in the app: the server removes the identity and the personal data (and closes the
+business if you are its only member and OWNER), after which the address can be registered again. `cleanup --
+--target=database` does **not** work for this — it deletes the `users` rows and strands every login
 ([Guide 4](4-test-accounts-and-mock-data.md)).
 
 ---

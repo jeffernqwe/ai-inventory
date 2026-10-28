@@ -98,8 +98,10 @@ SEED_CONFIRM=seed-three-accounts SEED_DB_CONFIRM=inventoryai_dev_db \
 | `jefferndullamalinao@gmail.com` | 50 000 | 222 222 |
 | `jeffernmalinaoqwe@gmail.com` | 90 000 | 400 000 |
 
-The addresses and sizes live together in `server/scripts/seed/lib.mjs`, and `check:accounts` and
-`cleanup:three` read the same list — so all three commands describe the same three tenants.
+That is the **preset** `seed:three` writes in development. Production refuses the preset, so its live
+tenants are seeded with explicit sizes — currently 5 000 / 10 000 / 15 000 ([Guide 10](10-seeding-production.md)).
+The addresses and preset sizes live together in `server/scripts/seed/lib.mjs`, and `check:accounts`
+and `cleanup:three` read the same list — so all three commands describe the same three addresses.
 
 **Registering an account creates ONE row, in the database that app is talking to.** The Firebase identity
 is shared by both databases, so each account needs at most one registration and the other side is a seed:
@@ -203,7 +205,8 @@ DEMO_ACCOUNT_PASSWORD='<password>' SEED_CONFIRM=seed-demo-tenant \
 - The database must be **named** and must equal the resolved one; the test database is refused.
 - **One phrase**, `SEED_CONFIRM=seed-demo-tenant` — there is no `SEED_DB_CONFIRM` for this tool.
 - It may also run against production, because the database is named and matched.
-- The password is set on every run.
+- Supplying `DEMO_ACCOUNT_PASSWORD` sets the password on every run; without it, an existing identity
+  keeps its current password.
 
 Sign in as `demo-preview@example.invalid` (owner `Demo Tester`). Every figure is fixed:
 
@@ -240,7 +243,7 @@ DEMO_ACCOUNT_PASSWORD='choose-a-password' SEED_CONFIRM=seed:perf-tenant \
 - `--size` is **documents**, 50–400 000, default 4 000; products land at ≈22 %. Deterministic (`--seed`,
   default 1). SKUs are `SEEDSKU-…`.
 - It creates a verified OWNER login (`perf-seed-ai@example.invalid`) in that tenant only, and refreshes its
-  password from `DEMO_ACCOUNT_PASSWORD` on every run.
+  password from `DEMO_ACCOUNT_PASSWORD` when that variable is supplied.
 - Re-counts every collection, re-checks every movement's arithmetic and requires its anchor before saying
   `OK`.
 - Its teardown is `cleanup:perf-tenant` ([Guide 11](11-deleting-development.md)); it keeps the identity.
@@ -296,8 +299,8 @@ referential integrity (inventory → product/location, receipts → real movemen
 needs no phrase. Exit codes are a contract:
 
 - **0** verified — the data is what the seeder claimed
-- **1** a violation was found — the data is wrong
-- **2** not verified — the database or account could not be read (not a data problem)
+- **1** a violation was found, **or the tenant is empty** — an empty tenant cannot verify a seed
+- **2** not verified — the database, account or business could not be read (not a data problem)
 
 Run it after every seed. It is the only thing that proves the rows, rather than the seeder's own count of
 its inserts. `verify:roles` is the equivalent for the role fixture.
@@ -311,8 +314,8 @@ its inserts. `verify:roles` is the equivalent for the role fixture.
 | `seed --plan=demo` | **replaced** for that one tenant | created if absent, else kept | never deleted; created only if absent |
 | `seed:three` / `seed:accounts` | **replaced** for each named tenant | same | same |
 | `seed --plan=roles` | **replaced** for the role fixture tenant | four role logins reused | same |
-| `seed:perf-tenant` | **replaced** for its own tenant | created if absent | created if absent; password refreshed |
-| `seed:demo-tenant` | **replaced** for the demo tenant | created if absent | created if absent; password set |
+| `seed:perf-tenant` | **replaced** for its own tenant | created if absent | created if absent; password refreshed when `DEMO_ACCOUNT_PASSWORD` is supplied |
+| `seed:demo-tenant` | **replaced** for the demo tenant | created if absent | created if absent; password set when `DEMO_ACCOUNT_PASSWORD` is supplied |
 | `seed:perf` | **replaced** for its own tenant | recreated, no login | never touched |
 | `verify:demo` / `verify:roles` | untouched | untouched | untouched |
 

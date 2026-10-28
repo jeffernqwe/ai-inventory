@@ -1628,18 +1628,48 @@ failure retries the original request **exactly once**; terminal errors never ren
 failure degrades gracefully without ending the session, and `BUSINESS_NOT_ACTIVE` preserves
 authentication. No refresh token and no new durable state exist.
 
+## Account Deletion (self-service)
+
+`DELETE /api/auth/me` closes the caller's own account. It is **authenticated** and carries no
+capability: the subject is `req.user.id`, no id in the request could name another account, and the
+caller must re-authenticate with the current password or a fresh Firebase ID token. The route is
+rate-limited, accepts the confirmation word `DELETE`, and issues no session.
+
+The row is not hard-deleted. It becomes a tombstone: `status: DELETED`, `deletedAt`, the real name and
+email replaced, `firebaseUid` and `passwordHash` removed, and `passwordChangedAt` stamped so an
+already-issued token cannot outlive the deletion. The person's sessions, password-reset and
+email-verification records, invitations addressed to them, and AI conversations and messages are
+removed. In the account-only path, audit rows are kept with `userId: null` and one `ACCOUNT_DELETED`
+row records the event; when the whole tenant closes, its audit trail is removed with it.
+
+The Firebase identity is deleted first, in the same operation. If that deletion fails, the database row
+is left intact rather than becoming an orphan. When another active member remains and the caller is the
+only active OWNER, the request is refused `409 LAST_OWNER_TRANSFER_REQUIRED` until ownership is
+transferred. When the caller is the only active member **and** the OWNER, the whole tenant is removed
+with the account — products, stock, movements, purchase orders, suppliers, locations, categories, the
+audit trail and assistant history — through the same teardown plan every cleanup uses. A non-owner who
+is the only active member leaves the tenant with its owner.
+
+The app exposes the flow at **Profile → Delete account**; `GET /account-deletion` is the public web
+page that explains it. A repeat request on a surviving tombstone converges: no destructive work is
+repeated and no second identity or audit row is created.
+
 ## Password Recovery
 
-A user who has forgotten their password recovers access through an emailed, single-use reset link.
-Two routes, both **public and unauthenticated** — the caller cannot authenticate, which is the whole
-point — and both POST-only:
+> **Current mobile path (AUTH-06, 2026-10-20).** The shipped app resets a password with a **six-digit
+> code entered in the app**, not by opening a link. The link flow below remains implemented for the
+> server page; the code flow is described in "Password reset by six-digit code" below.
+
+A user who has forgotten their password can recover access through an emailed, single-use reset link.
+The link flow has two routes, both **public and unauthenticated** — the caller cannot authenticate,
+which is the whole point — and both POST-only:
 
 ```text
 POST /api/auth/forgot-password   202, always
 POST /api/auth/reset-password    200 on success
 ```
 
-Both are rate-limited. They are the only unauthenticated write surface besides register and login.
+Both are rate-limited. The code flow below adds three more public, POST-only routes.
 
 ### `POST /api/auth/forgot-password`
 
@@ -1720,6 +1750,27 @@ wait on authentication.
   user whose reset succeeded would otherwise be sent straight back into the app instead of being asked
   to sign in with the new password. No client session survives a reset, matching the server, which ends
   every session the account held.
+
+### Password reset by six-digit code (AUTH-06, current mobile path)
+
+```text
+POST /api/auth/password-reset/code      202, always
+POST /api/auth/password-reset/verify    200 + a one-time reset authorization
+POST /api/auth/password-reset/confirm   200, password replaced
+```
+
+`/code` mints a six-digit code (10-minute lifetime, five attempts, 60-second resend cooldown) and sends
+it through the mail boundary. It answers the same `202` and the same sentence for a known address, an
+unknown one, an ineligible account and a delivery failure; the one `503` is a configuration refusal
+checked **before** the account lookup. `/verify` checks the code and returns a short-lived, single-use
+authorization (15 minutes); it accepts no password and issues no session. `/confirm` accepts that
+authorization, not the code, and the new password; it ends every session the account holds, stamps
+`passwordChangedAt`, requests revocation of the Firebase refresh tokens (best effort), and issues no
+session.
+
+The code and the authorization are stored only as purpose-separated keyed digests, and both are
+domain-separated from the email-verification digests that share the same pepper. The mobile screens are
+`/forgot-password`, `/reset-password-code` and `/reset-password-new`.
 
 ### Known limits
 
@@ -2076,20 +2127,27 @@ route reachable from `server/src/app.ts` therefore falls into exactly one declar
   `requireAuth`, and its declaration names the catalogue key. This is the default and the expectation
   for every route that reads or writes a business resource.
 - **Authenticated** — `requireAuth` plus a controller, with no capability gate. Reserved for the
-  caller's own account (`GET`/`PATCH /api/auth/me`, `POST /api/auth/change-password`, and the
-  session-lifecycle routes `POST /api/auth/logout`, `GET /api/auth/sessions`,
-  `DELETE /api/auth/sessions/:id` — a user's own sessions are self-service, so no capability is
-  involved). Phase 32H's `POST /api/auth/firebase/link` belongs here for the same reason: it attaches
-  an identity to the caller's own account and names no other account, and no catalogue key could
-  express "may link an identity" without inventing an authorization concept the catalogue does not
-  have. Also here are the categories/locations reads, which have no view capability in the catalogue.
-  Each is listed explicitly, with its reason, so that the deferral is visible and cannot be extended
-  by accident.
-- **Public** — no authentication at all. The health probes must answer before a token can exist,
-  login/register are how a token is obtained, and password recovery
-  (`POST /api/auth/forgot-password`, `POST /api/auth/reset-password`) is how a locked-out user gets a
-  new password without one; all are rate-limited, and no public route writes business data except
-  through the recovery flow described in §29.
+  caller's own account (`GET`/`PATCH`/`DELETE /api/auth/me`, `POST /api/auth/change-password`,
+  `POST /api/auth/renew`, `POST /api/auth/credentials-changed`, and the session-lifecycle routes
+  `POST /api/auth/logout`, `GET /api/auth/sessions`, `DELETE /api/auth/sessions/:id` — a user's own
+  sessions are self-service, so no capability is involved). `DELETE /api/auth/me` deletes only the
+  caller's account, after re-authentication; `POST /api/auth/renew` re-issues a token for the caller's
+  own live session; `POST /api/auth/credentials-changed` records a credential change on the caller's
+  own account and revokes its sessions. Phase 32H's `POST /api/auth/firebase/link` belongs here for
+  the same reason: it attaches an identity to the caller's own account and names no other account.
+  Also here are the categories/locations reads, which have no view capability in the catalogue. Each
+  is listed explicitly, with its reason, so that the deferral is visible and cannot be extended by
+  accident.
+- **Public** — no authentication at all. The health probes must answer before a token can exist;
+  login/register are how a token is obtained; the Firebase exchange/registration and pre-session
+  email-verification routes are how a verified Firebase identity reaches a tenant; password recovery
+  (the link routes and the AUTH-06 code routes) is how a locked-out user gets a new password; the
+  invitation preview is how an invited person reads the invitation. All are rate-limited.
+  `POST /api/auth/firebase/register` is the one public route that creates business data (the Business
+  and OWNER row), which is why it has its own limiter; the recovery flow writes credentials and
+  challenges, nothing in an existing tenant's inventory. The public HTML pages (`/privacy`, `/terms`,
+  `/account-deletion`, `/invite`, `/auth/reset`) are page routes outside `/api`; they write nothing
+  and are readable before any session exists.
 - **Role-gated** — a gate naming roles directly rather than a capability. **There are none**, and
   adding one requires an explicit decision: a role-name gate bypasses the permission catalogue, so a
   route using it would be invisible to any scan that looks only for capability keys.
@@ -2390,29 +2448,35 @@ not a credential and cannot authorize anything by itself: the API accepts Invent
 
 ## Password Recovery and Mail Delivery
 
-Password recovery is disabled unless mail delivery is configured. It requires:
+Mail delivery is shared by email verification and both password-recovery paths. It requires:
 
 ```text
-MAIL_PROVIDER               the provider that sends mail; empty disables recovery entirely
+MAIL_PROVIDER               the provider that sends mail; empty disables all mail
 MAIL_FROM                   a sender address the provider has verified
 BREVO_API_KEY               provider credential — server-side only
 MAIL_APP_NAME               optional; product name shown in the email (default "Inventory AI")
 MAIL_REQUEST_TIMEOUT_MS     optional; abort a provider request slower than this (default 10000)
-PASSWORD_RESET_URL          the reset page an emailed link points at
+PASSWORD_RESET_URL          only the emailed-link path; not used by the AUTH-06 code flow
+EMAIL_VERIFICATION_CODE_PEPPER  keys the verification and reset-code digests
 ```
 
-The provider, its credential and `PASSWORD_RESET_URL` must all be set before a reset token is created
-or a link is sent; while any is missing, `POST /api/auth/forgot-password` answers its fixed `503` and no
-token is written. A provider credential is never returned in a response, written to a log, or sent to
-the mobile application.
+The provider and its credential must be set before any verification or reset mail is sent. The
+emailed-link path also requires `PASSWORD_RESET_URL`; while any of the three is missing,
+`POST /api/auth/forgot-password` answers its fixed `503` and no token is written. The AUTH-06 code flow
+requires the provider and the pepper, but **not** `PASSWORD_RESET_URL`; the code route
+`POST /api/auth/password-reset/code` answers `503 PASSWORD_RESET_CODE_NOT_CONFIGURED` before any account
+lookup when either is unusable. A provider credential is never returned in a response, written to a
+log, or sent to the mobile application.
 
-`PASSWORD_RESET_URL` is the **only** source of the reset URL. It is never built from the `Host`,
-`Origin` or `Referer` headers or from anything a client sends, so a hostile request cannot redirect a
-victim's reset link to another domain. It must point at a real screen that reads the token from its
-query string and submits it to `POST /api/auth/reset-password`; a value pointing nowhere leaves the
-feature configured but unusable.
+For the emailed-link path, `PASSWORD_RESET_URL` is the **only** source of the reset URL. It is never
+built from the `Host`, `Origin` or `Referer` headers or from anything a client sends, so a hostile
+request cannot redirect a victim's reset link to another domain. It must point at a real screen that
+reads the token from its query string and submits it to `POST /api/auth/reset-password`; a value
+pointing nowhere leaves that path configured but unusable. The code flow never builds a URL.
 
-Recovery is rate-limited per source address and per account, separately from login:
+Recovery is rate-limited per source address and per account, separately from login. The AUTH-06
+`/password-reset/code` route uses the request budgets below; `/password-reset/verify` and
+`/password-reset/confirm` share the confirm budget:
 
 ```text
 AUTH_PASSWORD_RESET_RATE_LIMIT_WINDOW_MS          default 3600000  (1 hour)

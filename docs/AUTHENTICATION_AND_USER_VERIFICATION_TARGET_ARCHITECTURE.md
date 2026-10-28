@@ -75,6 +75,10 @@ application decisions.
 
 ### Two console settings, not repository settings
 
+> **Current implementation (AUTH-06, 2026-10-20).** The app's own password reset is the six-digit code
+> flow in `docs/SYSTEM_SPECIFICATION.md` §29; the link chain below remains only for Firebase-composed
+> emails and the server page.
+
 The emailed reset link returns through a page on this server, because Firebase refuses to mail a link
 that opens a custom scheme (`auth/unauthorized-domain`). Both settings live in the Firebase console:
 

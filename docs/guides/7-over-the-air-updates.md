@@ -137,8 +137,9 @@ npx eas-cli env:set --environment production --name EXPO_PUBLIC_API_URL \
 
 - `EXPO_PUBLIC_API_URL` is defined **twice** (EAS production environment and the production build
   profile). The profile wins for builds. Keep them identical.
-- `mobile/lib/config.ts` falls back to `http://localhost:4000` when it is absent. On 2026-10-24 the
-  production environment lacked it, so a production publish would have reached no server.
+- `mobile/lib/config.ts` falls back to a platform default (`http://10.0.2.2:4000` on Android,
+  `http://localhost:4000` elsewhere) when it is absent. On 2026-10-24 the production environment
+  lacked it, so a production publish would have reached no server.
 - Changing an `EXPO_PUBLIC_*` **value** is a build decision, not an OTA one.
 
 ## 5. Commands (from `mobile/`)

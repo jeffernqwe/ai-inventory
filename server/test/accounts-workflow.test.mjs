@@ -32,6 +32,8 @@ import {
   MAX_DOCUMENTS,
   MAX_PRODUCTS,
   MIN_PRODUCTS,
+  assertOneBusinessAssociation,
+  assertProductionTenantOwnership,
   databasesToCheck,
   documentsForProducts,
   productsForDocuments,
@@ -127,12 +129,12 @@ describe('the seeder has two modes and two phrases', () => {
     assert.match(source, /pass either --preset=\$\{PRESET\} or --accounts=…, not both/);
   });
 
-  it('the preset is refused in production, where every tenant must be named', () => {
+  it('the preset is refused in production, where every tenant is resolved and checked', () => {
     assert.match(
       source,
       /the \$\{PRESET_ALIAS\} preset is a development convenience and is refused in production/,
     );
-    assert.match(source, /--accounts="address:products:<businessId>,…"/);
+    assert.match(source, /--accounts="address:products,…"/);
   });
 
   it('the preview opens no connection in development, and only reads in production', () => {
@@ -155,7 +157,12 @@ describe('the seeder has two modes and two phrases', () => {
     assert.ok(preview.includes('readIdentity('), 'the preview must use the read-only identity lookup');
     assert.ok(!preview.includes('resolveIdentity('), 'the preview must not create or refresh an identity');
     assert.ok(preview.includes('resolveExistingTenantForIdentity('), 'the preview must resolve the tenant');
-    assert.ok(preview.includes('assertTenantNamedForReset('), 'the preview must apply the naming rule');
+    assert.ok(preview.includes('readBusinessAssociations('), 'the preview must check for ambiguous links');
+    assert.ok(preview.includes('assertOneBusinessAssociation('), 'the preview must refuse two tenants');
+    assert.ok(
+      preview.includes('assertProductionTenantOwnership('),
+      'the preview must apply the ownership and naming rules',
+    );
     assert.ok(!preview.includes('ensureTenantForIdentity('), 'the preview must not create a tenant');
     assert.ok(preview.includes('countTenantDataRemoval('), 'the preview must count what would be reset');
     assert.ok(!preview.includes('seedTenant('), 'the preview must not write data');
@@ -173,6 +180,113 @@ describe('the seeder has two modes and two phrases', () => {
       assert.ok(source.includes(call), `seed-accounts.mjs no longer calls ${call}`);
     }
     assert.match(source, /resolveIdentity\([^)]*refreshPassword: !production/);
+  });
+});
+
+describe('a production target is resolved from the account, never typed', () => {
+  const owner = {
+    businessId: 'a'.repeat(24),
+    businessName: 'republic of gamers',
+    role: 'OWNER',
+  };
+
+  it('an address with no tenant is refused, because production must not create one', () => {
+    assert.throws(
+      () => assertProductionTenantOwnership({ email: 'a@x.com', tenant: null, command: 'seed:accounts' }),
+      /no business exists for a@x\.com/,
+    );
+  });
+
+  it('a member who is not the OWNER is refused', () => {
+    assert.throws(
+      () =>
+        assertProductionTenantOwnership({
+          email: 'a@x.com',
+          tenant: { ...owner, role: 'STAFF' },
+          command: 'seed:accounts',
+        }),
+      /requires the OWNER/,
+    );
+  });
+
+  it('an optional id is only accepted when it names the tenant the account owns', () => {
+    assert.equal(
+      assertProductionTenantOwnership({ email: 'a@x.com', tenant: owner, command: 'seed:accounts' }),
+      owner.businessId,
+    );
+    assert.throws(
+      () =>
+        assertProductionTenantOwnership({
+          email: 'a@x.com',
+          tenant: owner,
+          requestedBusinessId: 'b'.repeat(24),
+          command: 'seed:accounts',
+        }),
+      /names business b{24}, but this account owns a{24}/,
+    );
+  });
+
+  it('two business associations are ambiguous and refused; one is returned', () => {
+    assert.equal(
+      assertOneBusinessAssociation({ email: 'a@x.com', businessIds: [owner.businessId, owner.businessId] }),
+      owner.businessId,
+    );
+    assert.equal(assertOneBusinessAssociation({ email: 'a@x.com', businessIds: [] }), null);
+    assert.throws(
+      () => assertOneBusinessAssociation({ email: 'a@x.com', businessIds: [owner.businessId, 'b'.repeat(24)] }),
+      /linked to 2 businesses/,
+    );
+  });
+
+  it('the dry run and the write path resolve and validate through the same functions', () => {
+    const source = read('seed-accounts.mjs');
+    for (const call of [
+      'readBusinessAssociations(',
+      'assertOneBusinessAssociation(',
+      'assertProductionTenantOwnership(',
+    ]) {
+      assert.ok(source.includes(call), `seed-accounts.mjs no longer calls ${call}`);
+    }
+
+    const preview = source.slice(
+      source.indexOf('async function previewProductionTargets'),
+      source.indexOf('async function main()'),
+    );
+    for (const call of [
+      'readIdentity(',
+      'resolveExistingTenantForIdentity(',
+      'readBusinessAssociations(',
+      'assertOneBusinessAssociation(',
+      'assertProductionTenantOwnership(',
+      'countTenantDataRemoval(',
+    ]) {
+      assert.ok(preview.includes(call), `the production preview no longer calls ${call}`);
+    }
+    assert.ok(
+      !preview.includes('ensureTenantForIdentity('),
+      'the production preview must not create a tenant',
+    );
+
+    // The real path must run that check BEFORE resolveIdentity, which can create a login when
+    // DEMO_ACCOUNT_PASSWORD is set. A refused tenant check must not leave a new identity behind.
+    const preflightIndex = source.lastIndexOf('await previewProductionTargets(plan, target.database)');
+    const identityLoop = source.indexOf('resolveIdentity(entry.email');
+    assert.ok(preflightIndex > -1, 'the real production path never runs the read-only preflight');
+    assert.ok(
+      identityLoop > preflightIndex,
+      'the real run resolves (and can create) identities before checking the tenants',
+    );
+  });
+
+  it('the production hint prints address:products, never an id that can go stale', () => {
+    const source = read('check-accounts.mjs');
+    assert.match(source, /return `\$\{row\.email\}:\$\{wanted \?\? 30000\}`;/);
+    assert.equal(
+      source.includes('row.businessId ? `:${row.businessId}`'),
+      false,
+      'the production hint still appends a business id',
+    );
+    assert.match(source, /each tenant is resolved from the account and checked/);
   });
 });
 
@@ -219,11 +333,19 @@ describe('the cleanup removes data and never an account', () => {
     assert.match(source, /never deletes an identity/);
   });
 
-  it('production names every tenant, and the id must be the account it claims', () => {
-    assert.match(source, /must name its tenant in production/);
+  it('production resolves each address to its tenant, and a supplied id must be that tenant', () => {
+    assert.match(source, /assertProductionTenantOwnership\(/);
+    assert.match(source, /readBusinessAssociations\(/);
+    assert.match(source, /assertOneBusinessAssociation\(/);
     assert.match(source, /const PRESET_ALIAS = 'cleanup:three'/);
     assert.match(source, /is refused in production/);
+    // The older `address:businessId` form still works, and is compared with the row.
     assert.match(source, /belongs to business \$\{String\(user\.businessId\)\}, not/);
+    assert.equal(
+      /must name its tenant in production/.test(source),
+      false,
+      'cleanup still demands an id it can look up from the account',
+    );
   });
 
   it('a verification failure is a failure, not a note', () => {

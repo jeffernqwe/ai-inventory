@@ -169,10 +169,10 @@ question: does the assistant stay correct and fast as a catalogue grows?
    ([Guide 13](13-firebase-identities.md)). The second command refuses
    while any user row still owns an address, which is why the order is a check and not advice.
 2. **Register all three in the app** — Create Account → the 6-digit code from the mailbox → dashboard.
-3. **Check them** with `npm run check:accounts` — read-only, and it names the `businessId` production
-   needs ([Guide 9](9-seeding-development.md)).
+3. **Check them** with `npm run check:accounts` — read-only, and it names the tenant each account owns and
+   prints the exact production seeding line ([Guide 9](9-seeding-development.md)).
 4. **Seed them** with `npm run seed:three` ([Guide 9](9-seeding-development.md)). Dry-run first; production
-   refuses the preset and wants every account named with the tenant it owns.
+   refuses the preset, and resolves each named address to its own tenant — which that account must own.
 5. **Generate a barcode** on one seeded product: both seeders leave SKUs and barcodes blank on purpose,
    so the app's own generation is what assigns them.
 6. **Compare** the sizes:

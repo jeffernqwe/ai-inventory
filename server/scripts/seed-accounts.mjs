@@ -51,16 +51,19 @@
 //     sign in nor register (`409 EMAIL_IN_USE`), and nothing in the application can
 //     repair it. Clearing MongoDB alone is the safe direction.
 //
-// PRODUCTION. The same script reaches a NAMED database, production included. Two extra
+// PRODUCTION. The same script reaches a NAMED database, production included. Three extra
 // rules apply there, because several REAL businesses can be reset in one command:
 //   * A PRESET IS REFUSED. Every account must be named explicitly, as
-//     `address:products[:businessId]`; the preset is a development convenience and would
-//     reset real businesses by accident. `npm run check:accounts -- --with-production` prints
-//     the same three accounts with their ids, ready to paste.
-//   * whenever an account ALREADY owns a business, its id must be the third field. A
-//     brand-new account has no id to name, and creating one deletes nothing.
+//     `address:products`; the preset is a development convenience and would reset real
+//     businesses by accident.
+//   * THE TENANT ID IS RESOLVED, NOT TYPED. Each address is looked up in the database, its
+//     own `businessId` is read, and the run requires that account to be the OWNER. The
+//     optional third field (`address:products:businessId`) still works, but it is compared
+//     with the resolved id and a mismatch refuses. An account with no business is refused
+//     rather than silently given a new one, so a production seed never creates a second
+//     tenant behind an existing login.
 //   * an EXISTING login's password is never rewritten, even when DEMO_ACCOUNT_PASSWORD is
-//     set. Creation still uses it.
+//     set. Creation is refused in production outright.
 //
 // Usage (development — TWO phrases, and the database is always named):
 //   SEED_CONFIRM=seed-three-accounts SEED_DB_CONFIRM=inventoryai_dev_db \
@@ -72,15 +75,19 @@
 //     npm run seed:accounts -- --database=inventoryai_dev_db \
 //       --accounts="a@x.com:100000,b@y.com:40000"
 //
-// Production (THREE phrases, the preset refused, every tenant named by id):
+// Production (THREE phrases, the preset refused, the tenant resolved from the address):
 //   NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
 //     SEED_CONFIRM=seed-accounts SEED_DB_CONFIRM=inventoryai_prod_db \
 //     SEED_PROD_CONFIRM=SEED-PRODUCTION-DATA \
 //     npm run seed:accounts -- --database=inventoryai_prod_db \
-//       --accounts="you@example.com:30000:<the id check:accounts prints>"
+//       --accounts="you@example.com:30000"
 //
-// If an address has no Firebase identity yet, supply its initial password through the
-// environment (never on the command line, never in a file):
+//   The optional third field still names a tenant, and is checked:
+//     --accounts="you@example.com:30000:<businessId>"
+//
+// In DEVELOPMENT only, an address with no Firebase identity may be created: supply its initial
+// password through the environment (never on the command line, never in a file). Production
+// refuses instead — register the account in the app first.
 //   DEMO_ACCOUNT_PASSWORD='…' SEED_CONFIRM=seed-accounts SEED_DB_CONFIRM=inventoryai_dev_db \
 //     npm run seed:accounts -- --database=inventoryai_dev_db --accounts="new@example.com:500"
 //
@@ -100,6 +107,8 @@ import {
   MAX_PRODUCTS,
   MIN_DOCUMENTS,
   MIN_PRODUCTS,
+  assertOneBusinessAssociation,
+  assertProductionTenantOwnership,
   assertTenantNamedForReset,
   countDisagreements,
   documentsForProducts,
@@ -108,6 +117,7 @@ import {
   normaliseEmail,
   parseCount,
   productsForDocuments,
+  readBusinessAssociations,
   readIdentity,
   readTenantCounts,
   resolveExistingTenantForIdentity,
@@ -258,13 +268,13 @@ function parsePlan(raw) {
  * WHY (measured 2026-10-28). The preview used to return before opening a connection, so it could
  * not compare the `:businessId` an entry names with the tenant the account actually owns. A wrong
  * id printed `business <someone else's id>` and exit 0, while the same line for real refused — the
- * preview said the opposite of the run, which is the one thing a preview must not do. It could not
- * say what would be reset either.
+ * preview said the opposite of the run, which is the one thing a preview must not do.
  *
- * It reads through the SAME lookup and the SAME rule as the real run
- * (`resolveExistingTenantForIdentity`, `assertTenantNamedForReset`), and it can only read:
- * `readIdentity` never creates, and nothing here writes. Development keeps the fast preview — an id
- * is optional there and never compared, and a tenant the run creates is not replacing anything.
+ * It reads through the SAME lookup and the SAME rules as the real run
+ * (`resolveExistingTenantForIdentity`, `readBusinessAssociations`, `assertProductionTenantOwnership`),
+ * and it can only read: `readIdentity` never creates, and nothing here writes. An address that
+ * resolves to no identity, no business or a non-OWNER refuses HERE rather than at the write.
+ * Development keeps the fast preview — it creates tenants there, and creates nothing that replaces.
  */
 async function previewProductionTargets(plan, database) {
   try {
@@ -280,36 +290,35 @@ async function previewProductionTargets(plan, database) {
     for (const entry of plan) {
       const identity = await readIdentity(entry.email);
       if (!identity) {
-        console.log(
-          `[${COMMAND}]   ${entry.email.padEnd(34)} no login yet — this run would CREATE it ` +
-            '(needs DEMO_ACCOUNT_PASSWORD)',
+        throw new SeedSafetyError(
+          `no Firebase identity exists for ${entry.email}, and a production seed will not create ` +
+            'one. Register the account in the app first (registration creates it), then re-run. ' +
+            'Nothing was written.',
         );
-        continue;
       }
 
       const tenant = await resolveExistingTenantForIdentity({ email: entry.email, identity });
-      if (!tenant) {
-        console.log(
-          `[${COMMAND}]   ${entry.email.padEnd(34)} no tenant yet — this run would CREATE one and print its id`,
-        );
-        continue;
-      }
-
-      // The real run's rule, applied here so a wrong id fails the preview rather than the write.
-      assertTenantNamedForReset({
-        production: true,
-        reused: true,
-        requestedBusinessId: entry.businessId,
-        businessId: tenant.businessId,
-        businessName: tenant.businessName,
-        command: `${COMMAND} (${entry.email})`,
-        namingHint: 'the third field of --accounts',
+      assertOneBusinessAssociation({
+        email: entry.email,
+        businessIds: await readBusinessAssociations({ email: entry.email, firebaseUid: identity.uid }),
       });
+
+      // The real run's rules, applied here so a missing tenant, a renamed id or a non-OWNER
+      // fails the preview rather than the write.
+      entry.businessId = String(
+        assertProductionTenantOwnership({
+          email: entry.email,
+          tenant,
+          requestedBusinessId: entry.businessId,
+          command: `${COMMAND} (${entry.email})`,
+          namingHint: 'the third field of --accounts',
+        }),
+      );
 
       const { total } = await countTenantDataRemoval([tenant.businessId]);
       console.log(
-        `[${COMMAND}]   ${entry.email.padEnd(34)} reusing ${String(tenant.businessId)} ` +
-          `("${tenant.businessName}") — ${total.toLocaleString()} document(s) would be reset`,
+        `[${COMMAND}]   ${entry.email.padEnd(34)} resolved ${entry.businessId} ` +
+          `("${tenant.businessName}", ${tenant.role}) — ${total.toLocaleString()} document(s) would be reset`,
       );
     }
   } finally {
@@ -349,8 +358,8 @@ async function main() {
     fail(
       `the ${PRESET_ALIAS} preset is a development convenience and is refused in production: it ` +
         'would reset three real businesses in one command. Name every account instead, as ' +
-        '--accounts="address:products:<businessId>,…" — `npm run check:accounts -- --with-production` ' +
-        'prints these three with their ids. Nothing was written.',
+        '--accounts="address:products,…" — each tenant is resolved from its address and checked ' +
+        'before anything is written.',
     );
   }
 
@@ -404,8 +413,8 @@ async function main() {
   if (production) {
     console.log('');
     console.log(
-      `[${COMMAND}] production: each account that ALREADY owns a business must name it as the third ` +
-        'field; its existing password is never changed',
+      `[${COMMAND}] production: each tenant is resolved from the account's own user row and must be ` +
+        'OWNED by it; an optional :businessId must match that row; its existing password is never changed',
     );
   }
 
@@ -416,7 +425,7 @@ async function main() {
       await previewProductionTargets(plan, target.database);
       console.log('');
       console.log(
-        `[${COMMAND}] dry run complete — every id was checked against ${target.database}; nothing was written.`,
+        `[${COMMAND}] dry run complete — every account and tenant was resolved against ${target.database}; nothing was written.`,
       );
     } else {
       console.log(`[${COMMAND}] dry run complete — no connection was opened and nothing was written.`);
@@ -453,7 +462,17 @@ async function main() {
     return;
   }
 
-  // ---- resolve every identity FIRST, so a plan that cannot be satisfied fails
+  // ---- production: prove every account and tenant BEFORE touching Firebase. The identity
+  // ---- resolver may create a login when DEMO_ACCOUNT_PASSWORD is set, and a production run
+  // ---- that would refuse on a missing tenant must not leave a new identity behind while
+  // ---- doing it. This is the dry run's own read-only check, run again on the real path.
+  if (production) {
+    console.log('');
+    console.log(`[${COMMAND}] production preflight — read-only, against ${target.database}:`);
+    await previewProductionTargets(plan, target.database);
+  }
+
+  // ---- resolve every identity next, so a plan that cannot be satisfied fails
   // ---- before any tenant has been reset. A half-seeded suite would silently bias
   // ---- the very comparison it is meant to support.
   const resolved = [];
@@ -484,11 +503,41 @@ async function main() {
   // ---- that every tenant about to be replaced was named — before anything is cleared.
   const prepared = [];
   for (const entry of resolved) {
-    const tenant = await ensureTenantForIdentity({
+    const existing = await resolveExistingTenantForIdentity({
       email: entry.email,
       identity: entry.identity,
-      businessName: `AI TEST ${entry.tier.toUpperCase()} — ${entry.products.toLocaleString()} seeded products`,
     });
+
+    let tenant;
+    if (production) {
+      // The lookup and the two rules are the ones the preview ran: an ambiguous association, a
+      // missing tenant or a non-OWNER is refused here as well, and an id supplied in the third
+      // field is accepted only when it equals the row's own businessId.
+      assertOneBusinessAssociation({
+        email: entry.email,
+        businessIds: await readBusinessAssociations({
+          email: entry.email,
+          firebaseUid: entry.identity.uid,
+        }),
+      });
+      entry.businessId = String(
+        assertProductionTenantOwnership({
+          email: entry.email,
+          tenant: existing,
+          requestedBusinessId: entry.businessId,
+          command: `${COMMAND} (${entry.email})`,
+          namingHint: 'the third field of --accounts',
+        }),
+      );
+      tenant = existing;
+    } else {
+      // Development keeps its one convenience: a new address may create its own tenant.
+      tenant = existing ?? await ensureTenantForIdentity({
+        email: entry.email,
+        identity: entry.identity,
+        businessName: `AI TEST ${entry.tier.toUpperCase()} — ${entry.products.toLocaleString()} seeded products`,
+      });
+    }
 
     // The premise of the whole exercise. If two accounts resolved to one business
     // their data WOULD mix, and every comparison drawn from them would be void.
@@ -591,12 +640,10 @@ async function main() {
   const cleanupPhrases =
     `${envPrefix}CLEANUP_CONFIRM=${phrase === PRESET_PHRASE ? 'cleanup-three-accounts' : 'cleanup-account-data'} ` +
     `CLEANUP_DB_CONFIRM=${target.database} ${production ? 'CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA ' : ''}`;
-  // The preset takes no account list; every other run must name the same accounts it seeded,
-  // with the same ids — a printed hint without them is refused (measured 2026-10-28: exit 1).
+  // The preset takes no account list; every other run names the same ADDRESSES it seeded.
+  // The cleanup resolves each one to its own tenant, so a hint cannot carry a stale id.
   const cleanupAccounts =
-    phrase === PRESET_PHRASE
-      ? ''
-      : ` --accounts="${results.map((r) => `${r.email}:${r.businessId}`).join(',')}"`;
+    phrase === PRESET_PHRASE ? '' : ` --accounts="${results.map((r) => r.email).join(',')}"`;
   console.log(`[${COMMAND}]   ${cleanupPhrases}npm run ${phrase === PRESET_PHRASE ? 'cleanup:three' : 'cleanup:account'} -- --database=${target.database}${cleanupAccounts} --dry-run`);
   console.log(`[${COMMAND}]   …and the same line without --dry-run to delete.`);
   if (production) {

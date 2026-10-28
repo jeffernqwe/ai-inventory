@@ -23,8 +23,8 @@ NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db   # both, enforced by co
   variable can reach production by habit. A refusal names every phrase that is missing and how many that
   target needs.
 - **A preset is refused.** `seed:three` (and `seed --plan=accounts` with no list) would reset three real
-  businesses in one command, so production requires every account to be **named with the tenant it already
-  owns**.
+  businesses in one command, so production requires every account to be **named by address**. Its tenant is
+  **resolved from the database**, and the account must be that tenant's OWNER.
 - **Every write is scoped by `businessId`.** Nothing outside the tenants you name is read or reset.
 - **The Firebase project is pinned** to `inventoryai-d0d20`; a login created elsewhere could never be
   joined to the tenant ([Guide 13](13-firebase-identities.md)).
@@ -41,9 +41,9 @@ npm run check:accounts -- --with-production
 ```
 
 It reads **the production database only** and Firebase, prints each account's tenant id, and prints the
-exact seeding line with the ids filled in. `--with-production` selects production instead of development,
-so a tenant that exists only in development never fails this check. Exit **0** every account ready,
-**1** missing or mismatched, **2** could not check.
+exact seeding line — `address:products`, with **no id to copy**. `--with-production` selects production
+instead of development, so a tenant that exists only in development never fails this check. Exit **0** every
+account ready, **1** missing or mismatched, **2** could not check.
 
 | Account | Products | ≈ Documents | `businessId` |
 |---|---|---|---|
@@ -51,9 +51,11 @@ so a tenant that exists only in development never fails this check. Exit **0** e
 | `jefferndullamalinao@gmail.com` | 50 000 | 222 222 | `6ae07d878f20644de675d4dd` |
 | `jeffernmalinaoqwe@gmail.com` | 90 000 | 400 000 | `6ae07daa8f20644de675d4e2` |
 
-The id is the tenant's own `_id`, not the login's — naming it is a second fingerprint, so a typo'd or
-copy-pasted address cannot empty a different business. An account that does not exist yet needs no id:
-creating one deletes nothing.
+The id shown is the tenant's own `_id`, not the login's. You no longer type it: the seeder resolves the
+address to that row, and refuses unless the account is the tenant's **OWNER**. The older
+`address:products:<businessId>` form still works, and a supplied id that does not match the resolved tenant
+is refused — the lookup is the source, an id is only a claim it checks. A production address with **no
+tenant is refused** too: registration in the app creates it, a seeder does not.
 
 ---
 
@@ -62,12 +64,13 @@ creating one deletes nothing.
 | Command | How the tenant is named |
 |---|---|
 | `seed --plan=demo` | `--business=<id>` |
-| `seed:accounts` / `seed:three`'s place | `--accounts="address:products:<businessId>,…"` |
+| `seed:accounts` / `seed:three`'s place | resolved from each address; an optional `:businessId` is checked |
 | `seed:perf-tenant`, `seed --plan=roles` | not needed — each owns the tenant it creates |
 
-The address resolves to its user row and that row's own `businessId` is what is written; the id you supply
-must **agree**, or the run refuses before writing. In production the run reports `password NOT changed`:
-an existing login's password is never rewritten.
+The address resolves to its user row and that row's own `businessId` is what is written. In production the
+row must be the **OWNER of exactly one** business: the resolver refuses a missing tenant, a second
+association, or a non-OWNER before any write. If you do supply an id, it must **agree** with that row.
+In production the run reports `password NOT changed`: an existing login's password is never rewritten.
 
 ---
 
@@ -79,15 +82,15 @@ NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
   SEED_CONFIRM=seed-accounts SEED_DB_CONFIRM=inventoryai_prod_db \
   SEED_PROD_CONFIRM=SEED-PRODUCTION-DATA \
   npm run seed:accounts -- --database=inventoryai_prod_db --dry-run \
-    --accounts="jefferndullamalinaozxc@gmail.com:30000:6adfb57dcd2aa24e547d0f02,jefferndullamalinao@gmail.com:50000:6ae07d878f20644de675d4dd,jeffernmalinaoqwe@gmail.com:90000:6ae07daa8f20644de675d4e2"
+    --accounts="jefferndullamalinaozxc@gmail.com:30000,jefferndullamalinao@gmail.com:50000,jeffernmalinaoqwe@gmail.com:90000"
 
 # EXECUTE — the same line without --dry-run
 ```
 
 - **A size is PRODUCTS.** `:400000d` asks in documents instead; the ceiling is **112 500 products ≈ 500 000
   documents** per account.
-- Each tenant is emptied and rewritten only after it has been named by id, so the run is the documented way
-  to start over for that tenant.
+- Each tenant is emptied and rewritten only after its address has resolved to exactly one tenant the
+  account owns, so the run is the documented way to start over for that tenant.
 - Expect `database … (PRODUCTION)`, a tenant line per account, `scope : replacing the DATA of business …`,
   the counts, `OK`, and `password NOT changed on a production run`. Name, members and roles are untouched.
 - **No SKUs or barcodes** are generated unless you ask for `--include-sku`.
@@ -124,7 +127,7 @@ production itself.
 |---|---|
 | A large tenant of its own, with a login | `npm run seed:perf-tenant -- --database=inventoryai_prod_db --size=60000` — the recommended route |
 | Your own account's tenant | `npm run seed -- --plan=demo --database=… --email=… --business=<id>` |
-| Accounts you name | `npm run seed:accounts -- --database=… --accounts="address:products:<id>,…"` |
+| Accounts you name | `npm run seed:accounts -- --database=… --accounts="address:products,…"` |
 | One login per role | `npm run seed -- --plan=roles --database=…` |
 | The fixed-figure demo tenant | `npm run seed:demo-tenant -- --database=…` (its own single phrase) |
 | The three presets | **refused** — `seed:three` may not run against production |
@@ -170,9 +173,10 @@ named and matched. Its figures are in [Guide 9](9-seeding-development.md); teard
 ## Dry run — prove the destination first
 
 Add `--dry-run` to any command above. The target and **all three phrases** are still checked, the plan is
-printed, and nothing is written. `seed:accounts` also reads — never writes — to check every `:businessId`
-against the tenant the account owns and to count what a run would reset, so a wrong or missing id fails the
-preview rather than the write. `seed --plan=…` opens no connection at all; `seed:perf-tenant` and
+printed, and nothing is written. `seed:accounts` also reads — never writes — to resolve every address to
+its own tenant, require an OWNER, refuse an ambiguous association, check any supplied `:businessId`
+against that row, and count what a run would reset. A wrong or missing mapping fails the preview rather
+than the write. `seed --plan=…` opens no connection at all; `seed:perf-tenant` and
 `seed:demo-tenant` read the database to count what they would replace. None of them touches Firebase.
 
 `--dry-run` is not a verification: it reports what *would* happen. Verification reads the rows back.
@@ -212,7 +216,7 @@ allocated — that guide has the numbers and the reclaim.
 | Command | Existing data | Account rows | Firebase identities |
 |---|---|---|---|
 | `seed --plan=demo --business=<id>` | **replaced** for that tenant | kept; created if absent | never deleted; password never rewritten |
-| `seed:accounts` with ids | **replaced** for each named tenant | kept | never deleted |
+| `seed:accounts` (resolved tenants) | **replaced** for each account's own tenant | kept | never deleted |
 | `seed:perf-tenant` | **replaced** for its own tenant | kept | created if absent; its own password refreshed |
 | `seed --plan=roles` | **replaced** for the role fixture tenant | four role logins reused | reused |
 | `seed:demo-tenant` | **replaced** for the demo tenant | kept | password set on every run |
@@ -224,9 +228,11 @@ allocated — that guide has the numbers and the reclaim.
 
 | Message | Meaning | Do |
 |---|---|---|
-| `the seed:three preset … is refused in production` | a preset against real businesses | name every account: `--accounts="address:products:<businessId>,…"` |
-| `must name its tenant in production` | an existing account was given without its id | add `:businessId` — the one `check:accounts` prints |
-| `belongs to business …, not …` | the id named is not the tenant that account owns | nothing was written; use the account's own id |
+| `the seed:three preset … is refused in production` | a preset against real businesses | name every account: `--accounts="address:products,…"` |
+| `no business exists for … and a production run will not create one` | the address has no tenant in this database | register it in the app first; registration creates the business |
+| `… requires the OWNER` | the account is a member, not the tenant's owner | seed the owner's address — the whole tenant is replaced |
+| `… is linked to 2 businesses …` | more than one row associates the address with a tenant | fix the association deliberately; nothing was written |
+| `names business …, but this account owns …` | a supplied id is not that account's tenant | omit the id (the run resolves it), or use the row's own |
 | `three confirmation phrase(s) … SEED_PROD_CONFIRM=SEED-PRODUCTION-DATA` | a phrase is missing or wrong | the message lists every one it needs |
 | `--database is "…" but this process resolved "…"` | the flag and `MONGODB_DB_NAME` disagree | set `MONGODB_DB_NAME` to the database you mean |
 | `MONGODB_URI names the database "…"` | the connection string is configured for the other environment | fix the URI; nothing was written |

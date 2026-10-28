@@ -15,9 +15,9 @@
 //
 // WHY THE ACCOUNT IS RESOLVED BY ADDRESS. The person names the account the way they see it
 // in the app. The address resolves to a user row, and that row's own `businessId` is what is
-// deleted — a client-supplied or remembered id is never trusted. In production every account
-// MUST also name its tenant, and the two must agree, so a typo cannot empty a different
-// business.
+// deleted — a client-supplied or remembered id is never trusted. In production the account
+// must be the OWNER of that one tenant; an optional `:businessId` is accepted and compared
+// with the row, so a typo cannot empty a different business.
 //
 // THE PHRASES (the same two-in-development / three-in-production rule as every cleanup):
 //   explicit list : CLEANUP_CONFIRM=cleanup-account-data
@@ -25,8 +25,8 @@
 //   both          : plus CLEANUP_DB_CONFIRM=<database>, and CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA
 //
 // THE PRESET IS DEVELOPMENT ONLY, and refused in production for the same reason the seeder's
-// preset is: it would empty three real businesses in one command. Name them instead, with the
-// ids `npm run check:accounts -- --with-production` prints.
+// preset is: it would empty three real businesses in one command. Name the addresses instead;
+// each one is resolved to its own tenant and checked before a row is deleted.
 //
 // `--dry-run` counts through the SAME plan the real run executes, prints every collection it
 // would empty, and deletes nothing. A run where nothing was ever seeded reports "nothing to
@@ -48,12 +48,15 @@
 //     npm run cleanup:account -- --database=inventoryai_dev_db \
 //       --accounts="a@x.com,b@y.com" --dry-run
 //
-// Production (THREE phrases, the preset refused, every tenant named by id):
+// Production (THREE phrases, the preset refused, the tenant resolved from the address):
 //   NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
 //     CLEANUP_CONFIRM=cleanup-account-data CLEANUP_DB_CONFIRM=inventoryai_prod_db \
 //     CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA \
 //     npm run cleanup:account -- --database=inventoryai_prod_db \
-//       --accounts="you@example.com:<the id check:accounts printed>,…"
+//       --accounts="you@example.com"
+//
+//   The optional id is still accepted, and is checked against the account's own tenant:
+//     --accounts="you@example.com:<businessId>"
 
 import 'dotenv/config';
 import mongoose from 'mongoose';
@@ -63,7 +66,13 @@ import User from '../src/models/user.model.ts';
 import { assertScopedCleanupTarget } from './cleanup/guard.mjs';
 import { CleanupSafetyError } from './cleanup/lib.mjs';
 import { SeedSafetyError, clearTenantData, countTenantDataRemoval } from './perf/lib.mjs';
-import { COMPARISON_ACCOUNTS, normaliseEmail } from './seed/lib.mjs';
+import {
+  COMPARISON_ACCOUNTS,
+  assertOneBusinessAssociation,
+  assertProductionTenantOwnership,
+  normaliseEmail,
+  readBusinessAssociations,
+} from './seed/lib.mjs';
 
 const COMMAND = 'cleanup:account';
 
@@ -102,7 +111,7 @@ function presetValue(argv = process.argv) {
   return undefined;
 }
 
-/** One entry: `address[:businessId]`. The id is the production naming act, never a lookup. */
+/** One entry: `address[:businessId]`. The id is optional and is only ever a claim to check. */
 function parseEntry(entry) {
   const parts = entry.split(':').map((part) => part.trim());
   if (parts.length < 1 || parts.length > 2) {
@@ -170,8 +179,8 @@ async function main() {
     fail(
       `the ${PRESET_ALIAS} preset is a development convenience and is refused in production: it would ` +
         'empty three real businesses in one command. Name every account instead, as ' +
-        '--accounts="address:<businessId>,…" — `npm run check:accounts -- --with-production` prints these ' +
-        'three with their ids. Nothing was deleted.',
+        '--accounts="address,…" — each address is resolved to its own tenant and checked. ' +
+        'Nothing was deleted.',
     );
   }
 
@@ -187,15 +196,6 @@ async function main() {
       fail(`"${entry.email}" appears twice in the plan. Nothing was deleted.`);
     }
     seen.add(entry.email);
-    // Naming the tenant is what proves the deletion is meant, and it is required exactly
-    // where the data is real. Development keeps the one-word command.
-    if (target.production && !entry.businessId) {
-      fail(
-        `--accounts entry "${entry.email}" must name its tenant in production, as ` +
-          `"${entry.email}:<businessId>" — that is what proves which business is emptied. ` +
-          'Nothing was deleted.',
-      );
-    }
   }
 
   console.log(`[${COMMAND}] database : ${target.database}${target.production ? '   (PRODUCTION)' : ''}`);
@@ -224,6 +224,13 @@ async function main() {
   // ---- before any row is deleted, so a partial cleanup cannot be mistaken for a done one.
   const prepared = [];
   for (const entry of plan) {
+    // A destructive command cannot pick one of two tenants for an address, even though the
+    // schema says that state cannot exist. The check runs before the lookup that assumes it.
+    assertOneBusinessAssociation({
+      email: entry.email,
+      businessIds: await readBusinessAssociations({ email: entry.email }),
+    });
+
     const user = await User.findOne({ email: entry.email })
       .select('_id businessId role')
       .lean();
@@ -239,6 +246,23 @@ async function main() {
       fail(
         `"${entry.email}" belongs to business ${String(user.businessId)}, not ${entry.businessId}. ` +
           'Refusing to empty a tenant the account does not own. Nothing was deleted.',
+      );
+    }
+    if (target.production) {
+      // The same rule the seeder applies: a production cleanup needs the OWNER of the tenant,
+      // and an address with no tenant is refused rather than treated as an empty one.
+      assertProductionTenantOwnership({
+        email: entry.email,
+        tenant: { businessId: user.businessId, role: user.role },
+        command: COMMAND,
+        namingHint: 'a :businessId in --accounts',
+      });
+    }
+
+    if (!entry.businessId) {
+      entry.businessId = String(user.businessId);
+      console.log(
+        `[${COMMAND}]   ${entry.email.padEnd(36)} resolved business ${entry.businessId} (${user.role})`,
       );
     }
 
@@ -291,7 +315,7 @@ async function main() {
     );
     console.log(
       `[${COMMAND}]     npm run ${preset ? PRESET_ALIAS : COMMAND} -- --database=${target.database}` +
-        `${preset ? '' : ` --accounts="${plan.map((e) => (e.businessId ? `${e.email}:${e.businessId}` : e.email)).join(',')}"`}`,
+        `${preset ? '' : ` --accounts="${plan.map((e) => e.email).join(',')}"`}`,
     );
     await mongoose.disconnect();
     return;

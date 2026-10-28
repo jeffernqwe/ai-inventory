@@ -105,16 +105,34 @@ const OWNER_COMMENT = 'the login, the business row and its members are never tou
  * SAME teardown plan the cleanup runs, so "what a seed would reset" here is exactly what
  * would be replaced — the check, the preview and the delete cannot describe different rows.
  */
-async function checkInDatabase(email, identity) {
-  const user = await User.findOne({ email })
+async function checkInDatabase(email, identity, { production = false } = {}) {
+  const rows = await User.find({ email })
     .select('_id businessId role status firebaseUid emailVerified')
     .lean();
 
+  // `users.email` is unique, so more than one row should be impossible — but a destructive
+  // command resolves the address before it acts, and this is the read-only place to report
+  // that the resolution would be a choice between tenants rather than a lookup.
+  const linkedBusinesses = [...new Set(rows.map((row) => String(row.businessId)).filter(Boolean))];
+  if (linkedBusinesses.length > 1) {
+    return {
+      verdict: 'AMBIGUOUS',
+      detail:
+        `${rows.length} user rows link this address to ${linkedBusinesses.length} businesses ` +
+        `(${linkedBusinesses.join(', ')}) — a seed or cleanup would REFUSE to choose one`,
+      businessId: null,
+      documents: 0,
+      products: 0,
+    };
+  }
+
+  const user = rows[0];
   if (!user) {
     return {
       verdict: 'MISSING',
-      detail:
-        'no user row — a seed would CREATE the tenant and print its id; nothing exists to replace',
+      detail: production
+        ? 'no user row — a production seed REFUSES (register the account in the app first); it does not create a tenant'
+        : 'no user row — a development seed would CREATE the tenant and print its id; nothing exists to replace',
       businessId: null,
       documents: 0,
       products: 0,
@@ -159,6 +177,24 @@ async function checkInDatabase(email, identity) {
       detail: `business ${String(user.businessId)} does not exist — a seed would REFUSE rather than repair it`,
       businessId: user.businessId ? String(user.businessId) : null,
       role: user.role,
+      documents: 0,
+      products: 0,
+    };
+  }
+
+  // A production seed replaces, and a production cleanup empties, the WHOLE tenant. Both act
+  // only for the account that owns it, so a member is reported as not ready rather than
+  // discovered at the write (or, worse, the delete).
+  if (production && user.role !== 'OWNER') {
+    return {
+      verdict: 'NOT OWNER',
+      detail:
+        `${user.role}, business ${String(user.businessId)} "${business.name}" — a production seed ` +
+        'or cleanup acts only for the OWNER',
+      businessId: String(user.businessId),
+      businessName: business.name,
+      role: user.role,
+      status: user.status,
       documents: 0,
       products: 0,
     };
@@ -248,7 +284,12 @@ async function main() {
     await connect(dbName);
     const rows = [];
     for (const email of accounts) {
-      rows.push({ email, ...(await checkInDatabase(email, identities.get(email))) });
+      rows.push({
+        email,
+        ...(await checkInDatabase(email, identities.get(email), {
+          production: dbName === DATABASE_NAMES.production,
+        })),
+      });
     }
     checked.push({ dbName, rows });
     await mongoose.disconnect();
@@ -309,11 +350,15 @@ async function main() {
   }
   if (withProduction) {
     const rows = checked.find((c) => c.dbName === DATABASE_NAMES.production)?.rows ?? [];
+    // No ids in the hint any more: the seeder resolves each address to its own tenant and checks
+    // ownership before it writes. An id pasted here would be a second source that can go stale.
     const entries = rows.map((row) => {
       const wanted = COMPARISON_ACCOUNTS.find((a) => a.email === row.email)?.products;
-      return `${row.email}:${wanted ?? 30000}${row.businessId ? `:${row.businessId}` : ''}`;
+      return `${row.email}:${wanted ?? 30000}`;
     });
-    console.log(`[${COMMAND}] production (three phrases; each existing tenant is NAMED by id):`);
+    console.log(
+      `[${COMMAND}] production (three phrases; each tenant is resolved from the account and checked):`,
+    );
     console.log(`[${COMMAND}]   NODE_ENV=production MONGODB_DB_NAME=${DATABASE_NAMES.production} \\`);
     console.log(`[${COMMAND}]     SEED_CONFIRM=seed-accounts SEED_DB_CONFIRM=${DATABASE_NAMES.production} \\`);
     console.log(`[${COMMAND}]     SEED_PROD_CONFIRM=SEED-PRODUCTION-DATA \\`);
@@ -325,7 +370,8 @@ async function main() {
     console.log('');
     console.log(
       `[${COMMAND}] NOT READY (exit 1) — ${notReady} pair(s) above are missing or mismatched. Nothing was ` +
-        'changed; the seeder refuses on STALE LINK / NOT LINKED / NO BUSINESS, and creates a tenant for MISSING.',
+        'changed; the seeder refuses on STALE LINK / NOT LINKED / NO BUSINESS / NOT OWNER / AMBIGUOUS, ' +
+        'and creates a tenant only in development, for MISSING.',
     );
     process.exit(1);
   }

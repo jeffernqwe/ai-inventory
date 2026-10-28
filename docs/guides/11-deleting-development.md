@@ -103,8 +103,8 @@ CLEANUP_CONFIRM=cleanup-account-data CLEANUP_DB_CONFIRM=inventoryai_dev_db \
     --accounts="a@x.com,b@y.com" --dry-run
 ```
 
-- In development the **addresses alone are enough**; production names every tenant with its `businessId`
-  ([Guide 12](12-deleting-production.md)).
+- In development the **addresses alone are enough**; production also reads each address's own tenant and
+  requires that account to be its **OWNER** ([Guide 12](12-deleting-production.md)).
 - The preview counts per collection **and per account**, through the same plan the deletion executes.
 - A real run re-counts every tenant afterwards and prints `0 remaining`; anything left **fails** the run.
 - An address with no account in that database is reported as `nothing to delete` and skipped — that is an

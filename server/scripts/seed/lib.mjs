@@ -88,6 +88,91 @@ export function assertTenantNamedForReset({
   }
 }
 
+/**
+ * A production seed or cleanup may only act on a tenant this account OWNS.
+ *
+ * WHY. `--accounts="address:products"` resolves the address to the tenant its own user row
+ * points at, which is the only id worth trusting. Two states would make that resolution
+ * unsafe: an account with NO tenant (a production run must not create a second business
+ * quietly — registration is the path that creates one) and a non-OWNER member (the run
+ * replaces or empties the WHOLE tenant, not just their rows). Both are refused before a
+ * connection is used for a write, and a supplied `:businessId` is still compared against
+ * the resolved tenant, so naming one cannot bypass the lookup.
+ *
+ * Shared by `seed:accounts` and `cleanup:account` so the two CLIs cannot disagree about
+ * which accounts a production run may touch.
+ */
+export function assertProductionTenantOwnership({
+  email,
+  tenant,
+  requestedBusinessId,
+  command,
+  namingHint = 'the third field of --accounts',
+}) {
+  const address = normaliseEmail(email);
+
+  if (!tenant || !tenant.businessId) {
+    throw new SeedSafetyError(
+      `no business exists for ${address} in this database, and a production run will not create ` +
+        'one. Register the account in the app first — registration creates its business — or name ' +
+        'a different address. Nothing was changed.',
+    );
+  }
+
+  if (tenant.role !== 'OWNER') {
+    throw new SeedSafetyError(
+      `${address} is ${tenant.role || 'not an OWNER'} in business ${String(tenant.businessId)}. ` +
+        'A production seed or cleanup acts on the whole tenant, so it requires the OWNER. ' +
+        'Nothing was changed.',
+    );
+  }
+
+  assertTenantNamedForReset({
+    production: true,
+    reused: true,
+    // RESOLUTION IS THE NAMING ACT now. When no id was typed, the tenant's own id is the one
+    // this run will use, so the shared rule below compares only a SUPPLIED id — a mismatch
+    // still refuses, and an omitted one is no longer a demand for a value that was just read.
+    requestedBusinessId: requestedBusinessId ?? tenant.businessId,
+    businessId: tenant.businessId,
+    businessName: tenant.businessName,
+    command,
+    namingHint,
+  });
+
+  return tenant.businessId;
+}
+
+/**
+ * An account must resolve to exactly ONE business.
+ *
+ * `users.email` is unique and so is `firebaseUid`, so this should be one row — but a seed is
+ * a destructive command, and "the database cannot contain that" is not the same as "this run
+ * checked". Legacy rows or a repaired link can leave an address pointing at two businesses;
+ * choosing one of them would be a guess, so the run stops and prints the ids instead.
+ */
+export function assertOneBusinessAssociation({ email, businessIds }) {
+  const unique = [...new Set((businessIds ?? []).filter(Boolean).map(String))];
+  if (unique.length > 1) {
+    throw new SeedSafetyError(
+      `${normaliseEmail(email)} is linked to ${unique.length} businesses in this database ` +
+        `(${unique.join(', ')}). Refusing to choose one — a seed or cleanup needs exactly one ` +
+        'tenant. Nothing was changed.',
+    );
+  }
+  return unique[0] ?? null;
+}
+
+/** Every business an address or identity is linked to. READ-ONLY, and the input to the rule above. */
+export async function readBusinessAssociations({ email, firebaseUid }) {
+  const address = normaliseEmail(email);
+  const filter = firebaseUid
+    ? { $or: [{ email: address }, { firebaseUid: String(firebaseUid) }] }
+    : { email: address };
+  const rows = await User.find(filter).select('businessId').lean();
+  return rows.map((row) => row.businessId).filter(Boolean);
+}
+
 /** Small deterministic PRNG (mulberry32) — same seed, same dataset, everywhere. */
 export function makeRandom(seed) {
   let a = seed >>> 0;
@@ -399,7 +484,7 @@ export function assertIdentityLinkUsable({ email, storedUid, resolvedUid }) {
 export async function resolveExistingTenantForIdentity({ email, identity }) {
   const address = normaliseEmail(email);
   const user = await User.findOne({ firebaseUid: identity.uid })
-    .select('_id businessId email')
+    .select('_id businessId email role')
     .lean();
 
   // The uid lookup missed. If a row already owns this ADDRESS, the next write would hit
@@ -407,7 +492,7 @@ export async function resolveExistingTenantForIdentity({ email, identity }) {
   // account. Both are reported, neither is repaired here: see assertIdentityLinkUsable.
   if (!user) {
     const byEmail = await User.findOne({ email: address })
-      .select('_id businessId email firebaseUid')
+      .select('_id businessId email role firebaseUid')
       .lean();
     if (!byEmail) return null;
     assertIdentityLinkUsable({
@@ -442,6 +527,7 @@ async function tenantForExistingUser(user) {
     businessId: business._id,
     businessName: business.name,
     userId: user._id,
+    role: user.role,
     accountCreated: false,
     reused: true,
   };

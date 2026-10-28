@@ -28,7 +28,7 @@ cannot reach production. A refusal names **every** missing phrase and says how m
 command also has a `--dry-run`, and the preview counts through the same plan the real run executes.
 
 - **A preset is refused.** `cleanup:three` would empty three real businesses in one command, so every
-  account is named instead.
+  **address** is named instead; each is resolved to its own tenant, and the account must be its OWNER.
 - **Every deletion is scoped by `businessId`**, resolved from the account's own row in this database.
 - **Nothing here deletes a login.** `--target=firebase` is a separate, deliberate operation, and it refuses
   while any database row still owns the address ([Guide 13](13-firebase-identities.md)).
@@ -79,19 +79,20 @@ NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
 accounts: the login, the business row, its members and their sessions.
 
 ```bash
-# PREVIEW — per account, per collection; the ids are the ones check:accounts prints
+# PREVIEW — per account, per collection; the tenant comes from each address
 NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
   CLEANUP_CONFIRM=cleanup-account-data CLEANUP_DB_CONFIRM=inventoryai_prod_db \
   CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA \
   npm run cleanup:account -- --database=inventoryai_prod_db --dry-run \
-    --accounts="jefferndullamalinaozxc@gmail.com:6adfb57dcd2aa24e547d0f02,jefferndullamalinao@gmail.com:6ae07d878f20644de675d4dd,jeffernmalinaoqwe@gmail.com:6ae07daa8f20644de675d4e2"
+    --accounts="jefferndullamalinaozxc@gmail.com,jefferndullamalinao@gmail.com,jeffernmalinaoqwe@gmail.com"
 
 # EXECUTE — the same line without --dry-run
 ```
 
-- **Production names every tenant:** `--accounts="address:<businessId>,…"`, and the id must be the tenant
-  that account actually owns. The run resolves the address to its user row and refuses on a mismatch. The
-  ids are the ones `npm run check:accounts -- --with-production` prints.
+- **Production resolves every tenant:** `--accounts="address,…"`. The run reads the account's own user
+  row, requires that account to be the tenant's **OWNER**, and refuses a missing tenant or a second
+  association before deleting anything. The older `address:<businessId>` form is still accepted, and a
+  supplied id must equal that row's tenant — an id is checked, never trusted.
 - The preview counts through the **same** plan the deletion executes, per collection and per account, and
   deletes nothing.
 - A real run re-counts every tenant afterwards and prints `0 remaining`; anything left **fails** the run
@@ -194,9 +195,11 @@ needs a phrase to check, because reading changes nothing.
 | Message | Do |
 |---|---|
 | `three confirmation phrase(s) … CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA` | add the third phrase; the message lists every one it needs |
-| `the cleanup:three preset … is refused in production` | name every account with `--accounts="address:<businessId>,…"` |
-| `must name its tenant in production` | a production entry gave an address without its id — add `:businessId` |
-| `belongs to business …, not …` | the id named is not the tenant that account owns; nothing was deleted |
+| `the cleanup:three preset … is refused in production` | name every account with `--accounts="address,…"` |
+| `no business exists for … and a production run will not create one` | the address has no tenant here; check the address, or the database |
+| `… requires the OWNER` | the account is a member, not the owner; empty the owner's tenant instead |
+| `… is linked to 2 businesses …` | fix the association deliberately; nothing was deleted |
+| `belongs to business …, not …` | a supplied id is not that account's tenant; omit it, or use the row's own |
 | `--database is "…" but this process resolved "…"` | set `MONGODB_DB_NAME` to match; do not retype the flag |
 | `MONGODB_URI names the database "…"` | the URI points the shell at another database; fix it before retrying |
 | `is the test database … "npm test" owns` | name production or development |

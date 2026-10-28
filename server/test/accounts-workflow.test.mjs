@@ -365,6 +365,28 @@ describe('the check answers questions and changes nothing', () => {
   });
 });
 
+describe('a connection failure is reported as a failure, not as a partial write', () => {
+  const read = (name) => readFileSync(new URL(`../scripts/${name}`, import.meta.url), 'utf8');
+
+  it('names the database and says nothing changed, before the first write', () => {
+    // Measured against production on 2026-10-28: the seed's whole report was
+    // `connect ETIMEDOUT 159.143.174.111:27017`, and a cleanup dry run exited 1 after printing its
+    // DRY RUN header — both readable as "something may have happened". Neither had.
+    for (const [name, sentence] of [
+      ['seed-accounts.mjs', 'No tenant data was written'],
+      ['cleanup-accounts.mjs', 'No document was deleted'],
+    ]) {
+      const source = read(name);
+      assert.match(
+        source,
+        /could not reach MongoDB for \$\{target\.database\}/,
+        `${name} does not name the database a failed connection was for`,
+      );
+      assert.ok(source.includes(sentence), `${name} does not say that nothing changed`);
+    }
+  });
+});
+
 describe('the identity authority is pinned, not inherited from the shell', () => {
   it('the approved project is imported from the guard that owns it, never restated', () => {
     const source = read('seed/guard.mjs');

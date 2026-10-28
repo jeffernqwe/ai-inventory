@@ -467,7 +467,18 @@ async function main() {
     );
   }
 
-  await mongoose.connect(env.mongodbUri, { dbName: env.mongodbDbName });
+  // A connection failure happens BEFORE phase 2, so nothing has been written. Without this
+  // wrapper the whole report was the driver's own line (`connect ETIMEDOUT …`, measured against
+  // production on 2026-10-28): it named neither the database nor whether anything had changed.
+  try {
+    await mongoose.connect(env.mongodbUri, { dbName: env.mongodbDbName });
+  } catch (err) {
+    throw new SeedSafetyError(
+      `could not reach MongoDB for ${target.database} (${String(err.message).split('\n')[0]}). ` +
+        'No tenant data was written — the run stopped before its first write. ' +
+        'A transient connection failure is worth one retry of the same command.',
+    );
+  }
 
   // ---- phase 2: tenants. Resolve EVERY tenant, prove the datasets are separate and
   // ---- that every tenant about to be replaced was named — before anything is cleared.

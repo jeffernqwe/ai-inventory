@@ -8,7 +8,7 @@ of truth for *what actually happened*, and it is why this file is long.
 
 **How to read it.** Do not read it top to bottom. Either find a record by number (§27FJ, §27DM — the
 numbers are cited from `CLAUDE.md` and from source comments), or use the index: `CLAUDE.md` §7 lists
-all **190** records by the title each gives itself.
+all **191** records by the title each gives itself.
 
 **Current state:** V1 complete and in production testing. The records that answer *where are we now*
 are §27FM (the V1 re-verification), §27FK (the runtime boundary and the blocked build), §27FJ (the two
@@ -22754,6 +22754,59 @@ unchanged by this record rather than introduced by it.
 **Verified.** `npm run test:unit`: **1572 tests, 1516 pass, 0 fail, 56 skipped**, exit 0 (the
 documentation guards included); `npm run lint` 0; `npm run typecheck` 0. The database-backed suite was not re-run: every change here is either a pure function, a print
 statement, or documentation, and the behaviour was exercised directly against both databases above.
+
+---
+
+# 27GK. Production seed and delete at 10 000 products — and a connection failure that read like a partial write (2026-10-28)
+
+**What was asked for.** A production-only pass over the seeding and deletion commands: the three fixed
+accounts, a large tenant, verification, scope and isolation checks, and a fix for anything it found.
+No development command was run.
+
+**What was run, in order, and what it proved.**
+
+| Operation (production, three phrases where it writes or deletes) | Result |
+| --- | --- |
+| `check:accounts --with-production` before any write | 3 of 3 READY, **0 products / 2 documents** |
+| `seed:accounts` — three ids named, 50 products each | **666 documents**, identities already existed and were verified |
+| `verify:demo` per tenant | **OK ×3** — 50 products, 6 low, 1 out, 0 integrity failures |
+| `check:accounts --with-production` after | **222 documents each** — equal, isolated counts |
+| `cleanup:account` dry run, then real | **666 counted → 666 removed, 0 remaining** |
+| `seed:accounts` — `jaffy…` at **10 000 products** | **44 444 documents in 65 093 ms** |
+| `verify:demo` on it | **OK** — 10 000 products, 1 535 low, 612 out, 462 receipt lines, 178 suppliers, 0 missing references |
+| `cleanup:account` dry run, then real | **44 444 counted → 44 444 removed, 0 remaining** |
+| final read-only count of the whole database | **4 businesses, 4 users, 0 products, 0 inventory, 0 transactions, 0 purchase orders** |
+
+**Every refusal fired before a connection**: a cleanup naming another account's `businessId`
+(`belongs to business …, not …`); a cleanup with only two phrases (`CLEANUP_PROD_CONFIRM` missing); a
+production shell pointed at the development database (equality refusal); `cleanup:three` in production
+(a development convenience, refused); `seed:perf` in production (development-only tool, refused).
+`seed:demo-tenant --dry-run` in production reported `would CREATE a new tenant` and wrote nothing.
+
+**The defect.** The first three-account seed reported only `connect ETIMEDOUT 159.143.174.111:27017` and
+exited 1: no database named, and no statement about whether anything had been written. The first
+10 000-product cleanup **dry run** was worse — it printed its `DRY RUN` header and then exited 1, which
+reads like a delete that may have run. Both were connection failures before the first write or delete;
+both succeeded on an immediate retry, and the tenants were confirmed unchanged in between. `seed-accounts`
+and `cleanup-accounts` now wrap their connection attempt and refuse with the target database named, an
+explicit `No tenant data was written` / `No document was deleted`, and the advice that one retry is
+the right response to a transient failure. A source test pins both messages.
+
+**Deliberately not exercised, with the reason.** The documented 30 000 / 50 000 / 90 000 preset was not
+run: it is ≈756 000 documents against a 512 MB tier whose ceiling §27GE already measured. `seed:demo-tenant`
+and `seed:roles` were not written for real — both rotate fixture credentials this shell does not hold
+(the demo preview's password in particular) — so only the demo tenant's read-only preview ran. The
+whole-database wipe and the Firebase-wide identity delete were not run at all: both destroy more than
+the tenants under test, and no test needs them.
+
+**Remaining risks, stated rather than closed.** Atlas connection timeouts were observed twice in one
+session; the new messages make them honest but nothing retries automatically. The large-size ceiling
+is unchanged: a 30/50/90 production preset can exhaust the tier regardless of these fixes. And the
+whole-database and Firebase-wide commands remain the two ways to destroy more than a tenant, unchanged
+by this pass.
+
+**Verified.** `npm run test:unit`: **1573 tests, 1517 pass, 0 fail, 56 skipped**, exit 0; `npm run lint`
+0; `npm run typecheck` 0.
 
 ---
 

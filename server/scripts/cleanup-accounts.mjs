@@ -61,6 +61,7 @@ import mongoose from 'mongoose';
 import env from '../src/config/env.ts';
 import User from '../src/models/user.model.ts';
 import { assertScopedCleanupTarget } from './cleanup/guard.mjs';
+import { CleanupSafetyError } from './cleanup/lib.mjs';
 import { SeedSafetyError, clearTenantData, countTenantDataRemoval } from './perf/lib.mjs';
 import { COMPARISON_ACCOUNTS, normaliseEmail } from './seed/lib.mjs';
 
@@ -206,7 +207,18 @@ async function main() {
   console.log(`[${COMMAND}] removes  : their inventory data only — the login, the business row, its members and the Firebase identity are KEPT`);
   if (dryRun) console.log(`[${COMMAND}] mode     : DRY RUN — counting only, nothing will be deleted`);
 
-  await mongoose.connect(env.mongodbUri, { dbName: env.mongodbDbName });
+  // A connection failure happens before any tenant is resolved or deleted. The old report was the
+  // driver's own line (a production dry run exited 1 with only its `DRY RUN` header printed,
+  // 2026-10-28), which reads like a run that may have deleted something. It did not.
+  try {
+    await mongoose.connect(env.mongodbUri, { dbName: env.mongodbDbName });
+  } catch (err) {
+    throw new CleanupSafetyError(
+      `could not reach MongoDB for ${target.database} (${String(err.message).split('\n')[0]}). ` +
+        'No document was deleted — the run stopped before its first delete. ' +
+        'A transient connection failure is worth one retry of the same command.',
+    );
+  }
 
   // ---- resolve and count EVERY tenant first: a misnamed or missing account stops the run
   // ---- before any row is deleted, so a partial cleanup cannot be mistaken for a done one.

@@ -519,6 +519,7 @@ anchor (`§27…`) in that file.
 - **§27GH** — The reference documents measured against the tree — three stale sentences, four undocumented variables, and the tables that were already right (2026-10-27)
 - **§27GI** — The production dry run checked nothing, and said the run would go ahead (2026-10-28)
 - **§27GJ** — The production check was judged by the development database, and every command's boundary re-measured (2026-10-28)
+- **§27GK** — Production seed and delete at 10 000 products — and a connection failure that read like a partial write (2026-10-28)
 
 ---
 

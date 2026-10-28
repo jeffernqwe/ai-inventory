@@ -113,7 +113,9 @@ import {
   countDisagreements,
   documentsForProducts,
   ensureTenantForIdentity,
+  isEmailAddress,
   makeRandom,
+  normaliseBusinessId,
   normaliseEmail,
   parseCount,
   productsForDocuments,
@@ -197,12 +199,13 @@ function parseEntry(entry) {
   }
 
   const email = normaliseEmail(parts[0]);
-  if (!email.includes('@')) {
+  if (!isEmailAddress(email)) {
     fail(`--accounts entry "${entry}" has no usable address. Nothing was written.`);
   }
 
   const size = parts[1];
-  const businessId = parts[2];
+  const rawBusinessId = parts[2];
+  const businessId = normaliseBusinessId(rawBusinessId);
   const inDocuments = /^\d+d$/i.test(size);
   const digits = (inDocuments ? size.slice(0, -1) : size).replace(/p$/i, '');
 
@@ -235,7 +238,7 @@ function parseEntry(entry) {
     total = documentsForProducts(products);
   }
 
-  if (businessId && !/^[a-f0-9]{24}$/i.test(businessId)) {
+  if (rawBusinessId !== undefined && !businessId) {
     fail(
       `--accounts entry "${entry}" has a businessId that is not 24 hexadecimal characters. ` +
         'Nothing was written.',
@@ -316,10 +319,10 @@ async function previewProductionTargets(plan, database) {
       );
 
       const { total } = await countTenantDataRemoval([tenant.businessId]);
-    console.log(
-      `  ${entry.email} — ${tenant.businessName} — ${tenant.role} — ` +
-        `${total.toLocaleString()} documents to reset`,
-    );
+      console.log(
+        `  ${entry.email} — ${tenant.businessName} — ${tenant.role} — ` +
+          `${total.toLocaleString()} documents to reset`,
+      );
     }
   } finally {
     await mongoose.disconnect();

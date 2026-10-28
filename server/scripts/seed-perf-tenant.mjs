@@ -70,7 +70,7 @@ import {
 } from './perf/lib.mjs';
 import { assertSeedTarget } from './seed/guard.mjs';
 import { clearTenantData, countTenantDataRemoval } from '../src/services/tenantTeardown.service.ts';
-import { makeRandom, resolveIdentity, seedTenant } from './seed/lib.mjs';
+import { makeRandom, parseCount, resolveIdentity, seedTenant } from './seed/lib.mjs';
 
 const COMMAND = 'seed:perf-tenant';
 
@@ -128,20 +128,59 @@ async function resolveTenant(identity) {
     businessId = new mongoose.Types.ObjectId(String(holder.businessId));
   }
 
+  // Resolve the existing user BEFORE creating a business. The old order created a
+  // business and only then refused because the user belonged to another one, leaving an
+  // empty business behind on every such refusal.
+  let user = await User.findOne({ email: SEED_OWNER_EMAIL }).select('_id businessId firebaseUid').lean();
+  if (user && !user.businessId) {
+    throw new SeedSafetyError(
+      `${SEED_OWNER_EMAIL} exists but carries no businessId. Refusing to invent a tenant ` +
+        'for an existing login. Nothing was written.',
+    );
+  }
+  if (user?.businessId) {
+    if (!businessId) {
+      // No business carries BOTH seed fingerprints, but this address already owns one. That is
+      // either a real account or a tenant whose marker was changed; neither is this seeder's to
+      // claim. The old code created a second business and then refused, leaving an orphan; this
+      // refuses before anything is written.
+      throw new SeedSafetyError(
+        `${SEED_OWNER_EMAIL} already belongs to business ${String(user.businessId)}, which does ` +
+          'not carry both seed fingerprints. Refusing to write into a tenant this run cannot prove ' +
+          'is its own. Nothing was written.',
+      );
+    }
+    if (String(user.businessId) !== String(businessId)) {
+      throw new SeedSafetyError(
+        `${SEED_OWNER_EMAIL} belongs to a DIFFERENT business (${String(user.businessId)}), not the ` +
+          `seed tenant (${String(businessId)}). Refusing to write into a real account's tenant. ` +
+          'Nothing was written.',
+      );
+    }
+  }
+
   if (!businessId) {
     const business = await Business.create({ name: SEED_BUSINESS_NAME, status: 'ACTIVE' });
     businessId = business._id;
     businessCreated = true;
   }
 
-  let user = await User.findOne({ email: SEED_OWNER_EMAIL }).select('_id businessId firebaseUid').lean();
-  if (user && String(user.businessId) !== String(businessId)) {
+  // A reused tenant must be a LIVE row, not an id copied from a user. Writing into a
+  // missing or closed business would leave rows the application can never show.
+  const business = await Business.findById(businessId).select('name status').lean();
+  if (!business) {
     throw new SeedSafetyError(
-      `${SEED_OWNER_EMAIL} belongs to a DIFFERENT business (${String(user.businessId)}), not the ` +
-        `seed tenant (${String(businessId)}). Refusing to write into a real account's tenant. ` +
+      `business ${String(businessId)} does not exist. Refusing to write into a tenant that ` +
+        'cannot be read. Nothing was written.',
+    );
+  }
+  if (business.status !== 'ACTIVE') {
+    throw new SeedSafetyError(
+      `business ${String(businessId)} ("${business.name}") is ${business.status}, not ACTIVE. ` +
         'Nothing was written.',
     );
   }
+
   if (user?.firebaseUid && user.firebaseUid !== identity.uid) {
     throw new SeedSafetyError(
       `${SEED_OWNER_EMAIL} carries a different firebaseUid in this database. The Firebase ` +
@@ -224,8 +263,13 @@ async function verifyTenant(businessId, expected) {
 }
 
 async function main() {
-  const size = Number.parseInt(argValue('--size') ?? String(DEFAULT_SIZE), 10);
-  const seed = Number.parseInt(argValue('--seed') ?? '1', 10);
+  const size = parseCount(argValue('--size'), {
+    name: '--size',
+    min: MIN_SIZE,
+    max: MAX_SIZE,
+    fallback: DEFAULT_SIZE,
+  });
+  const seed = parseCount(argValue('--seed'), { name: '--seed', min: 0, fallback: 1 });
   const dryRun = process.argv.includes('--dry-run');
 
   let database;
@@ -241,12 +285,6 @@ async function main() {
     throw err;
   }
 
-  if (!Number.isInteger(size) || size < MIN_SIZE || size > MAX_SIZE) {
-    fail(`--size must be an integer between ${MIN_SIZE} and ${MAX_SIZE} documents. Nothing was written.`);
-  }
-  if (!Number.isInteger(seed) || seed < 0) {
-    fail('--seed must be a non-negative integer. Nothing was written.');
-  }
   // Only a real run needs the credential: it is what `resolveIdentity` sets on the login. A preview
   // creates no identity, so demanding it there would block the preview for no reason.
   if (!dryRun && !process.env.DEMO_ACCOUNT_PASSWORD) {
@@ -275,9 +313,35 @@ async function main() {
           'guess which is the test tenant. Nothing was written.',
       );
     }
+    // The preview must not promise a create/replace the real run would refuse. These are the
+    // same read-only facts `resolveTenant` checks before its first write.
+    const ownerRow = await User.findOne({ email: SEED_OWNER_EMAIL }).select('businessId').lean();
     if (!ids.length) {
+      if (ownerRow?.businessId) {
+        fail(
+          `${SEED_OWNER_EMAIL} already belongs to business ${String(ownerRow.businessId)}, which ` +
+            'does not carry both seed fingerprints. A real run would REFUSE to write into it. ' +
+            'Nothing was written.',
+        );
+      }
       console.log(`[${COMMAND}] tenant   : would be CREATED (no seed tenant exists yet)`);
     } else {
+      if (ownerRow?.businessId && String(ownerRow.businessId) !== String(ids[0])) {
+        fail(
+          `${SEED_OWNER_EMAIL} belongs to a DIFFERENT business (${String(ownerRow.businessId)}), ` +
+            `not the seed tenant (${ids[0]}). A real run would REFUSE. Nothing was written.`,
+        );
+      }
+      const business = await Business.findById(ids[0]).select('name status').lean();
+      if (!business) {
+        fail(`business ${ids[0]} does not exist. A real run would REFUSE to write into it. Nothing was written.`);
+      }
+      if (business.status !== 'ACTIVE') {
+        fail(
+          `business ${ids[0]} ("${business.name}") is ${business.status}, not ACTIVE. A real run would ` +
+            'REFUSE. Nothing was written.',
+        );
+      }
       const { total, counts } = await countTenantDataRemoval(ids);
       console.log(`[${COMMAND}] tenant   : ${ids[0]} would be REPLACED`);
       for (const [collection, count] of Object.entries(counts)) {

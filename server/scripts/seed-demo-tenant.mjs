@@ -84,9 +84,10 @@ async function main() {
     // preview may not write to either store, so it reports the plan and the rows that would go.
     const plan = planSeed(await findDemoTenant());
     if (plan.action === 'refuse') {
-      console.log(`[${COMMAND}] ${plan.reason}`);
+      // A refusal is not a completed preview. Exiting 0 here said "the dry run agrees"
+      // when the half-state or a different business is exactly what the real run refuses.
       await mongoose.disconnect();
-      return;
+      fail(plan.reason);
     }
     const what = {
       create: 'would CREATE a new tenant',

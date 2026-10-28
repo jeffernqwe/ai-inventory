@@ -30,6 +30,8 @@ import {
 import {
   PERF_TENANT_CLEANUP_CONFIRM,
   PERF_TENANT_SEED_CONFIRM,
+  seedTenantFingerprintProblem,
+  seedTenantIdsFrom,
 } from '../scripts/perf/lib.mjs';
 import {
   TENANT_DATA_COLLECTIONS,
@@ -211,6 +213,72 @@ describe('perf tenant — one plan drives both the preview and the deletion', ()
   it('every step is named once, so no plan can silently shadow another', () => {
     const names = TENANT_TEARDOWN_PLAN.map((step) => step.name);
     assert.equal(new Set(names).size, names.length);
+  });
+});
+
+describe('perf tenant — a fingerprint that only half matches is not the tenant', () => {
+  it('requires the marker name and the owner address to agree', () => {
+    // The old lookup UNIONED the two sets, so a real business carrying the marker name
+    // was returned by a cleanup whose owner had nothing to do with it.
+    const target = 'a'.repeat(24);
+    const other = 'b'.repeat(24);
+    assert.deepEqual(seedTenantIdsFrom({ nameBusinessIds: [target], ownerBusinessIds: [target] }), [target]);
+    assert.deepEqual(seedTenantIdsFrom({ nameBusinessIds: [target], ownerBusinessIds: [other] }), []);
+    assert.deepEqual(seedTenantIdsFrom({ nameBusinessIds: [target], ownerBusinessIds: [] }), []);
+    assert.deepEqual(seedTenantIdsFrom({ nameBusinessIds: [target, other], ownerBusinessIds: [other] }), [other]);
+  });
+
+  it('a half-state is named and refused, never treated as “nothing to clean”', () => {
+    const target = 'a'.repeat(24);
+    const other = 'b'.repeat(24);
+    assert.equal(seedTenantFingerprintProblem({}), null);
+    assert.match(
+      seedTenantFingerprintProblem({ nameBusinessIds: [target], ownerBusinessIds: [other] }),
+      /half-state/,
+    );
+    assert.match(
+      seedTenantFingerprintProblem({ nameBusinessIds: [target], ownerBusinessIds: [] }),
+      /half-state/,
+    );
+    assert.equal(
+      seedTenantFingerprintProblem({ nameBusinessIds: [target, other], ownerBusinessIds: [target] }),
+      null,
+      'a name-only candidate is not part of a half-state when one real match exists',
+    );
+    assert.equal(
+      seedTenantFingerprintProblem({ nameBusinessIds: [target], ownerBusinessIds: [target] }),
+      null,
+    );
+  });
+
+  it('both perf cleanups and the perf seeder use the refusing lookup', () => {
+    for (const name of ['cleanup-perf-data.mjs', 'cleanup-perf-tenant.mjs', 'seed-perf-data.mjs']) {
+      assert.match(read(name), /findSeedTenantIds\(/, `${name} does not resolve the seed tenant`);
+    }
+  });
+
+  it('seed:perf-tenant resolves the existing user before creating a business', () => {
+    // The old order created a business and then refused because the user belonged to a
+    // different one, leaving an empty business behind on every such refusal.
+    const source = read('seed-perf-tenant.mjs');
+    const user = source.indexOf("let user = await User.findOne({ email: SEED_OWNER_EMAIL })");
+    const create = source.indexOf("const business = await Business.create({ name: SEED_BUSINESS_NAME");
+    assert.ok(user > -1, 'the user lookup is gone');
+    assert.ok(create > -1, 'the business creation is gone');
+    assert.ok(user < create, 'a business can be created before the existing user is checked');
+  });
+
+  it('the perf seeders parse sizes and seeds strictly', () => {
+    for (const name of ['seed-perf-data.mjs', 'seed-perf-tenant.mjs']) {
+      const source = read(name);
+      assert.match(source, /parseCount\(argValue\('--size'\)/, `${name} does not use the strict size parser`);
+      assert.match(source, /parseCount\(argValue\('--seed'\)/, `${name} does not use the strict seed parser`);
+      assert.equal(
+        /Number\.parseInt\(\s*argValue\('--(size|seed)'\)/.test(source),
+        false,
+        `${name} still parses with parseInt`,
+      );
+    }
   });
 });
 

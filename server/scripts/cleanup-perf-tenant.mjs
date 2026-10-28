@@ -109,8 +109,8 @@ async function main() {
     // Two ids means the business name and the owner email point at different tenants. Deleting
     // either one would be a guess, and the guess could be a real account's business.
     fail(
-      `the seed fingerprints disagree: ${ids.join(', ')}. Refusing to guess which to remove — ` +
-        'inspect both before deleting anything. Nothing was removed.',
+      `${ids.length} businesses match both seed fingerprints (${ids.join(', ')}). Refusing to ` +
+        'guess which to remove — inspect both before deleting anything. Nothing was removed.',
     );
   }
 

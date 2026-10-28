@@ -572,6 +572,13 @@ describe('cleanup — command surface', () => {
     assert.match(source, /REFERENCE_DATABASES = \[DATABASE_NAMES\.development, DATABASE_NAMES\.production\]/);
     assert.match(source, /client\.db\(dbName\)/);
   });
+
+  it('the Firebase engine refuses a malformed address before it connects', () => {
+    const source = readScript('cleanup-firebase-accounts.mjs');
+    assert.match(source, /isEmailAddress\(email\)/);
+    assert.match(source, /normaliseEmail/);
+    assert.equal(/email\.includes\('@'\)/.test(source), false, 'the weak address check came back');
+  });
 });
 
 // ---------------------------------------------------------------------------

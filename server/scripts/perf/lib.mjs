@@ -367,13 +367,71 @@ export function assertNamedReadTarget({
   return resolved;
 }
 
-/** Every businessId that belongs to the seed tenant, by BOTH fingerprints. */
-export async function findSeedTenantIds() {
+/**
+ * Every businessId that matches BOTH fingerprints, not either one.
+ *
+ * WHY THE INTERSECTION (measured 2026-10-28). The old implementation UNIONED the
+ * businesses whose marker name matched with those whose owner address matched. A real
+ * business that happened to carry the marker name was therefore returned by a cleanup
+ * whose owner had nothing to do with it, and the production-capable cleanup would have
+ * deleted it. Two independent fingerprints only identify one tenant when they AGREE.
+ * This pure function returns nothing for a half-state; `findSeedTenantIds` below turns that
+ * state into a refusal, so a cleanup cannot report "nothing to clean" while one half exists and
+ * a seed cannot create a second business it would then fail to own.
+ */
+export function seedTenantIdsFrom({ nameBusinessIds = [], ownerBusinessIds = [] } = {}) {
+  const owned = new Set(ownerBusinessIds.filter(Boolean).map(String));
+  return [...new Set(nameBusinessIds.filter(Boolean).map(String))].filter((id) => owned.has(id));
+}
+
+/**
+ * The refusal for a fingerprint state that names no single tenant.
+ *
+ * A HALF-STATE is the dangerous one: the marker business exists but the owner row is gone, or
+ * the owner row points at a business that is not named. `seedTenantIdsFrom` returns no id, which
+ * is safe for a delete but would let a seed create a SECOND business and then die on the unique
+ * email index, leaving an empty tenant. Naming the state is what turns that into a stop.
+ */
+export function seedTenantFingerprintProblem({ nameBusinessIds = [], ownerBusinessIds = [] } = {}) {
+  const names = [...new Set((nameBusinessIds ?? []).filter(Boolean).map(String))];
+  const owners = [...new Set((ownerBusinessIds ?? []).filter(Boolean).map(String))];
+  const matched = seedTenantIdsFrom({ nameBusinessIds: names, ownerBusinessIds: owners });
+
+  if (matched.length > 1) {
+    return (
+      `${matched.length} businesses match both seed fingerprints (${matched.join(', ')}). Refusing ` +
+      'to guess which is the test tenant. Nothing was changed.'
+    );
+  }
+  if (!matched.length && (names.length || owners.length)) {
+    return (
+      'the seed tenant is in a half-state: the marker name and the owner address point at ' +
+      `different businesses (name: ${names.join(', ') || '(none)'}; owner: ` +
+      `${owners.join(', ') || '(none)'}). Refusing to guess at a repair. Nothing was changed.`
+    );
+  }
+  return null;
+}
+
+/** Every businessId that matches BOTH fingerprints, and the two halves when they do not. */
+export async function findSeedTenantFingerprints() {
   const byName = await Business.find({ name: SEED_BUSINESS_NAME }).select('_id').lean();
   const byOwner = await User.find({ email: SEED_OWNER_EMAIL }).select('businessId').lean();
-  const ids = new Set();
-  for (const b of byName) ids.add(String(b._id));
-  for (const u of byOwner) if (u.businessId) ids.add(String(u.businessId));
-  return [...ids];
+  return {
+    nameBusinessIds: byName.map((b) => b._id),
+    ownerBusinessIds: byOwner.map((u) => u.businessId),
+    matched: seedTenantIdsFrom({
+      nameBusinessIds: byName.map((b) => b._id),
+      ownerBusinessIds: byOwner.map((u) => u.businessId),
+    }),
+  };
+}
+
+/** The database half of the rule above; a half-state is refused, never returned as "nothing". */
+export async function findSeedTenantIds() {
+  const fingerprints = await findSeedTenantFingerprints();
+  const problem = seedTenantFingerprintProblem(fingerprints);
+  if (problem) throw new SeedSafetyError(problem);
+  return fingerprints.matched;
 }
 

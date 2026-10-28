@@ -46,6 +46,7 @@ import 'dotenv/config';
 import mongoose from 'mongoose';
 
 import env from '../src/config/env.ts';
+import Business from '../src/models/business.model.ts';
 import User from '../src/models/user.model.ts';
 import { assertScopedCleanupTarget } from './cleanup/guard.mjs';
 import {
@@ -53,6 +54,14 @@ import {
   clearTenantData,
   countTenantDataRemoval,
 } from './perf/lib.mjs';
+import {
+  assertOneBusinessAssociation,
+  assertProductionTenantOwnership,
+  isEmailAddress,
+  normaliseBusinessId,
+  normaliseEmail,
+  readBusinessAssociations,
+} from './seed/lib.mjs';
 
 const COMMAND = 'cleanup:demo';
 const CONFIRM_PHRASE = 'cleanup:demo-account';
@@ -69,8 +78,10 @@ function fail(message) {
 }
 
 async function main() {
-  const email = argValue('--email');
-  const businessId = argValue('--business');
+  // The schema lower-cases on write but queries are exact. Normalise at the boundary so a
+  // mixed-case address finds the same row the database stored.
+  const email = normaliseEmail(argValue('--email'));
+  const businessId = normaliseBusinessId(argValue('--business'));
   const dryRun = process.argv.includes('--dry-run');
 
   // Two phrases in development, three in production — the same rule as the
@@ -82,11 +93,11 @@ async function main() {
     database: argValue('--database'),
   });
 
-  if (!email || !email.includes('@')) {
-    fail('--email=<address> is required. Nothing was removed.');
+  if (!isEmailAddress(email)) {
+    fail('--email=<a valid address> is required. Nothing was removed.');
   }
-  if (!/^[a-f0-9]{24}$/i.test(String(businessId ?? ''))) {
-    fail('--business=<24-character businessId> is required. Nothing was removed.');
+  if (!businessId) {
+    fail('--business=<24-character businessId> is required (hexadecimal). Nothing was removed.');
   }
 
   console.log(`[${COMMAND}] database : ${target.database}${target.production ? '   (PRODUCTION)' : ''}`);
@@ -96,7 +107,14 @@ async function main() {
 
   await mongoose.connect(env.mongodbUri, { dbName: env.mongodbDbName });
 
-  const user = await User.findOne({ email }).select('_id businessId role').lean();
+  // A destructive command cannot pick one of two tenants for an address, even though the
+  // schema says that state cannot exist. The check runs before the lookup that assumes it.
+  assertOneBusinessAssociation({
+    email,
+    businessIds: await readBusinessAssociations({ email }),
+  });
+
+  const user = await User.findOne({ email }).select('_id businessId role status').lean();
   if (!user) {
     fail(`no MongoDB account for ${email} — nothing was removed.`);
   }
@@ -105,6 +123,33 @@ async function main() {
       `"${email}" belongs to business ${String(user.businessId)}, not ${businessId}. ` +
         'Refusing to remove a tenant the account does not own. Nothing was removed.',
     );
+  }
+
+  const business = await Business.findById(businessId).select('name status').lean();
+  if (!business) {
+    fail(
+      `business ${businessId} does not exist in ${target.database}. Refusing to empty a ` +
+        'tenant that cannot be checked. Nothing was removed.',
+    );
+  }
+
+  // The demo cleanup shares the production account rule with seed:accounts and
+  // cleanup:accounts: OWNER, ACTIVE account, ACTIVE business. It runs before the dry-run
+  // count as well, so a preview cannot describe a deletion the real run would refuse.
+  if (target.production) {
+    assertProductionTenantOwnership({
+      email,
+      tenant: {
+        businessId: user.businessId,
+        businessName: business.name,
+        role: user.role,
+        status: user.status,
+        businessStatus: business.status,
+      },
+      requestedBusinessId: businessId,
+      command: COMMAND,
+      namingHint: '--business=<businessId>',
+    });
   }
 
   if (dryRun) {

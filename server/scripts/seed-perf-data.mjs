@@ -45,6 +45,7 @@ import {
   findSeedTenantIds,
   removeTenant,
 } from './perf/lib.mjs';
+import { parseCount } from './seed/lib.mjs';
 
 const COMMAND = 'seed:perf';
 
@@ -104,20 +105,16 @@ function assertDeterministic(seed) {
 }
 
 async function main() {
-  const size = Number.parseInt(argValue('--size') ?? '', 10);
-  const seed = Number.parseInt(argValue('--seed') ?? '1', 10);
+  // Strict whole numbers: parseInt accepted `900abc` as 900 and `12.9` as 12, so a
+  // mistyped size seeded a plausible-looking dataset nobody asked for.
+  const size = parseCount(argValue('--size'), { name: '--size', min: 1, max: 200000 });
+  const seed = parseCount(argValue('--seed'), { name: '--seed', min: 0, fallback: 1 });
   // The dataset depends on nothing already stored, so the preview needs no connection at all: the
   // plan IS the whole answer. `--dry-run` used to be silently ignored here (the flag was only
   // mentioned for the cleanup), which on a live database meant writing during a "preview".
   const dryRun = process.argv.includes('--dry-run');
 
   assertSafeTarget(env, COMMAND);
-  if (!Number.isInteger(size) || size < 1 || size > 200000) {
-    fail('--size must be an integer between 1 and 200000. Nothing was written.');
-  }
-  if (!Number.isInteger(seed) || seed < 0) {
-    fail('--seed must be a non-negative integer. Nothing was written.');
-  }
   assertDeterministic(seed);
 
   console.log(`[${COMMAND}] database : ${env.mongodbDbName}`);

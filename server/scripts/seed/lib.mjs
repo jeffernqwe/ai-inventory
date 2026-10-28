@@ -127,6 +127,22 @@ export function assertProductionTenantOwnership({
     );
   }
 
+  // A role is not enough. A DISABLED account cannot sign in, and a business that is not
+  // ACTIVE is not a target either. Both are checked here so every production caller that
+  // uses this shared rule refuses the same states, instead of each CLI deciding for itself.
+  if (String(tenant.status ?? '').toUpperCase() !== 'ACTIVE') {
+    throw new SeedSafetyError(
+      `${address} is ${tenant.status || 'not ACTIVE'} in business ${String(tenant.businessId)}. ` +
+        'A production seed or cleanup requires an ACTIVE account. Nothing was changed.',
+    );
+  }
+  if (String(tenant.businessStatus ?? '').toUpperCase() !== 'ACTIVE') {
+    throw new SeedSafetyError(
+      `business ${String(tenant.businessId)} is ${tenant.businessStatus || 'not ACTIVE'}. ` +
+        'A production seed or cleanup requires an ACTIVE business. Nothing was changed.',
+    );
+  }
+
   assertTenantNamedForReset({
     production: true,
     reused: true,
@@ -201,6 +217,31 @@ export const pick = (rand, list) => list[Math.floor(rand() * list.length)];
  */
 export function normaliseEmail(value) {
   return String(value ?? '').trim().toLowerCase();
+}
+
+/**
+ * A usable address, not merely a string containing an `@`.
+ *
+ * The demo commands used to accept `a@`, `@b` or `@`, hand the address to Firebase or
+ * MongoDB and report whatever the driver said. A malformed argument is an input problem,
+ * so it is refused before a connection with a sentence that names the flag.
+ * The shape matches the User model's own validator.
+ */
+export function isEmailAddress(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normaliseEmail(value));
+}
+
+/**
+ * One spelling for a business id, or null when it is not one.
+ *
+ * The regex already allowed upper-case hex, but the comparison against `ObjectId.toString()`
+ * is exact and that string is lower-case: `--business=ABC…` was therefore a valid argument
+ * that could never match, and a correct id was refused as the wrong tenant. Trimming also
+ * makes a pasted value with a trailing space usable instead of silently different.
+ */
+export function normaliseBusinessId(value) {
+  const text = String(value ?? '').trim().toLowerCase();
+  return /^[a-f0-9]{24}$/.test(text) ? text : null;
 }
 
 /**
@@ -484,7 +525,7 @@ export function assertIdentityLinkUsable({ email, storedUid, resolvedUid }) {
 export async function resolveExistingTenantForIdentity({ email, identity }) {
   const address = normaliseEmail(email);
   const user = await User.findOne({ firebaseUid: identity.uid })
-    .select('_id businessId email role')
+    .select('_id businessId email role status')
     .lean();
 
   // The uid lookup missed. If a row already owns this ADDRESS, the next write would hit
@@ -492,7 +533,7 @@ export async function resolveExistingTenantForIdentity({ email, identity }) {
   // account. Both are reported, neither is repaired here: see assertIdentityLinkUsable.
   if (!user) {
     const byEmail = await User.findOne({ email: address })
-      .select('_id businessId email role firebaseUid')
+      .select('_id businessId email role status firebaseUid')
       .lean();
     if (!byEmail) return null;
     assertIdentityLinkUsable({
@@ -528,6 +569,8 @@ async function tenantForExistingUser(user) {
     businessName: business.name,
     userId: user._id,
     role: user.role,
+    status: user.status,
+    businessStatus: business.status,
     accountCreated: false,
     reused: true,
   };
@@ -550,6 +593,23 @@ export async function ensureTenantForIdentity({ email, identity, businessName })
   if (existing) return existing;
 
   const address = normaliseEmail(email);
+  // `resolveExistingTenantForIdentity` returns null for a row with NO businessId, because there
+  // is no tenant to return. That is not permission to create a second row: `users.email` is
+  // unique, so the create below would die on the index after a business row was already made,
+  // leaving an empty tenant behind. Refuse before either write and name the linkage to repair.
+  const orphan = await User.findOne({
+    $or: [{ email: address }, { firebaseUid: String(identity.uid) }],
+  })
+    .select('_id businessId')
+    .lean();
+  if (orphan) {
+    throw new SeedSafetyError(
+      `an account row for ${address} already exists but carries no businessId. Refusing to ` +
+        'create a second account or an empty business for it — repair that linkage deliberately. ' +
+        'Nothing was written.',
+    );
+  }
+
   const business = await Business.create({ name: businessName, status: 'ACTIVE' });
   const created = await User.create({
     businessId: business._id,
@@ -564,6 +624,9 @@ export async function ensureTenantForIdentity({ email, identity, businessName })
     businessId: business._id,
     businessName,
     userId: created._id,
+    role: 'OWNER',
+    status: 'ACTIVE',
+    businessStatus: 'ACTIVE',
     accountCreated: true,
     reused: false,
   };
@@ -918,6 +981,32 @@ export function summariseReadiness(checked) {
   return { pairs, notReady, ready: pairs - notReady };
 }
 
+/**
+ * One account's readiness, as a value.
+ *
+ * READY means the account can actually be used: a Firebase identity exists and is enabled and
+ * verified, the user row is linked to it, the user is ACTIVE, and the business exists and is
+ * ACTIVE. A production run additionally requires the OWNER. Anything else is returned as a
+ * named state so `check:accounts` can explain it instead of printing READY for a login that
+ * cannot sign in or a tenant the seeder would refuse.
+ *
+ * Pure: the caller supplies the already-read records, so the decision is asserted without a
+ * database, Firebase or a connection.
+ */
+export function accountReadiness({ production = false, identity, user, business } = {}) {
+  if (!user) return 'MISSING';
+  if (!identity?.exists) return 'NO IDENTITY';
+  if (user.firebaseUid && String(user.firebaseUid) !== String(identity.uid)) return 'STALE LINK';
+  if (!user.firebaseUid) return 'NOT LINKED';
+  if (identity.disabled) return 'IDENTITY DISABLED';
+  if (!identity.emailVerified) return 'IDENTITY UNVERIFIED';
+  if (!business) return 'NO BUSINESS';
+  if (user.status !== 'ACTIVE') return 'USER INACTIVE';
+  if (production && user.role !== 'OWNER') return 'NOT OWNER';
+  if (business.status !== 'ACTIVE') return 'BUSINESS INACTIVE';
+  return 'READY';
+}
+
 export default {
   COMPARISON_ACCOUNTS,
   PRODUCTS_SHARE,
@@ -932,6 +1021,8 @@ export default {
   pick,
   insertChunked,
   normaliseEmail,
+  isEmailAddress,
+  normaliseBusinessId,
   parseCount,
   assertIdentityLinkUsable,
   resolveIdentity,
@@ -943,4 +1034,5 @@ export default {
   countDisagreements,
   databasesToCheck,
   summariseReadiness,
+  accountReadiness,
 };

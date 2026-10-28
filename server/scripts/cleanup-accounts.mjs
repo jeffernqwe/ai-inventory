@@ -71,6 +71,8 @@ import {
   COMPARISON_ACCOUNTS,
   assertOneBusinessAssociation,
   assertProductionTenantOwnership,
+  isEmailAddress,
+  normaliseBusinessId,
   normaliseEmail,
   readBusinessAssociations,
 } from './seed/lib.mjs';
@@ -122,19 +124,20 @@ function parseEntry(entry) {
   }
 
   const email = normaliseEmail(parts[0]);
-  if (!email.includes('@')) {
+  if (!isEmailAddress(email)) {
     fail(`--accounts entry "${entry}" has no usable address. Nothing was deleted.`);
   }
 
-  const businessId = parts[1];
-  if (businessId && !/^[a-f0-9]{24}$/i.test(businessId)) {
+  const rawBusinessId = parts[1];
+  const businessId = normaliseBusinessId(rawBusinessId);
+  if (rawBusinessId !== undefined && !businessId) {
     fail(
       `--accounts entry "${entry}" has a businessId that is not 24 hexadecimal characters. ` +
         'Nothing was deleted.',
     );
   }
 
-  return { email, businessId: businessId || undefined };
+  return { email, businessId: businessId ?? undefined };
 }
 
 function parsePlan(raw) {
@@ -229,7 +232,7 @@ async function main() {
     });
 
     const user = await User.findOne({ email: entry.email })
-      .select('_id businessId role')
+      .select('_id businessId role status')
       .lean();
 
     if (!user) {
@@ -266,7 +269,13 @@ async function main() {
       // The same rule the seeder applies: a production cleanup needs the OWNER of that tenant.
       assertProductionTenantOwnership({
         email: entry.email,
-        tenant: { businessId: user.businessId, role: user.role },
+        tenant: {
+          businessId: user.businessId,
+          businessName: business.name,
+          role: user.role,
+          status: user.status,
+          businessStatus: business.status,
+        },
         command: COMMAND,
         namingHint: 'a :businessId in --accounts',
       });
@@ -280,6 +289,7 @@ async function main() {
       businessId: String(user.businessId),
       businessName: business?.name ?? 'no business',
       role: user.role,
+      status: user.status,
       total,
       counts,
     });

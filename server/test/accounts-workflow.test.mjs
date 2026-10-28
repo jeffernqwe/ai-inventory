@@ -32,6 +32,7 @@ import {
   MAX_DOCUMENTS,
   MAX_PRODUCTS,
   MIN_PRODUCTS,
+  accountReadiness,
   assertOneBusinessAssociation,
   assertProductionTenantOwnership,
   databasesToCheck,
@@ -188,6 +189,8 @@ describe('a production target is resolved from the account, never typed', () => 
     businessId: 'a'.repeat(24),
     businessName: 'republic of gamers',
     role: 'OWNER',
+    status: 'ACTIVE',
+    businessStatus: 'ACTIVE',
   };
 
   it('an address with no tenant is refused, because production must not create one', () => {
@@ -207,6 +210,36 @@ describe('a production target is resolved from the account, never typed', () => 
         }),
       /requires the OWNER/,
     );
+  });
+
+  it('a DISABLED account is refused even when it is the OWNER', () => {
+    assert.throws(
+      () =>
+        assertProductionTenantOwnership({
+          email: 'a@x.com',
+          tenant: { ...owner, status: 'DISABLED' },
+          command: 'seed:accounts',
+        }),
+      /requires an ACTIVE account/,
+    );
+  });
+
+  it('a business that is not ACTIVE is refused even when the account is the OWNER', () => {
+    assert.throws(
+      () =>
+        assertProductionTenantOwnership({
+          email: 'a@x.com',
+          tenant: { ...owner, businessStatus: 'SUSPENDED' },
+          command: 'seed:accounts',
+        }),
+      /requires an ACTIVE business/,
+    );
+  });
+
+  it('the demo seed and cleanup share the production OWNER rule', () => {
+    for (const name of ['seed-demo-account.mjs', 'cleanup-demo-account.mjs']) {
+      assert.match(read(name), /assertProductionTenantOwnership\(/, `${name} does not call the shared rule`);
+    }
   });
 
   it('an optional id is only accepted when it names the tenant the account owns', () => {
@@ -370,6 +403,10 @@ describe('the check answers questions and changes nothing', () => {
     assert.match(source, /COMPARISON_ACCOUNTS\.map\(\(account\) => account\.email\)/);
   });
 
+  it('a READY line prints the tenant id the production demo seeder must name', () => {
+    assert.match(source, /businessId: \$\{row\.businessId\}/);
+  });
+
   it('it writes nothing to either store', () => {
     for (const forbidden of [
       'insertMany(',
@@ -422,6 +459,69 @@ describe('the check answers questions and changes nothing', () => {
         false,
         'the test database was selected',
       );
+    }
+  });
+
+  it('READY requires a usable identity, an ACTIVE account and an ACTIVE business', () => {
+    const ready = {
+      production: true,
+      identity: { exists: true, uid: 'firebase-1', disabled: false, emailVerified: true },
+      user: {
+        firebaseUid: 'firebase-1',
+        status: 'ACTIVE',
+        role: 'OWNER',
+        businessId: 'a'.repeat(24),
+      },
+      business: { status: 'ACTIVE', name: 'republic of gamers' },
+    };
+
+    assert.equal(accountReadiness(ready), 'READY');
+    assert.equal(
+      accountReadiness({ ...ready, user: { ...ready.user, role: 'STAFF' } }),
+      'NOT OWNER',
+    );
+    assert.equal(
+      accountReadiness({ ...ready, production: false, user: { ...ready.user, role: 'STAFF' } }),
+      'READY',
+      'development keeps its existing member convenience',
+    );
+
+    assert.equal(
+      accountReadiness({ ...ready, identity: { ...ready.identity, exists: false } }),
+      'NO IDENTITY',
+      'a stored uid with no identity must not be READY',
+    );
+    assert.equal(
+      accountReadiness({ ...ready, identity: { ...ready.identity, disabled: true } }),
+      'IDENTITY DISABLED',
+    );
+    assert.equal(
+      accountReadiness({ ...ready, identity: { ...ready.identity, emailVerified: false } }),
+      'IDENTITY UNVERIFIED',
+    );
+    assert.equal(
+      accountReadiness({ ...ready, user: { ...ready.user, status: 'DISABLED' } }),
+      'USER INACTIVE',
+    );
+    assert.equal(
+      accountReadiness({ ...ready, business: { ...ready.business, status: 'SUSPENDED' } }),
+      'BUSINESS INACTIVE',
+    );
+    assert.equal(accountReadiness({ ...ready, business: null }), 'NO BUSINESS');
+    assert.equal(
+      accountReadiness({ ...ready, user: { ...ready.user, firebaseUid: undefined } }),
+      'NOT LINKED',
+    );
+    assert.equal(
+      accountReadiness({ ...ready, user: { ...ready.user, firebaseUid: 'old-uid' } }),
+      'STALE LINK',
+    );
+  });
+
+  it('the script uses the shared readiness decision, not a second copy of the rule', () => {
+    assert.match(source, /accountReadiness\(/);
+    for (const verdict of ['NO IDENTITY', 'IDENTITY DISABLED', 'IDENTITY UNVERIFIED', 'USER INACTIVE', 'BUSINESS INACTIVE']) {
+      assert.match(source, new RegExp(`verdict === '${verdict}'`));
     }
   });
 

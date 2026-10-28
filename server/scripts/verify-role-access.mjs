@@ -51,6 +51,7 @@ import { ROLE_VALUES, hasPermission } from '../src/constants/roles.ts';
 import { decodeAccessToken, signAccessToken } from '../src/config/jwt.ts';
 import { createSessionForToken, newSessionId } from '../src/services/session.service.ts';
 import { SeedSafetyError, assertSafeTarget } from './perf/lib.mjs';
+import { normaliseBusinessId } from './seed/lib.mjs';
 import { AUTHENTICATED_ROUTES, MATRIX, admitted, cellAgrees } from './role-test/matrix.mjs';
 import {
   PASSWORD_ENV,
@@ -240,8 +241,12 @@ async function checkUserManagementBoundary(base, tokens, businessId, byRole) {
 }
 
 async function main() {
-  const businessArg = argValue('--business');
+  const rawBusiness = argValue('--business');
+  const businessArg = rawBusiness === undefined ? undefined : normaliseBusinessId(rawBusiness);
   const base = argValue('--base') ?? 'http://localhost:4000';
+  if (rawBusiness !== undefined && !businessArg) {
+    fail('--business must be a 24-character hexadecimal businessId. Nothing was checked.');
+  }
   const signin = process.argv.includes('--signin');
   const production = env.mongodbDbName === DATABASE_NAMES.production;
 

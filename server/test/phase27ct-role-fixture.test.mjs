@@ -39,6 +39,7 @@ import {
   ROLE_TEST_BUSINESS_NAME,
   SEED_CONFIRM_PHRASE,
   ensureRoleTestTenant,
+  roleFixtureTenantIdFrom,
 } from '../scripts/role-test/lib.mjs';
 import {
   AUTHENTICATED_ROUTES,
@@ -199,6 +200,61 @@ describe('§27CT cleanup deletes the database first and an identity only after p
       'the F-50 proof (no MongoDB user still uses the address) must run BEFORE any identity is deleted',
     );
     assert.match(cleanup, /stillLinked !== 0/);
+  });
+
+  test('the fixture tenant is the intersection of BOTH fingerprints, and a half-state is refused', () => {
+    const fixture = 'a'.repeat(24);
+    const other = 'b'.repeat(24);
+
+    assert.equal(
+      roleFixtureTenantIdFrom({ nameBusinessIds: [fixture], ownerBusinessIds: [fixture] }),
+      fixture,
+    );
+    assert.throws(
+      () => roleFixtureTenantIdFrom({ nameBusinessIds: [fixture], ownerBusinessIds: [other] }),
+      /half-state/,
+      'a marker name and a different owner must not resolve to either business',
+    );
+    assert.throws(
+      () => roleFixtureTenantIdFrom({ nameBusinessIds: [fixture], ownerBusinessIds: [] }),
+      /half-state/,
+    );
+    assert.throws(
+      () => roleFixtureTenantIdFrom({ nameBusinessIds: [], ownerBusinessIds: [fixture] }),
+      /half-state/,
+    );
+
+    assert.equal(
+      roleFixtureTenantIdFrom({
+        nameBusinessIds: [fixture],
+        ownerBusinessIds: [fixture],
+        claimedBusinessIds: [fixture],
+      }),
+      fixture,
+    );
+    assert.throws(
+      () =>
+        roleFixtureTenantIdFrom({
+          nameBusinessIds: [fixture],
+          ownerBusinessIds: [fixture],
+          claimedBusinessIds: [other],
+        }),
+      /does not name the role fixture/,
+    );
+    assert.throws(
+      () =>
+        roleFixtureTenantIdFrom({
+          nameBusinessIds: [fixture],
+          ownerBusinessIds: [fixture],
+          claimedBusinessIds: [fixture, other],
+        }),
+      /expected one/,
+    );
+  });
+
+  test('the verifier normalises --business, and the cleanup uses the refusing lookup', () => {
+    assert.match(verifier, /normaliseBusinessId\(rawBusiness\)/);
+    assert.match(cleanup, /findRoleTestBusiness\(/);
   });
 
   test('the tenant is resolved by its own fingerprints and verified afterwards', () => {

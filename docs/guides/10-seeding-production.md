@@ -176,8 +176,10 @@ Add `--dry-run` to any command above. The target and **all three phrases** are s
 printed, and nothing is written. `seed:accounts` also reads — never writes — to resolve every address to
 its own tenant, require an OWNER, refuse an ambiguous association, check any supplied `:businessId`
 against that row, and count what a run would reset. A wrong or missing mapping fails the preview rather
-than the write. `seed --plan=…` opens no connection at all; `seed:perf-tenant` and
-`seed:demo-tenant` read the database to count what they would replace. None of them touches Firebase.
+than the write. In production, `seed --plan=demo` reads the named tenant to check `--business` and
+count what it would replace (development still opens no connection). `seed:perf-tenant` and
+`seed:demo-tenant` also read the database to count what they would replace. None of them touches
+Firebase.
 
 `--dry-run` is not a verification: it reports what *would* happen. Verification reads the rows back.
 

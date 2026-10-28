@@ -67,6 +67,7 @@ import {
   assertFirebaseProject,
   summariseFirebaseReferences,
 } from './cleanup/lib.mjs';
+import { isEmailAddress, normaliseEmail } from './seed/lib.mjs';
 
 const COMMAND = 'cleanup:firebase';
 
@@ -96,14 +97,16 @@ function fail(message) {
 
 async function main() {
   const dryRun = process.argv.includes('--dry-run');
-  const emails = [...new Set(argValues('--email').map((e) => e.toLowerCase()))];
+  const emails = [...new Set(argValues('--email').map(normaliseEmail))];
 
   if (!emails.length) {
     fail('--email=<address> is required (repeatable, or comma-separated). Nothing was deleted.');
   }
   for (const email of emails) {
-    if (!email.includes('@')) {
-      fail(`"${email}" is not an address. Nothing was deleted.`);
+    // The address is a deletion target, not a string to try: `a@`, `@b` and a
+    // mixed-case paste used to reach Firebase and report whatever it said.
+    if (!isEmailAddress(email)) {
+      fail(`"${email}" is not a usable address. Nothing was deleted.`);
     }
   }
 

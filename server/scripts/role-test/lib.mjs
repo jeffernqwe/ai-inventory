@@ -126,25 +126,73 @@ export async function ensureVerifiedIdentity(email, password) {
  * tenant, and it may reuse the one it clearly created, but it must never guess
  * which of two candidates a person meant.
  */
-export async function findRoleTestBusiness({ businessIds = [] } = {}) {
-  const byName = await Business.find({ name: ROLE_TEST_BUSINESS_NAME })
-    .select('_id name status')
-    .lean();
-  const byOwner = await User.find({ email: ACCOUNTS[0].email }).select('businessId').lean();
+/**
+ * The fixture tenant's id, or a refusal — as a pure decision.
+ *
+ * WHY THE INTERSECTION. The old lookup UNIONED the business carrying the marker name with the
+ * business the fixture OWNER points at. A real business that happened to share the name was
+ * therefore returned, and the cleanup could delete it. Two independent fingerprints identify one
+ * tenant only when they AGREE; a half-state is refused rather than guessed at. A supplied id is a
+ * claim checked against that answer, never an input that widens it.
+ */
+export function roleFixtureTenantIdFrom({
+  nameBusinessIds = [],
+  ownerBusinessIds = [],
+  claimedBusinessIds = [],
+} = {}) {
+  const unique = (ids) => [...new Set((ids ?? []).filter(Boolean).map(String))];
+  const names = unique(nameBusinessIds);
+  const owners = unique(ownerBusinessIds);
+  const matched = names.filter((id) => owners.includes(id));
 
-  const ids = new Set();
-  for (const business of byName) ids.add(String(business._id));
-  for (const user of byOwner) if (user.businessId) ids.add(String(user.businessId));
-
-  if (businessIds.length) for (const id of businessIds) ids.add(String(id));
-
-  if (ids.size > 1) {
+  if (matched.length > 1) {
     throw new SeedSafetyError(
-      `the role fixture's fingerprints disagree (${[...ids].join(', ')}). Refusing to guess ` +
-        'which tenant was meant. Nothing was changed.',
+      `${matched.length} businesses match both role-fixture fingerprints (${matched.join(', ')}). ` +
+        'Refusing to guess which tenant was meant. Nothing was changed.',
     );
   }
-  return ids.size ? [...ids][0] : null;
+
+  const resolved = matched[0] ?? null;
+  if (!resolved && (names.length || owners.length)) {
+    throw new SeedSafetyError(
+      'the role fixture is in a half-state: its fingerprints disagree — the marker name and the ' +
+        `fixture owner point at different businesses (name: ${names.join(', ') || '(none)'}; owner: ` +
+        `${owners.join(', ') || '(none)'}). Refusing to guess at a repair. Nothing was changed.`,
+    );
+  }
+
+  const claims = unique(claimedBusinessIds);
+  if (claims.length > 1) {
+    throw new SeedSafetyError(
+      `${claims.length} business ids were supplied (${claims.join(', ')}); expected one. ` +
+        'Nothing was changed.',
+    );
+  }
+  if (claims.length === 1) {
+    if (!resolved) {
+      throw new SeedSafetyError(
+        `--business=${claims[0]} names no role-fixture tenant. Create the fixture first; nothing ` +
+          'was changed.',
+      );
+    }
+    if (claims[0] !== resolved) {
+      throw new SeedSafetyError(
+        `--business=${claims[0]} does not name the role fixture (${resolved}). Nothing was changed.`,
+      );
+    }
+  }
+
+  return resolved;
+}
+
+export async function findRoleTestBusiness({ businessIds = [] } = {}) {
+  const byName = await Business.find({ name: ROLE_TEST_BUSINESS_NAME }).select('_id').lean();
+  const byOwner = await User.find({ email: ACCOUNTS[0].email }).select('businessId').lean();
+  return roleFixtureTenantIdFrom({
+    nameBusinessIds: byName.map((business) => business._id),
+    ownerBusinessIds: byOwner.map((user) => user.businessId),
+    claimedBusinessIds: businessIds,
+  });
 }
 
 /**
@@ -345,6 +393,7 @@ export default {
   ROLE_TEST_BUSINESS_NAME,
   PASSWORD_ENV,
   ACCOUNTS,
+  roleFixtureTenantIdFrom,
   readFixturePassword,
   ensureVerifiedIdentity,
   findRoleTestBusiness,

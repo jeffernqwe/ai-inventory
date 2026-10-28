@@ -53,7 +53,8 @@
 //   SEED_CONFIRM=seed-demo-account SEED_DB_CONFIRM=inventoryai_dev_db \
 //     npm run seed -- --plan=demo --database=inventoryai_dev_db \
 //       --email=you@example.com --total=80000
-//   … add --dry-run to print the plan without connecting or writing.
+//   … add --dry-run to print the plan without writing; in production it connects read-only to
+//     check the named tenant, while the development preview opens no connection at all.
 //
 // Production (THREE phrases, and the tenant being reset is named too):
 //   NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
@@ -75,16 +76,24 @@ import 'dotenv/config';
 import mongoose from 'mongoose';
 
 import env from '../src/config/env.ts';
-import { SeedSafetyError, clearTenantData } from './perf/lib.mjs';
+import User from '../src/models/user.model.ts';
+import { SeedSafetyError, clearTenantData, countTenantDataRemoval } from './perf/lib.mjs';
 import { assertSeedTarget } from './seed/guard.mjs';
 import {
+  assertOneBusinessAssociation,
+  assertProductionTenantOwnership,
   assertTenantNamedForReset,
   countDisagreements,
   ensureTenantForIdentity,
+  isEmailAddress,
   makeRandom,
+  normaliseBusinessId,
   normaliseEmail,
   parseCount,
+  readBusinessAssociations,
+  readIdentity,
   readTenantCounts,
+  resolveExistingTenantForIdentity,
   resolveIdentity,
   seedTenant,
 } from './seed/lib.mjs';
@@ -106,16 +115,118 @@ function fail(message) {
   process.exit(1);
 }
 
-/** A MongoDB ObjectId, as a person can copy it from another command's output. */
-function isBusinessId(value) {
-  return /^[a-f0-9]{24}$/i.test(String(value ?? '').trim());
+/**
+ * What a PRODUCTION dry run can prove without writing.
+ *
+ * The development preview stays connection-free, because it creates tenants there and a
+ * preview cannot create one. A production run, by contrast, REPLACES an existing tenant;
+ * its preview must compare a supplied `--business` with the tenant the account actually
+ * owns. Without this, a wrong id printed a success and exit 0 while the same command for
+ * real refused (the defect fixed in seed:accounts on 2026-10-28). Every lookup here is
+ * read-only: `readIdentity` never creates, and `resolveExistingTenantForIdentity` never
+ * writes.
+ */
+async function previewProductionDryRun({ email, requestedBusiness, database, total }) {
+  try {
+    await mongoose.connect(env.mongodbUri, { dbName: env.mongodbDbName });
+  } catch (err) {
+    throw new SeedSafetyError(
+      `could not read ${database} to check the tenant (${String(err.message).split('\n')[0]}). ` +
+        'Nothing was written — and the tenant was NOT checked. Fix the connection and re-run the dry run.',
+    );
+  }
+
+  try {
+    const identity = await readIdentity(email);
+    if (!identity) {
+      if (requestedBusiness) {
+        throw new SeedSafetyError(
+          `--business=${requestedBusiness} names no tenant for ${email}, and no Firebase identity exists ` +
+            'either. A production run would create a tenant only when no id is named. Nothing was written.',
+        );
+      }
+      if (!process.env.DEMO_ACCOUNT_PASSWORD) {
+        throw new SeedSafetyError(
+          `no Firebase identity exists for ${email}, and DEMO_ACCOUNT_PASSWORD is not set. A real run ` +
+            'would refuse rather than create the login. Set it to preview the creation. Nothing was written.',
+        );
+      }
+      // A row with no identity is the F-50 state, not a new account. `ensureTenantForIdentity`
+      // refuses it; the preview must not promise a create the real run would reject.
+      const stranded = await User.findOne({ email }).select('_id businessId').lean();
+      if (stranded) {
+        throw new SeedSafetyError(
+          `a MongoDB account row for ${email} already exists with no Firebase identity. A real run ` +
+            'would refuse rather than attach an identity or create a second row; repair the link ' +
+            'deliberately. Nothing was written.',
+        );
+      }
+      console.log(`[${COMMAND}] identity : absent — a real run would CREATE it`);
+      console.log(`[${COMMAND}] tenant   : would be CREATED (a new business for ${email})`);
+      return;
+    }
+
+    const tenant = await resolveExistingTenantForIdentity({ email, identity });
+    assertOneBusinessAssociation({
+      email,
+      businessIds: await readBusinessAssociations({ email, firebaseUid: identity.uid }),
+    });
+
+    if (!tenant) {
+      if (requestedBusiness) {
+        throw new SeedSafetyError(
+          `--business=${requestedBusiness} names no tenant for ${email}, whose account has no business ` +
+            'of its own. A production run will not create a tenant with a chosen id. Nothing was written.',
+        );
+      }
+      console.log(`[${COMMAND}] identity : uid ${String(identity.uid).slice(0, 10)}… (already existed)`);
+      console.log(`[${COMMAND}] tenant   : would be CREATED (this account has no business yet)`);
+      return;
+    }
+
+    // The real run's rules, applied here so a missing tenant, a renamed id or a non-OWNER
+    // fails the preview rather than the write.
+    assertProductionTenantOwnership({
+      email,
+      tenant,
+      requestedBusinessId: requestedBusiness,
+      command: COMMAND,
+      namingHint: '--business=<businessId>',
+    });
+    // The ownership rule accepts an omitted id (seed:accounts resolves one from each
+    // address). THIS command's contract is stricter: replacing an existing tenant must
+    // name it, exactly as the real run's final check does.
+    assertTenantNamedForReset({
+      production: true,
+      reused: true,
+      requestedBusinessId: requestedBusiness,
+      businessId: tenant.businessId,
+      businessName: tenant.businessName,
+      command: COMMAND,
+      namingHint: '--business=<businessId>',
+    });
+
+    const { total: existing, counts } = await countTenantDataRemoval([tenant.businessId]);
+    console.log(`[${COMMAND}] identity : uid ${String(identity.uid).slice(0, 10)}… (already existed)`);
+    console.log(`[${COMMAND}] tenant   : ${tenant.businessName} (${String(tenant.businessId)}) would be REPLACED`);
+    for (const [collection, count] of Object.entries(counts)) {
+      if (count > 0) console.log(`[${COMMAND}]   ${collection.padEnd(24)} ${count}`);
+    }
+    console.log(
+      `[${COMMAND}] would clear ${existing.toLocaleString()} document(s), then write ~${total.toLocaleString()} ` +
+        'document(s).',
+    );
+  } finally {
+    await mongoose.disconnect();
+  }
 }
 
 async function main() {
   // Lower-cased once, here: the schema lower-cases on write but queries are exact, so a
   // mixed-case argument would find the Firebase identity and miss the database row.
   const email = normaliseEmail(argValue('--email'));
-  const requestedBusiness = argValue('--business');
+  const rawBusiness = argValue('--business');
+  const requestedBusiness = normaliseBusinessId(rawBusiness);
   const dryRun = process.argv.includes('--dry-run');
 
   // The unified guard: `--database=` must equal the resolved database, and the
@@ -130,8 +241,8 @@ async function main() {
   });
   const production = target.production;
 
-  if (!email || !email.includes('@')) {
-    fail('--email=<address> is required. Nothing was written.');
+  if (!isEmailAddress(email)) {
+    fail('--email=<a valid address> is required. Nothing was written.');
   }
   const total = parseCount(argValue('--total'), {
     name: '--total',
@@ -140,8 +251,8 @@ async function main() {
     fallback: 80000,
   });
   const seed = parseCount(argValue('--seed'), { name: '--seed', min: 0, fallback: 1 });
-  if (requestedBusiness && !isBusinessId(requestedBusiness)) {
-    fail('--business must be a 24-character businessId. Nothing was written.');
+  if (rawBusiness !== undefined && !requestedBusiness) {
+    fail('--business must be a 24-character hexadecimal businessId. Nothing was written.');
   }
 
   console.log(`[${COMMAND}] database : ${target.database}${production ? '   (PRODUCTION)' : ''}`);
@@ -152,23 +263,42 @@ async function main() {
 
   if (dryRun) {
     console.log('');
-    console.log(`[${COMMAND}] dry run complete — no connection was opened and nothing was written.`);
-    console.log(
-      `[${COMMAND}] a real run would resolve (creating only if absent) the Firebase identity for ` +
-        `${email}, then REPLACE the data of the tenant that account owns.`,
-    );
     if (production) {
+      // Read-only, but connected: a preview that cannot see the tenant cannot validate the id
+      // the real run will require.
+      await previewProductionDryRun({
+        email,
+        requestedBusiness,
+        database: target.database,
+        total,
+      });
+    } else {
+      console.log(`[${COMMAND}] dry run complete — no connection was opened and nothing was written.`);
       console.log(
-        `[${COMMAND}] production also needs --business=<the id verify:demo prints> whenever that ` +
-          'tenant already exists.',
+        `[${COMMAND}] a real run would resolve (creating only if absent) the Firebase identity for ` +
+          `${email}, then REPLACE the data of the tenant that account owns.`,
       );
     }
+    console.log(`[${COMMAND}] DRY RUN complete — nothing was written.`);
     console.log(
       `[${COMMAND}] to run for real: SEED_CONFIRM=${CONFIRM_PHRASE} ` +
         `SEED_DB_CONFIRM=${target.database}${production ? ' SEED_PROD_CONFIRM=SEED-PRODUCTION-DATA' : ''} ` +
         `npm run ${COMMAND} -- --database=${target.database} …`,
     );
     return;
+  }
+
+  // A production run that names a tenant must not create the identity first and only then
+  // discover that the id names nothing. The read is side-effect free; `resolveIdentity`
+  // below is the call that may create an identity.
+  if (production && requestedBusiness) {
+    const existingIdentity = await readIdentity(email);
+    if (!existingIdentity) {
+      fail(
+        `--business=${requestedBusiness} names no tenant for ${email}, and no Firebase identity ` +
+          'exists either. A production run will not create a tenant with a chosen id. Nothing was written.',
+      );
+    }
   }
 
   // In production an existing credential is never rewritten; see resolveIdentity.
@@ -182,7 +312,34 @@ async function main() {
   await mongoose.connect(env.mongodbUri, { dbName: env.mongodbDbName });
   const started = Date.now();
 
-  const tenant = await ensureTenantForIdentity({
+  // Production validation runs against the tenant as it already exists, BEFORE any
+  // create. A member must not reach the clear, and a supplied id that names no tenant
+  // must not silently become a second business. The shared rule checks OWNER, the
+  // account's ACTIVE status and the business's ACTIVE status.
+  const existing = production
+    ? await resolveExistingTenantForIdentity({ email, identity })
+    : null;
+  if (production && existing) {
+    assertOneBusinessAssociation({
+      email,
+      businessIds: await readBusinessAssociations({ email, firebaseUid: identity.uid }),
+    });
+    assertProductionTenantOwnership({
+      email,
+      tenant: existing,
+      requestedBusinessId: requestedBusiness,
+      command: COMMAND,
+      namingHint: '--business=<businessId>',
+    });
+  }
+  if (production && !existing && requestedBusiness) {
+    fail(
+      `--business=${requestedBusiness} names no tenant for ${email}, and a production run ` +
+        'will not create a tenant with a chosen id. Nothing was written.',
+    );
+  }
+
+  const tenant = existing ?? await ensureTenantForIdentity({
     email,
     identity,
     businessName: DEMO_BUSINESS_NAME,
@@ -190,6 +347,18 @@ async function main() {
   console.log(
     `[${COMMAND}] tenant   : ${tenant.reused ? 'reusing' : 'CREATED'} ${String(tenant.businessId)} ("${tenant.businessName}")`,
   );
+
+  // A newly created tenant is written as an ACTIVE OWNER, but it still goes through the
+  // same rule. The id just created is the only one it can be compared with.
+  if (production && !existing) {
+    assertProductionTenantOwnership({
+      email,
+      tenant,
+      requestedBusinessId: tenant.businessId,
+      command: COMMAND,
+      namingHint: '--business=<businessId>',
+    });
+  }
 
   // Naming the tenant is the third deliberate act a production reset needs. The rule lives
   // in ./seed/lib.mjs and is shared with seed:accounts, so the two cannot disagree about it.

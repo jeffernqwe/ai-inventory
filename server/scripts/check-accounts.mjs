@@ -47,7 +47,14 @@ import { getFirebaseAdminApp } from '../src/services/firebase/adminApp.ts';
 import { getAuth } from 'firebase-admin/auth';
 import { SeedSafetyError, countTenantDataRemoval } from './perf/lib.mjs';
 import { assertSeedFirebaseProject } from './seed/guard.mjs';
-import { COMPARISON_ACCOUNTS, databasesToCheck, normaliseEmail, summariseReadiness } from './seed/lib.mjs';
+import {
+  COMPARISON_ACCOUNTS,
+  accountReadiness,
+  databasesToCheck,
+  isEmailAddress,
+  normaliseEmail,
+  summariseReadiness,
+} from './seed/lib.mjs';
 
 const COMMAND = 'check:accounts';
 
@@ -73,7 +80,7 @@ function parseAccounts(raw) {
 
   if (!list.length) fail('--accounts="" names nothing. Nothing was read.');
   for (const email of list) {
-    if (!email.includes('@')) fail(`"${email}" is not an address. Nothing was read.`);
+    if (!isEmailAddress(email)) fail(`"${email}" is not a usable address. Nothing was read.`);
   }
   return [...new Set(list)];
 }
@@ -125,9 +132,14 @@ async function checkInDatabase(email, identity, { production = false } = {}) {
   }
 
   const user = rows[0];
-  if (!user) {
+  const business = user?.businessId
+    ? await Business.findById(user.businessId).select('name status').lean()
+    : null;
+  const verdict = accountReadiness({ production, identity, user, business });
+
+  if (verdict === 'MISSING') {
     return {
-      verdict: 'MISSING',
+      verdict,
       detail: production
         ? 'no user row — a production seed REFUSES (register the account in the app first); it does not create a tenant'
         : 'no user row — a development seed would CREATE the tenant and print its id; nothing exists to replace',
@@ -137,44 +149,91 @@ async function checkInDatabase(email, identity, { production = false } = {}) {
     };
   }
 
-  const business = user.businessId
-    ? await Business.findById(user.businessId).select('name status').lean()
-    : null;
-
-  // The stranded state §27BB (F-50) records: the row can neither sign in (the exchange
-  // resolves by `firebaseUid` only) nor register again (409 EMAIL_IN_USE), and no seeder
-  // repairs it. Reported as a refusal the seeder would make, not as a note.
-  if (identity.exists && user.firebaseUid && String(user.firebaseUid) !== String(identity.uid)) {
+  if (verdict === 'NO IDENTITY') {
     return {
-      verdict: 'STALE LINK',
+      verdict,
+      detail:
+        'no Firebase identity exists for this address, but a MongoDB user row does — a seed '
+        + 'would REFUSE; registration cannot reuse the address and the link needs a deliberate repair',
+      businessId: user.businessId ? String(user.businessId) : null,
+      businessName: business?.name,
+      role: user.role,
+      status: user.status,
+      documents: 0,
+      products: 0,
+    };
+  }
+
+  if (verdict === 'STALE LINK') {
+    // The stranded state §27BB (F-50) records: the row can neither sign in (the exchange
+    // resolves by `firebaseUid` only) nor register again (409 EMAIL_IN_USE), and no seeder
+    // repairs it. Reported as a refusal the seeder would make, not as a note.
+    return {
+      verdict,
       detail:
         `the row holds Firebase uid ${String(user.firebaseUid).slice(0, 10)}… but Firebase reports ` +
         `${String(identity.uid).slice(0, 10)}… for that address — a seed would REFUSE, and nothing ` +
         'repairs this implicitly',
       businessId: user.businessId ? String(user.businessId) : null,
+      businessName: business?.name,
       role: user.role,
+      status: user.status,
       documents: 0,
       products: 0,
     };
   }
 
-  if (!user.firebaseUid) {
+  if (verdict === 'NOT LINKED') {
     return {
-      verdict: 'NOT LINKED',
+      verdict,
       detail: 'the row carries no firebaseUid, so a seed would REFUSE rather than attach an identity',
       businessId: user.businessId ? String(user.businessId) : null,
+      businessName: business?.name,
       role: user.role,
+      status: user.status,
       documents: 0,
       products: 0,
     };
   }
 
-  if (!business) {
+  if (verdict === 'IDENTITY DISABLED' || verdict === 'IDENTITY UNVERIFIED') {
     return {
-      verdict: 'NO BUSINESS',
+      verdict,
+      detail:
+        verdict === 'IDENTITY DISABLED'
+          ? 'the Firebase identity is DISABLED — the app cannot create a session from it'
+          : 'the Firebase identity is NOT verified — the app refuses a session until it is verified',
+      businessId: user.businessId ? String(user.businessId) : null,
+      businessName: business?.name,
+      role: user.role,
+      status: user.status,
+      documents: 0,
+      products: 0,
+    };
+  }
+
+  if (verdict === 'NO BUSINESS') {
+    return {
+      verdict,
       detail: `business ${String(user.businessId)} does not exist — a seed would REFUSE rather than repair it`,
       businessId: user.businessId ? String(user.businessId) : null,
       role: user.role,
+      status: user.status,
+      documents: 0,
+      products: 0,
+    };
+  }
+
+  if (verdict === 'USER INACTIVE') {
+    return {
+      verdict,
+      detail:
+        `${user.status}, business ${String(user.businessId)} "${business.name}" — the app refuses ` +
+        'a session for a non-ACTIVE account',
+      businessId: String(user.businessId),
+      businessName: business.name,
+      role: user.role,
+      status: user.status,
       documents: 0,
       products: 0,
     };
@@ -183,12 +242,27 @@ async function checkInDatabase(email, identity, { production = false } = {}) {
   // A production seed replaces, and a production cleanup empties, the WHOLE tenant. Both act
   // only for the account that owns it, so a member is reported as not ready rather than
   // discovered at the write (or, worse, the delete).
-  if (production && user.role !== 'OWNER') {
+  if (verdict === 'NOT OWNER') {
     return {
-      verdict: 'NOT OWNER',
+      verdict,
       detail:
         `${user.role}, business ${String(user.businessId)} "${business.name}" — a production seed ` +
         'or cleanup acts only for the OWNER',
+      businessId: String(user.businessId),
+      businessName: business.name,
+      role: user.role,
+      status: user.status,
+      documents: 0,
+      products: 0,
+    };
+  }
+
+  if (verdict === 'BUSINESS INACTIVE') {
+    return {
+      verdict,
+      detail:
+        `business ${String(user.businessId)} "${business.name}" is ${business.status}, not ACTIVE ` +
+        '— a production seed would REFUSE to replace it',
       businessId: String(user.businessId),
       businessName: business.name,
       role: user.role,
@@ -212,9 +286,11 @@ async function checkInDatabase(email, identity, { production = false } = {}) {
   };
 }
 
-function identityLine(identity) {
+function identityLine(identity, verdict) {
   if (!identity.exists) {
-    return 'no identity — registering the address in the app creates one (a seed needs DEMO_ACCOUNT_PASSWORD)';
+    return verdict === 'NO IDENTITY'
+      ? 'no identity — the user row exists, so registration cannot create one; repair the link deliberately'
+      : 'no identity — registering the address in the app creates one (a seed needs DEMO_ACCOUNT_PASSWORD)';
   }
   const flags = [
     identity.emailVerified ? 'verified' : 'NOT verified',
@@ -302,9 +378,12 @@ async function main() {
         console.log(
           `  ${row.products.toLocaleString()} products / ${row.documents.toLocaleString()} documents in ${dbName}`,
         );
+        // The id is what `seed --plan=demo` must name in production. Printing a READY line without
+        // it left the operator to find the id in another tool.
+        console.log(`  businessId: ${row.businessId}`);
       } else {
         console.log(`  ${row.detail}`);
-        console.log(`  Firebase: ${identityLine(identity)}`);
+        console.log(`  Firebase: ${identityLine(identity, row.verdict)}`);
       }
     }
   }

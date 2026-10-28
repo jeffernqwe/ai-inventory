@@ -10,19 +10,23 @@
 // is evidence about the script, not about the database. This reads the rows back and
 // checks the three things a fixture can silently get wrong:
 //
-//   1. COUNTS, from the database, resolved through the account's own businessId.
+//   1. COUNTS, from the database, resolved through the account's own businessId — and
+//      the tenant must actually HOLD something. An empty tenant used to produce zero
+//      violations and print SUCCESS, which verified nothing at all.
 //   2. LEDGER CONSISTENCY — every inventory transaction must satisfy the invariant its
 //      OWN type implies (`newQuantity = previous +/- quantity`, `quantity = |target -
-//      previous|` for an adjustment) and no quantity may be negative. The performance
-//      seeder once wrote 6 615 of 6 616 STOCK_OUT rows as increases, and the assistant
-//      reported that faithfully: a self-contradicting fixture reads like a wrong answer.
+//      previous|` for an adjustment, the same absolute change for each TRANSFER leg) and
+//      no quantity may be negative. The performance seeder once wrote 6 615 of 6 616
+//      STOCK_OUT rows as increases, and the assistant reported that faithfully: a
+//      self-contradicting fixture reads like a wrong answer.
 //   3. REFERENTIAL INTEGRITY — every inventory row points at a product and a location
 //      that exist, every purchase order at a real supplier, and every receipt line at a
 //      real inventory transaction (a receipt must be backed by the movement it claims).
 //
-// Read-only: it never writes. Exit code 1 on any violation, so it can gate a
-// measurement run. It also prints the stock-health spread, because a dataset where
-// nothing is ever low leaves the restock path unmeasured.
+// Read-only: it never writes. Exit code 1 on any violation (including an empty tenant),
+// so it can gate a measurement run. A missing business is exit 2, because nothing can be
+// checked. It also prints the stock-health spread, because a dataset where nothing is
+// ever low leaves the restock path unmeasured.
 //
 // Two bugs in the FIRST version of this file are worth remembering, because both were
 // false alarms that a reader could have mistaken for fixture defects: a `select()` that
@@ -33,6 +37,7 @@ import 'dotenv/config';
 import mongoose from 'mongoose';
 
 import env, { DATABASE_NAMES } from '../src/config/env.ts';
+import Business from '../src/models/business.model.ts';
 import Category from '../src/models/category.model.ts';
 import Inventory from '../src/models/inventory.model.ts';
 import InventoryTransaction from '../src/models/inventoryTransaction.model.ts';
@@ -41,7 +46,9 @@ import Product from '../src/models/product.model.ts';
 import PurchaseOrder from '../src/models/purchaseOrder.model.ts';
 import Supplier from '../src/models/supplier.model.ts';
 import User from '../src/models/user.model.ts';
+import { ledgerViolations, tenantEmptinessProblem } from './demo/verify.mjs';
 import { SeedSafetyError, assertNamedReadTarget } from './perf/lib.mjs';
+import { isEmailAddress, normaliseEmail } from './seed/lib.mjs';
 
 const COMMAND = 'verify:demo';
 
@@ -54,10 +61,12 @@ const COMMAND = 'verify:demo';
 // not an address: `-- --database=…` alone used to be read as the email.
 const emailFlag = process.argv.find((a) => a.startsWith('--email='))?.slice('--email='.length);
 const positional = process.argv[2] && !process.argv[2].startsWith('--') ? process.argv[2] : undefined;
-const email = String(emailFlag ?? positional ?? '').trim();
-if (!email) {
-  console.error(`[${COMMAND}] --email=<address> is required, and nothing was read.`);
-  console.error(`[${COMMAND}] NOT VERIFIED (exit 2) — no account was named.`);
+// One spelling at the boundary, because `users.email` is stored lower-case and Mongoose
+// applies `lowercase` on WRITE only: `--email=A@X.com` used to miss the row it named.
+const email = normaliseEmail(emailFlag ?? positional);
+if (!isEmailAddress(email)) {
+  console.error(`[${COMMAND}] --email=<address> is required and must be valid, and nothing was read.`);
+  console.error(`[${COMMAND}] NOT VERIFIED (exit 2) — no usable account was named.`);
   process.exit(2);
 }
 
@@ -111,9 +120,18 @@ if (!user) {
   process.exit(2);
 }
 const businessId = user.businessId;
+const business = businessId ? await Business.findById(businessId).select('name').lean() : null;
+if (!business) {
+  // A user row pointing at no business cannot describe a tenant. Nothing is known about
+  // the data, so this is the same "could not check" outcome as an unreachable database.
+  console.error(
+    `[verify:demo] business ${String(businessId)} does not exist for ${email} — NOT VERIFIED (exit 2).`,
+  );
+  process.exit(2);
+}
 const filter = { businessId };
 console.log(`Account  : ${email} (${user.role})`);
-console.log(`Business : ${String(businessId)}`);
+console.log(`Business : ${business.name} (${String(businessId)})`);
 
 const counts = {
   categories: await Category.countDocuments(filter),
@@ -129,22 +147,21 @@ for (const v of Object.values(counts)) sum += v;
 console.log(`Products : ${counts.products.toLocaleString()}`);
 console.log(`Documents: ${sum.toLocaleString()}`);
 
+// An empty tenant has no violations because it has no rows to violate anything. That is
+// not a pass: the command exists to verify a seeded dataset, and there is none.
+const emptyProblem = tenantEmptinessProblem(counts);
+if (emptyProblem) {
+  console.error('');
+  console.error(`Result   : FAILED — ${emptyProblem}.`);
+  await mongoose.disconnect();
+  process.exit(1);
+}
+
 // ---- ledger consistency: every row must satisfy the invariant its OWN type implies
 const tx = await InventoryTransaction.find(filter)
   .select('type quantity previousQuantity newQuantity')
   .lean();
-const bad = { STOCK_IN: 0, STOCK_OUT: 0, ADJUSTMENT: 0, other: 0 };
-for (const t of tx) {
-  if (t.type === 'STOCK_IN') {
-    if (t.newQuantity !== t.previousQuantity + t.quantity) bad.STOCK_IN += 1;
-  } else if (t.type === 'STOCK_OUT') {
-    if (t.newQuantity !== t.previousQuantity - t.quantity) bad.STOCK_OUT += 1;
-  } else if (t.type === 'ADJUSTMENT') {
-    if (t.quantity !== Math.abs(t.newQuantity - t.previousQuantity)) bad.ADJUSTMENT += 1;
-  } else bad.other += 1;
-}
-const negative = tx.filter((t) => t.newQuantity < 0 || t.previousQuantity < 0).length;
-const badTotal = bad.STOCK_IN + bad.STOCK_OUT + bad.ADJUSTMENT + bad.other;
+const { bad, negative, badTotal } = ledgerViolations(tx);
 console.log(`Ledger   : ${tx.length.toLocaleString()} rows — ${badTotal} bad, ${negative} negative`);
 
 // ---- referential integrity of what was written
@@ -203,6 +220,7 @@ const problems = [
   ['STOCK_IN movements whose arithmetic does not hold', bad.STOCK_IN],
   ['STOCK_OUT movements whose arithmetic does not hold', bad.STOCK_OUT],
   ['ADJUSTMENT movements whose arithmetic does not hold', bad.ADJUSTMENT],
+  ['TRANSFER movements whose arithmetic does not hold', bad.TRANSFER],
   ['movements of an unrecognised type', bad.other],
   ['movements leaving a negative quantity', negative],
   ['inventory rows pointing at a missing product or location', invOrphans],

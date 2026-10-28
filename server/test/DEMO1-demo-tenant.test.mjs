@@ -10,6 +10,7 @@
 // the expected number is stated in advance and the fixture actually produces it.
 
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import { DATABASE_NAMES } from '../src/config/env.ts';
@@ -31,6 +32,8 @@ import {
   isProductionDatabase,
   planSeed,
 } from '../scripts/demo/lib.mjs';
+import { ledgerViolations, tenantEmptinessProblem } from '../scripts/demo/verify.mjs';
+import { isEmailAddress, normaliseBusinessId } from '../scripts/seed/lib.mjs';
 
 const SEED = {
   mongodbUri: 'mongodb://example.invalid',
@@ -192,6 +195,113 @@ test('DEMO-1 a half-state is refused rather than repaired, and the happy paths a
   const orphan = planSeed({ businessId: null, userId: 'u', userBusinessId: null });
   assert.equal(orphan.action, 'refuse');
   assert.match(orphan.reason, /invent its linkage/);
+});
+
+test('DEMO-1 a TRANSFER is checked, not rejected as an unknown type', () => {
+  // One transfer writes two legs: an outgoing row and an incoming row, both carrying a
+  // positive quantity and a signed change. The old checker counted every one as
+  // `other`, so a tenant with valid transfers could never verify.
+  const rows = [
+    { type: 'TRANSFER', quantity: 5, previousQuantity: 10, newQuantity: 5 },
+    { type: 'TRANSFER', quantity: 5, previousQuantity: 0, newQuantity: 5 },
+  ];
+  const clean = ledgerViolations(rows);
+  assert.equal(clean.bad.TRANSFER, 0);
+  assert.equal(clean.bad.other, 0);
+  assert.equal(clean.badTotal, 0);
+
+  const broken = ledgerViolations([{ ...rows[0], newQuantity: 9 }]);
+  assert.equal(broken.bad.TRANSFER, 1);
+  assert.equal(broken.bad.other, 0);
+  assert.equal(broken.badTotal, 1);
+});
+
+test('DEMO-1 every movement type, and a negative quantity, is counted where it belongs', () => {
+  const { bad, negative, badTotal } = ledgerViolations([
+    { type: 'STOCK_IN', quantity: 4, previousQuantity: 1, newQuantity: 5 },
+    { type: 'STOCK_OUT', quantity: 4, previousQuantity: 5, newQuantity: 1 },
+    { type: 'ADJUSTMENT', quantity: 3, previousQuantity: 1, newQuantity: 4 },
+    { type: 'STOCK_IN', quantity: 4, previousQuantity: 1, newQuantity: 99 },
+    { type: 'SOMETHING_ELSE', quantity: 1, previousQuantity: 0, newQuantity: 1 },
+    { type: 'STOCK_OUT', quantity: 2, previousQuantity: 1, newQuantity: -1 },
+  ]);
+  assert.deepEqual(bad, { STOCK_IN: 1, STOCK_OUT: 0, ADJUSTMENT: 0, TRANSFER: 0, other: 1 });
+  assert.equal(negative, 1);
+  assert.equal(badTotal, 2);
+});
+
+test('DEMO-1 an empty or product-less tenant is reported, not passed', () => {
+  assert.match(
+    tenantEmptinessProblem({ categories: 0, locations: 0, suppliers: 0, products: 0, inventory: 0 }),
+    /empty/,
+  );
+  assert.match(tenantEmptinessProblem({ categories: 2, products: 0, inventory: 0 }), /no products/);
+  assert.equal(tenantEmptinessProblem({ categories: 1, products: 3 }), null);
+});
+
+test('DEMO-1 verify:demo applies the emptiness and business checks, and names TRANSFER', () => {
+  const source = readFileSync(new URL('../scripts/verify-demo-data.mjs', import.meta.url), 'utf8');
+  assert.match(source, /tenantEmptinessProblem\(counts\)/);
+  assert.match(source, /Business\.findById\(businessId\)/);
+  assert.match(source, /TRANSFER movements whose arithmetic does not hold/);
+  assert.match(source, /NOT VERIFIED \(exit 2\)/);
+});
+
+test('DEMO-1 an address must be usable, and a business id gets one spelling', () => {
+  // The demo commands used to accept anything containing `@`, then reported a Firebase or
+  // driver error for `a@`, `@b` or `@`. An input problem belongs before the connection.
+  assert.equal(isEmailAddress('you@example.com'), true);
+  assert.equal(isEmailAddress('  YOU@EXAMPLE.COM  '), true);
+  for (const bad of ['', 'a@', '@b', '@', 'a b@example.com', 'a@example']) {
+    assert.equal(isEmailAddress(bad), false, `${JSON.stringify(bad)} was accepted`);
+  }
+
+  // Upper-case hex is a valid id, but `ObjectId.toString()` is lower-case. The old
+  // comparison therefore treated a correct id as a different tenant.
+  assert.equal(normaliseBusinessId('A'.repeat(24)), 'a'.repeat(24));
+  assert.equal(normaliseBusinessId(`  ${'B'.repeat(24)}  `), 'b'.repeat(24));
+  assert.equal(normaliseBusinessId('not-an-id'), null);
+  assert.equal(normaliseBusinessId(undefined), null);
+});
+
+test('DEMO-1 the demo commands validate input and the production dry run checks the tenant', () => {
+  const seed = readFileSync(new URL('../scripts/seed-demo-account.mjs', import.meta.url), 'utf8');
+  const cleanup = readFileSync(new URL('../scripts/cleanup-demo-account.mjs', import.meta.url), 'utf8');
+  const verify = readFileSync(new URL('../scripts/verify-demo-data.mjs', import.meta.url), 'utf8');
+  const tenant = readFileSync(new URL('../scripts/seed-demo-tenant.mjs', import.meta.url), 'utf8');
+  const seedLib = readFileSync(new URL('../scripts/seed/lib.mjs', import.meta.url), 'utf8');
+
+  for (const [name, source] of [['seed:demo', seed], ['cleanup:demo', cleanup]]) {
+    assert.match(source, /isEmailAddress\(/, `${name} does not validate the address`);
+    assert.match(source, /normaliseBusinessId\(/, `${name} does not normalise --business`);
+  }
+  assert.match(cleanup, /assertOneBusinessAssociation\(/);
+  assert.match(verify, /normaliseEmail\(emailFlag \?\? positional\)/);
+  assert.match(verify, /isEmailAddress\(email\)/);
+
+  // A production preview that reported success for an id the real run refuses is the
+  // defect this pins. The preview must read through the same resolver and naming rule.
+  const preview = seed.slice(
+    seed.indexOf('async function previewProductionDryRun'),
+    seed.indexOf('async function main()'),
+  );
+  assert.ok(preview.includes('readIdentity('), 'the preview must not create an identity');
+  assert.ok(!preview.includes('resolveIdentity('), 'the preview must not refresh or create an identity');
+  assert.ok(preview.includes('resolveExistingTenantForIdentity('));
+  assert.ok(preview.includes('assertProductionTenantOwnership('));
+  assert.ok(preview.includes('assertTenantNamedForReset('));
+  assert.ok(preview.includes('countTenantDataRemoval('));
+  assert.ok(!preview.includes('clearTenantData('), 'the preview must not delete anything');
+  assert.ok(!preview.includes('seedTenant('), 'the preview must not write anything');
+  assert.match(preview, /const stranded = await User\.findOne/);
+
+  // A row with no business cannot become a second account; the shared create path refuses it
+  // before making a business that would be left empty.
+  assert.match(seedLib, /carries no businessId/);
+  assert.match(seedLib, /Refusing to .*create a second account/s);
+
+  // A refused dry run is a refusal, not a completed preview.
+  assert.match(tenant, /fail\(plan\.reason\)/);
 });
 
 test('DEMO-1 the cleanup phrase and the seed phrase are not interchangeable', () => {

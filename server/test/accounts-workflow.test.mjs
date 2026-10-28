@@ -476,11 +476,6 @@ describe('the check answers questions and changes nothing', () => {
     );
   });
 
-  it('it names the Firebase project it asked, so the answer is checkable', () => {
-    assert.match(source, /firebaseConfig\(\)\.projectId/);
-    assert.match(source, /the project this shell is configured for/);
-  });
-
   it('it refuses to answer from the wrong project rather than reporting no identity', () => {
     // Pointed at another project it would report MISSING for accounts that exist — a wrong
     // answer, not a missing one. It stops instead, with the not-checked exit code.

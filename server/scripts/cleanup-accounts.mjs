@@ -199,14 +199,10 @@ async function main() {
     seen.add(entry.email);
   }
 
-  console.log(`[${COMMAND}] database : ${target.database}${target.production ? '   (PRODUCTION)' : ''}`);
-  console.log(`[${COMMAND}] confirmed: ${target.phrases} phrase(s) accepted`);
-  console.log(
-    `[${COMMAND}] mode     : ${preset ? `${PRESET_ALIAS} preset (three fixed accounts)` : 'explicit --accounts list'}`,
-  );
-  console.log(`[${COMMAND}] accounts : ${plan.map((e) => e.email).join(', ')}`);
-  console.log(`[${COMMAND}] removes  : their inventory data only — the login, the business row, its members and the Firebase identity are KEPT`);
-  if (dryRun) console.log(`[${COMMAND}] mode     : DRY RUN — counting only, nothing will be deleted`);
+  console.log(`Database : ${target.database}${target.production ? ' (PRODUCTION)' : ''}`);
+  console.log(`Mode     : ${dryRun ? 'DRY RUN — counting only, nothing will be deleted' : 'DELETE — tenant data only'}`);
+  console.log(`Accounts : ${plan.length}`);
+  console.log('Keeps    : login, business, members, sessions, identity — never deletes an identity');
 
   // A connection failure happens before any tenant is resolved or deleted. The old report was the
   // driver's own line (a production dry run exited 1 with only its `DRY RUN` header printed,
@@ -237,10 +233,7 @@ async function main() {
       .lean();
 
     if (!user) {
-      console.log(
-        `[${COMMAND}]   ${entry.email}: no account in ${target.database} — nothing to delete ` +
-          '(check the address, or the other database)',
-      );
+      console.log(`\n${entry.email} — no account — nothing to delete`);
       continue;
     }
     if (entry.businessId && String(user.businessId) !== String(entry.businessId)) {
@@ -249,13 +242,14 @@ async function main() {
           'Refusing to empty a tenant the account does not own. Nothing was deleted.',
       );
     }
+    const business = user.businessId
+      ? await Business.findById(user.businessId).select('name status').lean()
+      : null;
+
     if (target.production) {
       // The tenant must be a row this run can actually read. The seeder gets this from
       // `resolveExistingTenantForIdentity`; cleanup looks the user up directly, so the business
       // is checked here rather than assumed from a field that can be stale (§27BB / F-50).
-      const business = user.businessId
-        ? await Business.findById(user.businessId).select('name status').lean()
-        : null;
       if (!business) {
         fail(
           `"${entry.email}" points at business ${String(user.businessId)}, which does not exist in ` +
@@ -278,74 +272,46 @@ async function main() {
       });
     }
 
-    if (!entry.businessId) {
-      entry.businessId = String(user.businessId);
-      console.log(
-        `[${COMMAND}]   ${entry.email.padEnd(36)} resolved business ${entry.businessId} (${user.role})`,
-      );
-    }
+    if (entry.businessId == null) entry.businessId = String(user.businessId);
 
     const { total, counts } = await countTenantDataRemoval([user.businessId]);
-    prepared.push({ ...entry, businessId: String(user.businessId), role: user.role, total, counts });
+    prepared.push({
+      ...entry,
+      businessId: String(user.businessId),
+      businessName: business?.name ?? 'no business',
+      role: user.role,
+      total,
+      counts,
+    });
   }
 
   if (!prepared.length) {
-    console.log(
-      `[${COMMAND}] nothing to delete — none of the named accounts exist in ${target.database}.`,
-    );
+    console.log('\nResult   : SUCCESS — nothing to delete');
     await mongoose.disconnect();
     return;
   }
 
-  console.log('');
+  const total = prepared.reduce((sum, entry) => sum + entry.total, 0);
   for (const entry of prepared) {
     console.log(
-      `[${COMMAND}]   ${entry.email.padEnd(36)} ${String(entry.total).padStart(7)} document(s)` +
-        `${entry.total === 0 ? '  (already empty)' : ''}  business ${entry.businessId}`,
+      `\n${entry.email} — ${entry.businessName} — ${entry.total.toLocaleString()} documents` +
+        `${entry.total === 0 ? ' (already empty)' : ''}`,
     );
   }
-  const total = prepared.reduce((sum, entry) => sum + entry.total, 0);
 
   if (dryRun) {
     console.log('');
-    for (const entry of prepared) {
-      for (const [collection, count] of Object.entries(entry.counts)) {
-        if (count > 0) {
-          console.log(
-            `[${COMMAND}]   ${entry.email}  ${collection.padEnd(24)} ${count}`,
-          );
-        }
-      }
-    }
     console.log(
-      `[${COMMAND}] dry run complete — would remove ${total.toLocaleString()} document(s) across ` +
-        `${prepared.length} tenant(s); nothing was deleted.`,
+      `Would remove : ${total.toLocaleString()} documents across ${prepared.length} tenants`,
     );
-    console.log(`[${COMMAND}] to run for real:`);
-    // THE ENVIRONMENT PREFIX IS PART OF THE COMMAND — see the same constant in seed-perf-tenant.mjs:
-    // `.env` resolves to development, and the guard refuses a database this process did not
-    // resolve, so a production line without it cannot be pasted.
-    if (target.production) {
-      console.log(`[${COMMAND}]   NODE_ENV=production MONGODB_DB_NAME=${target.database} \\`);
-    }
-    console.log(
-      `[${COMMAND}]   CLEANUP_CONFIRM=${phrase} CLEANUP_DB_CONFIRM=${target.database}` +
-        `${target.production ? ' CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA' : ''} \\`,
-    );
-    console.log(
-      `[${COMMAND}]     npm run ${preset ? PRESET_ALIAS : COMMAND} -- --database=${target.database}` +
-        `${preset ? '' : ` --accounts="${plan.map((e) => e.email).join(',')}"`}`,
-    );
+    console.log('No data deleted.');
+    console.log('Result   : DRY RUN SUCCESS');
     await mongoose.disconnect();
     return;
   }
 
-  console.log('');
   for (const entry of prepared) {
-    const { removed, counts } = await clearTenantData([entry.businessId]);
-    for (const [collection, count] of Object.entries(counts)) {
-      if (count > 0) console.log(`[${COMMAND}]   ${entry.email}  ${collection.padEnd(24)} ${count}`);
-    }
+    const { removed } = await clearTenantData([entry.businessId]);
     // Prove it over the same plan the removal used: after a data-only clear, the count of
     // business-owned rows must be zero. The account rows are deliberately outside that plan.
     const remaining = (await countTenantDataRemoval([entry.businessId])).total;
@@ -355,22 +321,14 @@ async function main() {
           `(${entry.email}). The removal is incomplete — inspect before re-running anything.`,
       );
     }
-    console.log(`[${COMMAND}]   ${entry.email} removed ${removed.toLocaleString()} document(s); 0 remaining`);
+    console.log(
+      `\n${entry.email} — ${entry.businessName} — removed ${removed.toLocaleString()} documents — 0 remaining`,
+    );
   }
 
   console.log('');
-  console.log(
-    `[${COMMAND}] OK — ${total.toLocaleString()} document(s) removed from ${prepared.length} tenant(s), ` +
-      'each verified at 0 remaining.',
-  );
-  console.log(
-    `[${COMMAND}] kept      : the login, the business row, its members, their sessions and the Firebase ` +
-      'identity (F-50 — this command never deletes an identity)',
-  );
-  console.log(
-    `[${COMMAND}] next      : the accounts still sign in, and land in an empty business — seed them again, ` +
-        'or start fresh from the app',
-  );
+  console.log(`Removed  : ${total.toLocaleString()} documents from ${prepared.length} tenants; 0 remaining`);
+  console.log('Result   : SUCCESS');
 
   await mongoose.disconnect();
 }

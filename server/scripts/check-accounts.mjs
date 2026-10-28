@@ -95,8 +95,6 @@ async function readIdentity(auth, email) {
   }
 }
 
-const OWNER_COMMENT = 'the login, the business row and its members are never touched by a seed or a cleanup';
-
 /**
  * One account, in one database.
  *
@@ -265,16 +263,7 @@ async function main() {
   } catch (err) {
     fail(`${err.message} NOT CHECKED (exit 2).`);
   }
-  const projectId = firebaseConfig().projectId;
   const auth = getAuth(getFirebaseAdminApp());
-
-  console.log(`[${COMMAND}] READ-ONLY — nothing is created, changed or deleted`);
-  console.log(`[${COMMAND}] Firebase  : ${projectId} (the project this shell is configured for)`);
-  console.log(
-    `[${COMMAND}] databases : ${databases.join(', ')}` +
-      `${withProduction ? '  (production — development is the default)' : '  (add --with-production to check production instead)'}`,
-  );
-  console.log(`[${COMMAND}] accounts  : ${accounts.length}`);
 
   const identities = new Map();
   for (const email of accounts) identities.set(email, await readIdentity(auth, email));
@@ -299,66 +288,33 @@ async function main() {
   // selected. A row that does not exist elsewhere is not a finding about this environment.
   const { pairs, notReady, ready } = summariseReadiness(checked);
 
+  console.log(`Database : ${databases.join(', ')}${withProduction ? ' (PRODUCTION)' : ''}`);
+  console.log('Mode     : READ-ONLY — nothing is created, changed or deleted');
+  console.log(`Accounts : ${ready}/${pairs} READY`);
+
   for (const email of accounts) {
     const identity = identities.get(email);
-    console.log('');
-    console.log(`[${COMMAND}] ${email}`);
-    console.log(`[${COMMAND}]   firebase            : ${identityLine(identity)}`);
     for (const { dbName, rows } of checked) {
       const row = rows.find((r) => r.email === email);
-      // Every line keeps the command's prefix, and the continuation lines up under the
-      // database name's column rather than a character off it.
-      const head = `[${COMMAND}]   `;
-      const label = `${head}${dbName.padEnd(19)} : `;
+      console.log('');
+      console.log(`${email} — ${row.businessName ?? 'no business'} — ${row.verdict}`);
       if (row.verdict === 'READY') {
-        console.log(`${label}READY — ${row.detail}`);
         console.log(
-          `${head}${' '.repeat(19)}   ${row.products.toLocaleString()} products / ` +
-            `${row.documents.toLocaleString()} documents a seed would RESET` +
-            `${row.documents === 0 ? ' (the tenant is empty)' : ''}`,
+          `  ${row.products.toLocaleString()} products / ${row.documents.toLocaleString()} documents in ${dbName}`,
         );
       } else {
-        console.log(`${label}${row.verdict} — ${row.detail}`);
+        console.log(`  ${row.detail}`);
+        console.log(`  Firebase: ${identityLine(identity)}`);
       }
     }
   }
 
   console.log('');
-  console.log(
-    `[${COMMAND}] ${ready} of ${pairs} account/database pair(s) are READY in ${databases.join(', ')}; ` +
-      'every count comes from the same plan a cleanup executes.',
-  );
-  console.log(`[${COMMAND}] kept by both commands: ${OWNER_COMMENT}`);
-
-  // The bridge to the next step: the exact seeding command for what was just measured.
-  const preset = accounts.length === COMPARISON_ACCOUNTS.length &&
-    COMPARISON_ACCOUNTS.every((a) => accounts.includes(a.email));
-  // The next step belongs to the database that was read. Printing a development seed line after a
-  // production check is how an operator gets told to run the wrong command in the wrong place.
-  if (databases.includes(DATABASE_NAMES.development)) {
-    console.log('');
-    if (preset) {
-      console.log(`[${COMMAND}] seed the three fixed accounts (development, 30 000 / 50 000 / 90 000 products):`);
-      console.log(`[${COMMAND}]   SEED_CONFIRM=seed-three-accounts SEED_DB_CONFIRM=${DATABASE_NAMES.development} \\`);
-      console.log(`[${COMMAND}]     npm run seed:three -- --database=${DATABASE_NAMES.development} --dry-run`);
-    } else {
-      console.log(`[${COMMAND}] seed them (each entry is a product count):`);
-      console.log(`[${COMMAND}]   SEED_CONFIRM=seed-accounts SEED_DB_CONFIRM=${DATABASE_NAMES.development} \\`);
-      console.log(`[${COMMAND}]     npm run seed:accounts -- --database=${DATABASE_NAMES.development} \\`);
-      console.log(`[${COMMAND}]       --accounts="${accounts.map((email) => `${email}:30000`).join(',')}" --dry-run`);
-    }
-  }
   if (notReady > 0) {
-    console.log('');
-    console.log(
-      `[${COMMAND}] NOT READY (exit 1) — ${notReady} pair(s) above are missing or mismatched. Nothing was ` +
-        'changed; the seeder refuses on STALE LINK / NOT LINKED / NO BUSINESS / NOT OWNER / AMBIGUOUS, ' +
-        'and creates a tenant only in development, for MISSING.',
-    );
+    console.log(`Result   : FAILED — ${notReady} account(s) not ready. Nothing was changed.`);
     process.exit(1);
   }
-  console.log('');
-  console.log(`[${COMMAND}] READY (exit 0) — every named account exists and is linked where it was checked.`);
+  console.log('Result   : SUCCESS');
   process.exit(0);
 }
 

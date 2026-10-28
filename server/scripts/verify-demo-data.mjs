@@ -101,7 +101,7 @@ try {
 }
 
 // Printed BEFORE the lookup, so an exit 2 still says which database was checked.
-console.log(`database    : ${database}${database === DATABASE_NAMES.production ? '   (PRODUCTION)' : ''}`);
+console.log(`Database : ${database}${database === DATABASE_NAMES.production ? ' (PRODUCTION)' : ''}`);
 
 const user = await User.findOne({ email }).select('_id businessId role status emailVerified firebaseUid').lean();
 if (!user) {
@@ -112,8 +112,8 @@ if (!user) {
 }
 const businessId = user.businessId;
 const filter = { businessId };
-console.log(`account     : ${email}  role=${user.role} status=${user.status} firebaseUid=${user.firebaseUid ? 'yes' : 'NONE'}`);
-console.log(`businessId  : ${String(businessId)}`);
+console.log(`Account  : ${email} (${user.role})`);
+console.log(`Business : ${String(businessId)}`);
 
 const counts = {
   categories: await Category.countDocuments(filter),
@@ -125,12 +125,9 @@ const counts = {
   purchase_orders: await PurchaseOrder.countDocuments(filter),
 };
 let sum = 0;
-console.log('\nINDEPENDENT COUNTS (from the database, not from the script):');
-for (const [k, v] of Object.entries(counts)) {
-  sum += v;
-  console.log(`  ${k.padEnd(24)} ${String(v).padStart(7)}`);
-}
-console.log(`  ${'TOTAL'.padEnd(24)} ${String(sum).padStart(7)}`);
+for (const v of Object.values(counts)) sum += v;
+console.log(`Products : ${counts.products.toLocaleString()}`);
+console.log(`Documents: ${sum.toLocaleString()}`);
 
 // ---- ledger consistency: every row must satisfy the invariant its OWN type implies
 const tx = await InventoryTransaction.find(filter)
@@ -146,13 +143,9 @@ for (const t of tx) {
     if (t.quantity !== Math.abs(t.newQuantity - t.previousQuantity)) bad.ADJUSTMENT += 1;
   } else bad.other += 1;
 }
-console.log('\nLEDGER CONSISTENCY (a self-contradicting ledger reads like a wrong answer):');
-console.log(`  checked          ${tx.length}`);
-console.log(`  STOCK_IN  bad    ${bad.STOCK_IN}`);
-console.log(`  STOCK_OUT bad    ${bad.STOCK_OUT}`);
-console.log(`  ADJUSTMENT bad   ${bad.ADJUSTMENT}`);
 const negative = tx.filter((t) => t.newQuantity < 0 || t.previousQuantity < 0).length;
-console.log(`  negative stock   ${negative}`);
+const badTotal = bad.STOCK_IN + bad.STOCK_OUT + bad.ADJUSTMENT + bad.other;
+console.log(`Ledger   : ${tx.length.toLocaleString()} rows — ${badTotal} bad, ${negative} negative`);
 
 // ---- referential integrity of what was written
 const productIds = new Set((await Product.find(filter).select('_id').lean()).map((d) => String(d._id)));
@@ -171,28 +164,20 @@ const invOrphans =
 const pos = await PurchaseOrder.find(filter).select('items receipts number supplierId').lean();
 let poOrphanProduct = 0;
 let poOrphanTx = 0;
-let receiptLines = 0;
 for (const po of pos) {
   for (const item of po.items ?? []) {
     if (!productIds.has(String(item.productId))) poOrphanProduct += 1;
   }
   for (const receipt of po.receipts ?? []) {
     for (const line of receipt.lines ?? []) {
-      receiptLines += 1;
       if (!txIds.has(String(line.inventoryTransactionId))) poOrphanTx += 1;
     }
   }
 }
-const suppliers = await Supplier.find(filter).select('_id').lean();
 const poOrphanSupplier = pos.filter((po) => !supplierIds.has(String(po.supplierId))).length;
 
-console.log('\nREFERENTIAL INTEGRITY:');
-console.log(`  inventory rows with a missing product or location : ${invOrphans}`);
-console.log(`  PO items with a missing product                   : ${poOrphanProduct}`);
-console.log(`  PO rows with a missing supplier                   : ${poOrphanSupplier}`);
-console.log(`  receipt lines total                               : ${receiptLines}`);
-console.log(`  receipt lines pointing at a MISSING transaction    : ${poOrphanTx}`);
-console.log(`  suppliers present                                 : ${suppliers.length}`);
+const orphanTotal = invOrphans + poOrphanProduct + poOrphanSupplier + poOrphanTx;
+console.log(`Integrity: ${orphanTotal} missing references`);
 
 // ---- stock-health spread, so the assistant's answers have something to report
 const products = await Product.find(filter).select('_id minimumStock').lean();
@@ -211,10 +196,7 @@ for (const p of products) {
   if (qty <= (p.minimumStock ?? 0)) low += 1;
   if (qty === 0) zero += 1;
 }
-console.log('\nSTOCK HEALTH:');
-console.log(`  products                       ${products.length}`);
-console.log(`  at or below minimum (restock)   ${low}`);
-console.log(`  zero on hand                    ${zero}`);
+console.log(`Stock    : ${low.toLocaleString()} low, ${zero.toLocaleString()} out of stock`);
 
 // ---- the verdict, and the only path that exits 1
 const problems = [
@@ -232,9 +214,10 @@ const problems = [
 await mongoose.disconnect();
 
 if (problems.length > 0) {
-  console.error('\n[verify:demo] VIOLATIONS FOUND (exit 1):');
+  console.error('');
+  console.error('Result   : FAILED — violations found:');
   for (const [label, count] of problems) console.error(`  - ${label}: ${count}`);
   process.exit(1);
 }
-console.log('\n[verify:demo] OK (exit 0) — counts, ledger and referential integrity all hold.');
+console.log('Result   : SUCCESS');
 process.exit(0);

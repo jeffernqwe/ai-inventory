@@ -316,10 +316,10 @@ async function previewProductionTargets(plan, database) {
       );
 
       const { total } = await countTenantDataRemoval([tenant.businessId]);
-      console.log(
-        `[${COMMAND}]   ${entry.email.padEnd(34)} resolved ${entry.businessId} ` +
-          `("${tenant.businessName}", ${tenant.role}) — ${total.toLocaleString()} document(s) would be reset`,
-      );
+    console.log(
+      `  ${entry.email} — ${tenant.businessName} — ${tenant.role} — ` +
+        `${total.toLocaleString()} documents to reset`,
+    );
     }
   } finally {
     await mongoose.disconnect();
@@ -382,83 +382,40 @@ async function main() {
   const products = plan.reduce((sum, entry) => sum + entry.products, 0);
   const seconds = Math.round(documents / MEASURED_DOCS_PER_SECOND);
 
-  console.log(`[${COMMAND}] database    : ${target.database}${production ? '   (PRODUCTION)' : ''}`);
-  console.log(`[${COMMAND}] confirmed   : ${target.phrases} phrase(s) accepted`);
-  console.log(
-    `[${COMMAND}] mode        : ${phrase === PRESET_PHRASE ? `${PRESET_ALIAS} preset (three fixed accounts)` : 'explicit --accounts list'}`,
-  );
-  console.log(`[${COMMAND}] plan        : ${plan.length} account(s), ${products.toLocaleString()} products ≈ ${documents.toLocaleString()} documents`);
-  console.log(`[${COMMAND}] sku/barcode : ${includeSku ? 'GENERATED (--include-sku)' : 'none — left for the app to generate'}`);
-  console.log(`[${COMMAND}] PRNG seed   : ${seed} (the datasets are reproducible)`);
-  console.log(`[${COMMAND}] ${dryRun ? 'DRY RUN — nothing will be written' : 'DESTRUCTIVE within these tenants: existing data of each account is RESET'}`);
-  console.log('');
-  for (const entry of plan) {
-    console.log(
-      `[${COMMAND}]   ${entry.tier.padEnd(7)} ${entry.email.padEnd(34)} ` +
-        `${entry.products.toLocaleString().padStart(7)} products ≈ ${entry.total.toLocaleString().padStart(7)} documents` +
-        `${entry.businessId ? `  business ${entry.businessId}` : ''}`,
-    );
-  }
-
+  console.log(`Database : ${target.database}${production ? ' (PRODUCTION)' : ''}`);
+  console.log(`Mode     : ${dryRun ? 'DRY RUN — nothing will be written' : 'WRITE — each named tenant is reset'}`);
+  console.log(`Accounts : ${plan.length}`);
+  console.log(`Products : ${products.toLocaleString()}`);
+  console.log(`Documents: ${documents.toLocaleString()} (estimated)`);
+  if (includeSku) console.log('SKU/barcode: generated (--include-sku)');
   if (products >= LARGE_RUN_PRODUCTS) {
-    console.log('');
-    console.log(
-      `[${COMMAND}] LARGE RUN: ${products.toLocaleString()} products ≈ ${documents.toLocaleString()} documents, ` +
-        `about ${Math.max(1, Math.round(seconds / 60))} minute(s) of inserts at the measured rate ` +
-        `(${MEASURED_DOCS_PER_SECOND} documents/s). This size has not been measured end to end — ` +
-        'check the database tier has room before starting, and expect the run to hold the plan in memory.',
-    );
+    console.log(`Est. time: about ${Math.max(1, Math.round(seconds / 60))} minutes`);
+  }
+  if (production) {
+    console.log('Production: tenant resolved from the account, OWNER required');
   }
 
-  if (production) {
-    console.log('');
-    console.log(
-      `[${COMMAND}] production: each tenant is resolved from the account's own user row and must be ` +
-        'OWNED by it; an optional :businessId must match that row; its existing password is never changed',
-    );
+  // Production prints each account from the verified preflight instead, so the address,
+  // business and count appear once.
+  if (!production) {
+    for (const entry of plan) {
+      console.log(
+        `\n${entry.email} — ${entry.products.toLocaleString()} products — ` +
+          `${entry.total.toLocaleString()} documents`,
+      );
+    }
   }
 
   if (dryRun) {
     console.log('');
     if (production) {
-      console.log(`[${COMMAND}] production check — read-only, against ${target.database}:`);
       await previewProductionTargets(plan, target.database);
-      console.log('');
-      console.log(
-        `[${COMMAND}] dry run complete — every account and tenant was resolved against ${target.database}; nothing was written.`,
-      );
+      console.log('\nAll accounts and businesses verified.');
+      console.log('No data written.');
     } else {
-      console.log(`[${COMMAND}] dry run complete — no connection was opened and nothing was written.`);
+      console.log('dry run complete — no connection was opened and nothing was written.');
     }
-    console.log(
-      `[${COMMAND}] check the accounts first (read-only, and it prints the businessId of every tenant):`,
-    );
-    // The check names the database this run is about: `--with-production` selects production
-    // ONLY, so printing it after a development preview would send the operator to the wrong one.
-    const checkArgs = [
-      production ? '--with-production' : null,
-      plan.length && phrase !== PRESET_PHRASE
-        ? `--accounts="${plan.map((e) => e.email).join(',')}"`
-        : null,
-    ].filter(Boolean);
-    console.log(
-      `[${COMMAND}]   npm run check:accounts${checkArgs.length ? ` -- ${checkArgs.join(' ')}` : ''}`,
-    );
-    console.log(`[${COMMAND}] to run for real:`);
-    // THE ENVIRONMENT PREFIX IS PART OF THE COMMAND. `.env` resolves to development, and the
-    // guard refuses a `--database=` this process did not resolve — so a production line printed
-    // without it is a line that cannot be pasted (measured 2026-10-28: exit 1). Same reason as
-    // the identical constant in seed-perf-tenant.mjs.
-    if (production) {
-      console.log(`[${COMMAND}]   NODE_ENV=production MONGODB_DB_NAME=${target.database} \\`);
-    }
-    console.log(
-      `[${COMMAND}]   SEED_CONFIRM=${phrase} SEED_DB_CONFIRM=${target.database}` +
-        `${production ? ' SEED_PROD_CONFIRM=SEED-PRODUCTION-DATA' : ''} \\`,
-    );
-    console.log(
-      `[${COMMAND}]     npm run ${phrase === PRESET_PHRASE ? PRESET_ALIAS : COMMAND} -- --database=${target.database} …`,
-    );
+    console.log('Result   : DRY RUN SUCCESS');
     return;
   }
 
@@ -480,9 +437,9 @@ async function main() {
     const identity = await resolveIdentity(entry.email, { refreshPassword: !production });
     resolved.push({ ...entry, identity });
     console.log(
-      `[${COMMAND}] identity  : ${entry.email} uid ${String(identity.uid).slice(0, 10)}… ` +
-        `(${identity.created ? 'CREATED now' : 'already existed'}${identity.emailVerified ? ', verified' : ', NOT verified'})` +
-        `${identity.passwordSkipped ? ' — password NOT changed on a production run' : ''}`,
+      `Identity : ${entry.email} — ${identity.created ? 'CREATED' : 'verified'}` +
+        `${identity.emailVerified ? '' : ' (NOT verified)'}` +
+        `${identity.passwordSkipped ? ' — password unchanged' : ''}`,
     );
   }
 
@@ -568,15 +525,14 @@ async function main() {
   // ---- failure from here is a database failure rather than a plan that cannot work.
   const results = [];
   for (const { entry, tenant } of prepared) {
-    console.log('');
     console.log(
-      `[${COMMAND}] ${entry.tier}: ${entry.email} -> ${tenant.reused ? 'reusing' : 'CREATED'} ` +
-        `${String(tenant.businessId)} ("${tenant.businessName}")`,
+      `\n${entry.email} — ${tenant.businessName} — ${tenant.reused ? 'existing' : 'created'} tenant — ` +
+        `writing ${entry.total.toLocaleString()} documents`,
     );
 
     const cleared = await clearTenantData([tenant.businessId]);
     if (cleared.removed > 0) {
-      console.log(`[${COMMAND}]   reset: removed ${cleared.removed} previous document(s) from this tenant`);
+      console.log(`  reset: removed ${cleared.removed.toLocaleString()} previous documents`);
     }
 
     const started = Date.now();
@@ -612,59 +568,14 @@ async function main() {
       accountCreated: tenant.accountCreated,
     });
     console.log(
-      `[${COMMAND}]   wrote ${achieved.toLocaleString()} document(s) ` +
-        `(${counts.products.toLocaleString()} products) in ${Date.now() - started} ms`,
+      `  wrote ${achieved.toLocaleString()} documents ` +
+        `(${counts.products.toLocaleString()} products) in ${((Date.now() - started) / 1000).toFixed(1)}s`,
     );
   }
 
   console.log('');
-  console.log(`[${COMMAND}] OK — ${results.length} account(s) seeded, each its own tenant`);
-  console.log(`[${COMMAND}]`);
-  console.log(`[${COMMAND}]   tier    account                              products    documents   businessId`);
-  for (const r of results) {
-    console.log(
-      `[${COMMAND}]   ${r.tier.padEnd(7)} ${r.email.padEnd(34)} ` +
-        `${String(r.counts.products).padStart(8)}  ${String(r.achieved).padStart(11)}   ${String(r.businessId)}`,
-    );
-  }
-  console.log(`[${COMMAND}]`);
-  console.log(`[${COMMAND}] barcode generation is left unassigned on purpose: open a seeded product`);
-  console.log(`[${COMMAND}] in the app and use the barcode action to generate its first code.`);
-  console.log(`[${COMMAND}]`);
-  // A command printed for a named database must carry the environment that resolves to it: the
-  // guard is right to refuse otherwise, and the reader would be copying a line that cannot run.
-  const envPrefix = production ? `NODE_ENV=production MONGODB_DB_NAME=${target.database} ` : '';
-  console.log(`[${COMMAND}] verify one of them, rather than trusting this report:`);
-  console.log(`[${COMMAND}]   ${envPrefix}npm run verify:demo -- --email=${results[0].email} --database=${target.database}`);
-  console.log(`[${COMMAND}] remove the data again (the logins and business rows stay):`);
-  const cleanupPhrases =
-    `${envPrefix}CLEANUP_CONFIRM=${phrase === PRESET_PHRASE ? 'cleanup-three-accounts' : 'cleanup-account-data'} ` +
-    `CLEANUP_DB_CONFIRM=${target.database} ${production ? 'CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA ' : ''}`;
-  // The preset takes no account list; every other run names the same ADDRESSES it seeded.
-  // The cleanup resolves each one to its own tenant, so a hint cannot carry a stale id.
-  const cleanupAccounts =
-    phrase === PRESET_PHRASE ? '' : ` --accounts="${results.map((r) => r.email).join(',')}"`;
-  console.log(`[${COMMAND}]   ${cleanupPhrases}npm run ${phrase === PRESET_PHRASE ? 'cleanup:three' : 'cleanup:account'} -- --database=${target.database}${cleanupAccounts} --dry-run`);
-  console.log(`[${COMMAND}]   …and the same line without --dry-run to delete.`);
-  if (production) {
-    console.log(`[${COMMAND}] compare the assistant against the DEPLOYED server (one tenant at a time):`);
-    for (const r of results) {
-      console.log(
-        `[${COMMAND}]   NODE_ENV=production MONGODB_DB_NAME=${env.mongodbDbName} ` +
-          'PERF_TURNS_CONFIRM=perf-turns:production \\',
-      );
-      console.log(
-        `[${COMMAND}]     npm run perf:turns -- --base=https://ai-inventory-l1mi.onrender.com ` +
-          `--database=${env.mongodbDbName} --business=${String(r.businessId)} --login --only=1,2`,
-      );
-    }
-  } else {
-    console.log(`[${COMMAND}] compare the assistant across the tenants (server must be running):`);
-    for (const r of results) {
-      console.log(`[${COMMAND}]   npm run perf:measure -- --business=${String(r.businessId)} --label=${r.tier}`);
-    }
-    console.log(`[${COMMAND}]   npm run perf:turns   -- --business=<id> --only=1,3`);
-  }
+  console.log(`Documents: ${results.reduce((sum, r) => sum + r.achieved, 0).toLocaleString()} across ${results.length} tenants`);
+  console.log('Result   : SUCCESS');
 
   await mongoose.disconnect();
 }

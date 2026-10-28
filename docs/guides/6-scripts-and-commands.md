@@ -142,7 +142,7 @@ copy of each rule:
 | Check which accounts exist before writing | [9](9-seeding-development.md) | `npm run check:accounts [--with-production]` — reads only |
 | Seed a tenant, any database | [9](9-seeding-development.md) / [10](10-seeding-production.md) | `npm run seed -- --plan=demo\|accounts\|roles --database=…` |
 | Seed the three comparison accounts | [9](9-seeding-development.md) | `npm run seed:three -- --database=…` (preset; development only) |
-| Seed accounts you name | [9](9-seeding-development.md) / [10](10-seeding-production.md) | `npm run seed:accounts -- --database=… --accounts="a@x.com:30000,…"` |
+| Seed accounts you name | [9](9-seeding-development.md) / [10](10-seeding-production.md) | `npm run seed:accounts -- --database=… --accounts="a@x.com:1000,…"` (any size per account) |
 | Delete accounts' data, keeping the logins | [11](11-deleting-development.md) / [12](12-deleting-production.md) | `npm run cleanup:three` / `cleanup:account -- --accounts=…` |
 | Seed the fixed-figure demo tenant | [9](9-seeding-development.md) | `npm run seed:demo-tenant -- --database=…` |
 | Seed a large tenant you can sign into | [9](9-seeding-development.md) / [10](10-seeding-production.md) | `npm run seed:perf-tenant -- --database=… --size=…` |

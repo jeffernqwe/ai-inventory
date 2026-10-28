@@ -30,7 +30,7 @@ Run everything from `server/`.
 |---|---|
 | To know which accounts exist before writing | `npm run check:accounts` |
 | Data in the three comparison accounts | `npm run seed:three -- --database=inventoryai_dev_db` |
-| Data in accounts you name, by size | `npm run seed:accounts -- --database=inventoryai_dev_db --accounts="a@x.com:30000,b@y.com:50000"` |
+| Data in accounts you name, at any size | `npm run seed:accounts -- --database=inventoryai_dev_db --accounts="a@x.com:1000,b@y.com:2000"` |
 | Data in the account you sign in with | `npm run seed -- --plan=demo --database=inventoryai_dev_db --email=YOU@example.com` |
 | One working login per role | `npm run seed -- --plan=roles --database=inventoryai_dev_db` |
 | A small tenant with fixed figures | `npm run seed:demo-tenant -- --database=inventoryai_dev_db` |
@@ -98,10 +98,11 @@ SEED_CONFIRM=seed-three-accounts SEED_DB_CONFIRM=inventoryai_dev_db \
 | `jefferndullamalinao@gmail.com` | 50 000 | 222 222 |
 | `jeffernmalinaoqwe@gmail.com` | 90 000 | 400 000 |
 
-That is the **preset** `seed:three` writes in development. Production refuses the preset, so its live
-tenants are seeded with explicit sizes — currently 5 000 / 10 000 / 15 000 ([Guide 10](10-seeding-production.md)).
-The addresses and preset sizes live together in `server/scripts/seed/lib.mjs`, and `check:accounts`
-and `cleanup:three` read the same list — so all three commands describe the same three addresses.
+That is the **preset** `seed:three` writes in development. Production refuses the preset, so there the
+sizes are chosen per run; the tenants held 5 000 / 10 000 / 15 000 on 2026-10-29
+([Guide 10](10-seeding-production.md)). The addresses and preset sizes live together in
+`server/scripts/seed/lib.mjs`, and `check:accounts` and `cleanup:three` read the same list — so all
+three commands describe the same three addresses.
 
 **Registering an account creates ONE row, in the database that app is talking to.** The Firebase identity
 is shared by both databases, so each account needs at most one registration and the other side is a seed:
@@ -333,7 +334,7 @@ products). Every command prints both figures, so nothing has to be converted by 
 | Want | Command | Ceiling |
 |---|---|---|
 | Your own account, big | `--plan=demo --email=you@example.com --total=80000` (documents) | 400 000 |
-| The three fixed accounts | `seed:three` (30 000 / 50 000 / 90 000 products) | — |
+| The `seed:three` preset | `seed:three` (30 000 / 50 000 / 90 000 products, development only) | — |
 | Your own list, by product count | `seed:accounts --accounts="a@x.com:100000,b@x.com:40000"` | 112 500 each |
 | A size given in documents | `seed:accounts --accounts="a@x.com:444444d"` | 500 000 each |
 | The measurement tenant | `seed:perf-tenant --size=60000` (documents) | 400 000 |
@@ -355,7 +356,7 @@ measurements.
 | Message | Meaning | Do |
 |---|---|---|
 | `--plan=<demo\|accounts\|roles> is required` | no plan chosen | add `--plan=…` |
-| `--accounts="address:products[:businessId],…" is required` | a bare `seed:accounts` named nothing | add the list, or use `seed:three` for the fixed three |
+| `--accounts="address:products[:businessId],…" is required` | a bare `seed:accounts` named nothing | add the list, or use `seed:three` for the preset |
 | `asks for 1,000,000 products. The ceiling is 112,500` | over the ceiling | ask for 112 500 or fewer, or split the plan across accounts |
 | `two/three confirmation phrase(s) … SEED_CONFIRM=seed-three-accounts` | the preset is its own mode, so it wants its own phrase | export the phrase the refusal names — the mode decides which |
 | `--database=<name> is required` | the target was not named | add `--database=` with the resolved name |

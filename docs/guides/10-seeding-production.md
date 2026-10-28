@@ -40,10 +40,10 @@ PowerShell keeps variables until you clear them, so set, run, then clear `NODE_E
 npm run check:accounts -- --with-production
 ```
 
-It reads **the production database only** and Firebase, prints each account's tenant id and current
-size, and shows the size a `seed:accounts` line would use. `--with-production` selects production
-instead of development, so a tenant that exists only in development never fails this check. Exit **0**
-every account ready, **1** missing or mismatched, **2** could not check.
+It reads **the production database only** and Firebase, and prints each account's tenant id and the
+size that tenant currently holds. `--with-production` selects production instead of development, so a
+tenant that exists only in development never fails this check. Exit **0** every account ready, **1**
+missing or mismatched, **2** could not check.
 
 | Account | Products | ≈ Documents | `businessId` |
 |---|---|---|---|
@@ -51,9 +51,9 @@ every account ready, **1** missing or mismatched, **2** could not check.
 | `jefferndullamalinao@gmail.com` | 10 000 | 44 444 | `6ae15dc16f2be6b817771e9c` |
 | `jeffernmalinaoqwe@gmail.com` | 15 000 | 66 667 | `6ae15e926f2be6b817771ea2` |
 
-These are the live production tenants as measured on **2026-10-29**. The `seed:three` preset remains
-30 000 / 50 000 / 90 000, but it is development-only; a production run always names its sizes. The
-example in "Seeding the three accounts" below uses the current sizes.
+That table is a **measurement of what the tenants held on 2026-10-29**, not a target: nothing reads it.
+`seed:accounts` uses the size you type in `--accounts`, and re-seeding replaces whatever is there. The
+`seed:three` preset (30 000 / 50 000 / 90 000) is a separate, development-only convenience.
 
 The id is the tenant's own `_id`, not the login's. `seed:accounts` resolves the address to that row and
 needs no id; `seed --plan=demo` still names it with `--business=<id>`. A supplied id is checked against
@@ -74,11 +74,19 @@ seeder does not.
 The address resolves to its user row and that row's own `businessId` is what is written. In production the
 row must be the **OWNER of exactly one** business: the resolver refuses a missing tenant, a second
 association, or a non-OWNER before any write. If you do supply an id, it must **agree** with that row.
-In production the run reports `password NOT changed`: an existing login's password is never rewritten.
+In production the run says the password was left alone — `password unchanged` in `seed:accounts`,
+`password NOT changed` in `seed --plan=demo`. An existing login's password is never rewritten.
 
 ---
 
 ## Seeding the three accounts, all three in one run
+
+**The counts are yours on every run.** `--accounts` is the only thing that sets a size — there is no
+preset or documentation value behind it. Each entry is `address:products` (an optional `:businessId` is
+checked, not required), and any whole number from **5 to 112 500 products** per account is accepted.
+The unit is products, so `1000` means 1 000 products (≈4 444 documents across the collections) and the
+console prints both figures before it writes. Change the three numbers to whatever you need,
+independently; the command below is an example, not a required set.
 
 ```bash
 # PREVIEW — the same three phrases, nothing written
@@ -86,23 +94,32 @@ NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
   SEED_CONFIRM=seed-accounts SEED_DB_CONFIRM=inventoryai_prod_db \
   SEED_PROD_CONFIRM=SEED-PRODUCTION-DATA \
   npm run seed:accounts -- --database=inventoryai_prod_db --dry-run \
-    --accounts="jefferndullamalinaozxc@gmail.com:5000,jefferndullamalinao@gmail.com:10000,jeffernmalinaoqwe@gmail.com:15000"
+    --accounts="jefferndullamalinaozxc@gmail.com:1000,jefferndullamalinao@gmail.com:2000,jeffernmalinaoqwe@gmail.com:3000"
 
 # EXECUTE — the same line without --dry-run
 ```
 
 - **A size is PRODUCTS.** `:400000d` asks in documents instead; the ceiling is **112 500 products ≈ 500 000
   documents** per account.
+- **The run proves what it wrote.** After each tenant it re-counts every collection and compares the
+  database with what the writer reported; a disagreement stops the run and names the collection
+  (`wrote X, found Y`), and `Result : SUCCESS` is printed only after every tenant passes. The counts are
+  checked against the plan from your own command, never against a documented figure.
 - Each tenant is emptied and rewritten only after its address has resolved to exactly one tenant the
   account owns, so the run is the documented way to start over for that tenant.
-- Expect `database … (PRODUCTION)`, a tenant line per account, `scope : replacing the DATA of business …`,
-  the counts, `OK`, and `password NOT changed on a production run`. Name, members and roles are untouched.
+- Expect `Database : inventoryai_prod_db (PRODUCTION)`, `Products`/`Documents`, a preflight line per
+  account (`… — OWNER — N documents to reset`), an `Identity : … — verified — password unchanged` line, a
+  `wrote … documents (… products)` line, and `Result : SUCCESS`. Name, members and roles are untouched.
+  (The `scope : …` and `OK` lines belong to `seed --plan=accounts`, which is a different command.)
 - **No SKUs or barcodes** are generated unless you ask for `--include-sku`.
-- Measured 2026-10-29: the current **5 000 / 10 000 / 15 000** tenants hold **22 222 / 44 444 /
-  66 667 documents** (133 333 in all), and `verify:demo` returned **SUCCESS** for each with 0 bad ledger
-  rows and 0 missing references. The earlier 30 000 / 50 000 / 90 000 run on 2026-10-27 wrote
-  **755 555 documents** in **23 min 6 s**, and every identity was reported `already existed, verified`
-  — nothing was written to Firebase.
+- `verify:demo` ([Guide 9](9-seeding-development.md#verify--read-only-always)) is the independent
+  check afterwards: it validates ledger arithmetic, references and emptiness, and prints the counts it
+  read. It does not require any particular size, so it works for every size this command accepts.
+- Measured 2026-10-29 at **5 000 / 10 000 / 15 000** products: those tenants held **22 222 / 44 444 /
+  66 667 documents** (133 333 in all) and `verify:demo` returned **SUCCESS** for each with 0 bad ledger
+  rows and 0 missing references. That measurement describes that run, not a requirement. The earlier
+  30 000 / 50 000 / 90 000 run on 2026-10-27 wrote **755 555 documents** in **23 min 6 s**, and every
+  identity was reported `already existed, verified` — nothing was written to Firebase.
 
 ---
 
@@ -137,7 +154,7 @@ production itself.
 | Accounts you name | `npm run seed:accounts -- --database=… --accounts="address:products,…"` |
 | One login per role | `npm run seed -- --plan=roles --database=…` |
 | The fixed-figure demo tenant | `npm run seed:demo-tenant -- --database=…` (its own single phrase) |
-| The three presets | **refused** — `seed:three` may not run against production |
+| The comparison preset | **refused** — `seed:three` may not run against production |
 | A no-login measurement tenant | **refused** — `seed:perf` is development only |
 
 ### The measurement tenant (`seed:perf-tenant`)

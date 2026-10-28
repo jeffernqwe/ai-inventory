@@ -86,7 +86,12 @@ NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
   npm run cleanup:account -- --database=inventoryai_prod_db --dry-run \
     --accounts="jefferndullamalinaozxc@gmail.com,jefferndullamalinao@gmail.com,jeffernmalinaoqwe@gmail.com"
 
-# EXECUTE — the same line without --dry-run
+# EXECUTE — the same command, with --dry-run removed
+NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
+  CLEANUP_CONFIRM=cleanup-account-data CLEANUP_DB_CONFIRM=inventoryai_prod_db \
+  CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA \
+  npm run cleanup:account -- --database=inventoryai_prod_db \
+    --accounts="jefferndullamalinaozxc@gmail.com,jefferndullamalinao@gmail.com,jeffernmalinaoqwe@gmail.com"
 ```
 
 - **Production resolves every tenant:** `--accounts="address,…"`. The run reads the account's own user
@@ -106,16 +111,26 @@ NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
 ## Emptying one tenant, keeping its login (`cleanup:demo`)
 
 ```bash
+# PREVIEW — both identifiers must agree; nothing is deleted
 NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
   CLEANUP_CONFIRM=cleanup:demo-account CLEANUP_DB_CONFIRM=inventoryai_prod_db \
   CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA \
   npm run cleanup:demo -- --database=inventoryai_prod_db \
-  --email=YOUR_EMAIL --business=THE_BUSINESS_ID --dry-run
+    --email=jefferndullamalinaozxc@gmail.com \
+    --business=6ae15d1b6f2be6b817771e97 --dry-run
+
+# EXECUTE — the same command, with --dry-run removed
+NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
+  CLEANUP_CONFIRM=cleanup:demo-account CLEANUP_DB_CONFIRM=inventoryai_prod_db \
+  CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA \
+  npm run cleanup:demo -- --database=inventoryai_prod_db \
+    --email=jefferndullamalinaozxc@gmail.com \
+    --business=6ae15d1b6f2be6b817771e97
 ```
 
 Both identifiers are required and must **agree** — the email and the business id are two fingerprints of
-the same tenant. Drop `--dry-run` to delete; a real run re-reads afterwards and prints
-`verification found 0 remaining`.
+the same tenant. The id above is the one `check:accounts --with-production` prints for that account; a
+stale id is refused. A real run re-reads afterwards and prints `verification found 0 remaining`.
 
 Measured on production 2026-10-25: **80 006 documents removed** (36 104 inventory, 23 966 movements, 18 000
 products, 1 600 purchase orders, 300 suppliers, 24 categories, 6 locations, 4 assistant messages, 1
@@ -140,9 +155,52 @@ NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
 ```
 
 `cleanup:perf-tenant` removes the tenant `seed:perf-tenant` created ([Guide 10](10-seeding-production.md))
-and keeps its Firebase identity, so the address stays usable. `cleanup:demo-tenant` and `cleanup:roles`
-follow the same three-phrase rule and also keep their identities; `cleanup:roles --delete-firebase` removes
-the four role identities **only after** the rows are gone.
+and keeps its Firebase identity, so the address stays usable.
+
+## The fixed demo tenant (`cleanup:demo-tenant`)
+
+Deletes the demo tenant's inventory, ledger, products, categories, locations, suppliers, assistant rows,
+audit trail, its users and the business row. It keeps the Firebase identity, deliberately.
+
+```bash
+# PREVIEW — counts every collection, deletes nothing
+NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
+  CLEANUP_CONFIRM=cleanup:demo-tenant CLEANUP_DB_CONFIRM=inventoryai_prod_db \
+  CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA \
+  npm run cleanup:demo-tenant -- --database=inventoryai_prod_db --dry-run
+
+# EXECUTE — the same command, with --dry-run removed
+NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
+  CLEANUP_CONFIRM=cleanup:demo-tenant CLEANUP_DB_CONFIRM=inventoryai_prod_db \
+  CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA \
+  npm run cleanup:demo-tenant -- --database=inventoryai_prod_db
+```
+
+## The role fixture (`cleanup:roles`)
+
+Deletes the role-fixture tenant, its four users and their sessions, and keeps the four Firebase identities
+unless `--delete-firebase` is supplied. That flag deletes them only **after** the database rows are gone,
+and never before.
+
+```bash
+# PREVIEW — counts the rows, never touches Firebase, even with --delete-firebase
+NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
+  CLEANUP_CONFIRM=cleanup:roles CLEANUP_DB_CONFIRM=inventoryai_prod_db \
+  CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA \
+  npm run cleanup:roles -- --database=inventoryai_prod_db --dry-run
+
+# EXECUTE — the same command, with --dry-run removed; identities kept
+NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
+  CLEANUP_CONFIRM=cleanup:roles CLEANUP_DB_CONFIRM=inventoryai_prod_db \
+  CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA \
+  npm run cleanup:roles -- --database=inventoryai_prod_db
+
+# EXECUTE including the four identities — only after the rows are gone
+NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
+  CLEANUP_CONFIRM=cleanup:roles CLEANUP_DB_CONFIRM=inventoryai_prod_db \
+  CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA \
+  npm run cleanup:roles -- --database=inventoryai_prod_db --delete-firebase
+```
 
 ---
 

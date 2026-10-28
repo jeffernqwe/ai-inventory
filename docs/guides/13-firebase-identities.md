@@ -73,12 +73,35 @@ No command creates an identity on its own. The seeders do, as part of their own 
 ## Deleting the identities you name
 
 ```bash
-# look first
-CLEANUP_CONFIRM=cleanup:firebase CLEANUP_DB_CONFIRM=inventoryai_dev_db \
+# PREVIEW — checks the phrases and the links, deletes nothing
+NODE_ENV=development MONGODB_DB_NAME=inventoryai_dev_db \
+  CLEANUP_CONFIRM=cleanup:firebase CLEANUP_DB_CONFIRM=inventoryai_dev_db \
   npm run cleanup -- --target=firebase --database=inventoryai_dev_db \
-  --email=person@example.com --dry-run
+    --email=person@example.com --dry-run
 
-# then the same line without --dry-run
+# EXECUTE — the same command, with --dry-run removed
+NODE_ENV=development MONGODB_DB_NAME=inventoryai_dev_db \
+  CLEANUP_CONFIRM=cleanup:firebase CLEANUP_DB_CONFIRM=inventoryai_dev_db \
+  npm run cleanup -- --target=firebase --database=inventoryai_dev_db \
+    --email=person@example.com
+```
+
+Production is the same command with the third phrase and the production database named:
+
+```bash
+# PREVIEW — production, still nothing deleted
+NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
+  CLEANUP_CONFIRM=cleanup:firebase CLEANUP_DB_CONFIRM=inventoryai_prod_db \
+  CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA \
+  npm run cleanup -- --target=firebase --database=inventoryai_prod_db \
+    --email=person@example.com --dry-run
+
+# EXECUTE — the same command, with --dry-run removed
+NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
+  CLEANUP_CONFIRM=cleanup:firebase CLEANUP_DB_CONFIRM=inventoryai_prod_db \
+  CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA \
+  npm run cleanup -- --target=firebase --database=inventoryai_prod_db \
+    --email=person@example.com
 ```
 
 - `--email=` repeats, or takes a comma-separated list. At least one is required.

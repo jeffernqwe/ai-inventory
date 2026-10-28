@@ -22,8 +22,9 @@
 //
 // THE CEILING IS 112 500 PRODUCTS (500 000 documents), reported rather than attempted:
 // one million products would be ≈4 400 000 documents, and the plan is built in memory
-// before it is inserted. `--dry-run` prints the size warning for a large plan without
-// opening a connection.
+// before it is inserted. A development `--dry-run` prints the size warning without opening a
+// connection; a production one reads (read-only) to check every named id and count the reset —
+// a preview that cannot see the tenant cannot promise the write will be allowed.
 //
 // WHY ONE TENANT PER ACCOUNT. Every row is written with that account's own `businessId`,
 // and the application scopes every read by it, so the datasets cannot be seen from one
@@ -91,7 +92,7 @@ import 'dotenv/config';
 import mongoose from 'mongoose';
 
 import env from '../src/config/env.ts';
-import { SeedSafetyError, clearTenantData } from './perf/lib.mjs';
+import { SeedSafetyError, clearTenantData, countTenantDataRemoval } from './perf/lib.mjs';
 import { assertSeedTarget } from './seed/guard.mjs';
 import {
   COMPARISON_ACCOUNTS,
@@ -107,7 +108,9 @@ import {
   normaliseEmail,
   parseCount,
   productsForDocuments,
+  readIdentity,
   readTenantCounts,
+  resolveExistingTenantForIdentity,
   resolveIdentity,
   seedTenant,
 } from './seed/lib.mjs';
@@ -249,6 +252,71 @@ function parsePlan(raw) {
     .map(parseEntry);
 }
 
+/**
+ * Read BEFORE claiming, in production.
+ *
+ * WHY (measured 2026-10-28). The preview used to return before opening a connection, so it could
+ * not compare the `:businessId` an entry names with the tenant the account actually owns. A wrong
+ * id printed `business <someone else's id>` and exit 0, while the same line for real refused — the
+ * preview said the opposite of the run, which is the one thing a preview must not do. It could not
+ * say what would be reset either.
+ *
+ * It reads through the SAME lookup and the SAME rule as the real run
+ * (`resolveExistingTenantForIdentity`, `assertTenantNamedForReset`), and it can only read:
+ * `readIdentity` never creates, and nothing here writes. Development keeps the fast preview — an id
+ * is optional there and never compared, and a tenant the run creates is not replacing anything.
+ */
+async function previewProductionTargets(plan, database) {
+  try {
+    await mongoose.connect(env.mongodbUri, { dbName: env.mongodbDbName });
+  } catch (err) {
+    throw new SeedSafetyError(
+      `could not read ${database} to check the ids (${String(err.message).split('\n')[0]}). ` +
+        'Nothing was written — and the ids were NOT checked. Fix the connection and re-run the dry run.',
+    );
+  }
+
+  try {
+    for (const entry of plan) {
+      const identity = await readIdentity(entry.email);
+      if (!identity) {
+        console.log(
+          `[${COMMAND}]   ${entry.email.padEnd(34)} no login yet — this run would CREATE it ` +
+            '(needs DEMO_ACCOUNT_PASSWORD)',
+        );
+        continue;
+      }
+
+      const tenant = await resolveExistingTenantForIdentity({ email: entry.email, identity });
+      if (!tenant) {
+        console.log(
+          `[${COMMAND}]   ${entry.email.padEnd(34)} no tenant yet — this run would CREATE one and print its id`,
+        );
+        continue;
+      }
+
+      // The real run's rule, applied here so a wrong id fails the preview rather than the write.
+      assertTenantNamedForReset({
+        production: true,
+        reused: true,
+        requestedBusinessId: entry.businessId,
+        businessId: tenant.businessId,
+        businessName: tenant.businessName,
+        command: `${COMMAND} (${entry.email})`,
+        namingHint: 'the third field of --accounts',
+      });
+
+      const { total } = await countTenantDataRemoval([tenant.businessId]);
+      console.log(
+        `[${COMMAND}]   ${entry.email.padEnd(34)} reusing ${String(tenant.businessId)} ` +
+          `("${tenant.businessName}") — ${total.toLocaleString()} document(s) would be reset`,
+      );
+    }
+  } finally {
+    await mongoose.disconnect();
+  }
+}
+
 async function main() {
   const dryRun = process.argv.includes('--dry-run');
   const includeSku = process.argv.includes('--include-sku');
@@ -343,7 +411,16 @@ async function main() {
 
   if (dryRun) {
     console.log('');
-    console.log(`[${COMMAND}] dry run complete — no connection was opened and nothing was written.`);
+    if (production) {
+      console.log(`[${COMMAND}] production check — read-only, against ${target.database}:`);
+      await previewProductionTargets(plan, target.database);
+      console.log('');
+      console.log(
+        `[${COMMAND}] dry run complete — every id was checked against ${target.database}; nothing was written.`,
+      );
+    } else {
+      console.log(`[${COMMAND}] dry run complete — no connection was opened and nothing was written.`);
+    }
     console.log(
       `[${COMMAND}] check the accounts first (read-only, and it prints the businessId of every tenant):`,
     );

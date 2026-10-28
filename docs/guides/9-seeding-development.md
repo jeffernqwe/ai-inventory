@@ -269,7 +269,7 @@ Every seeder previews, and each preview stops before its first write:
 | Command | What the preview reports |
 |---|---|
 | `seed --plan=…` | the plan, the target and the phrase count — **no connection is opened** |
-| `seed:three` / `seed:accounts` | the products **and** the documents each entry will write, resets included |
+| `seed:three` / `seed:accounts` | the products **and** the documents each entry will write — **no connection is opened** here (production adds the tenant each entry would reset) |
 | `seed:perf` | the size, the tenant and the fact that any previous seed tenant would be replaced — no connection |
 | `seed:perf-tenant` | whether the tenant would be created or replaced, and how many documents would be cleared |
 | `seed:demo-tenant` | whether the tenant would be created, attached or replaced, and how many documents would be cleared |

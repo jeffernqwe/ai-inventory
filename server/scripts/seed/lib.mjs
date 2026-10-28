@@ -326,6 +326,29 @@ export async function resolveIdentity(email, { refreshPassword = true } = {}) {
 }
 
 /**
+ * Read-only: the Firebase identity for an address, or null. NEVER creates, NEVER updates.
+ *
+ * WHY IT IS SEPARATE FROM `resolveIdentity`. A preview has to answer "which tenant would this run
+ * reset?" without the side effects a seed may have: `resolveIdentity` creates a login when one is
+ * missing and can refresh a password. A dry run that created an identity would be the write it
+ * promised not to make.
+ */
+export async function readIdentity(email) {
+  const { getFirebaseAdminApp } = await import('../../src/services/firebase/adminApp.ts');
+  const { getAuth } = await import('firebase-admin/auth');
+  const app = getFirebaseAdminApp();
+  assertSeedFirebaseProject(app.options?.projectId);
+  const auth = getAuth(app);
+  try {
+    const existing = await auth.getUserByEmail(normaliseEmail(email));
+    return { uid: existing.uid, emailVerified: Boolean(existing.emailVerified), created: false };
+  } catch (err) {
+    if (err?.code === 'auth/user-not-found') return null;
+    throw err;
+  }
+}
+
+/**
  * The identity link on an existing account must be the one Firebase reports now.
  *
  * WHY THIS EXISTS (found 2026-10-26). `ensureTenantForIdentity` resolves the tenant by
@@ -367,18 +390,13 @@ export function assertIdentityLinkUsable({ email, storedUid, resolvedUid }) {
 }
 
 /**
- * Find — or create — the tenant that belongs to an already-resolved identity.
+ * The tenant this identity already owns, or null when the account has none yet. READ-ONLY.
  *
- * Reuse is the normal path: the owner registers through the app, and the seeder then
- * attaches to the tenant registration created. Creation is the fallback for an
- * identity that exists in Firebase but has no MongoDB account yet (which is exactly
- * the state the app itself calls `REGISTRATION_REQUIRED`), and it writes the same
- * shape the registration flow writes: OWNER, ACTIVE, linked by `firebaseUid` only.
- *
- * The account rows are only ever CREATED here, never deleted and never re-linked: a
- * data seeder has no business touching an account's identity linkage.
+ * The lookup is shared with the production dry run, so a preview and a real run cannot disagree
+ * about which tenant an account owns — the disagreement that made the preview report exit 0 for
+ * an id the real run refuses (measured 2026-10-28).
  */
-export async function ensureTenantForIdentity({ email, identity, businessName }) {
+export async function resolveExistingTenantForIdentity({ email, identity }) {
   const address = normaliseEmail(email);
   const user = await User.findOne({ firebaseUid: identity.uid })
     .select('_id businessId email')
@@ -391,58 +409,61 @@ export async function ensureTenantForIdentity({ email, identity, businessName })
     const byEmail = await User.findOne({ email: address })
       .select('_id businessId email firebaseUid')
       .lean();
-    if (byEmail) {
-      assertIdentityLinkUsable({
-        email: address,
-        storedUid: byEmail.firebaseUid,
-        resolvedUid: identity.uid,
-      });
-      const business = byEmail.businessId
-        ? await Business.findById(byEmail.businessId).select('name status').lean()
-        : null;
-      if (!business) {
-        throw new SeedSafetyError(
-          `the account for ${address} exists but its business ${String(byEmail.businessId)} does not. ` +
-            'Refusing to guess at a repair. Nothing was written.',
-        );
-      }
-      if (business.status !== 'ACTIVE') {
-        throw new SeedSafetyError(
-          `the account's business status is ${business.status}. Nothing was written.`,
-        );
-      }
-      return {
-        businessId: business._id,
-        businessName: business.name,
-        userId: byEmail._id,
-        accountCreated: false,
-        reused: true,
-      };
-    }
+    if (!byEmail) return null;
+    assertIdentityLinkUsable({
+      email: address,
+      storedUid: byEmail.firebaseUid,
+      resolvedUid: identity.uid,
+    });
+    return tenantForExistingUser(byEmail);
   }
 
-  if (user && user.businessId) {
-    const business = await Business.findById(user.businessId).select('name status').lean();
-    if (!business) {
-      throw new SeedSafetyError(
-        `the account's business ${String(user.businessId)} does not exist. Refusing to guess ` +
-          'at a repair — fix the linkage deliberately. Nothing was written.',
-      );
-    }
-    if (business.status !== 'ACTIVE') {
-      throw new SeedSafetyError(
-        `the account's business status is ${business.status}. Nothing was written.`,
-      );
-    }
-    return {
-      businessId: business._id,
-      businessName: business.name,
-      userId: user._id,
-      accountCreated: false,
-      reused: true,
-    };
-  }
+  if (!user.businessId) return null;
+  return tenantForExistingUser(user);
+}
 
+/** The business a resolved user row points at, with the two states a seed refuses to repair. */
+async function tenantForExistingUser(user) {
+  const business = user.businessId
+    ? await Business.findById(user.businessId).select('name status').lean()
+    : null;
+  if (!business) {
+    throw new SeedSafetyError(
+      `the account for ${user.email} exists but its business ${String(user.businessId)} does not. ` +
+        'Refusing to guess at a repair — fix the linkage deliberately. Nothing was written.',
+    );
+  }
+  if (business.status !== 'ACTIVE') {
+    throw new SeedSafetyError(
+      `the account's business status is ${business.status}. Nothing was written.`,
+    );
+  }
+  return {
+    businessId: business._id,
+    businessName: business.name,
+    userId: user._id,
+    accountCreated: false,
+    reused: true,
+  };
+}
+
+/**
+ * Find — or create — the tenant that belongs to an already-resolved identity.
+ *
+ * Reuse is the normal path: the owner registers through the app, and the seeder then
+ * attaches to the tenant registration created. Creation is the fallback for an
+ * identity that exists in Firebase but has no MongoDB account yet (which is exactly
+ * the state the app itself calls `REGISTRATION_REQUIRED`), and it writes the same
+ * shape the registration flow writes: OWNER, ACTIVE, linked by `firebaseUid` only.
+ *
+ * The account rows are only ever CREATED here, never deleted and never re-linked: a
+ * data seeder has no business touching an account's identity linkage.
+ */
+export async function ensureTenantForIdentity({ email, identity, businessName }) {
+  const existing = await resolveExistingTenantForIdentity({ email, identity });
+  if (existing) return existing;
+
+  const address = normaliseEmail(email);
   const business = await Business.create({ name: businessName, status: 'ACTIVE' });
   const created = await User.create({
     businessId: business._id,
@@ -795,6 +816,8 @@ export default {
   parseCount,
   assertIdentityLinkUsable,
   resolveIdentity,
+  readIdentity,
+  resolveExistingTenantForIdentity,
   ensureTenantForIdentity,
   seedTenant,
   readTenantCounts,

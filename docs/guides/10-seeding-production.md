@@ -163,8 +163,10 @@ named and matched. Its figures are in [Guide 9](9-seeding-development.md); teard
 ## Dry run — prove the destination first
 
 Add `--dry-run` to any command above. The target and **all three phrases** are still checked, the plan is
-printed, and nothing is written; `seed --plan=…` opens no connection at all, while `seed:perf-tenant` and
-`seed:demo-tenant` read the database to count what they would replace and never touch Firebase.
+printed, and nothing is written. `seed:accounts` also reads — never writes — to check every `:businessId`
+against the tenant the account owns and to count what a run would reset, so a wrong or missing id fails the
+preview rather than the write. `seed --plan=…` opens no connection at all; `seed:perf-tenant` and
+`seed:demo-tenant` read the database to count what they would replace. None of them touches Firebase.
 
 `--dry-run` is not a verification: it reports what *would* happen. Verification reads the rows back.
 

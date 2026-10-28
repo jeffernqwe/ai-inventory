@@ -133,12 +133,30 @@ describe('the seeder has two modes and two phrases', () => {
     assert.match(source, /--accounts="address:products:<businessId>,…"/);
   });
 
-  it('the preview opens no connection', () => {
+  it('the preview opens no connection in development, and only reads in production', () => {
+    // Development keeps the fast preview: it prints and returns before main connects.
     const dryIndex = source.indexOf('dry run complete — no connection was opened');
-    const connectIndex = source.indexOf('mongoose.connect(');
-    assert.ok(dryIndex > -1, 'the dry-run branch is missing');
-    assert.ok(connectIndex > -1, 'the script never connects, which cannot be right');
-    assert.ok(dryIndex < connectIndex, 'the dry run runs AFTER the connection is opened');
+    const mainConnectIndex = source.indexOf('mongoose.connect(', source.indexOf('async function main()'));
+    assert.ok(dryIndex > -1, 'the development dry-run branch is missing');
+    assert.ok(mainConnectIndex > -1, 'the real run never connects, which cannot be right');
+    assert.ok(dryIndex < mainConnectIndex, 'the development dry run runs AFTER the connection is opened');
+
+    // Production reads the tenant first, so a wrong `:businessId` fails the preview rather than
+    // the write (measured 2026-10-28: the preview reported exit 0 for an id the run refuses).
+    // It must read through the shared resolver and the shared naming rule, and must never touch
+    // the CREATING helper — a dry run that created a tenant would be the write it disclaims.
+    const preview = source.slice(
+      source.indexOf('async function previewProductionTargets'),
+      source.indexOf('async function main()'),
+    );
+    assert.ok(preview.length > 0, 'the production preview is missing');
+    assert.ok(preview.includes('readIdentity('), 'the preview must use the read-only identity lookup');
+    assert.ok(!preview.includes('resolveIdentity('), 'the preview must not create or refresh an identity');
+    assert.ok(preview.includes('resolveExistingTenantForIdentity('), 'the preview must resolve the tenant');
+    assert.ok(preview.includes('assertTenantNamedForReset('), 'the preview must apply the naming rule');
+    assert.ok(!preview.includes('ensureTenantForIdentity('), 'the preview must not create a tenant');
+    assert.ok(preview.includes('countTenantDataRemoval('), 'the preview must count what would be reset');
+    assert.ok(!preview.includes('seedTenant('), 'the preview must not write data');
   });
 
   it('the plan entry syntax is products, with documents available and marked', () => {

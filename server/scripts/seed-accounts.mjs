@@ -424,9 +424,16 @@ async function main() {
     console.log(
       `[${COMMAND}] check the accounts first (read-only, and it prints the businessId of every tenant):`,
     );
+    // The check names the database this run is about: `--with-production` selects production
+    // ONLY, so printing it after a development preview would send the operator to the wrong one.
+    const checkArgs = [
+      production ? '--with-production' : null,
+      plan.length && phrase !== PRESET_PHRASE
+        ? `--accounts="${plan.map((e) => e.email).join(',')}"`
+        : null,
+    ].filter(Boolean);
     console.log(
-      `[${COMMAND}]   npm run check:accounts -- --with-production` +
-        `${plan.length && phrase !== PRESET_PHRASE ? ` --accounts="${plan.map((e) => e.email).join(',')}"` : ''}`,
+      `[${COMMAND}]   npm run check:accounts${checkArgs.length ? ` -- ${checkArgs.join(' ')}` : ''}`,
     );
     console.log(`[${COMMAND}] to run for real:`);
     // THE ENVIRONMENT PREFIX IS PART OF THE COMMAND. `.env` resolves to development, and the

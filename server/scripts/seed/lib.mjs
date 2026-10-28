@@ -799,6 +799,39 @@ export function countDisagreements(written, readBack) {
     }));
 }
 
+/**
+ * Which database a read-only check covers: exactly ONE.
+ *
+ * WHY ONE, AND WHY IT IS A FUNCTION (measured 2026-10-28). `check:accounts --with-production` used to
+ * return `[development, production]` — development always, production appended when asked — and then
+ * judged readiness across both. A shell whose development database held no user row (because the data
+ * had been cleaned) therefore reported **NOT READY (exit 1)** for accounts that were READY in
+ * production. The exit code described the other database, which is not the one the operator was
+ * about to seed. Each environment is judged on its own, by selecting one.
+ *
+ * Pure, and takes the names as an argument, so the rule is asserted on values rather than inferred
+ * from the script's text.
+ */
+export function databasesToCheck({ withProduction, databaseNames }) {
+  return withProduction ? [databaseNames.production] : [databaseNames.development];
+}
+
+/**
+ * Readiness over every database that was actually read — and over nothing else.
+ *
+ * The exit code is `notReady > 0 ? 1 : 0`, so this is where "a missing row in the other environment"
+ * stops being able to fail a run: the caller only ever passes the databases `databasesToCheck` chose.
+ * Pure, so the arithmetic is tested without a connection.
+ */
+export function summariseReadiness(checked) {
+  const pairs = checked.reduce((total, entry) => total + entry.rows.length, 0);
+  const notReady = checked.reduce(
+    (total, entry) => total + entry.rows.filter((row) => row.verdict !== 'READY').length,
+    0,
+  );
+  return { pairs, notReady, ready: pairs - notReady };
+}
+
 export default {
   COMPARISON_ACCOUNTS,
   PRODUCTS_SHARE,
@@ -822,4 +855,6 @@ export default {
   seedTenant,
   readTenantCounts,
   countDisagreements,
+  databasesToCheck,
+  summariseReadiness,
 };

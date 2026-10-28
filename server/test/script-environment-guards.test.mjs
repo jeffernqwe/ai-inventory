@@ -640,3 +640,92 @@ describe('command audit — the refusals and previews fixed on 2026-10-27', () =
     assert.ok(preview < remove, 'the preview must be decided before anything is removed');
   });
 });
+
+/**
+ * The environment boundary, proved at the CALL site (2026-10-28).
+ *
+ * What makes separation true is not a naming convention: `--database=` must EQUAL the database
+ * `config/env.ts` resolved, and the connection uses the resolved value rather than the flag. So a
+ * shell resolving development cannot name production, and a production shell cannot be satisfied
+ * by a development phrase. These assertions pin that each command actually hands the flag to the
+ * guard, because a guard that exists but is never given the flag either refuses every run or has
+ * quietly fallen back to a weaker rule — and both look "guarded" to a scan that only finds the
+ * function name.
+ */
+describe('each data command is confined to the database its shell resolved', () => {
+  const read = (name) => readFileSync(new URL(`../scripts/${name}`, import.meta.url), 'utf8');
+
+  /** Commands that may run against production, and must therefore name their target. */
+  const PRODUCTION_CAPABLE = [
+    'seed-demo-account.mjs',
+    'seed-accounts.mjs',
+    'seed-role-accounts.mjs',
+    'seed-perf-tenant.mjs',
+    'seed-demo-tenant.mjs',
+    'cleanup-demo-account.mjs',
+    'cleanup-accounts.mjs',
+    'cleanup-role-accounts.mjs',
+    'cleanup-perf-tenant.mjs',
+    'cleanup-demo-tenant.mjs',
+    'cleanup-firebase-accounts.mjs',
+  ];
+
+  it('every production-capable writer hands its guard the database flag', () => {
+    for (const name of PRODUCTION_CAPABLE) {
+      const source = read(name);
+      const named =
+        /database: argValue\('--database'\)/.test(source) ||
+        /requestedDatabase: argValue\('--database'\)/.test(source);
+      assert.ok(named, `${name} never passes --database to its guard`);
+      assert.match(
+        source,
+        /assertSeedTarget\(|assertScopedCleanupTarget\(|assertCleanupTarget\(|assertDemoTarget\(/,
+        `${name} has no unified target guard`,
+      );
+    }
+  });
+
+  it('the development-only tools cannot be pointed at production at all', () => {
+    // No `--database=` reaches these guards, so their rule is "development only": a production
+    // shell is refused by posture, not merely by a phrase that happens to be missing.
+    for (const name of ['seed-perf-data.mjs', 'cleanup-perf-data.mjs']) {
+      const source = read(name);
+      assert.match(
+        source,
+        /assertSafeTarget\(env, COMMAND\)/,
+        `${name} no longer uses the development-only form of the guard`,
+      );
+      assert.equal(
+        /assertSafeTarget\(env, COMMAND,\s*\{/.test(source),
+        false,
+        `${name} became production-capable; it needs the two/three-phrase guard instead`,
+      );
+    }
+    // Firebase identities are one project shared by both databases, so the all-users wipe is
+    // fenced by the environment rather than by a database name.
+    assert.match(
+      read('cleanup-test-firebase.mjs'),
+      /assertNonProductionEnv\(process\.env\.NODE_ENV\)/,
+    );
+  });
+
+  it('the read-only checker selects one database; the one two-database read is a reference check', () => {
+    const checker = read('check-accounts.mjs');
+    assert.match(checker, /databasesToCheck\(\{ withProduction, databaseNames: DATABASE_NAMES \}\)/);
+    assert.equal(
+      /const databases = \[/.test(checker),
+      false,
+      'the checker rebuilt its database list by hand',
+    );
+
+    // `cleanup:firebase` reads both databases ON PURPOSE: an identity may only go when no user row
+    // in EITHER database references it. That is a reference check, not a readiness verdict, and
+    // conflating the two is what the checker's defect was.
+    const firebase = read('cleanup-firebase-accounts.mjs');
+    assert.match(
+      firebase,
+      /REFERENCE_DATABASES = \[DATABASE_NAMES\.development, DATABASE_NAMES\.production\]/,
+    );
+    assert.match(firebase, /summariseFirebaseReferences\(/);
+  });
+});

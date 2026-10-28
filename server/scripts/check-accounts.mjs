@@ -13,25 +13,27 @@
 // update, no delete, no Firebase user creation or deletion, and no session. `--dry-run` is
 // therefore not a mode it needs — there is nothing to preview but the state itself.
 //
-// WHICH DATABASES. A FIXED list, never a flag: the development database, plus the
-// production database when `--with-production` asks for it. The tool cannot be pointed at a
-// database someone else names, which is why it takes no `--database=` and needs no phrase:
-// reading changes nothing, and every number it prints is labelled with where it came from.
-// The test database is skipped — `npm test` owns it and clears it.
+// WHICH DATABASE. Exactly ONE per run, and a fixed choice rather than a free-form flag: the
+// development database by default, the production database when `--with-production` is given.
+// One, because readiness is a statement about the environment that is about to be written to:
+// judging both at once made a MISSING row in development fail a production check that was READY
+// (measured 2026-10-28), and the exit code then described a database nobody was seeding. The tool
+// still cannot be pointed at a database someone else names — it takes no `--database=` and needs
+// no phrase — and the test database is never read: `npm test` owns it and clears it.
 //
 // THE FIREBASE PROJECT IS THE ONE THIS SHELL IS CONFIGURED FOR, printed by id so the
 // answer is checkable. If the deployed server uses a different project, its identities are
 // not the ones described here.
 //
 // EXIT CODES, the same contract `verify:demo` uses:
-//   0  every account is READY in every database that was read
-//   1  something is MISSING or MISMATCHED — a state, not an error; the blocks say which
+//   0  every account is READY in the database that was read
+//   1  something is MISSING or MISMATCHED there — a state, not an error; the blocks say which
 //   2  NOT CHECKED — no connection string, the database could not be reached, or Firebase
 //      is not configured. Nothing is known, and nothing is claimed.
 //
 // Usage:
-//   npm run check:accounts                                  # the three fixed accounts
-//   npm run check:accounts -- --with-production                # …and what production holds
+//   npm run check:accounts                                  # the three fixed accounts, development
+//   npm run check:accounts -- --with-production                # production instead of development
 //   npm run check:accounts -- --accounts="a@x.com,b@y.com"  # your own addresses
 
 import 'dotenv/config';
@@ -45,7 +47,7 @@ import { getFirebaseAdminApp } from '../src/services/firebase/adminApp.ts';
 import { getAuth } from 'firebase-admin/auth';
 import { SeedSafetyError, countTenantDataRemoval } from './perf/lib.mjs';
 import { assertSeedFirebaseProject } from './seed/guard.mjs';
-import { COMPARISON_ACCOUNTS, normaliseEmail } from './seed/lib.mjs';
+import { COMPARISON_ACCOUNTS, databasesToCheck, normaliseEmail, summariseReadiness } from './seed/lib.mjs';
 
 const COMMAND = 'check:accounts';
 
@@ -211,12 +213,10 @@ async function main() {
     );
   }
 
-  // Development always; production only when it was asked for. A fixed list, so no flag can
-  // point this tool at a database nobody named.
-  const databases = [
-    DATABASE_NAMES.development,
-    ...(withProduction ? [DATABASE_NAMES.production] : []),
-  ];
+  // ONE database, chosen by the shared rule: development by default, production instead when it
+  // was asked for. The readiness and the exit code below see only what this returned, so the other
+  // environment cannot fail the check.
+  const databases = databasesToCheck({ withProduction, databaseNames: DATABASE_NAMES });
 
   if (!isFirebaseConfigured()) {
     fail('Firebase is not configured, so the identities cannot be checked. NOT CHECKED (exit 2).');
@@ -234,7 +234,10 @@ async function main() {
 
   console.log(`[${COMMAND}] READ-ONLY — nothing is created, changed or deleted`);
   console.log(`[${COMMAND}] Firebase  : ${projectId} (the project this shell is configured for)`);
-  console.log(`[${COMMAND}] databases : ${databases.join(', ')}${withProduction ? '' : '  (add --with-production to include the other)'}`);
+  console.log(
+    `[${COMMAND}] databases : ${databases.join(', ')}` +
+      `${withProduction ? '  (production — development is the default)' : '  (add --with-production to check production instead)'}`,
+  );
   console.log(`[${COMMAND}] accounts  : ${accounts.length}`);
 
   const identities = new Map();
@@ -251,7 +254,10 @@ async function main() {
     await mongoose.disconnect();
   }
 
-  let notReady = 0;
+  // The verdict and the exit code are computed from `checked` alone — the one database the rule
+  // selected. A row that does not exist elsewhere is not a finding about this environment.
+  const { pairs, notReady, ready } = summariseReadiness(checked);
+
   for (const email of accounts) {
     const identity = identities.get(email);
     console.log('');
@@ -271,17 +277,15 @@ async function main() {
             `${row.documents === 0 ? ' (the tenant is empty)' : ''}`,
         );
       } else {
-        notReady += 1;
         console.log(`${label}${row.verdict} — ${row.detail}`);
       }
     }
   }
 
-  const pairs = accounts.length * databases.length;
   console.log('');
   console.log(
-    `[${COMMAND}] ${pairs - notReady} of ${pairs} account/database pair(s) are READY; ` +
-      `every count comes from the same plan a cleanup executes.`,
+    `[${COMMAND}] ${ready} of ${pairs} account/database pair(s) are READY in ${databases.join(', ')}; ` +
+      'every count comes from the same plan a cleanup executes.',
   );
   console.log(`[${COMMAND}] kept by both commands: ${OWNER_COMMENT}`);
 
@@ -289,15 +293,19 @@ async function main() {
   const preset = accounts.length === COMPARISON_ACCOUNTS.length &&
     COMPARISON_ACCOUNTS.every((a) => accounts.includes(a.email));
   console.log('');
-  if (preset) {
-    console.log(`[${COMMAND}] seed the three fixed accounts (development, 30 000 / 50 000 / 90 000 products):`);
-    console.log(`[${COMMAND}]   SEED_CONFIRM=seed-three-accounts SEED_DB_CONFIRM=${DATABASE_NAMES.development} \\`);
-    console.log(`[${COMMAND}]     npm run seed:three -- --database=${DATABASE_NAMES.development} --dry-run`);
-  } else {
-    console.log(`[${COMMAND}] seed them (each entry is a product count):`);
-    console.log(`[${COMMAND}]   SEED_CONFIRM=seed-accounts SEED_DB_CONFIRM=${DATABASE_NAMES.development} \\`);
-    console.log(`[${COMMAND}]     npm run seed:accounts -- --database=${DATABASE_NAMES.development} \\`);
-    console.log(`[${COMMAND}]       --accounts="${accounts.map((email) => `${email}:30000`).join(',')}" --dry-run`);
+  // The next step belongs to the database that was read. Printing a development seed line after a
+  // production check is how an operator gets told to run the wrong command in the wrong place.
+  if (databases.includes(DATABASE_NAMES.development)) {
+    if (preset) {
+      console.log(`[${COMMAND}] seed the three fixed accounts (development, 30 000 / 50 000 / 90 000 products):`);
+      console.log(`[${COMMAND}]   SEED_CONFIRM=seed-three-accounts SEED_DB_CONFIRM=${DATABASE_NAMES.development} \\`);
+      console.log(`[${COMMAND}]     npm run seed:three -- --database=${DATABASE_NAMES.development} --dry-run`);
+    } else {
+      console.log(`[${COMMAND}] seed them (each entry is a product count):`);
+      console.log(`[${COMMAND}]   SEED_CONFIRM=seed-accounts SEED_DB_CONFIRM=${DATABASE_NAMES.development} \\`);
+      console.log(`[${COMMAND}]     npm run seed:accounts -- --database=${DATABASE_NAMES.development} \\`);
+      console.log(`[${COMMAND}]       --accounts="${accounts.map((email) => `${email}:30000`).join(',')}" --dry-run`);
+    }
   }
   if (withProduction) {
     const rows = checked.find((c) => c.dbName === DATABASE_NAMES.production)?.rows ?? [];

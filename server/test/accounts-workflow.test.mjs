@@ -32,8 +32,10 @@ import {
   MAX_DOCUMENTS,
   MAX_PRODUCTS,
   MIN_PRODUCTS,
+  databasesToCheck,
   documentsForProducts,
   productsForDocuments,
+  summariseReadiness,
 } from '../scripts/seed/lib.mjs';
 import { APPROVED_FIREBASE_PROJECT_ID, assertSeedFirebaseProject } from '../scripts/seed/guard.mjs';
 import { SeedSafetyError } from '../scripts/perf/lib.mjs';
@@ -260,17 +262,48 @@ describe('the check answers questions and changes nothing', () => {
     assert.match(source, /READ-ONLY — nothing is created, changed or deleted/);
   });
 
-  it('the databases are a fixed list, and production is read only when it is asked for', () => {
-    // The list itself, not a mention of the names anywhere in the file: what it READS is what
-    // this asserts, and the test database must not be in it.
-    const list = source.match(/const databases = \[([\s\S]*?)\];/);
-    assert.ok(list, 'the fixed read list is missing');
-    assert.match(list[1], /DATABASE_NAMES\.development/);
-    assert.match(list[1], /DATABASE_NAMES\.production/);
+  const NAMES = {
+    development: 'inventoryai_dev_db',
+    test: 'inventoryai_test_db',
+    production: 'inventoryai_prod_db',
+  };
+
+  it('one database per run: development by default, production INSTEAD when asked', () => {
+    assert.deepEqual(databasesToCheck({ withProduction: false, databaseNames: NAMES }), [NAMES.development]);
+    assert.deepEqual(databasesToCheck({ withProduction: true, databaseNames: NAMES }), [NAMES.production]);
+
+    // The defect measured 2026-10-28: production was APPENDED to development, so the command
+    // read both and a development row that did not exist failed a production check.
     assert.equal(
-      /DATABASE_NAMES\.test/.test(list[1]),
+      databasesToCheck({ withProduction: true, databaseNames: NAMES }).includes(NAMES.development),
       false,
-      'the test database is in the read list, and npm test owns it',
+      'a production check must not read development',
+    );
+    assert.equal(
+      databasesToCheck({ withProduction: false, databaseNames: NAMES }).includes(NAMES.production),
+      false,
+      'a development check must not read production',
+    );
+
+    // Never the test database, in either mode: `npm test` owns it and clears it.
+    for (const withProduction of [false, true]) {
+      assert.equal(
+        databasesToCheck({ withProduction, databaseNames: NAMES }).includes(NAMES.test),
+        false,
+        'the test database was selected',
+      );
+    }
+  });
+
+  it('the script uses the rule, and cannot be pointed at a database nobody chose', () => {
+    assert.match(
+      source,
+      /const databases = databasesToCheck\(\{ withProduction, databaseNames: DATABASE_NAMES \}\);/,
+    );
+    assert.equal(
+      /const databases = \[/.test(source),
+      false,
+      'the database list was rebuilt by hand, so selection and its test can drift',
     );
     assert.match(source, /--with-production/);
     // No `--database=` flag: the tool cannot be pointed at a database nobody named, which is
@@ -278,7 +311,38 @@ describe('the check answers questions and changes nothing', () => {
     assert.equal(
       /argValue\('--database'\)/.test(source),
       false,
-      'check-accounts.mjs parses --database, so its target is no longer a fixed list',
+      'check-accounts.mjs parses --database, so its target is no longer a fixed choice',
+    );
+  });
+
+  it('a row missing in the other environment cannot fail the selected one', () => {
+    // The exact shape of the reported failure: development holds no user rows, production is READY.
+    const rows = {
+      [NAMES.development]: [{ verdict: 'MISSING' }, { verdict: 'MISSING' }, { verdict: 'MISSING' }],
+      [NAMES.production]: [{ verdict: 'READY' }, { verdict: 'READY' }, { verdict: 'READY' }],
+    };
+
+    const production = databasesToCheck({ withProduction: true, databaseNames: NAMES })
+      .map((dbName) => ({ dbName, rows: rows[dbName] }));
+    const summary = summariseReadiness(production);
+    assert.deepEqual(summary, { pairs: 3, notReady: 0, ready: 3 });
+    assert.equal(summary.notReady > 0 ? 1 : 0, 0, 'the production check must exit 0');
+
+    // The same rows selected for development are counted there — the verdict follows the selection.
+    const development = databasesToCheck({ withProduction: false, databaseNames: NAMES })
+      .map((dbName) => ({ dbName, rows: rows[dbName] }));
+    assert.deepEqual(summariseReadiness(development), { pairs: 3, notReady: 3, ready: 0 });
+  });
+
+  it('the readiness summary is the only counter, and it drives the exit code', () => {
+    assert.match(source, /const \{ pairs, notReady, ready \} = summariseReadiness\(checked\);/);
+    assert.match(source, /if \(notReady > 0\) \{/);
+    assert.match(source, /process\.exit\(1\)/);
+    assert.match(source, /process\.exit\(0\)/);
+    assert.equal(
+      /notReady \+= 1/.test(source),
+      false,
+      'a second counter inside the print loop can disagree with the summary that sets the exit code',
     );
   });
 

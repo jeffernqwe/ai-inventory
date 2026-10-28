@@ -288,9 +288,10 @@ below has the measurement.
   `npm run seed:accounts --accounts="a@x.com:30000"` size each tenant by its **product** count (the
   generator prints the derived document figure beside it; `address:400000d` asks in documents instead),
   while `seed --plan=demo --total` and `seed:perf-tenant --size` stay documents. `npm run check:accounts
-  [--with-production]` is the read-only pre-flight that says which accounts exist in which database and
-  how many documents a seed would reset — it reads a FIXED list of databases and needs no phrase, so it
-  cannot be pointed anywhere. `cleanup:account` / `cleanup:three` remove that data again and keep every
+  [--with-production]` is the read-only pre-flight that says which accounts exist and how many documents
+  a seed would reset — **one database per run**: development by default, production *instead* with
+  `--with-production`, so a row missing in the other environment cannot fail the check. It is a fixed
+  choice rather than a `--database=` flag, and needs no phrase because it changes nothing. `cleanup:account` / `cleanup:three` remove that data again and keep every
   login, business row and Firebase identity. **The Firebase project is pinned, not inherited**: a seed
   creates its login in the approved project (`inventoryai-d0d20`) or refuses, because a login created
   in another project could never be joined to the tenant (the app resolves a user by `firebaseUid`).
@@ -516,6 +517,8 @@ anchor (`§27…`) in that file.
 - **§27GF** — The data guides split by environment — four files where two stood, and the Firebase guide renumbered (2026-10-27)
 - **§27GG** — The guides audited for misfiled content, and the data guides' commands put under a guard (2026-10-27)
 - **§27GH** — The reference documents measured against the tree — three stale sentences, four undocumented variables, and the tables that were already right (2026-10-27)
+- **§27GI** — The production dry run checked nothing, and said the run would go ahead (2026-10-28)
+- **§27GJ** — The production check was judged by the development database, and every command's boundary re-measured (2026-10-28)
 
 ---
 

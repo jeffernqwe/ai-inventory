@@ -40,8 +40,10 @@ PowerShell keeps variables until you clear them, so set, run, then clear `NODE_E
 npm run check:accounts -- --with-production
 ```
 
-It reads both databases and Firebase, prints each account's tenant id, and prints the exact seeding line
-with the ids filled in. Exit **0** every account ready, **1** missing or mismatched, **2** could not check.
+It reads **the production database only** and Firebase, prints each account's tenant id, and prints the
+exact seeding line with the ids filled in. `--with-production` selects production instead of development,
+so a tenant that exists only in development never fails this check. Exit **0** every account ready,
+**1** missing or mismatched, **2** could not check.
 
 | Account | Products | ≈ Documents | `businessId` |
 |---|---|---|---|

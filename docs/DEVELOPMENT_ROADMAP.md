@@ -8,7 +8,7 @@ of truth for *what actually happened*, and it is why this file is long.
 
 **How to read it.** Do not read it top to bottom. Either find a record by number (§27FJ, §27DM — the
 numbers are cited from `CLAUDE.md` and from source comments), or use the index: `CLAUDE.md` §7 lists
-all **188** records by the title each gives itself.
+all **190** records by the title each gives itself.
 
 **Current state:** V1 complete and in production testing. The records that answer *where are we now*
 are §27FM (the V1 re-verification), §27FK (the runtime boundary and the blocked build), §27FJ (the two
@@ -22599,6 +22599,161 @@ plans and evidence directories are records, and the roadmap's historical command
 rather than instructions.
 
 **Verified.** The full unit suite, run in the committed state.
+
+---
+
+# 27GI. The production dry run checked nothing, and said the run would go ahead (2026-10-28)
+
+**What was asked for.** Make the production seed dry run check each `:businessId` against the account
+so a wrong id is refused *before* the real run.
+
+**What was there.** `seed:accounts --dry-run` printed its plan and returned **before opening a
+connection**. In development that is correct and cheap — an id is optional there and never compared.
+In production it was a preview that could not see what it was previewing, and the consequences were
+measured against the live database:
+
+| Entry, `NODE_ENV=production … --dry-run` | Printed | Exit |
+| --- | --- | --- |
+| `jaffy…:2000:6ae14e4e…` — another business's id | `business 6ae14e4e…`, no refusal | **0** |
+| `jaffy…:2000` — no id, tenant already exists | the plan, no refusal | **0** |
+| `jaffy…:2000:6ae14f14…` — the id it owns | the plan, no count | 0 |
+
+The same first line for real refuses (`names business …, but this account owns …`), so the preview
+said the opposite of the run on the exact input an operator uses a preview to check. The second line
+would have **replaced** an existing tenant's data; the preview accepted it. And none of the three
+could say how much a reset would delete, which is the other question a preview exists to answer.
+
+**Why it happened.** There were two lookups and only one of them was shared. The real run resolved
+the tenant through `ensureTenantForIdentity`; the preview had no read-only way to ask the same
+question, so it asked none. The defect was not a missing check — it was a **second, weaker copy of the
+path**, which is the shape that drifts.
+
+**What changed.** The lookup now has a read-only half and both callers use it.
+
+- `seed/lib.mjs`: `readIdentity(email)` returns the Firebase identity or `null` and never creates or
+  updates (unlike `resolveIdentity`, which does both). `ensureTenantForIdentity` is split into
+  `resolveExistingTenantForIdentity` — the two lookups (by `firebaseUid`, then by email with the stale-
+  link check), the business-existence check and the status check — and the create step, which stays in
+  `ensureTenantForIdentity`. The error text is unchanged; only its placement moved.
+- `seed-accounts.mjs`: in production, `--dry-run` now connects (read-only), resolves each login and
+  tenant through that resolver, applies the **same** `assertTenantNamedForReset` rule as the write
+  path, and prints the document count the reset would remove via `countTenantDataRemoval` — the
+  counting half of the same teardown plan the cleanup runs, so the number is what would actually be
+  deleted rather than an estimate. A wrong or missing id now fails the preview. Development keeps the
+  connection-free preview, and its message still says so.
+- Guides 10 and 9 state the two behaviours as they now are; Guide 9's table row had claimed the
+  development preview reports resets, which it does not and never did.
+
+**Measured after the change.** Wrong id: exit **1**, `names business 6ae14e4e…, but this account owns
+6ae14f14…`. No id: exit **1**, `the third field of --accounts is required in production` plus
+`would REPLACE the data of business … (“republic of gamers”)`. Correct id: exit 0, `reusing
+6ae14f14bcf1b24131c7cf26 (“republic of gamers”) — 0 document(s) would be reset`. Then the real paths,
+which the refactor touched: production seed at `200` products → **889 documents**, `verify:demo`
+**OK** (exit 0), `cleanup:account` **889 removed, 0 remaining**; and the create branch (an account with
+no `User` row) in development → `CREATED 6ae15947d9032c245ca21c6a`, 34 documents, deleted to 0. The
+production database was left empty: 4 users, 4 businesses, 0 documents in every data collection.
+
+**The test that failed, and why it was right to fail.** `accounts-workflow` located the *first*
+`mongoose.connect(` in `seed-accounts.mjs` and asserted the preview printed before it. The shared
+helper’s connect now precedes the development message, so the assertion broke on a real change of
+contract — not on a rename. It now asserts both halves: development prints before `main` connects
+(nothing opens), and the production preview may call only `readIdentity`,
+`resolveExistingTenantForIdentity`, `assertTenantNamedForReset` and `countTenantDataRemoval` — never
+`resolveIdentity`, `ensureTenantForIdentity` or `seedTenant`. That list is the property worth pinning:
+the preview may read, and may not create.
+
+**Verified.** `npm run test:unit`: **1566 tests, 1510 pass, 0 fail, 56 skipped**, exit 0; `npm run
+lint` 0; `npm run typecheck` 0. Committed as `e109e19` (5 files, 190 insertions, 70 deletions).
+
+**Two behaviour changes this record owns, and one thing it did not prove.** A production dry run now
+needs the database reachable *and* `FIREBASE_*` configured, because it reads the identity before it
+resolves the tenant; the old preview returned before either was touched, so on a host without them
+the preview now refuses where it previously printed a plan. That refusal is the correct
+trade — a preview that cannot read cannot check — but it is a change, not a free gain. The connection-
+failure path (`the ids were NOT checked`) is written and lint-clean and was **not** exercised: breaking
+the network to watch it fire was not worth the risk to a live target.
+
+---
+
+# 27GJ. The production check was judged by the development database, and every command's boundary re-measured (2026-10-28)
+
+**What was asked for.** `npm run check:accounts -- --with-production` was expected to check production;
+run against a shell whose development database held no user rows, it reported **NOT READY (exit 1)**
+for accounts that were READY in production. Make production the only database that run judges, then
+re-check that every data command is confined to the environment it names.
+
+**What the checker did, measured.** `databases` was built as `[development, ...(withProduction ?
+[production] : [])]` — production **appended** to development, never replacing it — and readiness was
+summed over every database read. One run therefore produced: development **0 of 3** (all `MISSING`),
+production **3 of 3 READY**, and exit **1** because `notReady` counted the development rows. The exit
+code described the environment nobody was about to seed.
+
+**The fix, in one place.** `seed/lib.mjs` gained two pure functions: `databasesToCheck({withProduction,
+databaseNames})` returns exactly one database (development by default, production instead), and
+`summariseReadiness(checked)` returns `{pairs, notReady, ready}` over the databases that were actually
+read. `check-accounts.mjs` now builds its list from the first and takes its verdict and exit code from
+the second; the second counter that lived inside the print loop (`notReady += 1`) is gone, because two
+counters can disagree and only one of them was tested. The printed label, the hint text and the
+next-step commands follow the selected database: a production check prints the three-phrase production
+line, a development check prints the two-phrase one and no longer suggests `--with-production`.
+
+**The same defect in the seeder's printed hint.** `seed-accounts` printed `npm run check:accounts --
+--with-production` after **every** dry run, including a development one. With the new semantics that
+line would have sent a development operator to check production. It now emits the flag only when the
+run itself targets production.
+
+**The boundary audit, command by command** (source, plus the guards' own tests):
+
+- **Every production-capable writer names its database and proves the name.** `seed:demo`,
+  `seed:accounts`, `seed:three`, `seed:roles`, `seed:perf-tenant`, `seed:demo-tenant`, and every
+  scoped cleanup including `cleanup:firebase` pass `--database=` to a guard that requires it to
+  **equal** what `config/env.ts` resolved; the connection uses the resolved value, never the flag, and
+  the connection string's own database is refused if it names a different one. Two phrases in
+  development, three in production.
+- **The development-only tools cannot reach production at all.** `seed:perf` and `cleanup:perf` call
+  the guard without a database, which refuses production and an unrecognised `NODE_ENV`; the
+  Firebase-wide `cleanup:test-firebase` is fenced by `assertNonProductionEnv`.
+- **Read-only tools do not judge an environment they were not asked about.** The checker is now one
+  database; `verify:demo` names production explicitly before reading it; `backup:db` and
+  `audit:indexes` read only the resolved database.
+- **One deliberate two-database read remains, and it is not a verdict.** `cleanup:firebase` reads user
+  rows in development **and** production before deleting an identity, because an identity may only go
+  when no row in either database references it. That is a reference check; conflating it with
+  readiness is exactly the defect above.
+- **One deliberate single-phrase exception remains.** `seed:demo-tenant` keeps `SEED_CONFIRM` alone and
+  may still target production, as Guide 10 already documents; it names the database and refuses a
+  mismatch, so it cannot cross environments — it is cheaper to confirm, not less targeted.
+
+**Tests added.** `accounts-workflow` now asserts the one-database rule, that the script uses it rather
+than rebuilding a list, that a `MISSING` row outside the selected database cannot change the verdict
+(the reported failure, reproduced as a unit), and that the summary is the only counter driving the
+exit code. `script-environment-guards` gained the call-site sweep: every production-capable writer
+hands its guard `--database=`, the development-only tools never gain it, and the checker selects one
+database while `cleanup:firebase`'s two-database read is asserted as a reference check.
+
+**Tested against both environments, read-only where production was concerned.**
+
+| Run | Result |
+| --- | --- |
+| `npm run check:accounts` | dev only, **0 of 3** (rows are absent there), exit **1** |
+| `npm run check:accounts -- --with-production` | prod only, **3 of 3 READY**, 0 products / 2 documents each, exit **0** |
+| dev shell naming `inventoryai_prod_db` (seed and cleanup) | refused: "resolved inventoryai_dev_db … not connected to", exit **1** |
+| production run with two phrases | refused: `SEED_PROD_CONFIRM=SEED-PRODUCTION-DATA` missing, exit **1** |
+| development `seed:accounts` at 5 products | created `6ae16216…`, **34 documents** in 652 ms |
+| `verify:demo` on that tenant | **OK (exit 0)** — counts, ledger, referential integrity |
+| `cleanup:account` dry run, then real | 34 counted, **34 removed, 0 remaining**, rows and identity kept |
+| production after all of it | still **3 of 3 READY, 0 products / 2 documents** — the dev work touched nothing |
+| production `seed:accounts --dry-run` (2000 products) | read-only check named `6ae15d1b…` ("royal kludge"), 2 documents would reset, exit **0** |
+
+**What is not changed, and why.** `seed:demo-tenant`'s single phrase is a documented decision, not an
+oversight, and weakening or tightening it is a separate one. `cleanup:test-firebase` still deletes
+every identity in the one Firebase project both environments share, fenced by environment rather than
+by database — the narrower `cleanup:firebase --email=…` remains the per-account tool, and the risk is
+unchanged by this record rather than introduced by it.
+
+**Verified.** `npm run test:unit`: **1572 tests, 1516 pass, 0 fail, 56 skipped**, exit 0 (the
+documentation guards included); `npm run lint` 0; `npm run typecheck` 0. The database-backed suite was not re-run: every change here is either a pure function, a print
+statement, or documentation, and the behaviour was exercised directly against both databases above.
 
 ---
 

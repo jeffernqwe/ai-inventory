@@ -62,14 +62,18 @@ plan.
 
 ```bash
 npm run check:accounts                       # the development database
-npm run check:accounts -- --with-production   # …and what production holds
+npm run check:accounts -- --with-production   # production INSTEAD (one database per run)
 npm run check:accounts -- --accounts="a@x.com,b@y.com"
 ```
 
 Read-only, and it needs no phrase because it changes nothing. For every address it prints the Firebase
-identity (uid, verified, enabled, how it signs in), the user row in each database (role, business, the
-stored uid) and how many documents a seed would reset. Exit codes: **0** every account ready, **1**
-something missing or mismatched (a state, not an error), **2** could not check.
+identity (uid, verified, enabled, how it signs in), the user row **in the selected database** (role,
+business, the stored uid) and how many documents a seed would reset there. Exit codes: **0** every
+account ready, **1** something missing or mismatched (a state, not an error), **2** could not check.
+
+`--with-production` **replaces** the development database rather than adding to it: the verdict and the
+exit code describe only the environment you are about to write to, so a tenant missing in development
+cannot fail a production check. Run it once per environment.
 
 `MISSING` means there is no row yet: a seed would **create** that tenant. `STALE LINK`, `NOT LINKED` and
 `NO BUSINESS` are states a seed refuses on.

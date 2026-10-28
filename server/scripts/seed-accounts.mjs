@@ -54,7 +54,7 @@
 // rules apply there, because several REAL businesses can be reset in one command:
 //   * A PRESET IS REFUSED. Every account must be named explicitly, as
 //     `address:products[:businessId]`; the preset is a development convenience and would
-//     reset real businesses by accident. `npm run check:accounts --with-production` prints
+//     reset real businesses by accident. `npm run check:accounts -- --with-production` prints
 //     the same three accounts with their ids, ready to paste.
 //   * whenever an account ALREADY owns a business, its id must be the third field. A
 //     brand-new account has no id to name, and creating one deletes nothing.
@@ -281,7 +281,7 @@ async function main() {
     fail(
       `the ${PRESET_ALIAS} preset is a development convenience and is refused in production: it ` +
         'would reset three real businesses in one command. Name every account instead, as ' +
-        '--accounts="address:products:<businessId>,…" — `npm run check:accounts --with-production` ' +
+        '--accounts="address:products:<businessId>,…" — `npm run check:accounts -- --with-production` ' +
         'prints these three with their ids. Nothing was written.',
     );
   }
@@ -348,10 +348,17 @@ async function main() {
       `[${COMMAND}] check the accounts first (read-only, and it prints the businessId of every tenant):`,
     );
     console.log(
-      `[${COMMAND}]   npm run check:accounts --with-production` +
+      `[${COMMAND}]   npm run check:accounts -- --with-production` +
         `${plan.length && phrase !== PRESET_PHRASE ? ` --accounts="${plan.map((e) => e.email).join(',')}"` : ''}`,
     );
     console.log(`[${COMMAND}] to run for real:`);
+    // THE ENVIRONMENT PREFIX IS PART OF THE COMMAND. `.env` resolves to development, and the
+    // guard refuses a `--database=` this process did not resolve — so a production line printed
+    // without it is a line that cannot be pasted (measured 2026-10-28: exit 1). Same reason as
+    // the identical constant in seed-perf-tenant.mjs.
+    if (production) {
+      console.log(`[${COMMAND}]   NODE_ENV=production MONGODB_DB_NAME=${target.database} \\`);
+    }
     console.log(
       `[${COMMAND}]   SEED_CONFIRM=${phrase} SEED_DB_CONFIRM=${target.database}` +
         `${production ? ' SEED_PROD_CONFIRM=SEED-PRODUCTION-DATA' : ''} \\`,
@@ -480,13 +487,22 @@ async function main() {
   console.log(`[${COMMAND}] barcode generation is left unassigned on purpose: open a seeded product`);
   console.log(`[${COMMAND}] in the app and use the barcode action to generate its first code.`);
   console.log(`[${COMMAND}]`);
+  // A command printed for a named database must carry the environment that resolves to it: the
+  // guard is right to refuse otherwise, and the reader would be copying a line that cannot run.
+  const envPrefix = production ? `NODE_ENV=production MONGODB_DB_NAME=${target.database} ` : '';
   console.log(`[${COMMAND}] verify one of them, rather than trusting this report:`);
-  console.log(`[${COMMAND}]   npm run verify:demo -- --email=${results[0].email} --database=${target.database}`);
+  console.log(`[${COMMAND}]   ${envPrefix}npm run verify:demo -- --email=${results[0].email} --database=${target.database}`);
   console.log(`[${COMMAND}] remove the data again (the logins and business rows stay):`);
   const cleanupPhrases =
-    `CLEANUP_CONFIRM=${phrase === PRESET_PHRASE ? 'cleanup-three-accounts' : 'cleanup-account-data'} ` +
+    `${envPrefix}CLEANUP_CONFIRM=${phrase === PRESET_PHRASE ? 'cleanup-three-accounts' : 'cleanup-account-data'} ` +
     `CLEANUP_DB_CONFIRM=${target.database} ${production ? 'CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA ' : ''}`;
-  console.log(`[${COMMAND}]   ${cleanupPhrases}npm run ${phrase === PRESET_PHRASE ? 'cleanup:three' : 'cleanup:account'} -- --database=${target.database} --dry-run`);
+  // The preset takes no account list; every other run must name the same accounts it seeded,
+  // with the same ids — a printed hint without them is refused (measured 2026-10-28: exit 1).
+  const cleanupAccounts =
+    phrase === PRESET_PHRASE
+      ? ''
+      : ` --accounts="${results.map((r) => `${r.email}:${r.businessId}`).join(',')}"`;
+  console.log(`[${COMMAND}]   ${cleanupPhrases}npm run ${phrase === PRESET_PHRASE ? 'cleanup:three' : 'cleanup:account'} -- --database=${target.database}${cleanupAccounts} --dry-run`);
   console.log(`[${COMMAND}]   …and the same line without --dry-run to delete.`);
   if (production) {
     console.log(`[${COMMAND}] compare the assistant against the DEPLOYED server (one tenant at a time):`);

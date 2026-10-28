@@ -26,7 +26,7 @@
 //
 // THE PRESET IS DEVELOPMENT ONLY, and refused in production for the same reason the seeder's
 // preset is: it would empty three real businesses in one command. Name them instead, with the
-// ids `npm run check:accounts --with-production` prints.
+// ids `npm run check:accounts -- --with-production` prints.
 //
 // `--dry-run` counts through the SAME plan the real run executes, prints every collection it
 // would empty, and deletes nothing. A run where nothing was ever seeded reports "nothing to
@@ -169,7 +169,7 @@ async function main() {
     fail(
       `the ${PRESET_ALIAS} preset is a development convenience and is refused in production: it would ` +
         'empty three real businesses in one command. Name every account instead, as ' +
-        '--accounts="address:<businessId>,…" — `npm run check:accounts --with-production` prints these ' +
+        '--accounts="address:<businessId>,…" — `npm run check:accounts -- --with-production` prints these ' +
         'three with their ids. Nothing was deleted.',
     );
   }
@@ -267,6 +267,12 @@ async function main() {
         `${prepared.length} tenant(s); nothing was deleted.`,
     );
     console.log(`[${COMMAND}] to run for real:`);
+    // THE ENVIRONMENT PREFIX IS PART OF THE COMMAND — see the same constant in seed-perf-tenant.mjs:
+    // `.env` resolves to development, and the guard refuses a database this process did not
+    // resolve, so a production line without it cannot be pasted.
+    if (target.production) {
+      console.log(`[${COMMAND}]   NODE_ENV=production MONGODB_DB_NAME=${target.database} \\`);
+    }
     console.log(
       `[${COMMAND}]   CLEANUP_CONFIRM=${phrase} CLEANUP_DB_CONFIRM=${target.database}` +
         `${target.production ? ' CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA' : ''} \\`,

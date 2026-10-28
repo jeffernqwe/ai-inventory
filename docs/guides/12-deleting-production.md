@@ -91,7 +91,7 @@ NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
 
 - **Production names every tenant:** `--accounts="address:<businessId>,…"`, and the id must be the tenant
   that account actually owns. The run resolves the address to its user row and refuses on a mismatch. The
-  ids are the ones `npm run check:accounts --with-production` prints.
+  ids are the ones `npm run check:accounts -- --with-production` prints.
 - The preview counts through the **same** plan the deletion executes, per collection and per account, and
   deletes nothing.
 - A real run re-counts every tenant afterwards and prints `0 remaining`; anything left **fails** the run
@@ -175,7 +175,7 @@ fit.
 |---|---|---|
 | a tenant cleanup | the command again with `--dry-run` | every collection at 0, or `nothing to clean` |
 | a tenant cleanup | `verify:demo` with the production environment | exit 0, or `no such account` if the rows are gone |
-| an accounts cleanup | `npm run check:accounts --with-production` | the accounts are still `READY`, with 0 documents a seed would reset |
+| an accounts cleanup | `npm run check:accounts -- --with-production` | the accounts are still `READY`, with 0 documents a seed would reset |
 | a database wipe | `npm run seed -- … --dry-run` | a clean target; the app shows an empty business |
 | firebase deletion | the `--target=firebase` line with `--dry-run` | `no identity` for each address ([Guide 13](13-firebase-identities.md)) |
 

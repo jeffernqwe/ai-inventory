@@ -31,7 +31,7 @@
 //
 // Usage:
 //   npm run check:accounts                                  # the three fixed accounts
-//   npm run check:accounts --with-production                # …and what production holds
+//   npm run check:accounts -- --with-production                # …and what production holds
 //   npm run check:accounts -- --accounts="a@x.com,b@y.com"  # your own addresses
 
 import 'dotenv/config';

@@ -333,10 +333,10 @@ async function main() {
   // The bridge to the next step: the exact seeding command for what was just measured.
   const preset = accounts.length === COMPARISON_ACCOUNTS.length &&
     COMPARISON_ACCOUNTS.every((a) => accounts.includes(a.email));
-  console.log('');
   // The next step belongs to the database that was read. Printing a development seed line after a
   // production check is how an operator gets told to run the wrong command in the wrong place.
   if (databases.includes(DATABASE_NAMES.development)) {
+    console.log('');
     if (preset) {
       console.log(`[${COMMAND}] seed the three fixed accounts (development, 30 000 / 50 000 / 90 000 products):`);
       console.log(`[${COMMAND}]   SEED_CONFIRM=seed-three-accounts SEED_DB_CONFIRM=${DATABASE_NAMES.development} \\`);
@@ -348,24 +348,6 @@ async function main() {
       console.log(`[${COMMAND}]       --accounts="${accounts.map((email) => `${email}:30000`).join(',')}" --dry-run`);
     }
   }
-  if (withProduction) {
-    const rows = checked.find((c) => c.dbName === DATABASE_NAMES.production)?.rows ?? [];
-    // No ids in the hint any more: the seeder resolves each address to its own tenant and checks
-    // ownership before it writes. An id pasted here would be a second source that can go stale.
-    const entries = rows.map((row) => {
-      const wanted = COMPARISON_ACCOUNTS.find((a) => a.email === row.email)?.products;
-      return `${row.email}:${wanted ?? 30000}`;
-    });
-    console.log(
-      `[${COMMAND}] production (three phrases; each tenant is resolved from the account and checked):`,
-    );
-    console.log(`[${COMMAND}]   NODE_ENV=production MONGODB_DB_NAME=${DATABASE_NAMES.production} \\`);
-    console.log(`[${COMMAND}]     SEED_CONFIRM=seed-accounts SEED_DB_CONFIRM=${DATABASE_NAMES.production} \\`);
-    console.log(`[${COMMAND}]     SEED_PROD_CONFIRM=SEED-PRODUCTION-DATA \\`);
-    console.log(`[${COMMAND}]     npm run seed:accounts -- --database=${DATABASE_NAMES.production} \\`);
-    console.log(`[${COMMAND}]       --accounts="${entries.join(',')}"`);
-  }
-
   if (notReady > 0) {
     console.log('');
     console.log(

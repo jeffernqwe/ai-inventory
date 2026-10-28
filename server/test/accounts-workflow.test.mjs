@@ -278,15 +278,18 @@ describe('a production target is resolved from the account, never typed', () => 
     );
   });
 
-  it('the production hint prints address:products, never an id that can go stale', () => {
+  it('prints no production seeding hint — the result is the end of the output', () => {
     const source = read('check-accounts.mjs');
-    assert.match(source, /return `\$\{row\.email\}:\$\{wanted \?\? 30000\}`;/);
     assert.equal(
-      source.includes('row.businessId ? `:${row.businessId}`'),
+      source.includes('production (three phrases'),
       false,
-      'the production hint still appends a business id',
+      'the production hint block is still printed',
     );
-    assert.match(source, /each tenant is resolved from the account and checked/);
+    assert.equal(
+      source.includes('SEED_PROD_CONFIRM'),
+      false,
+      'the production hint still prints its confirmation phrase',
+    );
   });
 });
 

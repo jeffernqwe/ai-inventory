@@ -62,6 +62,7 @@ import 'dotenv/config';
 import mongoose from 'mongoose';
 
 import env from '../src/config/env.ts';
+import Business from '../src/models/business.model.ts';
 import User from '../src/models/user.model.ts';
 import { assertScopedCleanupTarget } from './cleanup/guard.mjs';
 import { CleanupSafetyError } from './cleanup/lib.mjs';
@@ -249,8 +250,26 @@ async function main() {
       );
     }
     if (target.production) {
-      // The same rule the seeder applies: a production cleanup needs the OWNER of the tenant,
-      // and an address with no tenant is refused rather than treated as an empty one.
+      // The tenant must be a row this run can actually read. The seeder gets this from
+      // `resolveExistingTenantForIdentity`; cleanup looks the user up directly, so the business
+      // is checked here rather than assumed from a field that can be stale (§27BB / F-50).
+      const business = user.businessId
+        ? await Business.findById(user.businessId).select('name status').lean()
+        : null;
+      if (!business) {
+        fail(
+          `"${entry.email}" points at business ${String(user.businessId)}, which does not exist in ` +
+            `${target.database}. Refusing to empty a tenant that cannot be checked. Nothing was deleted.`,
+        );
+      }
+      if (business.status !== 'ACTIVE') {
+        fail(
+          `business ${String(user.businessId)} ("${business.name}") is ${business.status}, not ACTIVE. ` +
+            'Refusing to empty it. Nothing was deleted.',
+        );
+      }
+
+      // The same rule the seeder applies: a production cleanup needs the OWNER of that tenant.
       assertProductionTenantOwnership({
         email: entry.email,
         tenant: { businessId: user.businessId, role: user.role },

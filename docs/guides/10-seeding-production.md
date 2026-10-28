@@ -240,7 +240,7 @@ allocated — that guide has the numbers and the reclaim.
 | `not a seeding target` | an unknown database name | only `inventoryai_dev_db` / `inventoryai_prod_db` |
 | `asks for 1,000,000 products. The ceiling is 112,500` | over the per-account ceiling | split the plan across accounts |
 | `this shell is configured for Firebase project "…"` | the credentials name a project other than the approved one | fix `FIREBASE_PROJECT_ID`; nothing was read or written |
-| `no Firebase identity exists … DEMO_ACCOUNT_PASSWORD is not set` | the address has no login and no password was supplied | register it in the app first (recommended) |
+| `no Firebase identity exists … a production seed will not create one` | the address has no login in this Firebase project | register it in the app first; production never creates one |
 | `the database account for … is linked to Firebase uid …` | the identity was deleted and re-created, so the row holds a stale uid | seed a different address, or repair the link through an approved flow |
 | `Writes are blocked on your cluster` (from MongoDB) | the M0 filled up | empty a tenant or rebuild the empty collections' indexes ([Guide 12](12-deleting-production.md)) |
 

@@ -337,6 +337,11 @@ describe('the cleanup removes data and never an account', () => {
     assert.match(source, /assertProductionTenantOwnership\(/);
     assert.match(source, /readBusinessAssociations\(/);
     assert.match(source, /assertOneBusinessAssociation\(/);
+    // The tenant must be a live row, not a businessId that points at nothing or at a closed
+    // business. The seeder gets this from its resolver; cleanup reads it directly.
+    assert.match(source, /Business\.findById\(user\.businessId\)/);
+    assert.match(source, /Refusing to empty a tenant that cannot be checked/);
+    assert.match(source, /is \$\{business\.status\}, not ACTIVE/);
     assert.match(source, /const PRESET_ALIAS = 'cleanup:three'/);
     assert.match(source, /is refused in production/);
     // The older `address:businessId` form still works, and is compared with the row.

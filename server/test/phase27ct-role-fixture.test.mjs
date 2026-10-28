@@ -91,6 +91,26 @@ describe('§27CT the fixture is one account per role, and cannot be a real addre
     assert.equal(packageJson.scripts['cleanup:roles'], 'node scripts/cleanup-role-accounts.mjs');
     assert.equal(packageJson.scripts['verify:roles'], 'node scripts/verify-role-access.mjs');
   });
+
+  test('every printed next step names the database and the production environment', () => {
+    // A hint is a command the operator will paste. In production it must carry
+    // `NODE_ENV=production MONGODB_DB_NAME=…`, or the pasted line resolves the
+    // development database and either seeds the wrong one or is refused by the very
+    // guard it was meant to satisfy. `--database=` is asserted for the same reason.
+    assert.match(seeder, /const envPrefix = production \? `NODE_ENV=production MONGODB_DB_NAME=\$\{target\.database\} ` : ''/);
+    assert.ok(seeder.includes('to run for real: ${envPrefix}'), 'the real-run hint omits the environment prefix');
+    assert.ok(
+      seeder.includes('`npm run ${COMMAND} -- --database=${target.database}`'),
+      'the real-run hint omits --database=',
+    );
+    assert.ok(
+      seeder.includes('${envPrefix}SEED_CONFIRM=${SEED_CONFIRM_PHRASE} npm run verify:roles'),
+      'the verify:roles hint omits the environment prefix',
+    );
+    const verifyHint = seeder.slice(seeder.indexOf('npm run verify:roles'), seeder.indexOf('npm run verify:roles') + 260);
+    assert.match(verifyHint, /--database=\$\{target\.database\}/, 'the verify:roles hint omits --database=');
+    assert.match(verifyHint, /--business=\$\{tenant\.businessId\}/, 'the verify:roles hint omits --business=');
+  });
 });
 
 describe('§27CT no mail path, and no identity is created by a pattern', () => {

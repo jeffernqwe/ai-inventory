@@ -115,6 +115,11 @@ the account already owns one.
 
 ## Which command, in production
 
+Every row below is a production command: it needs `NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db`
+and the phrases shown in the full blocks. A line copied without them resolves the development database and
+is refused by the same guard — `check:accounts --with-production` is the exception, because it selects
+production itself.
+
 | You want | Command |
 |---|---|
 | A large tenant of its own, with a login | `npm run seed:perf-tenant -- --database=inventoryai_prod_db --size=60000` — the recommended route |

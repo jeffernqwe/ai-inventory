@@ -111,6 +111,10 @@ async function main() {
     confirmPhrase: SEED_CONFIRM_PHRASE,
   });
   const production = target.production;
+  // A printed next step has to be runnable in the shell it is printed into. Without
+  // this prefix a production line copied into a plain shell resolves DEVELOPMENT and
+  // is refused by the guard it was meant to satisfy — or worse, seeds the wrong one.
+  const envPrefix = production ? `NODE_ENV=production MONGODB_DB_NAME=${target.database} ` : '';
 
   const total = parseCount(argValue('--total'), {
     name: '--total',
@@ -142,8 +146,9 @@ async function main() {
     console.log('');
     console.log(`[${COMMAND}] dry run complete — no connection was opened and nothing was written.`);
     console.log(
-      `[${COMMAND}] to run for real: ROLE_TEST_PASSWORD='…' SEED_CONFIRM=${SEED_CONFIRM_PHRASE} ` +
-        `SEED_DB_CONFIRM=${target.database}${production ? ' SEED_PROD_CONFIRM=SEED-PRODUCTION-DATA' : ''} ` +
+      `[${COMMAND}] to run for real: ${envPrefix}ROLE_TEST_PASSWORD='…' ` +
+        `SEED_CONFIRM=${SEED_CONFIRM_PHRASE} SEED_DB_CONFIRM=${target.database}` +
+        `${production ? ' SEED_PROD_CONFIRM=SEED-PRODUCTION-DATA' : ''} ` +
         `npm run ${COMMAND} -- --database=${target.database}`,
     );
     return;
@@ -218,7 +223,16 @@ async function main() {
   console.log('');
   console.log(`[${COMMAND}] sign in on the phone with any of the four addresses and the password you set in ${PASSWORD_ENV}.`);
   console.log(`[${COMMAND}] prove the server-side boundary (server must be running):`);
-  console.log(`[${COMMAND}]   npm run verify:roles -- --business=${tenant.businessId}`);
+  console.log(
+    `[${COMMAND}]   ${envPrefix}SEED_CONFIRM=${SEED_CONFIRM_PHRASE} npm run verify:roles ` +
+      `-- --database=${target.database} --business=${tenant.businessId}`,
+  );
+  if (production) {
+    console.log(
+      `[${COMMAND}]   for a deployed server add --signin --base=<url>: a minted session is signed ` +
+        'with this machine\'s JWT_SECRET, which the server does not share.',
+    );
+  }
   console.log(`[${COMMAND}] remove the fixture when done (MongoDB only; Firebase identities are kept):`);
   const cleanupPhrases =
     `CLEANUP_CONFIRM=${CLEANUP_CONFIRM_PHRASE} CLEANUP_DB_CONFIRM=${target.database} ` +

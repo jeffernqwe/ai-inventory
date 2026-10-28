@@ -8,7 +8,7 @@ of truth for *what actually happened*, and it is why this file is long.
 
 **How to read it.** Do not read it top to bottom. Either find a record by number (§27FJ, §27DM — the
 numbers are cited from `CLAUDE.md` and from source comments), or use the index: `CLAUDE.md` §7 lists
-all **191** records by the title each gives itself.
+all **192** records by the title each gives itself.
 
 **Current state:** V1 complete and in production testing. The records that answer *where are we now*
 are §27FM (the V1 re-verification), §27FK (the runtime boundary and the blocked build), §27FJ (the two
@@ -22807,6 +22807,51 @@ by this pass.
 
 **Verified.** `npm run test:unit`: **1573 tests, 1517 pass, 0 fail, 56 skipped**, exit 0; `npm run lint`
 0; `npm run typecheck` 0.
+
+---
+
+# 27GL. A production hint that named the database but not the environment — and 20 000 products proven in production (2026-10-28)
+
+**What was asked for.** A second production-only pass, at a larger size: audit every production-capable
+script and its printed hints, prove the guards refuse a wrong target, then repeat the three-account and
+single-account workflows end to end. No development command was run.
+
+**The defect the audit found.** Four of the five production-capable seeders printed their next steps with
+`NODE_ENV=production MONGODB_DB_NAME=…` in front. The role fixture did not. Its "to run for real" line
+carried `SEED_PROD_CONFIRM=SEED-PRODUCTION-DATA` but no environment, so pasted into a plain shell it
+resolved development; and its `verify:roles` line carried neither the environment nor `--database=`, so the
+printed verification could not prove the tenant that had just been written. Both lines now use the same
+`envPrefix` the other seeders use, and the verify hint names `SEED_CONFIRM`, `--database` and
+`--business`, with a production note to add `--signin --base=<url>` for a deployed server. A source test
+pins all four properties, so a future edit cannot drop one silently.
+
+**What was run, in order, in production.**
+
+| Operation (three phrases where it writes or deletes) | Result |
+| --- | --- |
+| `check:accounts --with-production` before any write | 3 of 3 READY, 0 products / 0 documents |
+| four refusals: dev database named, no `--database`, missing production phrase, wrong tenant id | all exit 1 before a connection; built-in change confirmed at 0 documents |
+| `seed:accounts` — three ids named, **1 000 products each** | **13 332 documents**, 4 444 per tenant |
+| `verify:demo` per tenant | **OK ×3** — 1 000 products, 166 low, 58 out, 47 receipt lines, 18 suppliers, 0 missing references |
+| per-tenant and whole-database read-only counts | **1 000 / 1 000 / 1 000 products**, 3 000 total, no cross-tenant record |
+| `cleanup:account` dry run, then real | **13 332 counted → 13 332 removed, 0 remaining** |
+| `seed:accounts` — `jaffy…` at **20 000 products** | **88 889 documents in 130 398 ms** |
+| `verify:demo` on it | **OK** — 27 023 ledger rows checked, 0 bad, 0 negative, 807 receipt lines, 300 suppliers, 0 missing references |
+| `cleanup:account` dry run, then real | **88 889 counted → 88 889 removed, 0 remaining** |
+| final whole-database read-only count | **4 businesses, 4 users, 4 sessions, 12 documents, 0 products** |
+
+All four production accounts were READY afterwards, with their Firebase identities untouched and their
+business rows intact. One `verify:demo` run met `connect ETIMEDOUT` and exited 2 with `NOT VERIFIED — this
+is not a data violation`; an immediate retry passed. That is the §27GK message working, not a new defect.
+
+**Not exercised, with the reason.** The 30 000 / 50 000 / 90 000 preset (≈756 000 documents) was not run:
+20 000 products is the largest size now proven in production, and the 512 MB ceiling §27GE measured is
+unchanged. The whole-database wipe and the Firebase-wide identity delete were not run: both destroy more
+than the tenants under test. `seed:demo-tenant` and `seed:roles` were audited but not written for real,
+for the same reason as §27GK — they rotate fixture credentials this shell does not hold.
+
+**Verified.** `npm run test:unit`: **1574 tests, 1518 pass, 0 fail, 56 skipped**, exit 0 (the new source
+test included); `npm run lint` 0.
 
 ---
 

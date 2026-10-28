@@ -520,6 +520,7 @@ anchor (`§27…`) in that file.
 - **§27GI** — The production dry run checked nothing, and said the run would go ahead (2026-10-28)
 - **§27GJ** — The production check was judged by the development database, and every command's boundary re-measured (2026-10-28)
 - **§27GK** — Production seed and delete at 10 000 products — and a connection failure that read like a partial write (2026-10-28)
+- **§27GL** — A production hint that named the database but not the environment — and 20 000 products proven in production (2026-10-28)
 
 ---
 

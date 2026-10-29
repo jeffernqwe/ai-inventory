@@ -21,10 +21,12 @@
 //     and the same password the seeder used; both stay in the environment and are
 //     never printed.
 //
-// NO DATA IS WRITTEN and no AI quota is spent: the matrix uses a READ route for
-// `ai.use` and an ABSENT id for by-id routes, and refused cells never reach a
-// controller. The only rows created are four sessions, removed again before the
-// script exits.
+// THE MATRIX ITSELF WRITES NO TENANT DATA and no AI quota is spent: it uses a READ
+// route for `ai.use` and an ABSENT id for by-id routes, and refused cells never reach
+// a controller. The user-management probes DO write — they create and delete users
+// through `POST /api/users`, which leaves audit rows in the fixture tenant (10 were
+// measured on a 200-document fixture, 2026-10-29) — and the only other rows are four
+// sessions, removed again before the script exits.
 //
 // Usage:
 //   SEED_CONFIRM=seed-roles npm run verify:roles -- --business=<id>

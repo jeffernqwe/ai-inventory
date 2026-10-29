@@ -521,6 +521,12 @@ anchor (`§27…`) in that file.
 - **§27GJ** — The production check was judged by the development database, and every command's boundary re-measured (2026-10-28)
 - **§27GK** — Production seed and delete at 10 000 products — and a connection failure that read like a partial write (2026-10-28)
 - **§27GL** — A production hint that named the database but not the environment — and 20 000 products proven in production (2026-10-28)
+- **§27GM** — Each account chooses whether its products carry a SKU and barcode (2026-10-29)
+- **§27GN** — Seeded barcodes are valid, unique EAN-13 — printable and scannable (2026-10-29)
+- **§27GO** — `--include-sku` is replaced by `--codes=`, and refused rather than ignored (2026-10-29)
+- **§27GP** — The seeding documentation measured against the scripts — six stale statements (2026-10-29)
+- **§27GQ** — A typed tenant id is a claim, and it is checked in every environment (2026-10-29)
+- **§27GR** — The seeding commands run against a database — four code modes, 1 000 products, and a corrupted tenant caught (2026-10-29)
 
 ---
 

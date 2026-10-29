@@ -71,8 +71,9 @@ documented in [Guide 12](12-deleting-production.md) and [Guide 13](13-firebase-i
 - Every allowed row: `NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db` and `--database=inventoryai_prod_db`, which must equal the resolved name.
 - `--dry-run` checks the target and prints the plan; it never skips a phrase.
 - `check:accounts` (which selects production with `--with-production` and takes no `--database=`)
-  and `verify:demo` take **no phrase**. `verify:roles` writes no tenant data but takes
-  `SEED_CONFIRM=seed-roles`, because it mints four sessions and removes them.
+  and `verify:demo` take **no phrase**. `verify:roles` writes no products, inventory or lasting
+  users, but takes `SEED_CONFIRM=seed-roles`: it mints four sessions and removes them, and its
+  user-management probes create and delete users, which leaves audit rows in the fixture tenant.
 
 Two cautions belong on their own lines:
 
@@ -129,11 +130,14 @@ In production the run says the password was left alone — `password unchanged` 
 ## Seeding the three accounts, all three in one run
 
 **The counts are yours on every run.** `--accounts` is the only thing that sets a size — there is no
-preset or documentation value behind it. Each entry is `address:products` (an optional `:businessId` is
-checked, not required), and any whole number from **5 to 112 500 products** per account is accepted.
+preset or documentation value behind it. Each entry is
+`address:products[:businessId][:codes=both|none|sku|barcode]`
+(an optional `:businessId` is checked, not required; the id and the code choice may be given in either
+order), and any whole number from **5 to 112 500 products** per account is accepted.
 The unit is products, so `1000` means 1 000 products (≈4 444 documents across the collections) and the
 console prints both figures before it writes. Change the three numbers to whatever you need,
-independently; the command below is an example, not a required set.
+independently; the command below is an example, not a required set. One account is the same command with a
+one-entry list.
 
 **Effect:** writes. Each named tenant's inventory, movements, purchase orders, products, categories,
 locations and suppliers are replaced; user rows, business rows and Firebase identities are kept.
@@ -166,7 +170,13 @@ NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
   account (`… — OWNER — N documents to reset`), an `Identity : … — verified — password unchanged` line, a
   `wrote … documents (… products)` line, and `Result : SUCCESS`. Name, members and roles are untouched.
   (The `scope : …` and `OK` lines belong to `seed --plan=accounts`, which is a different command.)
-- **No SKUs or barcodes** are generated unless you ask for `--include-sku`.
+- **SKUs and barcodes are chosen per entry, independently**: `codes=both`, `codes=sku`, `codes=barcode`
+  or `codes=none`. An entry that says nothing takes the run-wide default: none, or the mode named with
+  `--codes=both|none|sku|barcode`. `--include-sku` was removed and is **refused** — not ignored — with the
+  replacement in the message, so a saved command line cannot quietly seed neither field. A SKU is a
+  readable test value (`ACCTSKU-0`); a barcode is a valid **EAN-13** in the
+  internal prefix-2 range — unique within the tenant, with a computed check digit — so it renders,
+  prints and scans like any other code.
 - `verify:demo` ([Guide 9](9-seeding-development.md#verify--read-only-always)) is the independent
   check afterwards: it validates ledger arithmetic, references and emptiness, and prints the counts it
   read. It does not require any particular size, so it works for every size this command accepts.
@@ -339,10 +349,11 @@ missing references; stock health was 781 low / 320 out, 1 535 / 612 and 2 315 / 
 30 000 / 50 000 / 90 000 run measured 4 656 / 1 892, 7 623 / 3 030 and 13 683 / 5 481 — the PRNG seed
 doing what it promises across two environments and two sizes.
 
-The role fixture has its own check. It writes no tenant data, but it is not phrase-free: it mints four
-sessions and removes them, so it requires `SEED_CONFIRM=seed-roles`. In production it must use
-`--signin`, because a session minted on this laptop is signed with a `JWT_SECRET` the deployed server
-does not share.
+The role fixture has its own check. It writes no products, inventory or lasting users, but it is not
+phrase-free: it mints four sessions and removes them, so it requires `SEED_CONFIRM=seed-roles`; its
+user-management probes create and delete users, and those writes leave audit rows in the fixture tenant.
+In production it must use `--signin`, because a session minted on this laptop is signed with a
+`JWT_SECRET` the deployed server does not share.
 
 ```bash
 NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \

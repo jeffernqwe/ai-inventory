@@ -2593,9 +2593,7 @@ V1 product schema should include:
 barcode
 ```
 
-but scanning functionality is not required for the first release.
-
-Future V2:
+Scanning **shipped during V1**, so the pipeline this section originally deferred is the one that exists:
 
 ```text
 Camera
@@ -2606,6 +2604,15 @@ Product Lookup
  ↓
 Inventory Action
 ```
+
+The camera reads a barcode, the app resolves it through the authenticated, business-scoped lookup and
+shows the product with its per-location stock; an `ACTIVE` product offers **Stock In / Stock Out** with
+that product pre-selected, and the product screen can be opened from the result. A product whose code is
+thirteen digits prints and shares an **EAN-13** label.
+
+A code the application generates is a valid EAN-13 — thirteen digits in the GS1 "restricted distribution"
+range (prefix `2`), with a computed check digit — and is unique within its business. Uniqueness applies
+only to products that carry a code; products without one are outside that index.
 
 ---
 

@@ -405,12 +405,20 @@ describe('seeding helpers — addresses, sizes and the read-back', () => {
     const demo = read('seed-demo-account.mjs');
     const accounts = read('seed-accounts.mjs');
     const roles = read('seed-role-accounts.mjs');
+    const lib = read('seed/lib.mjs');
 
     assert.match(demo, /normaliseEmail\(argValue\('--email'\)\)/, 'demo does not normalise the address');
+    // The `--accounts` grammar lives in the shared core so the per-account code choice is
+    // testable without a database; the CLI must still go through it rather than parse in place.
+    assert.match(
+      lib,
+      /const email = normaliseEmail\(parts\[0\]\)/,
+      'the shared plan-entry parser does not normalise plan addresses',
+    );
     assert.match(
       accounts,
-      /const email = normaliseEmail\(parts\[0\]\)/,
-      'accounts does not normalise plan addresses',
+      /parseAccountsPlanEntry\(/,
+      'accounts does not use the shared plan-entry parser',
     );
 
     for (const [name, source] of [['demo', demo], ['accounts', accounts], ['roles', roles]]) {

@@ -16,9 +16,10 @@
 //                                     Its phrase is SEED_CONFIRM=seed-three-accounts.
 //   * `npm run seed:accounts --accounts="a@x.com:30000,b@y.com:50000"`  your own list.
 //                                     Its phrase is SEED_CONFIRM=seed-accounts.
-//   Each account may name its tenant: `address:products[:businessId]`. A size may be given
-//   in documents instead with a `d`: `address:400000d`. The command prints the phrase it
-//   needs, and a refusal names every phrase that is missing.
+//   Each account may name its tenant and choose its own product codes:
+//   `address:products[:businessId][:codes=both|none|sku|barcode]`. A size may be given in
+//   documents instead with a `d`: `address:400000d`. The command prints the phrase it needs,
+//   and a refusal names every phrase that is missing.
 //
 // THE CEILING IS 112 500 PRODUCTS (500 000 documents), reported rather than attempted:
 // one million products would be ≈4 400 000 documents, and the plan is built in memory
@@ -31,11 +32,15 @@
 // another. The script additionally asserts that the accounts resolved to DIFFERENT
 // businesses, because "the data was separate" is the premise every comparison rests on.
 //
-// NO SKUs AND NO BARCODES BY DEFAULT. `sku` and `barcode` are optional on the Product
-// schema and are uniquely indexed only among products that actually have them, so any
-// number of products may omit them. Leaving them out is deliberate: it leaves the app's own
-// barcode generation as the thing that FIRST assigns a code, which is what makes that
-// feature testable on this data. `--include-sku` adds generated codes instead.
+// SKUs AND BARCODES ARE CHOSEN PER ACCOUNT, AND INDEPENDENTLY. Both fields are optional on
+// the Product schema and are uniquely indexed only among products that actually have them,
+// so any number of products may carry either, both, or neither. An entry says
+// `codes=both|none|sku|barcode`; without it, the run-wide default set by `--codes=` applies —
+// NONE, deliberately, which leaves the app's own barcode generation as the thing that FIRST
+// assigns a code and makes that feature testable on this data. `--codes=both` is the run-wide
+// choice the preset needs, because it has no entry list to configure. The old `--include-sku`
+// boolean is REFUSED rather than ignored: it meant `both`, and quietly dropping it would seed
+// neither field on a command line that asked for both.
 //
 // SAFETY — all of it inherited, none of it re-implemented:
 //   * `assertSeedTarget` (./seed/guard.mjs) requires `--database=` to equal the database
@@ -75,6 +80,10 @@
 //     npm run seed:accounts -- --database=inventoryai_dev_db \
 //       --accounts="a@x.com:100000,b@y.com:40000"
 //
+//   … with the product codes chosen per account (the id and the choice may be in either
+//   order; `--codes=` sets the default for entries that state nothing):
+//     --accounts="a@x.com:1000:codes=both,b@y.com:2000:codes=none,c@z.com:3000:codes=sku"
+//
 // Production (THREE phrases, the preset refused, the tenant resolved from the address):
 //   NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
 //     SEED_CONFIRM=seed-accounts SEED_DB_CONFIRM=inventoryai_prod_db \
@@ -103,22 +112,20 @@ import { SeedSafetyError, clearTenantData, countTenantDataRemoval } from './perf
 import { assertSeedTarget } from './seed/guard.mjs';
 import {
   COMPARISON_ACCOUNTS,
-  MAX_DOCUMENTS,
-  MAX_PRODUCTS,
-  MIN_DOCUMENTS,
-  MIN_PRODUCTS,
+  assertDistinctTenants,
   assertOneBusinessAssociation,
   assertProductionTenantOwnership,
+  assertRequestedTenantKnown,
+  assertRequestedTenantMatches,
   assertTenantNamedForReset,
+  codeFields,
   countDisagreements,
   documentsForProducts,
   ensureTenantForIdentity,
-  isEmailAddress,
   makeRandom,
-  normaliseBusinessId,
-  normaliseEmail,
+  parseAccountsPlanEntry,
   parseCount,
-  productsForDocuments,
+  parseRunwideCodes,
   readBusinessAssociations,
   readIdentity,
   readTenantCounts,
@@ -181,88 +188,42 @@ function presetValue(argv = process.argv) {
 }
 
 /**
- * One plan entry: `address:size[:businessId]`.
+ * The three comparison accounts, as a plan. Sizes live in ./seed/lib.mjs with the emails.
  *
- * The size is PRODUCTS. A `d` suffix makes it DOCUMENTS instead — the currency the
- * generator works in, for a run that wants a total rather than a catalogue size. A bare
- * address is refused rather than defaulted: a size guessed here would show up later as an
- * unexplained difference between two tenants' response times, which is exactly the
- * comparison this script exists to make trustworthy.
+ * The preset has no per-entry code field of its own, so every account takes the run-wide
+ * default that `--codes=` sets — which is the only way to seed the three accounts with codes.
  */
-function parseEntry(entry) {
-  const parts = entry.split(':').map((part) => part.trim());
-  if (parts.length < 2 || parts.length > 3) {
-    fail(
-      `--accounts entry "${entry}" must be address:products (or address:products:businessId, ` +
-        'or a size in documents with a d suffix: address:400000d). Nothing was written.',
-    );
-  }
-
-  const email = normaliseEmail(parts[0]);
-  if (!isEmailAddress(email)) {
-    fail(`--accounts entry "${entry}" has no usable address. Nothing was written.`);
-  }
-
-  const size = parts[1];
-  const rawBusinessId = parts[2];
-  const businessId = normaliseBusinessId(rawBusinessId);
-  const inDocuments = /^\d+d$/i.test(size);
-  const digits = (inDocuments ? size.slice(0, -1) : size).replace(/p$/i, '');
-
-  let products;
-  let total;
-  if (inDocuments) {
-    total = parseCount(digits, {
-      name: `--accounts document size for ${email}`,
-      min: MIN_DOCUMENTS,
-      max: MAX_DOCUMENTS,
-    });
-    products = productsForDocuments(total);
-  } else {
-    // The ceiling is reported HERE, before the range parser, because the number is what
-    // makes the limit understandable: "between 5 and 112500" says what, not why.
-    const asked = /^\d+$/.test(digits) ? Number.parseInt(digits, 10) : NaN;
-    if (Number.isSafeInteger(asked) && asked > MAX_PRODUCTS) {
-      fail(
-        `${email} asks for ${asked.toLocaleString()} products. The ceiling is ` +
-          `${MAX_PRODUCTS.toLocaleString()} products (${MAX_DOCUMENTS.toLocaleString()} documents): ` +
-          'one million products would be ≈4 400 000 documents, and the whole dataset is built in ' +
-          'memory before it is inserted, so that run is refused rather than attempted. Nothing was written.',
-      );
-    }
-    products = parseCount(digits, {
-      name: `--accounts product size for ${email}`,
-      min: MIN_PRODUCTS,
-      max: MAX_PRODUCTS,
-    });
-    total = documentsForProducts(products);
-  }
-
-  if (rawBusinessId !== undefined && !businessId) {
-    fail(
-      `--accounts entry "${entry}" has a businessId that is not 24 hexadecimal characters. ` +
-        'Nothing was written.',
-    );
-  }
-
-  return { email, products, total, tier: 'custom', businessId: businessId || undefined };
-}
-
-/** The three comparison accounts, as a plan. Sizes live in ./seed/lib.mjs with the emails. */
-function presetPlan() {
+function presetPlan(defaultCodes) {
   return COMPARISON_ACCOUNTS.map((account) => ({
     ...account,
     total: documentsForProducts(account.products),
+    codes: defaultCodes,
+    ...codeFields(defaultCodes),
   }));
 }
 
-function parsePlan(raw) {
-  if (!raw) return presetPlan();
+/** The plan entry's code choice, as the words the console prints. */
+function codeLabel({ includeSku, includeBarcode }) {
+  if (includeSku && includeBarcode) return 'both';
+  if (includeSku) return 'sku only';
+  if (includeBarcode) return 'barcode only';
+  return 'none';
+}
+
+/**
+ * The plan: the preset, or the comma-separated list the command names.
+ *
+ * The entry grammar (`address:products[:businessId][:codes=both|none|sku|barcode]`) lives in
+ * ./seed/lib.mjs so its refusals are testable without a database; only the run-wide default
+ * is decided here.
+ */
+function parsePlan(raw, defaultCodes) {
+  if (!raw) return presetPlan(defaultCodes);
   return raw
     .split(',')
     .map((entry) => entry.trim())
     .filter(Boolean)
-    .map(parseEntry);
+    .map((entry) => parseAccountsPlanEntry(entry, { defaultCodes }));
 }
 
 /**
@@ -331,7 +292,9 @@ async function previewProductionTargets(plan, database) {
 
 async function main() {
   const dryRun = process.argv.includes('--dry-run');
-  const includeSku = process.argv.includes('--include-sku');
+  // Throws — and `fail()` prints it — on the removed `--include-sku` and on any `--codes=` value
+  // that is not one of the four modes. This runs before the target guard, so nothing connects.
+  const defaultCodes = parseRunwideCodes(process.argv);
   const preset = presetValue();
   const requested = argValue('--accounts');
 
@@ -340,7 +303,7 @@ async function main() {
   }
   if (!preset && !requested) {
     fail(
-      '--accounts="address:products[:businessId],…" is required — for the three fixed accounts use ' +
+      '--accounts="address:products[:businessId][:codes=…],…" is required — for the three fixed accounts use ' +
         `${PRESET_ALIAS} (the same script with --preset=${PRESET}). Nothing was written.`,
     );
   }
@@ -366,7 +329,7 @@ async function main() {
     );
   }
 
-  const plan = parsePlan(requested);
+  const plan = parsePlan(requested, defaultCodes);
   const seed = parseCount(argValue('--seed'), { name: '--seed', min: 0, fallback: 1 });
 
   if (!plan.length) {
@@ -390,7 +353,10 @@ async function main() {
   console.log(`Accounts : ${plan.length}`);
   console.log(`Products : ${products.toLocaleString()}`);
   console.log(`Documents: ${documents.toLocaleString()} (estimated)`);
-  if (includeSku) console.log('SKU/barcode: generated (--include-sku)');
+  console.log(
+    `SKU/barcode: ${codeLabel(codeFields(defaultCodes))} by default` +
+      ' — --codes=both|none|sku|barcode, and an entry may say codes=… for itself',
+  );
   if (products >= LARGE_RUN_PRODUCTS) {
     console.log(`Est. time: about ${Math.max(1, Math.round(seconds / 60))} minutes`);
   }
@@ -404,7 +370,8 @@ async function main() {
     for (const entry of plan) {
       console.log(
         `\n${entry.email} — ${entry.products.toLocaleString()} products — ` +
-          `${entry.total.toLocaleString()} documents`,
+          `${entry.total.toLocaleString()} documents (estimated) — ` +
+          `SKU/barcode: ${codeLabel(entry)}`,
       );
     }
   }
@@ -490,22 +457,31 @@ async function main() {
         }),
       );
       tenant = existing;
+    } else if (existing) {
+      // A SUPPLIED ID IS A CLAIM, CHECKED IN DEVELOPMENT TOO (§27GQ). It used to be read only on
+      // the production path and silently ignored here, so `alice@x.com:1000:<bob's id>` replaced
+      // alice's own tenant while the operator believed they had named bob's.
+      assertRequestedTenantMatches({
+        email: entry.email,
+        requestedBusinessId: entry.businessId,
+        businessId: existing.businessId,
+        command: `${COMMAND} (${entry.email})`,
+      });
+      tenant = existing;
     } else {
-      // Development keeps its one convenience: a new address may create its own tenant.
-      tenant = existing ?? await ensureTenantForIdentity({
+      // Development keeps its one convenience: a NEW address may create its own tenant — but only
+      // when it names none. An id naming no tenant is refused rather than quietly replaced by a
+      // generated one, which is what used to happen (§27GQ).
+      assertRequestedTenantKnown({
+        email: entry.email,
+        requestedBusinessId: entry.businessId,
+        command: `${COMMAND} (${entry.email})`,
+      });
+      tenant = await ensureTenantForIdentity({
         email: entry.email,
         identity: entry.identity,
         businessName: `AI TEST ${entry.tier.toUpperCase()} — ${entry.products.toLocaleString()} seeded products`,
       });
-    }
-
-    // The premise of the whole exercise. If two accounts resolved to one business
-    // their data WOULD mix, and every comparison drawn from them would be void.
-    if (prepared.some((p) => String(p.tenant.businessId) === String(tenant.businessId))) {
-      throw new SeedSafetyError(
-        `"${entry.email}" resolved to business ${String(tenant.businessId)}, which another account in ` +
-          'this plan already owns — the datasets would not be separate. Stopping.',
-      );
     }
 
     // Naming the tenant is required exactly when there is something to replace. A
@@ -524,13 +500,23 @@ async function main() {
     prepared.push({ entry, tenant });
   }
 
+  // The premise of the whole exercise: every account must own its OWN tenant. Checked on the
+  // RESOLVED ids (a typed id can differ and still land on one tenant), after every tenant is
+  // known and before any tenant is reset.
+  assertDistinctTenants(
+    prepared.map(({ entry, tenant }) => ({ email: entry.email, businessId: tenant.businessId })),
+    { command: COMMAND, consequence: 'Nothing was written.' },
+  );
+
   // ---- phase 3: reset and write, one tenant at a time. Every check above passed, so a
   // ---- failure from here is a database failure rather than a plan that cannot work.
   const results = [];
   for (const { entry, tenant } of prepared) {
+    // An ESTIMATE, labelled as one: at the minimum sizes the fixed per-collection minimums write
+    // more than the plan's document figure (5 products plan 22 and write 34, measured 2026-10-29).
     console.log(
       `\n${entry.email} — ${tenant.businessName} — ${tenant.reused ? 'existing' : 'created'} tenant — ` +
-        `writing ${entry.total.toLocaleString()} documents`,
+        `writing an estimated ${entry.total.toLocaleString()} documents`,
     );
 
     const cleared = await clearTenantData([tenant.businessId]);
@@ -544,7 +530,8 @@ async function main() {
       userId: tenant.userId,
       total: entry.total,
       rand: makeRandom(seed),
-      includeSkuBarcode: includeSku,
+      includeSku: entry.includeSku,
+      includeBarcode: entry.includeBarcode,
       label: 'ACCT',
     });
 

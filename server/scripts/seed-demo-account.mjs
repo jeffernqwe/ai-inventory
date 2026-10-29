@@ -82,6 +82,8 @@ import { assertSeedTarget } from './seed/guard.mjs';
 import {
   assertOneBusinessAssociation,
   assertProductionTenantOwnership,
+  assertRequestedTenantKnown,
+  assertRequestedTenantMatches,
   assertTenantNamedForReset,
   countDisagreements,
   ensureTenantForIdentity,
@@ -316,9 +318,9 @@ async function main() {
   // create. A member must not reach the clear, and a supplied id that names no tenant
   // must not silently become a second business. The shared rule checks OWNER, the
   // account's ACTIVE status and the business's ACTIVE status.
-  const existing = production
-    ? await resolveExistingTenantForIdentity({ email, identity })
-    : null;
+  // Resolved in BOTH environments, and before any create: the read is what makes a supplied
+  // `--business` checkable, and development must check it too (§27GQ).
+  const existing = await resolveExistingTenantForIdentity({ email, identity });
   if (production && existing) {
     assertOneBusinessAssociation({
       email,
@@ -339,11 +341,33 @@ async function main() {
     );
   }
 
+  // The same claim-checks the accounts seeder applies, BEFORE a tenant can be created. A supplied
+  // `--business` was parsed and then ignored outside production, so a mistyped id replaced the
+  // caller's own tenant instead of being refused; an id naming NO tenant was replaced by a
+  // generated one. Both are refusals now (§27GQ).
+  if (!production && existing) {
+    assertRequestedTenantMatches({
+      email,
+      requestedBusinessId: requestedBusiness,
+      businessId: existing.businessId,
+      command: COMMAND,
+    });
+  }
+  if (!production && !existing) {
+    assertRequestedTenantKnown({
+      email,
+      requestedBusinessId: requestedBusiness,
+      command: COMMAND,
+      namingHint: '--business',
+    });
+  }
+
   const tenant = existing ?? await ensureTenantForIdentity({
     email,
     identity,
     businessName: DEMO_BUSINESS_NAME,
   });
+
   console.log(
     `[${COMMAND}] tenant   : ${tenant.reused ? 'reusing' : 'CREATED'} ${String(tenant.businessId)} ("${tenant.businessName}")`,
   );
@@ -388,7 +412,8 @@ async function main() {
     userId: tenant.userId,
     total,
     rand: makeRandom(seed),
-    includeSkuBarcode: true,
+    includeSku: true,
+    includeBarcode: true,
     label: 'DEMO',
   });
 

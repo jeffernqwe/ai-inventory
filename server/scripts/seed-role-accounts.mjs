@@ -185,7 +185,8 @@ async function main() {
     userId: tenant.users.OWNER.id,
     total,
     rand: makeRandom(seed),
-    includeSkuBarcode: true,
+    includeSku: true,
+    includeBarcode: true,
     label: 'ROLE',
   });
   const elapsedMs = Date.now() - started;

@@ -369,7 +369,8 @@ async function main() {
     userId: (await User.findOne({ email: SEED_OWNER_EMAIL }).select('_id').lean())._id,
     total: size,
     rand: makeRandom(seed),
-    includeSkuBarcode: true,
+    includeSku: true,
+    includeBarcode: true,
     label: 'SEED',
   });
 

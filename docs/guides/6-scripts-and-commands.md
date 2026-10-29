@@ -152,6 +152,11 @@ copy of each rule:
 | Empty one tenant | [11](11-deleting-development.md) | `npm run cleanup:demo\|cleanup:roles\|…` |
 | Delete a Firebase login | [13](13-firebase-identities.md) | `npm run cleanup -- --target=firebase --database=… --email=…` |
 
+**The products' codes are a choice.** Each `--accounts` entry takes `codes=both|none|sku|barcode`, the
+per-account field `--codes=` sets the run-wide default, and the default is `none` — the app's own barcode
+generation then assigns the first code. A seeded barcode is a valid EAN-13, unique per tenant; full detail
+and complete commands are in [Guide 9](9-seeding-development.md).
+
 Two facts worth carrying between the guides, because every one of them depends on them:
 
 - **The database is named, twice.** `--database=` must equal what `MONGODB_DB_NAME` resolves, or the run
@@ -173,8 +178,8 @@ question: does the assistant stay correct and fast as a catalogue grows?
    prints the exact production seeding line ([Guide 9](9-seeding-development.md)).
 4. **Seed them** with `npm run seed:three` ([Guide 9](9-seeding-development.md)). Dry-run first; production
    refuses the preset, and resolves each named address to its own tenant — which that account must own.
-5. **Generate a barcode** on one seeded product: both seeders leave SKUs and barcodes blank on purpose,
-   so the app's own generation is what assigns them.
+5. **Generate a barcode** on one seeded product: the seeders leave SKUs and barcodes blank unless asked
+   (`--codes=both` seeds them), so by default the app's own generation is what assigns the first code.
 6. **Compare** the sizes:
 
 ```bash
@@ -347,7 +352,8 @@ command reports that and exits 1. The habit worth forming: restore into the test
 ### Files that are not commands
 
 `server/scripts/perf/lib.mjs` (the perf tenant definition, the safety guard and teardown helpers),
-`server/scripts/seed/lib.mjs` (the dataset shape shared by `seed:demo` and `seed:accounts`),
+`server/scripts/seed/lib.mjs` (the dataset shape shared by every full-tenant seeder — demo, accounts,
+roles, perf-tenant),
 `server/scripts/seed/guard.mjs` and `server/scripts/cleanup/guard.mjs` (the one target rule each),
 `server/scripts/cleanup/lib.mjs` + `run.mjs` (the guarded delete sequence). Opening them does nothing, by
 design. Also automatic: `npm install` in `mobile/` applies a `postinstall` patch.

@@ -8,7 +8,7 @@ of truth for *what actually happened*, and it is why this file is long.
 
 **How to read it.** Do not read it top to bottom. Either find a record by number (§27FJ, §27DM — the
 numbers are cited from `CLAUDE.md` and from source comments), or use the index: `CLAUDE.md` §7 lists
-all **192** records by the title each gives itself.
+all **198** records by the title each gives itself.
 
 **Current state:** V1 complete and in production testing. The records that answer *where are we now*
 are §27FM (the V1 re-verification), §27FK (the runtime boundary and the blocked build), §27FJ (the two
@@ -22852,6 +22852,358 @@ for the same reason as §27GK — they rotate fixture credentials this shell doe
 
 **Verified.** `npm run test:unit`: **1574 tests, 1518 pass, 0 fail, 56 skipped**, exit 0 (the new source
 test included); `npm run lint` 0.
+
+---
+
+# 27GM. Each account chooses whether its products carry a SKU and barcode (2026-10-29)
+
+**What was asked for.** `seed:accounts` could seed products with generated codes or without them, but
+the choice was one `--include-sku` flag applied to the whole run: three accounts in a single command
+could not mix them. The request was for each `--accounts` entry to choose for itself, with the existing
+default and every safety rule unchanged.
+
+**What changed.** The entry grammar gained one optional field:
+`address:products[:businessId][:codes=both|none|sku|barcode]`. The two product fields are written
+INDEPENDENTLY — `both` writes the generated `sku` and `barcode`, `sku` and `barcode` write that one,
+and `none` omits both, which is what leaves the app's own barcode generation the first code to assign.
+The id and the choice are recognised by their own shapes — 24 hex, or a `codes=` prefix — and accepted
+in either order, so naming a tenant never forces a position for the new field. An entry that states
+nothing takes the run-wide default: `none` as before, or `both` when `--include-sku` is passed, so every
+command line written before this record behaves exactly as it did.
+
+The parser moved from `seed-accounts.mjs` into `parseAccountsPlanEntry` in `seed/lib.mjs`, where it is
+pure and throws `SeedSafetyError` instead of exiting. That is what makes the resolutions and refusals
+assertable without a database: the default, all four modes, the override of the run default, four
+accounts configured independently in one plan, both field orders, the unchanged product/document units,
+an unknown mode, a repeated `codes=`, and a field that is neither an id nor a mode. `seedTenant` now
+takes `includeSku` and `includeBarcode` as separate booleans (the demo, role and performance seeders
+pass both), the CLI passes the entry's pair straight through, and its plan output states the choice per
+account.
+
+**What did not change.** `assertSeedTarget`, the two/three confirmation phrases, the pinned Firebase
+project, production's tenant resolution and OWNER rule, the `:businessId` comparison, the reset scope
+and the read-back verification are untouched — the choice is a property of the dataset, not of the
+target. The `seed:three` preset keeps the run-wide default, because it has no entry list to configure.
+
+**Limits, stated rather than discovered later.** At the time of this record a seeded barcode was still
+an opaque string (`ACCTBC0`), not EAN-13, so it was stored and searchable but not printable or
+scannable — §27GN closes that. The `--include-sku` flag keeps its historical meaning (both fields) and
+has no `--include-barcode` partner; a run that wants a different default sets it per entry.
+`seed --plan=demo`, `seed --plan=roles` and `seed:perf-tenant` still always write both; changing them
+was not asked for, and the performance tenant's own verifier requires the `SEEDSKU-0` row its
+measurement asks about.
+
+**Verified.** `npm run test:unit`: **1608 tests, 1552 pass, 0 fail, 56 skipped**, exit 0 (nine new
+assertions); `npm run lint` 0; `npm run typecheck` 0.
+
+---
+
+# 27GN. Seeded barcodes are valid, unique EAN-13 — printable and scannable (2026-10-29)
+
+**What was asked for.** With `codes=both` and `codes=barcode` available (§27GM), a seeded barcode was
+still an opaque string (`ACCTBC0`): stored and searchable, but neither renderable by the product screen
+nor decodable by the scanner. The request was for valid EAN-13 — thirteen digits with a real check
+digit, unique per tenant, compatible with the app's scanning.
+
+**What changed.** `allocateEan13Barcodes` in `seed/lib.mjs` reuses the generator the API already owns,
+`internalEan13Candidates` in `src/utils/internalBarcode.ts`: deterministic from the product's
+ObjectId, GS1 "restricted distribution" prefix 2, standard mod-10 check digit — the same values
+`POST /api/products/:id/generate-barcode` issues. `seedTenant` now pre-generates each product's `_id`
+and allocates the whole batch before the insert, so no two products in a tenant can share a code even
+when their 64-candidate windows overlap. A product whose candidates are all taken is a
+`SeedSafetyError` rather than a duplicate; the partial `(businessId, barcode)` unique index remains
+the final authority. `taken` is empty in every seeder because each caller clears the tenant first.
+
+**Why a check digit, and not just thirteen digits.** The mobile predicate `isEan13` is `/^\d{13}$/`
+— it decides whether the label card renders at all, and it does not verify the check digit. Padding a
+number to thirteen digits would therefore produce a label that renders and does not decode. The code
+is built with `ean13Value(payload12)`, and the tests assert the check digit digit by digit.
+
+**Scope.** Every seeder that writes through `seedTenant` with barcodes — `seed:accounts` and the
+`seed:three` preset, `seed --plan=demo`, `seed --plan=roles`, `seed:perf-tenant` — now writes EAN-13.
+SKUs are unchanged (`ACCTSKU-0`). `seed:perf` still writes its separate `SEEDBC` fixture and
+`seed:demo-tenant` has no barcodes; neither was in scope.
+
+**Uniqueness.** Within a tenant, by the batch Set and the index; across tenants a repeated value is
+legal and expected, because the index is `(businessId, barcode)`. A 5 000-product batch is asserted
+unique and check-digit-valid, and a one-off allocation at the 112 500-product ceiling produced
+**112 500 distinct codes in 214 ms**. Omitting both fields remains legal for any number of products.
+
+**Not exercised, with the reason.** The write itself was not run against a database: unit mode skips
+the 56 DB-backed suites, and no suite calls the shared `seedTenant`. The allocator, the batch rule and
+the seeder's wiring are covered; the document that MongoDB would store is not.
+
+**Verified.** `npm run test:unit`: **1614 tests, 1558 pass, 0 fail, 56 skipped**, exit 0 (six new
+assertions); `npm run lint` 0; `npm run typecheck` 0.
+
+---
+
+# 27GO. `--include-sku` is replaced by `--codes=`, and refused rather than ignored (2026-10-29)
+
+**What was asked for.** With the per-account `codes=` field (§27GM) and real EAN-13 values (§27GN), the
+old `--include-sku` boolean looked redundant: one switch for the whole run, and only one thing it could
+say. The request was to remove it — after a review, and only if that were safe.
+
+**What the review found, and why it could not simply be deleted.** Since §27GM the flag had exactly one
+job: it set the run-wide default that every `--accounts` entry without a `codes=` field inherits. That
+includes the `seed:three` preset, which takes no entry list at all — so `--include-sku` was the only way
+to seed the three comparison accounts WITH codes. Deleting it would have quietly removed a capability,
+not a duplicate. Nothing in CI, no npm script and no workflow passed it, but three guides described it,
+§27GB's record named it, and one test asserted the raw `process.argv.includes('--include-sku')` scan.
+
+**What changed.** `--codes=both|none|sku|barcode` is now the run-wide default, parsed by
+`parseRunwideCodes` in `seed/lib.mjs` — pure, like the entry parser, so every refusal is assertable
+without a process. It is a strict superset of the boolean: `both` is what the flag meant, and `sku` /
+`barcode` are choices the flag could never express, now available to the preset too. `--include-sku` is
+REFUSED, with a message naming `--codes=both`, rather than ignored: ignoring it would seed neither field
+on a command line that asked for both, and the plan would print `none` as if that had been chosen. That
+is the rule the removed cleanup selectors already follow. `codeFields(mode)` turns a mode into the two
+booleans `seedTenant` takes, so the translation exists once instead of three times (the entry parser,
+the preset, the CLI), and the plan line prints the default it will use.
+
+**What did not change.** `seedTenant`'s own `includeSku` / `includeBarcode` parameters — six seeders call
+them — the per-entry `codes=` field and its precedence over the default, the default itself (`none`), the
+two/three confirmation phrases, `assertSeedTarget`, the pinned Firebase project, production's tenant
+resolution and OWNER rule, the reset scope and the read-back. The guides say what a saved command line
+must now type instead of the flag.
+
+**History, not rewritten.** §27GB's command list and §27GM's account of the flag describe the surface as
+it stood on their dates; both are left as written, and this record is the current one.
+
+**Verified.** Focused suite **61/61** (four new assertions: the default and all four modes, a cased
+value, the `--include-sku` refusal with and without a `--codes=` value, and the three malformed forms);
+`npm run test:unit`: **1618 tests, 1562 pass, 0 fail, 56 skipped**, exit 0; `npm run lint` 0;
+`npm run typecheck` 0. Both behaviours were also run as commands: `--include-sku` exits 1 with the
+replacement named, a `--codes=both` list seeds `both` by default and lets an entry override it to
+`sku only`, and `seed:three --codes=barcode` — a choice the boolean could never express — printed
+all three accounts as `barcode only` with no connection opened.
+
+---
+
+# 27GP. The seeding documentation measured against the scripts — six stale statements (2026-10-29)
+
+**What was asked for.** A documentation review of the recently changed seeding surface: the per-account
+`codes=` field, the `--codes=` default, the removed `--include-sku`, and EAN-13 barcodes — checked against
+the scripts and tests rather than against the documents themselves.
+
+**What was measured.** Every `npm run` in the five data guides still resolves to a real script
+(`data-guide-commands`, 5/5 green). The phrase tables match the guards: two in development, three in
+production, `seed:demo-tenant`'s single phrase, `cleanup:three`'s own, `seed:perf-ai` for the perf pair.
+The sizes match the parsers: `seed:accounts` 5–112 500 products (500 000 documents), `seed --plan=demo`
+100–400 000 documents (default 80 000), `seed:perf-tenant` 50–400 000 documents (default 4 000), and the
+preset's 30 000 / 50 000 / 90 000. The EAN-13 claims match `internalEan13Candidates` (prefix 2, mod-10
+check digit) and `mobile/lib/ean13.ts` (`isEan13` is thirteen digits; the label needs that, the scanner
+verifies the check digit). `seed:perf --size` was read in `seed-perf-data.mjs`, where the loop creates one
+product per unit.
+
+**Six statements were wrong or absent, and are fixed.**
+
+1. **Guide 4 said `seed:perf --size` was documents.** The script loops `for (i < size)` creating products,
+   so the unit is PRODUCTS (1–200 000) — and Guide 9 already said so. The two fixtures are now separate
+   rows, one per unit. This predates the codes work and is the one defect here that no recent change
+   introduced.
+2. **Guide 6 said the comparison seeders "leave SKUs and barcodes blank on purpose".** True as a default,
+   false as a rule: `--codes=both` seeds them. The step now says which is which.
+3. **No guide contained a runnable `--codes=` command.** The option was described in prose only. Guide 9
+   now carries a complete PREVIEW/EXECUTE pair with a different choice per account.
+4. **The dictionary had no `barcode` or `SKU` entry**, although Guide 4's glossary line points readers
+   there. Both are added, with the EAN-13 range and the independence of the two fields.
+5. **Guide 9/10 did not state the single-account form.** One entry is the same command; both guides say so.
+6. **`SYSTEM_SPECIFICATION.md` §39 still called scanning "not required for the first release" and put the
+   camera → scanner → lookup → inventory-action pipeline in future V2.** It shipped in V1 (Phases 12A–12D):
+   the scanner resolves the code through the business-scoped lookup, shows the product's per-location
+   stock, offers Stock In / Stock Out pre-selected, and a thirteen-digit code prints and shares an EAN-13
+   label. The section now says that, states the generated code's format and per-business uniqueness, and
+   keeps only what is genuinely future.
+
+**What was deliberately not changed.** `docs/freebuff/HANDOFF.md` still carries its 2026-10-12 staleness
+banner and frozen status table; it is declared historical and is not reworded. The roadmap's own §27GB /
+§27GM / §27GO records keep the wording of their dates. Guides 11–13 were read and needed nothing: their
+commands, phrases and dry-run counts match the cleanup guards and the `check:accounts` contract.
+
+**Verified.** `npm run test:unit`: **1618 tests, 1562 pass, 0 fail, 56 skipped**, exit 0 — the five guide
+commands and both docs guards among them; docs guards re-run after this record. `npm run lint` 0;
+`npm run typecheck` 0.
+
+---
+
+# 27GQ. A typed tenant id is a claim, and it is checked in every environment (2026-10-29)
+
+**What was asked for.** A continued improvement pass over the seeding and cleanup surface: review the
+scripts, commands, validation, code generation, verification and cleanup for defects, and fix what is
+verifiable without touching production data.
+
+**Three defects, all one shape: a tenant id that was typed and then not read.**
+
+1. **`seed:accounts` checked the third `--accounts` field only in production.** In development the
+   entry's `businessId` was parsed and then dropped (`tenant = existing ?? ensureTenantForIdentity(…)`),
+   so `alice@x.com:1000:<bob's businessId>` REPLACED ALICE'S OWN TENANT while the console printed alice's
+   id. The operator believed they had named bob's tenant; the run reset a different one. The seeder now
+   applies `assertRequestedTenantMatches` on the development path too, before the tenant is reset.
+2. **`seed --plan=demo` did the same with `--business`.** The flag was compared with the resolved tenant
+   only inside the production branch, so a mistyped id in development replaced the caller's own tenant
+   and said nothing. The same rule now runs there, on the tenant the address already owns.
+3. **An id that named NO tenant was silently replaced by a generated one.** `ensureTenantForIdentity`
+   never accepted a chosen id, so a development run given `--business=<id>` for an address with no
+   tenant created a DIFFERENT tenant and printed its id — after the operator had named one. Both seeders
+   now refuse through `assertRequestedTenantKnown`, before any business row is written, and say that a
+   run creates a tenant only when no id is named.
+
+**And one cleanup defect the same review found.** `cleanup:account` is a list of ACCOUNTS, but every
+count and every delete is scoped to a TENANT. Two members of one business — exactly the shape the role
+fixture (`seed:roles`) creates — were accepted, and the tenant's documents were counted and reported
+twice. `seed:accounts` already refused that plan, with an inline check and its own wording. Both now
+call one shared rule, `findDuplicateTenant` / `assertDistinctTenants` in `server/scripts/seed/lib.mjs`,
+and it runs on the RESOLVED ids: two different typed ids can still land on one tenant, which is the case
+a typed-id check cannot see.
+
+**The pre-flight had to learn the same answer.** `check:accounts` is what an operator runs before
+seeding, and for that plan it printed two `READY` lines — one per address, both naming the same tenant —
+while the seeder would refuse it. `markSharedTenants` (pure, beside the rules above) now labels each
+READY row of a shared tenant `SHARED TENANT`, naming the other address, so the check's `ready/total`
+count and its exit code (1) agree with the run it is predicting. A row already refused by another rule
+is left as it is.
+
+**The development preview is honest about what it cannot check.** A dry run opens no connection, so no
+address can be resolved and neither claim-check can run there. The preview therefore does not pretend
+to have validated an id; the real run does, before the first write, and the messages above are the ones
+it prints.
+
+**What did not change.** Every confirmation phrase, the target guard (`--database=` must equal
+`MONGODB_DB_NAME`), the production OWNER/ACTIVE checks, the one-tenant-per-plan premise, and the
+`codes=` / `--codes=` surface. Production already refused all three id cases; the production paths and
+their messages are untouched. No database was seeded, deleted or otherwise modified while verifying
+this record.
+
+**Verified.** `npm run test:unit`: **1625 tests, 1569 pass, 0 fail, 56 skipped**, exit 0; `npm run lint`
+0; `npm run typecheck` 0. The new cases are in `server/test/accounts-workflow.test.mjs`: the two claim
+rules (omitted id, matching id, mismatched id, unknown tenant), the duplicate-tenant rule (a shared
+tenant, a plan with no tenant, two differing tenants), the pre-flight's shared-tenant verdict and its
+effect on the `ready/total` count, and source assertions that both seeders, the cleanup and the check call
+the shared guards rather than a private copy. No database was seeded, deleted or otherwise modified.
+
+---
+
+# 27GR. The seeding commands run against a database — four code modes, 1 000 products, and a corrupted tenant caught (2026-10-29)
+
+**What was asked for.** Run the supported commands rather than review them: seeding, SKU/barcode generation,
+verification, cleanup, production refusals, input validation. Environment: `inventoryai_dev_db` on Atlas,
+`NODE_ENV=development`, Firebase Admin configured. No production command was executed; every production
+case below was a refusal that stopped before a connection, and no production row was read or written.
+
+**Seeding, measured.** `seed:accounts` wrote 5 products (`codes=both`): 34 documents, the seeder's own
+read-back SUCCESS; read from MongoDB, all 5 carried distinct `ACCTSKU-n` SKUs and 5 distinct EAN-13 values
+in the prefix-2 range with a valid check digit (e.g. `2451327152404`). `verify:demo` on that tenant read
+6 ledger rows with 0 bad and 0 missing references. Re-seeding the same tenant gave `none` → 0/0,
+`sku` → 5/0, `barcode` → 0/5, and `--codes=sku` with no entry field → 5/0. A 1 000-product `codes=both`
+run wrote exactly the planned 4 444 documents, with 1 000 distinct SKUs, 1 000 distinct valid EAN-13s,
+1 829 ledger rows and 0 violations. A `:100d` entry wrote 23 products and exactly 100 documents, and
+`seed --plan=demo --total=100` wrote exactly 100 too (23 products, 26 ledger rows, read-back equal;
+`verify:demo` SUCCESS). Two accounts in one command, with `both`+`none` and then `sku`+`barcode`, each
+matched its own choice.
+
+**The other fixtures.** `seed:demo-tenant` created its identity and passed **15/15** fixture checks;
+`verify:demo` read 27 documents and exited 0; `cleanup:demo-tenant` removed its user and business row
+(2), reported 0 leftovers and left the Firebase identity in place, as designed. `seed:perf --size=20`
+wrote 111 documents; `cleanup:perf` removed 111 with 0 remaining, and a second cleanup reported
+`nothing to clean` and exited 0.
+
+**Verification can fail, and says why.** On a fresh 5-product tenant, one `STOCK_OUT` row was inserted
+with wrong arithmetic (`1 - 5 = 10`) and one inventory row with a non-existent product. `verify:demo`
+reported `Ledger: 1 bad`, `Integrity: 2 missing references`, exited **1**, and named both violations.
+An empty tenant exited **1** (`the tenant is empty`); a missing account, an invalid address and a
+mismatched `--database` each exited **2** with `NOT VERIFIED`.
+
+**Cleanup, measured.** `cleanup:account` previewed and then removed 68 documents across two accounts,
+reporting `0 remaining` for each; later runs removed 4 444, 100 and 36. It kept every login, business
+row and identity. `cleanup:three` refused in production by name; a duplicate address was refused before
+any delete; an unknown address reported `nothing to delete` and exited 0, which is the documented
+answer rather than a failure.
+
+**Refusals, all before a write and all exit 1.** Missing and wrong phrases, a `--database` that differs
+from the resolved name, the test database, a missing `--database`, an invalid address, sizes 4 and
+112 501, an unknown entry field, `codes=maybe`, a repeated `codes=`, the removed `--include-sku`, a
+production target without `SEED_PROD_CONFIRM`, a supplied tenant id naming no tenant and one naming
+another tenant (development included — §27GQ), the same account twice, `seed:three --accounts`, and
+`seed:perf` without its phrase or with sizes 0, 200 001 and `900abc`.
+
+**One output corrected, one document corrected.** The plan's per-entry document figure was stated as a
+fact; at the smallest size it planned 22 and wrote 34, because the generator also writes fixed
+per-collection minimums. The per-entry and write lines now say *estimated*, and Guide 9 explains the
+floor (ordinary sizes match exactly: 1 000 → 4 444). Guide 11's refusal table told operators to set
+`CLEANUP_CONFIRM=<the command>`; the real phrases are `cleanup-account-data` and
+`cleanup-three-accounts`, and the table now points at the exact values instead.
+
+**Known and left alone.** `seed:perf` still writes `SEEDBC…` marker barcodes rather than EAN-13 — the
+scope decision §27GN recorded; its tenant is measurement-only and has no login. Not tested: production
+seeding or deletion (out of scope), `seed:three` at its real sizes (it would create the two missing
+30 000/90 000 tenants), `verify:roles`, and the 56 DB-backed suites unit mode skips.
+
+**State left behind.** Every development tenant is empty (0 non-empty businesses); the demo and perf
+fixtures were removed; the account used for the write tests is still READY with 0 documents. The demo
+Firebase identity now exists and is intentionally left, because every teardown in this project removes
+Mongo rows first and never deletes an identity (§27BB).
+
+**Verified.** `npm run test:unit`: **1625 tests, 1569 pass, 0 fail, 56 skipped**, exit 0; `npm run lint`
+0; `npm run typecheck` 0. The commands above are the evidence; no test was weakened and no guard was
+bypassed.
+
+**Second pass — the remaining command families (2026-10-29).** The first pass left `seed:roles`,
+`verify:roles`, `cleanup:roles` and duplicate-barcode rejection untested. Both were run against
+`inventoryai_dev_db`; no production command was run, and port 4000 was checked and released.
+
+**The role fixture, measured.** `seed:roles --total=200` created one tenant with exactly four accounts
+(OWNER, ADMIN, MANAGER, STAFF), wrote 200 documents and read them back equal: 45 products, 63 inventory
+rows, 76 ledger rows, 5 purchase orders, 4 categories, 2 locations, 5 suppliers. All 45 products carried a
+`ROLESKU-n` SKU and 45 distinct EAN-13 values (0 invalid, 0 duplicates). `verify:roles` (minted sessions,
+server on `localhost:4000`) matched **96 of 96** cells — 18 gated routes × 4 roles plus 3 ungated routes ×
+4 roles — and **12 of 12** user-management probes, then removed its four sessions. A seeded EAN-13 was
+resolved through the real scan endpoint (`GET /api/products/barcode`) as STAFF: HTTP 200 and the same
+product id; an unknown 13-digit code and a malformed one each returned 404.
+
+**The role teardown.** `--dry-run` counted 215 documents (200 data + 10 audit + 4 users + 1 business) and
+deleted nothing; the real run removed 215, proved 0 leftovers, and `--delete-firebase` deleted the four
+identities only after re-querying that no user still referenced them. A second run reported
+`nothing to clean` and exited 0. Missing phrases, a `--database` that differed from the resolved name,
+`--total=99`, a malformed `--business`, and a real seed with `ROLE_TEST_PASSWORD=` (explicitly empty, so
+dotenv could not supply the `.env` value) each exited 1 with `Nothing was written/checked/deleted`. The
+four identities did not exist before this pass and do not exist after it.
+
+**Duplicate barcodes, proved live rather than assumed.** `npm run audit:indexes` reported 71 declared
+indexes across 17 collections with **0** declaration/database disagreements, so the partial unique
+`(businessId, barcode)` index is BUILT, not merely declared. Inserting a cloned product with the same
+barcode and no SKU was refused with `E11000` on `businessId,barcode`; the same barcode under a different
+`businessId` was accepted (the index is per tenant) and removed again. A duplicate SKU was refused on
+`businessId,sku`. The product count was 45 before and after, with 0 stray probe rows. The allocator's two
+remaining refusals — all 64 candidates taken, and one id twice in a batch — were confirmed by hand and are
+now covered by two new assertions in `accounts-workflow.test.mjs`.
+
+**Two statements corrected, no behaviour changed.** The JSDoc for `assertOneBusinessAssociation` had been
+left above `assertRequestedTenantMatches` when §27GQ added the new rules, so the file documented the wrong
+function; it now sits on its own. And `verify:roles` was described (in its header and twice in Guide 10)
+as writing no tenant data: measured, its user-management probes create and delete users and leave **10
+audit rows** in the fixture tenant. The wording now says that; the matrix itself still writes no tenant
+data and spends no AI quota.
+
+**Verified after the changes.** `npm run test:unit`: **1627 tests, 1571 pass, 0 fail, 56 skipped**, exit 0
+(two new); `npm run lint` 0; `npm run typecheck` 0. `npm test` (the full suite, pinned to
+`inventoryai_test_db` by `TEST_MODE`): **2 388 tests, 2 388 pass, 0 fail, 0 skipped**, exit 0 on the second
+run. The first run failed one case — `ai:usage --days=60` exited 2 with `MongoNetworkError` — and that
+suite passed alone (11/11) and in the rerun, so it was a transient Atlas connection failure, not a defect
+in this change.
+
+**The sign-in path, measured.** The first pass could not reach `verify:roles --signin` because no web API
+key was in the server shell. The app's public client key lives in `mobile/.env` (non-empty, same Firebase
+project); it was loaded without being printed, the fixture was seeded with the configured
+`ROLE_TEST_PASSWORD`, and `verify:roles --signin` then signed **all four accounts in through Firebase
+Identity Toolkit**, exchanged each ID token at `POST /api/auth/firebase/exchange`, and matched the same
+**96 of 96** cells and **12 of 12** probes, removing its four sessions. Cleanup removed 214 documents
+(200 data + 9 audit + 4 users + 1 business) with 0 remaining and deleted the four identities. That closes
+the last role path that had no measurement; no production credential was used and no authentication
+check was bypassed.
+
+**Not tested.** `seed:three` at its real sizes and any production write. The development database is back
+to its pre-pass state: no role fixture, its four identities deleted, and port 4000 released.
 
 ---
 

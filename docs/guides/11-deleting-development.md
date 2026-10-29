@@ -201,7 +201,7 @@ to this database too.
 
 | Message | Do |
 |---|---|
-| `two confirmation phrase(s) are required` | set `CLEANUP_CONFIRM=<the command>` and `CLEANUP_DB_CONFIRM=inventoryai_dev_db` |
+| `two confirmation phrase(s) are required` | export the command's **own** phrase from the table above — for example `cleanup-account-data`, not `cleanup:account` — and `CLEANUP_DB_CONFIRM=inventoryai_dev_db`; the refusal names the exact value it wanted |
 | `three confirmation phrase(s) … CLEANUP_PROD_CONFIRM=DELETE-PRODUCTION-DATA` | the target is production — add the third phrase ([Guide 12](12-deleting-production.md)) |
 | `--database is "…" but this process resolved "…"` | set `MONGODB_DB_NAME` to match; do not retype the flag |
 | `MONGODB_URI names the database "…"` | the URI points the shell at another database; fix it before retrying |
@@ -211,6 +211,7 @@ to this database too.
 | `--accounts="address[:businessId],…" is required` | a bare `cleanup:account` named nothing — add the list, or use `cleanup:three` |
 | `the cleanup:three preset … is refused in production` | a preset against real businesses — name every account with `--accounts=` |
 | `belongs to business …, not …` | the id named is not the tenant that account owns; nothing was deleted |
+| `resolve to the same business … Name one account per tenant` | two addresses in the plan are members of one tenant, so its documents would be counted and reported twice; nothing was deleted |
 | `verification failed: N document(s) still reference the fixture tenant` | the delete was partial; re-run and read the collections named |
 | `still have a MongoDB user` | clear the database first, then the login ([Guide 13](13-firebase-identities.md)) |
 

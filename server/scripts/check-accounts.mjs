@@ -52,6 +52,7 @@ import {
   accountReadiness,
   databasesToCheck,
   isEmailAddress,
+  markSharedTenants,
   normaliseEmail,
   summariseReadiness,
 } from './seed/lib.mjs';
@@ -356,7 +357,9 @@ async function main() {
         })),
       });
     }
-    checked.push({ dbName, rows });
+    // The seeder refuses a plan whose addresses resolve to one tenant (§27GQ); the pre-flight has
+    // to say the same thing, or it promises a run that will stop.
+    checked.push({ dbName, rows: markSharedTenants(rows) });
     await mongoose.disconnect();
   }
 

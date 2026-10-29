@@ -76,7 +76,9 @@ exit code describe only the environment you are about to write to, so a tenant m
 cannot fail a production check. Run it once per environment.
 
 `MISSING` means there is no row yet: a seed would **create** that tenant. `STALE LINK`, `NOT LINKED` and
-`NO BUSINESS` are states a seed refuses on.
+`NO BUSINESS` are states a seed refuses on. `SHARED TENANT` means two addresses in the plan resolve to one
+business: the seed refuses that plan (its datasets would not be separate), so the check reports both as
+not ready rather than promising a run that would stop.
 
 ---
 
@@ -91,6 +93,10 @@ SEED_CONFIRM=seed-three-accounts SEED_DB_CONFIRM=inventoryai_dev_db \
 SEED_CONFIRM=seed-three-accounts SEED_DB_CONFIRM=inventoryai_dev_db \
   npm run seed:three -- --database=inventoryai_dev_db
 ```
+
+Add `--codes=both` (or `--codes=sku` / `--codes=barcode`) to either command to give every seeded product
+those codes. The preset has no per-account field, so `--codes=` is its only lever; the per-entry detail
+is in the next section.
 
 | Account | Products | ≈ Documents |
 |---|---|---|
@@ -120,16 +126,53 @@ SEED_CONFIRM=seed-accounts SEED_DB_CONFIRM=inventoryai_dev_db \
     --accounts="a@x.com:100000,b@y.com:40000" --dry-run
 ```
 
-- **A size is PRODUCTS**, and every entry needs one: `--accounts="address:products[:businessId]"`.
-  The dry run prints the products *and* the documents each entry will write. `:400000d` asks in
-  **documents** instead. The `:businessId` third field is only needed in production
-  ([Guide 10](10-seeding-production.md)).
+One account is the same command with a one-entry list; several are the comma-separated form above — there
+is no other shape.
+
+The same command with a different code choice per account — preview first, then the identical line without
+`--dry-run`:
+
+```bash
+SEED_CONFIRM=seed-accounts SEED_DB_CONFIRM=inventoryai_dev_db \
+  npm run seed:accounts -- --database=inventoryai_dev_db \
+    --accounts="a@x.com:1000:codes=both,b@y.com:2000:codes=none,c@z.com:3000:codes=sku" --dry-run
+
+SEED_CONFIRM=seed-accounts SEED_DB_CONFIRM=inventoryai_dev_db \
+  npm run seed:accounts -- --database=inventoryai_dev_db \
+    --accounts="a@x.com:1000:codes=both,b@y.com:2000:codes=none,c@z.com:3000:codes=sku"
+```
+
+- **A size is PRODUCTS**, and every entry needs one:
+  `--accounts="address:products[:businessId][:codes=both|none|sku|barcode]"`. The dry run prints the products
+  *and* an estimate of the documents each entry will write. `:400000d` asks in **documents** instead. The
+  `:businessId` field is only needed in production ([Guide 10](10-seeding-production.md)), and the
+  id and the code choice are accepted in either order. If you do give one, it is a claim, checked in
+  **both** environments: it must be the tenant that address already owns, and an id that names no
+  tenant is refused rather than replaced by a generated one. A preview opens no connection, so it
+  cannot check an id — the run does, before its first write. `--seed=N` changes the generated data and
+  defaults to `1`, so two runs at the same size describe the same tenant.
+- **The document figure is an estimate, and the command now says so.** Ordinary runs match it exactly
+  (1 000 products → 4 444 documents, measured 2026-10-29), but the generator also writes fixed
+  per-collection minimums (4 categories, 2 locations, 5 suppliers, 5 purchase orders). At the smallest
+  size, 5 products plan 22 documents and write 34. The summary line was always labelled *estimated*;
+  the per-entry and write lines now say it too.
 - **An address that already has a verified identity needs no `DEMO_ACCOUNT_PASSWORD`.** That variable
   exists only to create an identity that does not exist yet. An account registered in the app is reused as
   it is — the run reads its `uid` from Firebase and writes nothing back, so a Google-only login seeds
   exactly like a password one and no credential is changed.
-- **No SKUs or barcodes are generated**, so the app's own barcode generation is what assigns them — that is
-  deliberate, and worth one product per run. `--include-sku` generates them too.
+- **Each account chooses its own SKUs and barcodes, and the two fields are independent.** `codes=both`
+  writes both, `codes=sku` writes only the SKU, `codes=barcode` only the barcode, and `codes=none` omits
+  both (which leaves the app's own barcode generation to assign the first code — deliberate, and worth one
+  product per run). Without a `codes=` field an entry takes the run-wide default — **none**, unless
+  `--codes=both`, `--codes=sku` or `--codes=barcode` is passed; `--codes=` is also the only way to give
+  the `seed:three` preset codes, because it takes no entry list. One run can mix them:
+  `--accounts="a@x.com:1000:codes=both,b@y.com:2000:codes=none,c@z.com:3000:codes=sku"`.
+  The old `--include-sku` is gone: it is refused with the replacement named, rather than ignored, because
+  a run that asked for both fields would otherwise seed neither.
+- **A generated barcode is a real EAN-13**, unique within the account: 13 digits in the internal
+  prefix-2 range with a computed check digit, so it renders, prints and scans. Thirteen digits is what
+  the label renderer requires; the check digit is what a scanner verifies. The SKU stays a readable
+  test value (`ACCTSKU-0`).
 - Each account gets its own business; the command refuses if two accounts resolve to the same one.
 - A missing login stops the run (unless you supply `DEMO_ACCOUNT_PASSWORD`); an existing password is never
   changed.
@@ -356,7 +399,11 @@ measurements.
 | Message | Meaning | Do |
 |---|---|---|
 | `--plan=<demo\|accounts\|roles> is required` | no plan chosen | add `--plan=…` |
-| `--accounts="address:products[:businessId],…" is required` | a bare `seed:accounts` named nothing | add the list, or use `seed:three` for the preset |
+| `--accounts="address:products[:businessId][:codes=…],…" is required` | a bare `seed:accounts` named nothing | add the list, or use `seed:three` for the preset |
+| `--include-sku is gone` | an old command line still passes the removed flag | use `--codes=both`, or `--codes=sku` / `--codes=barcode` for one field |
+| `names business …, but this account owns …` | the `:businessId` given is not the tenant that address owns | remove the id, or name the tenant `check:accounts` prints; nothing was written |
+| `names business …, but no tenant is linked to …` | an id was given for an address that has no tenant yet | drop the id — a run that must create a tenant prints the id it created |
+| `--codes=… is not a choice` | the run-wide default is not a mode | use `both`, `none`, `sku` or `barcode` |
 | `asks for 1,000,000 products. The ceiling is 112,500` | over the ceiling | ask for 112 500 or fewer, or split the plan across accounts |
 | `two/three confirmation phrase(s) … SEED_CONFIRM=seed-three-accounts` | the preset is its own mode, so it wants its own phrase | export the phrase the refusal names — the mode decides which |
 | `--database=<name> is required` | the target was not named | add `--database=` with the resolved name |

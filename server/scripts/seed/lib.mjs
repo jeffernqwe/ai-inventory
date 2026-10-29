@@ -25,6 +25,7 @@ import Product from '../../src/models/product.model.ts';
 import PurchaseOrder from '../../src/models/purchaseOrder.model.ts';
 import Supplier from '../../src/models/supplier.model.ts';
 import User from '../../src/models/user.model.ts';
+import { MAX_BARCODE_ATTEMPTS, internalEan13Candidates } from '../../src/utils/internalBarcode.ts';
 import { SeedSafetyError } from '../perf/lib.mjs';
 import { assertSeedFirebaseProject } from './guard.mjs';
 
@@ -157,6 +158,98 @@ export function assertProductionTenantOwnership({
   });
 
   return tenant.businessId;
+}
+
+/**
+ * A supplied `:businessId` must agree with the tenant the address actually resolves to.
+ *
+ * WHY THIS IS NOT PRODUCTION-ONLY (found 2026-10-29). The development path read the id but never
+ * compared it: `tenant = existing ?? ensureTenantForIdentity(...)` and then straight to the reset.
+ * `assertTenantNamedForReset` returns early outside production, so an `--accounts` entry such as
+ * `alice@x.com:1000:<bob's id>` was ACCEPTED AND IGNORED — the run replaced alice's own tenant
+ * while the operator believed they had named bob's. Development data is still data, and a typo
+ * should be a refusal rather than a silent substitution.
+ *
+ * Omission is not a claim, so it passes: the address's own tenant is the target. Pure, so the rule
+ * is asserted without a database.
+ */
+export function assertRequestedTenantMatches({ email, requestedBusinessId, businessId, command = 'seed:accounts' }) {
+  if (requestedBusinessId == null) return;
+  if (String(requestedBusinessId) === String(businessId)) return;
+
+  throw new SeedSafetyError(
+    `${normaliseEmail(email)} names business ${String(requestedBusinessId)}, but this account owns ` +
+      `${String(businessId)} [${command}]. Refusing to write to a tenant that was not named. ` +
+      'Nothing was changed.',
+  );
+}
+
+/**
+ * A supplied id must name a tenant the address ALREADY owns.
+ *
+ * The other half of `assertRequestedTenantMatches`: that rule compares an id with a tenant that was
+ * found, this one refuses the case where nothing was found. Without it a development run given an id
+ * that names no tenant silently created a DIFFERENT one for the address, so the run's output named a
+ * business the operator had not asked for. Nothing is replaced in that case, which is why it is a
+ * refusal rather than a safety incident — but a typed id that is ignored is still a typed id that was
+ * not honoured. Production refuses the same way, in `seed:demo`'s own words.
+ */
+export function assertRequestedTenantKnown({
+  email,
+  requestedBusinessId,
+  command = 'seed:accounts',
+  namingHint = 'the third field of --accounts',
+}) {
+  if (requestedBusinessId == null) return;
+
+  throw new SeedSafetyError(
+    `${namingHint} names business ${String(requestedBusinessId)}, but no tenant is linked to ` +
+      `${normaliseEmail(email)} in this database [${command}]. A run creates a tenant only when no ` +
+      'id is named, and it prints the id it created. Nothing was written.',
+  );
+}
+
+/**
+ * The first tenant two plan entries share, if any. Pure.
+ *
+ * A plan is a list of ACCOUNTS, but every destructive act is scoped to a TENANT. Naming two members
+ * of one business (the role fixture is exactly that shape) makes a cleanup count and report the same
+ * documents twice, and makes a seed's "separate datasets" premise false. The resolved ids are what
+ * matter: two typed ids that differ can still resolve to one tenant, so callers pass the resolutions.
+ */
+export function findDuplicateTenant(entries) {
+  const seen = new Map();
+
+  for (const entry of entries ?? []) {
+    const id = entry?.businessId == null ? '' : String(entry.businessId);
+    if (!id) continue;
+    const email = normaliseEmail(entry.email);
+    if (seen.has(id)) return { businessId: id, first: seen.get(id), second: email };
+    seen.set(id, email);
+  }
+
+  return null;
+}
+
+/**
+ * Refuse a plan in which two accounts name one tenant.
+ *
+ * Shared by `seed:accounts` and `cleanup:account` so they cannot disagree about what a plan means;
+ * the consequence is the command's own words (`Nothing was written.` / `Nothing was deleted.`).
+ */
+export function assertDistinctTenants(
+  entries,
+  { command = 'seed:accounts', consequence = 'Nothing was changed.' } = {},
+) {
+  const duplicate = findDuplicateTenant(entries);
+  if (!duplicate) return;
+
+  throw new SeedSafetyError(
+    `"${duplicate.second}" and "${duplicate.first}" resolve to the same business ` +
+      `${duplicate.businessId} [${command}]. Name one account per tenant: two accounts of one ` +
+      'business would repeat the same work and report its documents twice. ' +
+      consequence,
+  );
 }
 
 /**
@@ -349,6 +442,189 @@ export function documentsForProducts(products) {
   throw new SeedSafetyError(
     `${String(products)} products cannot be expressed as a document budget. Nothing was written.`,
   );
+}
+
+/**
+ * The SKU/barcode choices an `--accounts` entry may state, per account.
+ *
+ * The two fields are optional on the Product schema and are written independently, so a tenant
+ * can carry a SKU without a barcode (or the reverse). All four combinations are expressible
+ * because each is a state the app itself can meet: `none` leaves the app's own barcode
+ * generation the first code to assign, `sku` is a catalogue imported with internal references,
+ * `barcode` is a label-only stock item, and `both` is the fully described product.
+ */
+export const CODE_MODES = Object.freeze(['both', 'none', 'sku', 'barcode']);
+
+/**
+ * The two booleans a mode stands for. `seedTenant` takes the fields separately because they are
+ * separate on the schema; every caller states a MODE instead, so the translation lives once.
+ */
+export function codeFields(mode) {
+  return {
+    includeSku: mode === 'both' || mode === 'sku',
+    includeBarcode: mode === 'both' || mode === 'barcode',
+  };
+}
+
+/**
+ * The run-wide code default from the command line: `--codes=both|none|sku|barcode`.
+ *
+ * `--include-sku` is GONE, and it is REFUSED rather than ignored. It used to mean `both` for every
+ * entry that stated nothing, so a saved command line that still passes it would seed NEITHER field
+ * while the plan printed `none` — a silent downgrade that looks exactly like a deliberate choice.
+ * The refusal names the replacement, the way the removed cleanup selectors are refused.
+ *
+ * `--codes=` is also the only way to reach the `seed:three` preset: it has no entry list, so it
+ * cannot say `codes=` per account, and before this the boolean was the only lever it had.
+ *
+ * Pure and throwing, like the entry parser, so every refusal is assertable without a process.
+ */
+export function parseRunwideCodes(argv = [], { flag = '--codes' } = {}) {
+  if (argv.includes('--include-sku')) {
+    throw new SeedSafetyError(
+      '--include-sku is gone. Pass --codes=both for the same thing, or --codes=sku / ' +
+        '--codes=barcode for one field; an entry may still say codes=… for itself. ' +
+        'Nothing was written.',
+    );
+  }
+
+  const prefix = `${flag}=`;
+  const hits = argv.filter((arg) => arg.startsWith(prefix));
+  if (hits.length > 1) {
+    throw new SeedSafetyError(`${flag} is given more than once. Nothing was written.`);
+  }
+  if (!hits.length) {
+    if (argv.includes(flag)) {
+      throw new SeedSafetyError(
+        `${flag} needs a value: ${flag}=both, ${flag}=none, ${flag}=sku or ${flag}=barcode. ` +
+          'Nothing was written.',
+      );
+    }
+    return 'none';
+  }
+
+  const written = hits[0].slice(prefix.length).trim();
+  const mode = written.toLowerCase();
+  if (!CODE_MODES.includes(mode)) {
+    throw new SeedSafetyError(
+      `${flag}=${written} is not a choice: use ${flag}=both, ${flag}=none, ${flag}=sku or ` +
+        `${flag}=barcode. Nothing was written.`,
+    );
+  }
+  return mode;
+}
+
+/**
+ * One `--accounts` entry: `address:size[:businessId][:codes=both|none|sku|barcode]`.
+ *
+ * `size` is PRODUCTS, or DOCUMENTS with a `d` suffix. The two optional fields are accepted in
+ * EITHER order, because each is recognised by its own shape — a 24-hex id, or a `codes=`
+ * prefix — so asking for codes does not force a particular position for the tenant id.
+ *
+ * `defaultCodes` is the run-wide default set by `--codes=` on the command line; an entry that says
+ * nothing about codes takes it, and an entry that says something overrides it in either direction.
+ *
+ * Pure, and it THROWS instead of exiting, so every refusal is asserted without a database or a
+ * connection. The CLI's own `fail()` prints the `[seed:accounts]` prefix it always did.
+ */
+export function parseAccountsPlanEntry(entry, { defaultCodes = 'none' } = {}) {
+  const text = String(entry ?? '');
+  const parts = text.split(':').map((part) => part.trim());
+
+  if (parts.length < 2 || parts.length > 4) {
+    throw new SeedSafetyError(
+      `--accounts entry "${text}" must be address:products[:businessId][:codes=both|none|sku|barcode] ` +
+        '(or a size in documents with a d suffix: address:400000d). Nothing was written.',
+    );
+  }
+
+  const email = normaliseEmail(parts[0]);
+  if (!isEmailAddress(email)) {
+    throw new SeedSafetyError(
+      `--accounts entry "${text}" has no usable address. Nothing was written.`,
+    );
+  }
+
+  const size = parts[1];
+  const inDocuments = /^\d+d$/i.test(size);
+  const digits = (inDocuments ? size.slice(0, -1) : size).replace(/p$/i, '');
+
+  let products;
+  let total;
+  if (inDocuments) {
+    total = parseCount(digits, {
+      name: `--accounts document size for ${email}`,
+      min: MIN_DOCUMENTS,
+      max: MAX_DOCUMENTS,
+    });
+    products = productsForDocuments(total);
+  } else {
+    // The ceiling is reported HERE, before the range parser, because the number is what
+    // makes the limit understandable: "between 5 and 112500" says what, not why.
+    const asked = /^\d+$/.test(digits) ? Number.parseInt(digits, 10) : NaN;
+    if (Number.isSafeInteger(asked) && asked > MAX_PRODUCTS) {
+      throw new SeedSafetyError(
+        `${email} asks for ${asked.toLocaleString()} products. The ceiling is ` +
+          `${MAX_PRODUCTS.toLocaleString()} products (${MAX_DOCUMENTS.toLocaleString()} documents): ` +
+          'one million products would be ≈4 400 000 documents, and the whole dataset is built in ' +
+          'memory before it is inserted, so that run is refused rather than attempted. Nothing was written.',
+      );
+    }
+    products = parseCount(digits, {
+      name: `--accounts product size for ${email}`,
+      min: MIN_PRODUCTS,
+      max: MAX_PRODUCTS,
+    });
+    total = documentsForProducts(products);
+  }
+
+  let businessId;
+  let codes;
+  for (const part of parts.slice(2)) {
+    const choice = /^codes=(.*)$/i.exec(part);
+    if (choice) {
+      if (codes !== undefined) {
+        throw new SeedSafetyError(
+          `--accounts entry "${text}" carries more than one codes= field. Nothing was written.`,
+        );
+      }
+      const mode = choice[1].trim().toLowerCase();
+      if (!CODE_MODES.includes(mode)) {
+        throw new SeedSafetyError(
+          `--accounts entry "${text}" has codes="${choice[1].trim()}", but codes must be both, ` +
+            'none, sku or barcode (both writes both fields, sku or barcode writes that one, ' +
+            'none omits them). Nothing was written.',
+        );
+      }
+      codes = mode;
+      continue;
+    }
+
+    const id = normaliseBusinessId(part);
+    if (!id) {
+      throw new SeedSafetyError(
+        `--accounts entry "${text}" has the field "${part}", which is neither a 24-character ` +
+          'businessId nor codes=both|none|sku|barcode. Nothing was written.',
+      );
+    }
+    if (businessId !== undefined) {
+      throw new SeedSafetyError(
+        `--accounts entry "${text}" carries more than one businessId. Nothing was written.`,
+      );
+    }
+    businessId = id;
+  }
+
+  const resolved = codes ?? defaultCodes;
+  return {
+    email,
+    products,
+    total,
+    tier: 'custom',
+    businessId: businessId || undefined,
+    codes: resolved,
+    ...codeFields(resolved),
+  };
 }
 
 /**
@@ -633,6 +909,60 @@ export async function ensureTenantForIdentity({ email, identity, businessName })
 }
 
 /**
+ * Allocate one valid EAN-13 barcode per product, unique within the batch.
+ *
+ * WHY EAN-13. A seeded barcode is only useful if the app can scan it and print it: the mobile
+ * scanner decodes EAN-13 natively, the product screen renders only `isEan13` values, and the
+ * lookup is an exact string match. An opaque string such as `ACCTBC0` is stored but can never
+ * be scanned off a label. These are the SAME candidates `POST /api/products/:id/generate-barcode`
+ * issues — deterministic from the product's ObjectId, in the GS1 "restricted distribution"
+ * prefix-2 range, with a real mod-10 check digit — so a seeded code and one the app assigns
+ * later are indistinguishable to a reader.
+ *
+ * UNIQUENESS IS PER TENANT, which is what the partial `(businessId, barcode)` unique index
+ * enforces. `taken` carries codes already in the tenant (empty for every seeder, because each
+ * caller clears the tenant first); within the batch the same set prevents two products from
+ * sharing a code even when their candidate windows overlap. A product whose 64 consecutive
+ * candidates are all taken is a refusal rather than a duplicate: the whole dataset is written
+ * with `insertMany({ ordered: false })`, and a duplicate would fail the chunk after part of
+ * the tenant had been written.
+ *
+ * Pure, so every property is asserted without a database.
+ */
+export function allocateEan13Barcodes(ids, { taken = [] } = {}) {
+  const used = new Set(taken);
+  const codes = new Map();
+
+  for (const id of ids) {
+    const hex = String(id);
+    if (codes.has(hex)) {
+      throw new SeedSafetyError(
+        `product ${hex} appears twice in the barcode batch. Nothing was written.`,
+      );
+    }
+
+    let code = null;
+    for (const candidate of internalEan13Candidates(hex)) {
+      if (!used.has(candidate)) {
+        code = candidate;
+        break;
+      }
+    }
+    if (!code) {
+      throw new SeedSafetyError(
+        `could not allocate a unique EAN-13 barcode for product ${hex}: ` +
+          `${MAX_BARCODE_ATTEMPTS} consecutive candidates are all taken. Nothing was written.`,
+      );
+    }
+
+    used.add(code);
+    codes.set(hex, code);
+  }
+
+  return codes;
+}
+
+/**
  * Write a full, self-consistent dataset into ONE tenant.
  *
  * Every count scales with `total`, so the knob means what it says at any size. A
@@ -640,11 +970,15 @@ export async function ensureTenantForIdentity({ email, identity, businessName })
  * collections alone produced 666 documents for a 300-document request — a target the
  * script then reported as if it had hit it.
  *
- * `includeSkuBarcode: false` omits `sku`/`barcode` on products (and the `sku`
- * snapshot on PO lines, which is optional in the schema). Both fields are optional in
- * the Product schema and are uniquely indexed with a `partialFilterExpression`, so any
- * number of products may omit them — which is what leaves the app's own barcode
- * generation as the thing that first assigns them.
+ * `includeSku` and `includeBarcode` are independent, because the two fields are: a tenant may
+ * have a SKU without a barcode, a barcode without a SKU, both, or neither. The PO line's `sku`
+ * snapshot follows the product's own value (it is optional in the schema), and both fields are
+ * uniquely indexed with a `partialFilterExpression`, so any number of products may omit them —
+ * which is what leaves the app's own barcode generation as the thing that first assigns them
+ * on a tenant that was seeded with `codes=none`. When barcodes ARE included they are real
+ * EAN-13 values (`allocateEan13Barcodes`), so a seeded product can be printed and scanned.
+ * The SKU stays `<label>SKU-<i>`, which is a human-readable test value rather than a code the
+ * scanner is expected to decode.
  *
  * Returns per-collection counts. It does NOT reset pre-existing data first; the
  * caller does that with `clearTenantData`, because "reset then seed" is a tenant
@@ -655,7 +989,8 @@ export async function seedTenant({
   userId = null,
   total,
   rand,
-  includeSkuBarcode = true,
+  includeSku = true,
+  includeBarcode = true,
   label = 'DEMO',
 }) {
   const business = businessId;
@@ -699,6 +1034,9 @@ export async function seedTenant({
       ? (rand() < 0.4 ? 0 : intBetween(rand, 1, minimumStock))
       : Math.round(minimumStock * (1.5 + rand() * 8));
     const doc = {
+      // Pre-generated so the EAN-13 barcode can be derived from the product's own id, exactly
+      // as `POST /api/products/:id/generate-barcode` derives it.
+      _id: new mongoose.Types.ObjectId(),
       businessId: business,
       name: `${pick(rand, ADJECTIVES)} ${pick(rand, NOUNS)} ${10000 + i}`,
       description: `Seeded row ${i} for AI scale testing`,
@@ -710,11 +1048,16 @@ export async function seedTenant({
       status: 'ACTIVE',
       _availableTotal: available,
     };
-    if (includeSkuBarcode) {
-      doc.sku = `${label}SKU-${i}`;
-      doc.barcode = `${label}BC${i}`;
-    }
+    if (includeSku) doc.sku = `${label}SKU-${i}`;
     productDocs.push(doc);
+  }
+
+  // Barcodes are allocated together, after the ids exist, so two products in this tenant can
+  // never share one. `taken` is empty because every caller clears the tenant first; the
+  // partial (businessId, barcode) unique index remains the final authority.
+  if (includeBarcode) {
+    const codes = allocateEan13Barcodes(productDocs.map((doc) => doc._id.toHexString()));
+    for (const doc of productDocs) doc.barcode = codes.get(doc._id.toHexString());
   }
   const products = await insertChunked(
     Product,
@@ -972,6 +1315,42 @@ export function databasesToCheck({ withProduction, databaseNames }) {
  * stops being able to fail a run: the caller only ever passes the databases `databasesToCheck` chose.
  * Pure, so the arithmetic is tested without a connection.
  */
+/**
+ * Refuse, in the report, a plan whose accounts resolve to ONE tenant.
+ *
+ * `check:accounts` is the pre-flight for `seed:accounts`, and since §27GQ the seeder refuses a plan
+ * that names one tenant twice. Reporting two READY lines for that plan made the check promise a run
+ * the seeder would not perform. A row that is already refused is left exactly as it was — this rule
+ * says nothing about a state another rule already explained.
+ *
+ * Pure: returns NEW rows, so the caller's records are never mutated.
+ */
+export function markSharedTenants(rows) {
+  const list = rows ?? [];
+  const counts = new Map();
+  for (const row of list) {
+    if (row?.verdict !== 'READY' || !row.businessId) continue;
+    const id = String(row.businessId);
+    counts.set(id, (counts.get(id) ?? 0) + 1);
+  }
+
+  return list.map((row) => {
+    const id = row?.businessId == null ? '' : String(row.businessId);
+    if (row?.verdict !== 'READY' || (counts.get(id) ?? 0) < 2) return row;
+
+    const others = list
+      .filter((other) => other !== row && other?.businessId != null && String(other.businessId) === id)
+      .map((other) => other.email);
+    return {
+      ...row,
+      verdict: 'SHARED TENANT',
+      detail:
+        `business ${id} is also the tenant of ${others.join(', ')} — a seed refuses a plan that names ` +
+        'one tenant twice, because its datasets would not be separate',
+    };
+  });
+}
+
 export function summariseReadiness(checked) {
   const pairs = checked.reduce((total, entry) => total + entry.rows.length, 0);
   const notReady = checked.reduce(
@@ -1030,6 +1409,7 @@ export default {
   resolveExistingTenantForIdentity,
   ensureTenantForIdentity,
   seedTenant,
+  allocateEan13Barcodes,
   readTenantCounts,
   countDisagreements,
   databasesToCheck,

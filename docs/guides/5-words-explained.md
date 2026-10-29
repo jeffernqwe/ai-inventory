@@ -17,6 +17,11 @@ so "database unreachable" is usually a network problem.
 **backend** — the half that holds the rules and talks to the database. The app never talks to the
 database directly; that separation is a security rule, not a preference.
 
+**barcode** — the number printed as a product's stripes. A code the app generates — and every code the
+seeders write when asked — is a valid **EAN-13** in the GS1 "internal" range (it starts with `2`), with a
+real check digit, unique within its business. Scan one with the phone to look its product up
+([Guide 9](9-seeding-development.md)).
+
 **bundle** — the app's code packed into one file for the phone. Metro produces it; the Metro window
 says when the phone fetched it.
 
@@ -102,6 +107,10 @@ number that makes a generator repeat it.
 
 **session** — the backend's record of a signed-in state. Signing out deletes it, so a copied pass
 stops working immediately.
+
+**SKU** — *stock keeping unit*: the business's own reference for a product (`ACCTSKU-0` in seeded data).
+Unique within its business when present, and independent of the barcode — a product may have either, both,
+or neither.
 
 **stock status** — how a quantity compares with the product's minimum: in stock, low, or out of stock.
 

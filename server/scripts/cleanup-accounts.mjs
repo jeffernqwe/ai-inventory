@@ -69,6 +69,7 @@ import { CleanupSafetyError } from './cleanup/lib.mjs';
 import { SeedSafetyError, clearTenantData, countTenantDataRemoval } from './perf/lib.mjs';
 import {
   COMPARISON_ACCOUNTS,
+  assertDistinctTenants,
   assertOneBusinessAssociation,
   assertProductionTenantOwnership,
   isEmailAddress,
@@ -294,6 +295,15 @@ async function main() {
       counts,
     });
   }
+
+  // A plan names ACCOUNTS; every deletion is scoped to a TENANT, and two members of one business
+  // would make the total count that tenant twice (the role fixture is exactly that shape). Checked
+  // on the resolved ids, before anything is deleted: the counts above are reads, and a refusal
+  // discards them rather than acting on a plan it will not run.
+  assertDistinctTenants(prepared, {
+    command: COMMAND,
+    consequence: 'Nothing was deleted.',
+  });
 
   if (!prepared.length) {
     console.log('\nResult   : SUCCESS — nothing to delete');

@@ -117,10 +117,15 @@ for what is actually stored.
 |---|---|
 | `seed:demo-tenant` | 6 products, 112 units, 3 locations, 9 ledger movements — every figure fixed and printed by the seeder |
 | `seed:roles` | ~900 documents (≈200 products), four logins, one tenant |
-| `seed:perf` / `seed:perf-tenant` | `--size` documents (products ≈22 %), deterministic SKUs `SEEDSKU-…` |
+| `seed:perf` | `--size` **products** (1–200 000), deterministic SKUs `SEEDSKU-…`, no login |
+| `seed:perf-tenant` | `--size` **documents** (products ≈22 %), deterministic SKUs `SEEDSKU-…`, one OWNER login |
 
-No SKUs or barcodes are seeded by `seed:three` / `seed:accounts`, so the app's own barcode generation is
-what assigns them — that is deliberate, and worth one product per run.
+No SKUs or barcodes are seeded by `seed:three` / `seed:accounts` unless asked for: each `--accounts`
+entry takes `codes=both|none|sku|barcode`, and `--codes=` sets the run-wide default — the only lever the
+`seed:three` preset has, because it takes no entry list. So the app's own barcode generation is what
+assigns them by default — that is deliberate, and worth one product per run.
+When barcodes are asked for they are valid EAN-13 values (internal prefix-2 range, real check digit,
+unique within the account), so they can be printed and scanned.
 
 ---
 

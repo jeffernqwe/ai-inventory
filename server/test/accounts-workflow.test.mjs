@@ -33,6 +33,14 @@ import {
   MAX_PRODUCTS,
   MIN_PRODUCTS,
   accountReadiness,
+  allocateEan13Barcodes,
+  assertDistinctTenants,
+  assertRequestedTenantKnown,
+  assertRequestedTenantMatches,
+  findDuplicateTenant,
+  markSharedTenants,
+  parseAccountsPlanEntry,
+  parseRunwideCodes,
   assertOneBusinessAssociation,
   assertProductionTenantOwnership,
   databasesToCheck,
@@ -42,8 +50,15 @@ import {
 } from '../scripts/seed/lib.mjs';
 import { APPROVED_FIREBASE_PROJECT_ID, assertSeedFirebaseProject } from '../scripts/seed/guard.mjs';
 import { SeedSafetyError } from '../scripts/perf/lib.mjs';
+import {
+  MAX_BARCODE_ATTEMPTS,
+  ean13CheckDigit,
+  ean13Value,
+  internalEan13Candidates,
+} from '../src/utils/internalBarcode.ts';
 
 const read = (name) => readFileSync(new URL(`../scripts/${name}`, import.meta.url), 'utf8');
+const seedLibSource = read('seed/lib.mjs');
 const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
 /** What `seedTenant` will actually write, in products, for a document budget. */
@@ -126,7 +141,10 @@ describe('the seeder has two modes and two phrases', () => {
   });
 
   it('a bare seed:accounts names nothing, so it refuses instead of guessing a list', () => {
-    assert.match(source, /--accounts="address:products\[:businessId\],…" is required/);
+    assert.match(
+      source,
+      /--accounts="address:products\[:businessId\]\[:codes=…\],…" is required/,
+    );
     assert.match(source, /pass either --preset=\$\{PRESET\} or --accounts=…, not both/);
   });
 
@@ -170,10 +188,22 @@ describe('the seeder has two modes and two phrases', () => {
   });
 
   it('the plan entry syntax is products, with documents available and marked', () => {
-    assert.match(source, /address:products:businessId/);
-    assert.match(source, /^\s*const inDocuments = \/\^\\d\+d\$\//m);
-    assert.match(source, /--accounts document size for/);
-    assert.match(source, /--accounts product size for/);
+    // The grammar lives in the shared core so the per-account code choice below is testable
+    // without a database; the CLI is what passes the run-wide default into it.
+    assert.match(seedLibSource, /address:products\[:businessId\]\[:codes=both\|none\|sku\|barcode\]/);
+    assert.match(seedLibSource, /^\s*const inDocuments = \/\^\\d\+d\$\//m);
+    assert.match(seedLibSource, /--accounts document size for/);
+    assert.match(seedLibSource, /--accounts product size for/);
+  });
+
+  it('the per-account choice is what the write path passes to the core', () => {
+    assert.match(source, /includeSku: entry\.includeSku/);
+    assert.match(source, /includeBarcode: entry\.includeBarcode/);
+    // The run-wide default comes from the validated flag, never from a raw boolean scan.
+    assert.match(source, /const defaultCodes = parseRunwideCodes\(process\.argv\)/);
+    // The preset has no entry list of its own, so this default is its only lever — which is
+    // why the old flag could not simply be deleted.
+    assert.match(source, /codes: defaultCodes,\s*\.\.\.codeFields\(defaultCodes\)/);
   });
 
   it('the write path is the shared core, and it is read back', () => {
@@ -181,6 +211,330 @@ describe('the seeder has two modes and two phrases', () => {
       assert.ok(source.includes(call), `seed-accounts.mjs no longer calls ${call}`);
     }
     assert.match(source, /resolveIdentity\([^)]*refreshPassword: !production/);
+  });
+});
+
+describe('each account chooses its own SKU and barcode', () => {
+  const BUSINESS = 'a'.repeat(24);
+
+  /** `[includeSku, includeBarcode]` for an entry — the pair the write path consumes. */
+  const codesOf = (entry, options) => {
+    const parsed = parseAccountsPlanEntry(entry, options);
+    return [parsed.includeSku, parsed.includeBarcode];
+  };
+
+  it('defaults to neither, and the run default is only a default', () => {
+    assert.deepEqual(codesOf('a@x.com:1000'), [false, false]);
+    assert.deepEqual(codesOf('a@x.com:1000', { defaultCodes: 'both' }), [true, true]);
+  });
+
+  it('each mode selects its own fields', () => {
+    assert.deepEqual(codesOf('a@x.com:1000:codes=both'), [true, true]);
+    assert.deepEqual(codesOf('a@x.com:1000:codes=none'), [false, false]);
+    assert.deepEqual(codesOf('a@x.com:1000:codes=sku'), [true, false]);
+    assert.deepEqual(codesOf('a@x.com:1000:codes=barcode'), [false, true]);
+  });
+
+  it('codes= overrides the run default in every direction', () => {
+    assert.deepEqual(codesOf('a@x.com:1000:codes=none', { defaultCodes: 'both' }), [false, false]);
+    assert.deepEqual(codesOf('a@x.com:1000:codes=sku', { defaultCodes: 'both' }), [true, false]);
+    assert.deepEqual(codesOf('a@x.com:1000:codes=both', { defaultCodes: 'none' }), [true, true]);
+  });
+
+  it('four accounts in one plan are configured independently', () => {
+    // The request this was written for: each account states its own pair.
+    const plan = [
+      'one@x.com:1000:codes=both',
+      'two@x.com:2000:codes=none',
+      'three@x.com:3000:codes=sku',
+      'four@x.com:4000:codes=barcode',
+    ].map((entry) => parseAccountsPlanEntry(entry));
+
+    assert.deepEqual(
+      plan.map((entry) => [entry.email, entry.products, entry.includeSku, entry.includeBarcode]),
+      [
+        ['one@x.com', 1000, true, true],
+        ['two@x.com', 2000, false, false],
+        ['three@x.com', 3000, true, false],
+        ['four@x.com', 4000, false, true],
+      ],
+    );
+  });
+
+  it('the tenant id and the code choice are accepted in either order', () => {
+    const idFirst = parseAccountsPlanEntry(`a@x.com:1000:${BUSINESS}:codes=sku`);
+    const codesFirst = parseAccountsPlanEntry(`a@x.com:1000:codes=sku:${BUSINESS}`);
+
+    for (const entry of [idFirst, codesFirst]) {
+      assert.equal(entry.businessId, BUSINESS);
+      assert.deepEqual([entry.includeSku, entry.includeBarcode], [true, false]);
+    }
+  });
+
+  it('the product and document sizes still mean what they did', () => {
+    assert.equal(parseAccountsPlanEntry('a@x.com:1000').total, documentsForProducts(1000));
+    assert.equal(
+      parseAccountsPlanEntry('a@x.com:400000d').products,
+      productsForDocuments(400000),
+    );
+  });
+
+  it('an unknown mode is refused, and the accepted values are named', () => {
+    assert.throws(
+      () => parseAccountsPlanEntry('a@x.com:1000:codes=maybe'),
+      /codes="maybe".*codes must be both, none, sku or barcode.*Nothing was written/s,
+    );
+  });
+
+  it('a repeated code field, and a field that is neither id nor mode, are refused', () => {
+    assert.throws(
+      () => parseAccountsPlanEntry('a@x.com:1000:codes=both:codes=none'),
+      /more than one codes=/,
+    );
+    assert.throws(
+      () => parseAccountsPlanEntry('a@x.com:1000:both'),
+      /neither a 24-character businessId nor codes=both\|none\|sku\|barcode/,
+    );
+  });
+});
+
+describe('a named tenant is checked, and one tenant cannot be named twice', () => {
+  const BUSINESS = 'a'.repeat(24);
+  const OTHER = 'b'.repeat(24);
+
+  it('accepts an omitted id, and an id that agrees with the resolved tenant', () => {
+    for (const requestedBusinessId of [undefined, null, BUSINESS]) {
+      assert.doesNotThrow(() =>
+        assertRequestedTenantMatches({
+          email: 'a@x.com',
+          requestedBusinessId,
+          businessId: BUSINESS,
+        }),
+      );
+    }
+  });
+
+  it('refuses a supplied id that names another tenant, in development as well as production', () => {
+    // Before §27GQ the development path never read the id, so this passed and the run replaced the
+    // address's OWN tenant while the operator believed they had named a different one.
+    assert.throws(
+      () =>
+        assertRequestedTenantMatches({
+          email: 'a@x.com',
+          requestedBusinessId: BUSINESS,
+          businessId: OTHER,
+        }),
+      /a@x\.com names business a{24}, but this account owns b{24}.*Nothing was changed/s,
+    );
+  });
+
+  it('accepts an omitted id, and refuses an id that names no tenant at all', () => {
+    assert.doesNotThrow(() =>
+      assertRequestedTenantKnown({ email: 'a@x.com', requestedBusinessId: undefined }),
+    );
+    // Development used to create a DIFFERENT tenant and print its id, so the run named a business
+    // the operator had never asked for.
+    assert.throws(
+      () =>
+        assertRequestedTenantKnown({
+          email: 'a@x.com',
+          requestedBusinessId: BUSINESS,
+          command: 'seed:demo',
+          namingHint: '--business',
+        }),
+      /--business names business a{24}, but no tenant is linked to a@x\.com.*A run creates a tenant only when no id is named.*Nothing was written/s,
+    );
+  });
+
+  it('finds the second account that resolves to an already-named tenant, and nothing when all differ', () => {
+    assert.equal(
+      findDuplicateTenant([
+        { email: 'one@x.com', businessId: BUSINESS },
+        { email: 'two@x.com', businessId: OTHER },
+      ]),
+      null,
+    );
+    assert.deepEqual(
+      findDuplicateTenant([
+        { email: 'one@x.com', businessId: BUSINESS },
+        { email: 'two@x.com', businessId: BUSINESS },
+      ]),
+      { businessId: BUSINESS, first: 'one@x.com', second: 'two@x.com' },
+    );
+    // An entry with no tenant (a missing account, skipped before this point) is not a duplicate.
+    assert.equal(
+      findDuplicateTenant([
+        { email: 'one@x.com' },
+        { email: 'two@x.com' },
+      ]),
+      null,
+    );
+  });
+
+  it('refuses a plan that names one tenant twice, and says which two accounts', () => {
+    assert.throws(
+      () =>
+        assertDistinctTenants(
+          [
+            { email: 'one@x.com', businessId: BUSINESS },
+            { email: 'two@x.com', businessId: BUSINESS },
+          ],
+          { command: 'cleanup:account', consequence: 'Nothing was deleted.' },
+        ),
+      /"two@x\.com" and "one@x\.com" resolve to the same business a{24} \[cleanup:account\].*Nothing was deleted/s,
+    );
+  });
+
+  it('the pre-flight reports a shared tenant as not ready, because the seed would refuse it', () => {
+    const marked = markSharedTenants([
+      { email: 'one@x.com', verdict: 'READY', businessId: BUSINESS, documents: 10 },
+      { email: 'two@x.com', verdict: 'READY', businessId: BUSINESS, documents: 10 },
+      { email: 'three@x.com', verdict: 'READY', businessId: OTHER, documents: 0 },
+    ]);
+
+    assert.deepEqual(marked.map((row) => row.verdict), ['SHARED TENANT', 'SHARED TENANT', 'READY']);
+    assert.match(marked[0].detail, /business a{24} is also the tenant of two@x\.com.*would not be separate/s);
+    assert.match(marked[1].detail, /also the tenant of one@x\.com/);
+    // The counts stay visible: the point is to report what would be touched, not to hide it.
+    assert.equal(marked[0].documents, 10);
+    // And the summary's exit-code counter follows the verdict, not the row count.
+    assert.deepEqual(summariseReadiness([{ rows: marked }]), { pairs: 3, notReady: 2, ready: 1 });
+    // A state another rule already explained is not re-labelled.
+    assert.equal(
+      markSharedTenants([
+        { email: 'one@x.com', verdict: 'MISSING', businessId: BUSINESS },
+        { email: 'two@x.com', verdict: 'READY', businessId: BUSINESS },
+      ])[0].verdict,
+      'MISSING',
+    );
+  });
+
+  it('both seeders and the accounts cleanup call the shared guards', () => {
+    // The helpers above are pure; these assertions are what prove the CLIs actually use them.
+    for (const name of ['seed-accounts.mjs', 'seed-demo-account.mjs']) {
+      assert.match(read(name), /assertRequestedTenantMatches\(/, `${name} checks a named tenant`);
+      assert.match(read(name), /assertRequestedTenantKnown\(/, `${name} refuses an unknown tenant`);
+    }
+    assert.match(read('seed-accounts.mjs'), /assertDistinctTenants\(/);
+    assert.match(read('cleanup-accounts.mjs'), /assertDistinctTenants\(/);
+    // The pre-flight reports the same plan the seeder refuses (§27GQ).
+    assert.match(read('check-accounts.mjs'), /markSharedTenants\(/);
+  });
+});
+
+describe('the run-wide code default is --codes=, and the old flag is refused', () => {
+  it('defaults to neither, and accepts all four modes', () => {
+    assert.equal(parseRunwideCodes([]), 'none');
+    for (const mode of ['both', 'none', 'sku', 'barcode']) {
+      assert.equal(parseRunwideCodes([`--codes=${mode}`]), mode);
+    }
+  });
+
+  it('reads a cased value, and ignores flags it does not own', () => {
+    assert.equal(parseRunwideCodes(['--dry-run', '--codes=BOTH']), 'both');
+  });
+
+  it('refuses --include-sku, and names its replacement', () => {
+    // It used to mean `both`; ignoring it would seed neither field, so it must stop the run.
+    assert.throws(
+      () => parseRunwideCodes(['--include-sku']),
+      /--include-sku is gone\. Pass --codes=both.*Nothing was written/s,
+    );
+    // Including when a value is also given, so the two spellings can never disagree.
+    assert.throws(
+      () => parseRunwideCodes(['--codes=sku', '--include-sku']),
+      /--include-sku is gone/,
+    );
+  });
+
+  it('refuses an unknown value, a missing value and a repeat', () => {
+    assert.throws(
+      () => parseRunwideCodes(['--codes=maybe']),
+      /--codes=maybe is not a choice.*--codes=both.*Nothing was written/s,
+    );
+    assert.throws(() => parseRunwideCodes(['--codes']), /--codes needs a value/);
+    assert.throws(() => parseRunwideCodes(['--codes=both', '--codes=sku']), /more than once/);
+  });
+});
+
+describe('seeded barcodes are valid EAN-13', () => {
+  const BASE = BigInt(`0x${'ab'.repeat(12)}`);
+  const hex = (value) => value.toString(16).padStart(24, '0');
+  const ids = Array.from({ length: 6 }, (_, i) => hex(BASE + BigInt(i * 1000)));
+
+  it('allocates one 13-digit code per product, with a real check digit', () => {
+    const codes = allocateEan13Barcodes(ids);
+
+    assert.equal(codes.size, ids.length);
+    for (const code of codes.values()) {
+      assert.match(code, /^2\d{12}$/, 'an internal EAN-13 uses the GS1 prefix-2 range');
+      assert.equal(
+        ean13CheckDigit(code.slice(0, 12)),
+        Number(code[12]),
+        `${code} does not carry a valid EAN-13 check digit`,
+      );
+      assert.equal(ean13Value(code.slice(0, 12)), code);
+    }
+  });
+
+  it('every code in a batch is unique', () => {
+    const codes = [...allocateEan13Barcodes(ids).values()];
+    assert.equal(new Set(codes).size, codes.length);
+  });
+
+  it('adjacent products whose candidate windows overlap still differ', () => {
+    // `internalEan13Candidates` steps +1 on a collision, so two ids one apart share 63 of
+    // their 64 candidates. Allocation must skip, not reuse.
+    const codes = [...allocateEan13Barcodes([hex(BASE), hex(BASE + 1n)]).values()];
+    assert.notEqual(codes[0], codes[1]);
+  });
+
+  it('stays unique and valid across a 5 000-product batch', () => {
+    // The real ceiling is 112 500 products; 5 000 proves the allocator's Set is doing the
+    // work rather than the ObjectId spacing happening to avoid collisions.
+    const many = Array.from({ length: 5000 }, (_, i) => hex(BASE + BigInt(i * 2)));
+    const codes = [...allocateEan13Barcodes(many).values()];
+
+    assert.equal(new Set(codes).size, many.length);
+    for (const code of codes) {
+      assert.equal(ean13CheckDigit(code.slice(0, 12)), Number(code[12]));
+    }
+  });
+
+  it('a code already taken in the tenant is skipped, not reused', () => {
+    const first = allocateEan13Barcodes([ids[0]]).get(ids[0]);
+    const second = allocateEan13Barcodes([ids[0]], { taken: [first] }).get(ids[0]);
+
+    assert.notEqual(second, first);
+    assert.equal(ean13Value(second.slice(0, 12)), second);
+  });
+
+  it('an id whose every candidate is taken is refused, never given a duplicate', () => {
+    // The live index is the final authority, but reaching it would fail the insert AFTER part
+    // of a chunk was written. Allocation refuses first, and says which product it could not fit.
+    const id = ids[0];
+    const taken = [...internalEan13Candidates(id)];
+    assert.equal(taken.length, MAX_BARCODE_ATTEMPTS);
+
+    assert.throws(
+      () => allocateEan13Barcodes([id], { taken }),
+      (err) =>
+        err instanceof SeedSafetyError &&
+        err.message.includes(`${MAX_BARCODE_ATTEMPTS} consecutive candidates`) &&
+        err.message.includes('Nothing was written'),
+    );
+  });
+
+  it('the same id twice in one batch is refused, not allocated twice', () => {
+    assert.throws(
+      () => allocateEan13Barcodes([ids[0], ids[0]]),
+      (err) => err instanceof SeedSafetyError && err.message.includes('appears twice'),
+    );
+  });
+
+  it('the seeder writes the allocated code, not the old opaque value', () => {
+    assert.equal(seedLibSource.includes('${label}BC'), false);
+    assert.match(seedLibSource, /allocateEan13Barcodes\(/);
   });
 });
 

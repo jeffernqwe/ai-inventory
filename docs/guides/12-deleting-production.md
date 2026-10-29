@@ -7,6 +7,9 @@ Development is [Guide 11](11-deleting-development.md); seeding is [Guide 9](9-se
 The commands are the same as development. Three things differ: **the phrases**, **the environment** and
 **what is refused**.
 
+[Guide 14](14-command-runbook.md) is the single sheet of complete development and production
+invocations; this guide explains the production rules behind them.
+
 Run everything from `server/`.
 
 ---
@@ -102,8 +105,12 @@ NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
   deletes nothing.
 - A real run re-counts every tenant afterwards and prints `0 remaining`; anything left **fails** the run
   rather than being reported as done.
-- An address with no account in this database is reported as `nothing to delete` and skipped — an answer,
-  not a failure, and the run still exits 0.
+- An address with no account in this database is **refused before any delete** — a named account that does
+  not exist cannot return `SUCCESS` for a tenant the run never found.
+- Add `--witness="<an account outside the plan>"` to either line for a read-only proof that another tenant
+  was untouched. The witness must exist and must not share a business with any account being emptied. Its
+  data counts, login row, business row, role, status and Firebase linkage are captured before the run and
+  compared after it; any difference **fails** the run. The witness is never modified or deleted.
 - It never deletes a user row, a business row, a session or a Firebase identity.
 
 ---
@@ -233,20 +240,40 @@ fit.
 | After | Run | Expect |
 |---|---|---|
 | a tenant cleanup | the command again with `--dry-run` | every collection at 0, or `nothing to clean` |
-| a tenant cleanup | `verify:demo` with the production environment | `FAILED — the tenant is empty` (exit 1) is the proof the data is gone; exit 2 if the rows are gone too |
+| a tenant cleanup | `verify:demo` with the production environment, `--email=…` for one tenant or `--accounts="…"` for several | `FAILED — the tenant is empty` (exit 1) is the proof the data is gone; exit 2 if the rows are gone too |
 | an accounts cleanup | `npm run check:accounts -- --with-production` | the accounts are still `READY`, with 0 documents a seed would reset |
 | a database wipe | `npm run seed -- … --dry-run` | a clean target; the app shows an empty business |
 | firebase deletion | the `--target=firebase` line with `--dry-run` | `no identity` for each address ([Guide 13](13-firebase-identities.md)) |
 
 ```bash
 NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
-  npm run verify:demo -- --email=you@example.com --database=inventoryai_prod_db
+  npm run verify:demo -- --database=inventoryai_prod_db \
+  --accounts="jefferndullamalinaozxc@gmail.com,jefferndullamalinao@gmail.com,jeffernmalinaoqwe@gmail.com"
 ```
+
+Use `--email=…` instead when only one tenant was emptied. With `--accounts`, each empty tenant is reported
+separately and the run exits **1**; that is the intended proof, not a failure of the delete. A tenant that
+cannot be read is reported as unchecked: if nothing else failed, the run exits **2** and the deletion is not
+verified; an empty tenant already makes the exit **1**.
 
 Cleanups prove themselves: each real run re-queries the same plan and prints `0 remaining`. Nothing here
 needs a phrase to check, because reading changes nothing. An empty tenant is not a verification pass:
 `verify:demo` exists to check a seeded dataset, so it reports that state as a failure (exit 1). Read it
 as the deletion's proof, not as a data defect.
+
+That covers the tenants you emptied. Isolation itself is structural — every plan is scoped by the
+`businessId` resolved from the named account — and `--witness="<address>"` adds a cross-tenant measurement:
+the witness's counts and account rows are read before and after the delete, and any difference fails the
+run. It must be a tenant outside the plan (and not a second member of a planned business). If you omit the
+flag, the same proof can be recorded by hand:
+
+```bash
+NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
+  npm run check:accounts -- --with-production --accounts="witness@example.com"
+```
+
+Expect the same `READY` line and the same products/documents count both times. Replace the example address
+with a tenant that is not in the cleanup plan.
 
 ---
 

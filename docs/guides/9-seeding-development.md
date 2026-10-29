@@ -246,7 +246,9 @@ DEMO_ACCOUNT_PASSWORD='<password>' SEED_CONFIRM=seed-demo-tenant \
   npm run seed:demo-tenant -- --database=inventoryai_dev_db
 ```
 
-- The database must be **named** and must equal the resolved one; the test database is refused.
+- The database must be **named** and must equal the resolved one; the test database is refused. If
+  `MONGODB_URI` names a database, it must name the same one — a URI ending in
+  `inventoryai_prod_db` beside a resolved `inventoryai_dev_db` is refused before connecting.
 - **One phrase**, `SEED_CONFIRM=seed-demo-tenant` — there is no `SEED_DB_CONFIRM` for this tool.
 - It may also run against production, because the database is named and matched.
 - Supplying `DEMO_ACCOUNT_PASSWORD` sets the password on every run; without it, an existing identity
@@ -338,16 +340,62 @@ real run is what creates or refreshes the login. Neither needs the password to p
 npm run verify:demo -- --email=you@example.com --database=inventoryai_dev_db
 ```
 
-It reads the database and checks counts, ledger arithmetic (`newQuantity = previous ± quantity`) and
-referential integrity (inventory → product/location, receipts → real movements). It writes nothing, so it
-needs no phrase. Exit codes are a contract:
+To verify several accounts in one read-only run, name each address and (optionally) the product count it
+should hold:
+
+```bash
+npm run verify:demo -- --database=inventoryai_dev_db \
+  --accounts="jefferndullamalinaozxc@gmail.com:1000,jefferndullamalinao@gmail.com:1000,jeffernmalinaoqwe@gmail.com:1000"
+```
+
+An entry is `address[:products][:codes=both|none|sku|barcode]`; `--expect-products=<n>` supplies the
+default for entries that omit a count, and `--expect-codes=<mode>` supplies the default mode for entries
+that omit `:codes=`. `--email` and `--accounts` are alternatives — naming both is a usage error (exit
+**2**). The run prints one block per account and exits **0** only when every account verified; **1** when
+any account has a violation, is empty, holds a different product count from the one named, or does not
+carry the expected code mode; **2** when nothing failed but an account could not be read.
+
+To prove the SKU/barcode mode as well as the size, name it in the entry or with `--expect-codes=`:
+
+```bash
+npm run verify:demo -- --database=inventoryai_dev_db \
+  --accounts="jefferndullamalinaozxc@gmail.com:1000:codes=both"
+
+npm run verify:demo -- --database=inventoryai_dev_db \
+  --accounts="jefferndullamalinaozxc@gmail.com:1000" --expect-codes=both
+```
+
+The block prints the mode and the barcode values it read from the products:
+
+```text
+Codes    : 1,000 both, 0 SKU only, 0 barcode only, 0 neither — both (expected both)
+Barcodes : 1,000 present — 1,000 valid EAN-13, 0 invalid check digits, 0 duplicate values, 0 non-EAN-13
+```
+
+The four `Codes` counts are disjoint: `both`, SKU only, barcode only, and neither. A mode can be `both`,
+`sku`, `barcode`, `none`, `MIXED` or `empty`; `MIXED` is a tenant containing more than one combination.
+Only the four seed modes can be named as an expectation — `MIXED` and `empty` are observed results, not
+valid `--expect-codes` values. Without `--expect-codes` or `:codes=`, the line still prints but no mode can
+fail the run. `Codes` counts a non-empty `sku` or `barcode` string, so it proves presence, not validity.
+
+`Barcodes` checks the values behind those counts. A 13-digit value whose mod-10 check digit is correct or
+wrong is counted as `valid EAN-13` or `invalid check digit`; a value carried by more than one product is a
+`duplicate value`; every other string is `non-EAN-13`. A wrong check digit or a duplicate value **fails**
+the run (exit 1). A non-EAN-13 value is reported but does not fail on its own, because a manufacturer code
+need not be EAN-13. Immediately after a `none` seed the line reads `0 present`; the app's own barcode
+generation can add values later.
+
+It reads the database and checks counts, ledger arithmetic (`newQuantity = previous ± quantity`),
+referential integrity (inventory → product/location, receipts → real movements), the code coverage and
+the barcode values above. It writes nothing, so it needs no phrase. Exit codes are a contract:
 
 - **0** verified — the data is what the seeder claimed
-- **1** a violation was found, **or the tenant is empty** — an empty tenant cannot verify a seed
+- **1** a violation was found, a code-mode or product-count expectation did not match, **or the tenant is empty** — an empty tenant cannot verify a seed
 - **2** not verified — the database, account or business could not be read (not a data problem)
 
 Run it after every seed. It is the only thing that proves the rows, rather than the seeder's own count of
-its inserts. `verify:roles` is the equivalent for the role fixture.
+its inserts. For the three-account workflow, one `--accounts` run is the whole verification. `verify:roles`
+is the equivalent for the role fixture.
 
 ---
 

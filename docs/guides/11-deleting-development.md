@@ -107,8 +107,11 @@ CLEANUP_CONFIRM=cleanup-account-data CLEANUP_DB_CONFIRM=inventoryai_dev_db \
   requires that account to be its **OWNER** ([Guide 12](12-deleting-production.md)).
 - The preview counts per collection **and per account**, through the same plan the deletion executes.
 - A real run re-counts every tenant afterwards and prints `0 remaining`; anything left **fails** the run.
-- An address with no account in that database is reported as `nothing to delete` and skipped — that is an
-  answer rather than a failure, and the run still exits 0.
+- An address with no account in that database is **refused before any delete** — a named account must exist.
+- Add `--witness="<an account outside the plan>"` to either `cleanup:account` line for a read-only proof
+  that another tenant was untouched. The witness must exist and must not share a business with any account
+  being emptied; its data counts, login row, business row, role, status and Firebase linkage are compared
+  before and after, and any difference **fails** the run. It is never modified or deleted.
 - It never deletes a user row, a business row, a session or a Firebase identity.
 
 ---
@@ -176,7 +179,7 @@ reason.
 | After | Run | Expect |
 |---|---|---|
 | a tenant cleanup | the command again with `--dry-run` | every collection at 0, or `nothing to clean` |
-| a tenant cleanup | `npm run verify:demo -- --email=… --database=inventoryai_dev_db` | `FAILED — the tenant is empty` (exit 1) is the proof the data is gone; exit 2 if the rows are gone too |
+| a tenant cleanup | `npm run verify:demo -- --email=… --database=inventoryai_dev_db` (one tenant) or `--accounts="…"` (several) | `FAILED — the tenant is empty` (exit 1) is the proof the data is gone; exit 2 if the rows are gone too |
 | an accounts cleanup | `npm run check:accounts` | the accounts are still `READY`, with 0 documents a seed would reset |
 | a database wipe | `npm run seed -- … --dry-run` or a fresh seed | a clean target; the app shows an empty business |
 | firebase deletion | the same `--target=firebase` line with `--dry-run` | `no identity` for each address |
@@ -185,6 +188,13 @@ Cleanups prove themselves: each real run re-queries the same plan and prints `0 
 needs a phrase to check, because reading changes nothing. An empty tenant is not a verification pass:
 `verify:demo` exists to check a seeded dataset, so it reports that state as a failure (exit 1). Read it
 as the deletion's proof, not as a data defect.
+
+For the three-account workflow, one `--accounts` run reports every tenant as empty. That proves the tenants
+you name. To measure a tenant **outside** the plan, pass `--witness="<address>"`: the cleanup records that
+tenant's counts and account rows before the delete and compares them after it, failing the run on any
+difference. The witness is refused if it is in the plan or shares a business with a planned account. If you
+omit the flag, the equivalent manual check is to record `check:accounts` for the outside tenant before and
+after the delete; the `READY` line and the products/documents counts must be identical.
 
 ---
 

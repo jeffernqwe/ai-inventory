@@ -696,6 +696,60 @@ describe('the cleanup removes data and never an account', () => {
     for (const phrase of cleanupPhrases) assert.equal(seedPhrases.includes(phrase), false, phrase);
   });
 
+  it('refuses a named account that does not exist instead of skipping it', () => {
+    // A typo in --accounts used to print "no account — nothing to delete" and continue.
+    // With every address misspelled the command still exited SUCCESS — a destructive command
+    // that reports a clean run for an account it never found. A named account is a claim.
+    // The witness added a second `if (!user)` block earlier in the file, so anchor on the
+    // plan's own refusal message and walk back to its guard. The assertion still reads the
+    // account-plan branch, not the optional read-only control.
+    const miss = source.indexOf('has no MongoDB account in ${target.database}');
+    assert.notEqual(miss, -1, 'the cleanup no longer checks whether the account exists');
+    const start = source.lastIndexOf('if (!user) {', miss);
+    assert.notEqual(start, -1, 'the missing-account refusal is gone');
+    const block = source.slice(start, source.indexOf('const business =', start));
+    assert.match(block, /fail\(/, 'a missing account is not refused');
+    assert.match(block, /has no MongoDB account/);
+    assert.match(block, /Nothing was deleted/);
+    assert.equal(block.includes('continue;'), false, 'a missing account is still skipped');
+  });
+
+  it('the preview prints every collection count, including zero, under each tenant', async () => {
+    // A total is not a preview: an operator about to delete 13 332 documents needs to see
+    // where they are. The formatter keeps every key the teardown plan counted, even a zero,
+    // so a collection that is unexpectedly empty is visible rather than omitted.
+    const { formatCollectionCounts } = await import('../scripts/cleanup/lib.mjs');
+    assert.equal(
+      typeof formatCollectionCounts,
+      'function',
+      'the cleanup has no per-collection formatter',
+    );
+
+    const line = (name, count) => `  ${name.padEnd(24)} ${count}`;
+    assert.deepEqual(
+      formatCollectionCounts({ ai_messages: 0, products: 1000, inventory: 1502, audit_logs: 0 }),
+      [
+        line('ai_messages', '0'),
+        line('products', '1,000'),
+        line('inventory', '1,502'),
+        line('audit_logs', '0'),
+      ],
+      'the breakdown lost a collection, its order, or its thousands separator',
+    );
+
+    // The dry-run path prints it under each tenant line, before it reports a would-remove
+    // total. The real delete path deliberately keeps its existing output.
+    const preview = source.slice(
+      source.indexOf('for (const entry of prepared) {'),
+      source.indexOf('  if (witness) {'),
+    );
+    assert.match(
+      preview,
+      /if \(dryRun\) \{[\s\S]*formatCollectionCounts\(entry\.counts\)/,
+      'the dry run does not print the per-collection breakdown',
+    );
+  });
+
   it('it empties tenant data through the shared teardown, and counts with its other half', () => {
     assert.match(source, /assertScopedCleanupTarget\(/);
     assert.match(source, /clearTenantData\(\[entry\.businessId\]\)/);

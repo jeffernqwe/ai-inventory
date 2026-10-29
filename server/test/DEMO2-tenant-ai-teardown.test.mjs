@@ -23,13 +23,21 @@ import { dbSuite } from './testEnv.mjs';
 import { ensureDb, disconnectDb } from './helpers.mjs';
 import AuditLog from '../src/models/auditLog.model.ts';
 import Business from '../src/models/business.model.ts';
+import Category from '../src/models/category.model.ts';
+import Inventory from '../src/models/inventory.model.ts';
+import InventoryTransaction from '../src/models/inventoryTransaction.model.ts';
+import Invitation from '../src/models/invitation.model.ts';
+import Location from '../src/models/location.model.ts';
 import PasswordResetChallenge from '../src/models/passwordResetChallenge.model.ts';
 import PasswordResetToken from '../src/models/passwordResetToken.model.ts';
 import Product from '../src/models/product.model.ts';
+import PurchaseOrder from '../src/models/purchaseOrder.model.ts';
 import Session from '../src/models/session.model.ts';
+import Supplier from '../src/models/supplier.model.ts';
 import User from '../src/models/user.model.ts';
 import AIConversation from '../src/models/aiConversation.model.ts';
 import AIMessage from '../src/models/aiMessage.model.ts';
+import { formatCollectionCounts } from '../scripts/cleanup/lib.mjs';
 import {
   clearTenantData,
   countTenantDataRemoval,
@@ -48,6 +56,111 @@ const TARGET_EMAIL = 'demo2-target@example.invalid';
 const KEEPER_EMAIL = 'demo2-keeper@example.invalid';
 const TARGET_NAME = 'DEMO2 Teardown Target';
 const KEEPER_NAME = 'DEMO2 Teardown Keeper';
+
+/**
+ * Seed one row set in EVERY collection the data-only cleanup plan measures, with a
+ * DISTINCT count per collection.
+ *
+ * Distinct counts are the point. With equal counts, a preview that paired a count with
+ * the wrong collection would still add up to the same total, so the test could not fail
+ * for the defect it exists to catch.
+ */
+async function seedEveryCleanupCollection(businessId, userId) {
+  const locations = await Location.insertMany(
+    Array.from({ length: 9 }, (_, i) => ({ businessId, name: `PREVIEW location ${i}` })),
+  );
+  const suppliers = await Supplier.insertMany(
+    Array.from({ length: 10 }, (_, i) => ({ businessId, name: `PREVIEW supplier ${i}` })),
+  );
+  await Category.insertMany(
+    Array.from({ length: 8 }, (_, i) => ({ businessId, name: `PREVIEW category ${i}` })),
+  );
+  const products = await Product.insertMany(
+    Array.from({ length: 4 }, (_, i) => ({ businessId, name: `PREVIEW product ${i}` })),
+  );
+
+  await Inventory.insertMany(
+    Array.from({ length: 5 }, (_, i) => ({
+      businessId,
+      productId: products[i % products.length]._id,
+      locationId: locations[i]._id,
+      quantity: 10 + i,
+    })),
+  );
+  await InventoryTransaction.insertMany(
+    Array.from({ length: 2 }, (_, i) => ({
+      businessId,
+      productId: products[i]._id,
+      locationId: locations[i]._id,
+      type: 'STOCK_IN',
+      quantity: 5,
+      previousQuantity: 0,
+      newQuantity: 5,
+      userId,
+    })),
+  );
+  await PurchaseOrder.insertMany(
+    Array.from({ length: 6 }, (_, i) => ({
+      businessId,
+      number: `PREVIEW-${i + 1}`,
+      supplierId: suppliers[0]._id,
+      locationId: locations[0]._id,
+      status: 'DRAFT',
+    })),
+  );
+
+  const conversations = await AIConversation.insertMany(
+    Array.from({ length: 3 }, (_, i) => ({ businessId, userId, title: `PREVIEW conversation ${i}` })),
+  );
+  await AIMessage.insertMany(
+    Array.from({ length: 7 }, (_, i) => ({
+      conversationId: conversations[i % conversations.length]._id,
+      role: i % 2 === 0 ? 'USER' : 'ASSISTANT',
+      content: `PREVIEW message ${i}`,
+    })),
+  );
+  await AuditLog.insertMany(
+    Array.from({ length: 11 }, (_, i) => ({
+      businessId,
+      action: 'PRODUCT_CREATED',
+      entityType: 'PRODUCT',
+      entityId: String(products[i % products.length]._id),
+    })),
+  );
+  await Invitation.create({
+    businessId,
+    email: 'preview-invitee@example.invalid',
+    role: 'STAFF',
+    tokenHash: `preview-invitation-${String(businessId)}`,
+    invitedBy: userId,
+    expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+  });
+
+  return {
+    ai_messages: 7,
+    ai_conversations: 3,
+    inventory: 5,
+    inventory_transactions: 2,
+    purchase_orders: 6,
+    products: 4,
+    categories: 8,
+    locations: 9,
+    suppliers: 10,
+    audit_logs: 11,
+    invitations: 1,
+  };
+}
+
+/** Read the preview exactly as an operator reads it: one name/count line per collection. */
+function parsePreview(lines) {
+  const counts = {};
+  for (const line of lines) {
+    const match = /^ {2}([a-z_]+)\s+([\d,]+)$/.exec(line);
+    assert.ok(match, `not a collection/count line: ${JSON.stringify(line)}`);
+    counts[match[1]] = Number(match[2].replaceAll(',', ''));
+  }
+  return counts;
+}
 
 async function seedTenant(businessId, userId, productName) {
   const conversation = await AIConversation.create({ businessId, userId, title: `conv ${productName}` });
@@ -118,6 +231,13 @@ async function resetDemo2() {
     Business.deleteMany({ _id: { $in: businessIds } }),
     Product.deleteMany({ businessId: { $in: businessIds } }),
     AuditLog.deleteMany({ businessId: { $in: businessIds } }),
+    Category.deleteMany({ businessId: { $in: businessIds } }),
+    Inventory.deleteMany({ businessId: { $in: businessIds } }),
+    InventoryTransaction.deleteMany({ businessId: { $in: businessIds } }),
+    Invitation.deleteMany({ businessId: { $in: businessIds } }),
+    Location.deleteMany({ businessId: { $in: businessIds } }),
+    PurchaseOrder.deleteMany({ businessId: { $in: businessIds } }),
+    Supplier.deleteMany({ businessId: { $in: businessIds } }),
     AIMessage.deleteMany({ conversationId: { $in: conversations.map((c) => c._id) } }),
     AIConversation.deleteMany({ businessId: { $in: businessIds } }),
   ]);
@@ -240,6 +360,58 @@ dbSuite('DEMO-2 a tenant teardown takes everything the tenant owns', dbOk, () =>
     const removal = await clearTenantData([targetBusiness]);
     assert.deepEqual(preview.counts, removal.counts);
     assert.equal(preview.total, removal.removed);
+    assert.equal((await countTenantDataRemoval([targetBusiness])).total, 0);
+  });
+
+  it('★ the cleanup preview prints exactly the counts the delete run returns', async () => {
+    await seedAccount(targetBusiness, targetUser, TARGET_EMAIL, TARGET_NAME);
+    const expected = await seedEveryCleanupCollection(targetBusiness, targetUser);
+
+    // Keep the fixture able to catch a swap: two collections sharing a count would
+    // make that pair interchangeable without changing any total.
+    assert.equal(
+      new Set(Object.values(expected)).size,
+      Object.keys(expected).length,
+      'the fixture counts are no longer distinct, so a swapped pair could pass',
+    );
+
+    // What `cleanup:account --dry-run` prints. The unit suite pins the CLI to this
+    // formatter and the data-only counter; this suite pins the numbers themselves.
+    const preview = await countTenantDataRemoval([targetBusiness]);
+    const printed = parsePreview(formatCollectionCounts(preview.counts));
+
+    assert.deepEqual(preview.counts, expected, 'the preview counted a different fixture from the one seeded');
+    assert.deepEqual(printed, expected, 'the printed breakdown lost or swapped a collection');
+    assert.equal(
+      preview.total,
+      Object.values(expected).reduce((sum, count) => sum + count, 0),
+      'the preview total is not the sum of its printed counts',
+    );
+
+    // A preview that already deleted something would make the comparison below pass
+    // against a tenant it emptied before the delete run ever started.
+    assert.equal(await Product.countDocuments({ businessId: targetBusiness }), expected.products);
+    assert.equal(
+      await AIConversation.countDocuments({ businessId: targetBusiness }),
+      expected.ai_conversations,
+    );
+
+    const removal = await clearTenantData([targetBusiness]);
+
+    // The delete returns its OWN counts, measured as rows are removed. The preview was
+    // printed before that happened, from a separate read.
+    assert.deepEqual(removal.counts, expected, 'the delete run removed a different fixture');
+    assert.deepEqual(printed, removal.counts, 'the preview printed different counts from the delete run');
+    assert.deepEqual(
+      Object.keys(printed),
+      Object.keys(removal.counts),
+      'the preview omitted or invented a collection the delete run counted',
+    );
+    assert.equal(preview.total, removal.removed, 'the preview total and the removed total disagree');
+
+    // The account rows are outside this plan: cleanup:account empties the tenant, not the login.
+    assert.equal(await Business.countDocuments({ _id: targetBusiness }), 1);
+    assert.equal(await User.countDocuments({ _id: targetUser }), 1);
     assert.equal((await countTenantDataRemoval([targetBusiness])).total, 0);
   });
 

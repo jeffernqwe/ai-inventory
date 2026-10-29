@@ -7,6 +7,9 @@ Firebase logins are [Guide 13](13-firebase-identities.md); the accounts are [Gui
 The commands are the same as development. Three things differ: **the phrases**, **the environment** and
 **what is refused**.
 
+[Guide 14](14-command-runbook.md) is the single sheet of complete development and production
+invocations; this guide explains the production rules behind them.
+
 Run everything from `server/`.
 
 ---
@@ -339,15 +342,67 @@ NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
     --database=inventoryai_prod_db
 ```
 
-Use the address you actually seeded; the one above is the first of the three accounts.
+Use the address you actually seeded; the one above is the first of the three accounts. To read all three
+in one command — the production workflow this guide is written for — name the addresses and the size each
+should hold:
 
-Reads counts, ledger arithmetic and referential integrity; writes nothing, needs no phrase. Exit **0**
-verified, **1** a violation **or an empty tenant** (an empty tenant cannot verify a seeded dataset),
-**2** could not read (a missing account or business, or the database — not a data problem). Measured
+```bash
+NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
+  npm run verify:demo -- --database=inventoryai_prod_db \
+  --accounts="jefferndullamalinaozxc@gmail.com:1000,jefferndullamalinao@gmail.com:1000,jeffernmalinaoqwe@gmail.com:1000"
+```
+
+An entry is `address[:products][:codes=both|none|sku|barcode]`; `--expect-products=<n>` supplies the
+default for an entry that omits a count, and `--expect-codes=<mode>` supplies the default for an entry
+that omits `:codes=`. An entry's own value wins. Naming both `--email` and `--accounts` exits **2**.
+Expect `SUCCESS — 3 account(s) verified` and exit **0**; each account's block names its products,
+documents, code coverage and ledger rows, with `0 bad` and `0 missing references`.
+
+To prove the SKU/barcode mode the seed was asked for, add it to the verification. The A1.1 command above
+uses the seeder's default, `none`, so its verification names `none`; a `codes=both` seed is verified with
+`both`:
+
+```bash
+NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
+  npm run verify:demo -- --database=inventoryai_prod_db \
+  --accounts="jefferndullamalinaozxc@gmail.com:1000:codes=none"
+
+NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
+  npm run verify:demo -- --database=inventoryai_prod_db \
+  --accounts="jefferndullamalinaozxc@gmail.com:1000:codes=both"
+```
+
+Each block carries lines such as:
+
+```text
+Codes    : 0 both, 0 SKU only, 0 barcode only, 1,000 neither — none (expected none)
+Barcodes : 0 present — 0 valid EAN-13, 0 invalid check digits, 0 duplicate values, 0 non-EAN-13
+```
+
+The four `Codes` counts are disjoint. A mode can be `both`, `sku`, `barcode`, `none`, `MIXED` or `empty`;
+only the four seed modes can be named as an expectation — `MIXED` and `empty` are observed results, not
+valid `--expect-codes` values. A mismatch exits **1** and names the expected mode and the counts. Without
+`--expect-codes` or `:codes=`, the line still prints but no mode is asserted. `Codes` counts a non-empty
+`sku` or `barcode` string, so it proves presence, not validity.
+
+`Barcodes` checks the values: a 13-digit value with a correct or wrong mod-10 check digit is counted as
+`valid EAN-13` or `invalid check digit`, a value shared by two products is a `duplicate value`, and every
+other string is `non-EAN-13`. A wrong check digit or a duplicate **fails** the run (exit 1). A non-EAN-13
+manufacturer code is reported but does not fail on its own. Immediately after a `none` seed the line reads
+`0 present`; the app's own generation can add values later. The line is read from every product's stored
+barcode, so it also audits a tenant that was edited after seeding.
+
+Reads counts, ledger arithmetic, referential integrity and code coverage; writes nothing, needs no
+phrase. Exit **0** verified, **1** a violation, a code-mode or product-count mismatch, **or an empty
+tenant** (an empty tenant cannot verify a seeded dataset), **2** could not read (a missing account or
+business, or the database — not a data problem). Measured
 2026-10-29 on the current tenants: all three returned **SUCCESS**, with **0** bad ledger rows and **0**
 missing references; stock health was 781 low / 320 out, 1 535 / 612 and 2 315 / 929. The earlier
 30 000 / 50 000 / 90 000 run measured 4 656 / 1 892, 7 623 / 3 030 and 13 683 / 5 481 — the PRNG seed
-doing what it promises across two environments and two sizes.
+doing what it promises across two environments and two sizes. On 2026-10-30 the same three accounts were
+re-read with `--expect-codes=none`: each printed `Codes    : 0 both, 0 SKU only, 0 barcode only, 1,000
+neither — none (expected none)` and the run exited **0**. The first account with `--expect-codes=both`
+exited **1** and named `none, expected both` with the same four counts.
 
 The role fixture has its own check. It writes no products, inventory or lasting users, but it is not
 phrase-free: it mints four sessions and removes them, so it requires `SEED_CONFIRM=seed-roles`; its
@@ -373,13 +428,14 @@ the shape it must have.
 
 ## Room on the cluster
 
-The cluster is Atlas M0: **512 MB of data plus indexes**, shared by development and production. Measured
-2026-10-29, `inventoryai_prod_db` reports **32.0 MB of document data (16.0 MB stored) and 59.0 MB of
-indexes** — **91.0 MB of the 512 MB** by `dbStats`, with the current 5 000 / 10 000 / 15 000
-tenants. At the preset's 30 000 / 50 000 / 90 000 sizes the same three tenants measured **379.9 MB** on
-2026-10-27, so a full development copy of those full-size datasets (~338 MB) alongside a full
-production copy still does not fit; an M0 that runs out of storage does **not** degrade, it **blocks
-writes** (the 2026-10-18 incident).
+The cluster is Atlas M0: **512 MB of data plus indexes**, shared by development and production. The
+current production run is **1 000 products / 4 444 documents per tenant — 13 332 documents in total**.
+At the 5 000 / 10 000 / 15 000 sizes measured on 2026-10-29, `inventoryai_prod_db` reported **32.0 MB of
+document data (16.0 MB stored) and 59.0 MB of indexes** — **91.0 MB of the 512 MB** by `dbStats`; the
+ceiling is reached by size, not by account count. At the preset's 30 000 / 50 000 / 90 000 sizes the same
+three tenants measured **379.9 MB** on 2026-10-27, so a full development copy of those full-size datasets
+(~338 MB) alongside a full production copy still does not fit; an M0 that runs out of storage does **not**
+degrade, it **blocks writes** (the 2026-10-18 incident).
 
 So: seed the environment you are working in at full size, and keep the other small; or empty one first
 ([Guide 12](12-deleting-production.md)). A delete frees documents but **not** the space their indexes were

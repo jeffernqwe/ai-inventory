@@ -57,7 +57,7 @@ every command must name its database. The rule in full: [Guide 9](9-seeding-deve
 |---|---|---|
 | **Your own address** | `seed --plan=demo` | one tenant sized by `--total` (default 80 000 documents) |
 | **A throwaway tester** (`tester-1@example.com`, …) | `seed --plan=demo` with a new address | its own separate tenant; a fresh address per tester |
-| **Three comparison accounts** | `npm run seed:three` (development) / `seed:accounts` (production) | development: the preset's 30 000 / 50 000 / 90 000 products (≈133 000 / 222 000 / 400 000 documents); production: the sizes you name per run — the tenants held 5 000 / 10 000 / 15 000 (≈22 222 / 44 444 / 66 667) on 2026-10-29 |
+| **Three comparison accounts** | `npm run seed:three` (development) / `seed:accounts` (production) | development: the preset's 30 000 / 50 000 / 90 000 products (≈133 000 / 222 000 / 400 000 documents); production: the sizes you name per run — the current run holds 1 000 products (≈4 444 documents) for each, 13 332 documents in total |
 | **`demo-preview@example.invalid`** | `seed:demo-tenant` | the small fixed-figure demo tenant (6 products, 112 units) |
 | **`role-owner@…` / `role-admin@…` / `role-manager@…` / `role-staff@…`** | `seed:roles` | one tenant, one working login per role, ~900 documents |
 | **`perf-seed-ai@example.invalid`** | `seed:perf-tenant` | a large measurement tenant you can sign into |
@@ -83,9 +83,9 @@ role, no editing an ADMIN or the OWNER.
 | `jeffernmalinaoqwe@gmail.com` | 90 000 | 400 000 |
 
 That table is the preset `seed:three` writes **in development**. Production refuses the preset, so
-there the sizes are chosen per run and nothing checks them against this table — the tenants held
-5 000 / 10 000 / 15 000 on 2026-10-29. They exist to answer one question: does the assistant stay
-correct and fast as a catalogue grows? The walkthrough is in
+there the sizes are chosen per run and nothing checks them against this table — the current run holds
+1 000 products / 4 444 documents for each, 13 332 documents in total. They exist to answer one question:
+does the assistant stay correct and fast as a catalogue grows? The walkthrough is in
 [Guide 6](6-scripts-and-commands.md#comparing-the-assistant-across-tenants).
 The preset's addresses and sizes are defined once in `server/scripts/seed/lib.mjs`. Only `seed:three`
 uses the sizes; `check:accounts` (do they exist?) and `cleanup:three` (empty them, keeping the logins)

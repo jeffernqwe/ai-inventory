@@ -50,4 +50,21 @@ export function databaseNameInUri(uri) {
   }
 }
 
-export default { databaseNameInUri };
+/**
+ * The URI's database name when it DISAGREES with the resolved one, otherwise null.
+ *
+ * A URI that names no database is not evidence of anything: an Atlas connection string often
+ * omits the path and relies on `dbName`. Only a NAMED database can contradict the run.
+ *
+ * The comparison lives here, next to the parser, so every guard that needs it asks the same
+ * question. A guard that calls `databaseNameInUri` and forgets the `!==` is exactly the gap
+ * this function makes harder to leave.
+ */
+export function uriDatabaseMismatch(uri, resolvedDbName) {
+  const uriDatabase = databaseNameInUri(uri);
+  const resolved = String(resolvedDbName ?? '').trim();
+  if (!uriDatabase || !resolved || uriDatabase === resolved) return null;
+  return uriDatabase;
+}
+
+export default { databaseNameInUri, uriDatabaseMismatch };

@@ -8,7 +8,7 @@ of truth for *what actually happened*, and it is why this file is long.
 
 **How to read it.** Do not read it top to bottom. Either find a record by number (§27FJ, §27DM — the
 numbers are cited from `CLAUDE.md` and from source comments), or use the index: `CLAUDE.md` §7 lists
-all **198** records by the title each gives itself.
+all **203** records by the title each gives itself.
 
 **Current state:** V1 complete and in production testing. The records that answer *where are we now*
 are §27FM (the V1 re-verification), §27FK (the runtime boundary and the blocked build), §27FJ (the two
@@ -23204,6 +23204,217 @@ check was bypassed.
 
 **Not tested.** `seed:three` at its real sizes and any production write. The development database is back
 to its pre-pass state: no role fixture, its four identities deleted, and port 4000 released.
+
+---
+
+# 27GS. One verification command for the accounts workflow — and the expected size made checkable (2026-10-29)
+
+**What was asked for.** Simplify production inventory testing to five operations: check the accounts, seed,
+verify the seed, delete only that data, and verify the deletion. The audit found step three still needed
+`verify:demo` once per account, and none of those runs could assert the size the seed was asked for.
+
+**The change, and what it deliberately did not add.** `verify:demo` now accepts
+`--accounts="address[:products],…"`: one connection, one process, one exit code. `--email=` is unchanged
+for one account, and `--expect-products=` supplies a default for entries that omit a size. There is no new
+npm script and no second verifier; the existing command and its read-only target guard do the work.
+
+**One exit code for several accounts.** Every account is read before the verdict is chosen: **0** all
+verified, **1** at least one violation, empty tenant or expected-size mismatch, **2** none failed but at
+least one could not be checked. A database that cannot be reached is still **2**. Each account is resolved
+through its own `businessId`; duplicate addresses, a missing address and an entry with more than one size
+are refused before the connection.
+
+**Measured production, read-only.** The one-command form was run against the three tenants at the size
+A1.1 records:
+
+```text
+Database : inventoryai_prod_db (PRODUCTION)
+Accounts : 3
+... 1,000 products — expected 1,000 / 4,444 documents / 1,829 ledger rows, 0 bad, 0 negative
+    0 missing references / 166 low / 58 out of stock ...
+Result   : SUCCESS — 3 account(s) verified.        [exit 0]
+```
+
+No production row was created, changed or deleted; the three tenants still hold the 13 332-document
+dataset and no cleanup was run after the seed.
+
+**Guarded.** `DEMO1-demo-tenant.test.mjs` pins the account/size parser and its refusals.
+`command-runbook.test.mjs` now requires A1.1 to carry one `--accounts` block with three expected sizes and
+to omit `--email=`, and accepts either form in every `verify:demo` block. The source guards that require
+the address refusal before the connection, the quoted `process.argv[2]` test and the
+`tenantEmptinessProblem(counts)` call still pass.
+
+**Verified.** `node --test test/DEMO1-demo-tenant.test.mjs test/command-runbook.test.mjs
+test/script-environment-guards.test.mjs`: **89 tests, 89 pass, 0 fail**, exit 0. The full unit
+suite (`npm run test:unit`): **1 653 tests, 1 597 pass, 0 fail, 56 skipped**, exit 0. The refusal
+cases were also run: no address and `--accounts` combined with `--email` each exited **2** before a
+connection, and an expected **999** against a 1 000-product tenant exited **1** naming both numbers.
+
+**Remaining, deliberately.** The post-delete isolation proof still covers the named tenants and their
+logins, not an unrelated witness tenant (P1); the A3.1 production execute at 13 332 documents has not been
+run (P2). No script was deleted and no production data was changed.
+
+---
+
+# 27GT. The unrelated-tenant witness for `cleanup:account` (2026-10-29)
+
+**What was open.** §27GS recorded P1: the post-delete isolation proof covered the named tenants and their
+logins, but not a tenant outside the plan. `cleanup:account` scopes every delete by the `businessId`
+resolved from each named account, so the isolation was structural — and nothing read a different tenant to
+show it.
+
+**The change.** `cleanup:account` now accepts an optional `--witness="<address>"`. It is read-only: the
+witness is resolved from its own user row, and the command captures the data-only teardown counts plus the
+login row (id, email, business id, role, status, Firebase linkage) and the business row (name, status)
+before the first `clearTenantData`. After the deletes — or after a dry run's `Would remove` block — it
+repeats those reads and fails on any difference. The Firebase UID is compared but never printed. A witness
+with no account, no tenant, an `address:businessId` value, or a tenant already in the plan (same address or
+same business) is refused before anything is deleted. The witness never enters the deletion plan.
+
+**Where the code is.** `server/scripts/cleanup/witness.mjs` holds the pure parser, scope rule and snapshot
+comparison; `cleanup-accounts.mjs` holds the DB reads and the two calls, so every rule is assertable without
+a connection.
+
+**Guarded.** `server/test/cleanup-witness.test.mjs` has 13 DB-free tests: optional parsing and
+normalisation, the address-only refusal, in-plan and same-business refusals, the no-tenant refusal, the
+exact snapshot shape, changed count/login/business/Firebase-linkage failures, the UID never appearing in a
+failure, and source wiring that resolves the witness before the first delete, re-checks it before
+`SUCCESS`, and never passes it to `clearTenantData`.
+
+**Measured.** `node --test test/cleanup-witness.test.mjs`: **13 tests, 13 pass, 0 fail**, exit 0.
+`node --test test/cleanup-witness.test.mjs test/data-guide-commands.test.mjs test/command-runbook.test.mjs
+test/cleanup-target-guard.test.mjs`: **98 pass, 0 fail**, exit 0. `npm run test:unit`: **1,673 tests,
+1,617 pass, 0 fail, 56 skipped**, exit 0. `npm run lint`: **0**. A read-only development dry run with one
+planned account and a witness in another business printed `Witness  : … — 4,444 documents (outside the
+plan, read-only)` and `Witness  : unchanged — …`, then `DRY RUN SUCCESS`; no document was deleted, and no
+production command or destructive run was made.
+
+**Two integration points.** The unit runner refused the new file as unclassified (exit 2) until it was
+registered in the pure-unit group. The older missing-account guard in `accounts-workflow.test.mjs` now
+anchors on the plan's own refusal message, because the witness introduced a second `if (!user)` block
+earlier in the file; the assertion still reads the account-plan branch, not the read-only control.
+
+**Documented, and a stale sentence corrected.** Guides 11, 12 and 14 describe the flag and when the
+three-account plan needs a fourth account (or a subset) to have a witness. Guides 11 and 12 also said a
+named address with no MongoDB row was skipped with `nothing to delete` and exit 0; the script refuses it
+before any delete, so that sentence is now correct. The manual `check:accounts` before/after comparison
+remains documented as the fallback when the flag is omitted.
+
+**What remains unmeasured.** The real delete path's post-run witness comparison has unit coverage and the
+dry-run path has a live read-only run, but no destructive run used a witness. §27GS's P2 — the A3.1
+production execute at 13 332 documents — is still open. No production data was changed and nothing was
+committed or pushed.
+
+---
+
+# 27GU. The seed's SKU/barcode mode becomes verifiable — from the products, not the plan (2026-10-30)
+
+**What was open.** The one-account production workflow asked for the seeded SKU/barcode setting to be
+verified, but `verify:demo` read only counts, ledger arithmetic and references. The seed printed the mode
+it intended, and the seeder's own read-back counted documents, not fields; neither was evidence that the
+products actually carried the requested codes. A plan could say `both` while every product was `none`.
+
+**The change.** `verify:demo` now accepts `--expect-codes=both|none|sku|barcode`, and an `--accounts`
+entry may state its own `codes=` mode. The run always prints the four disjoint counts it read from the
+products — both, SKU only, barcode only, neither — plus the observed mode (`both`, `sku`, `barcode`,
+`none`, `MIXED` or `empty`). An explicitly named mode that does not match fails the account with exit
+**1** and names the expected mode and all four counts; a malformed or valueless flag is refused with exit
+**2** before the database is opened. Without an expectation the line is informational only, so existing
+callers keep their previous pass/fail contract.
+
+**Read-only by construction.** The new `scripts/demo/codeCoverage.mjs` exports one function built from
+four `Product.countDocuments` calls, filtered by the account's own resolved `businessId`. It has no write
+call. The product counts mean a non-empty `sku`/`barcode` string; the check does **not** validate EAN-13
+check digits or uniqueness.
+
+**Guarded.** `DEMO1-demo-tenant.test.mjs` pins the parser (run-wide default, per-entry override, duplicate
+or malformed fields, bare flag), the classifier (all four modes, `MIXED`, `empty`, impossible counts), the
+exact `Codes` line and the mismatch sentence, plus the source order (mode parsed before connecting) and
+the read-only coverage module. A new DB suite, `DEMO3-code-coverage.test.mjs`, inserts products in every
+combination and proves the counts against real MongoDB; it is registered in the runner's `PURE_DB` list.
+
+**Measured.** `node --test test/DEMO1-demo-tenant.test.mjs`: **24 pass, 0 fail**. `TEST_MODE=db node
+--test test/DEMO3-code-coverage.test.mjs`: **3 pass, 0 fail** against `inventoryai_test_db`.
+`TEST_MODE=unit node --test test/DEMO1-demo-tenant.test.mjs test/command-runbook.test.mjs
+test/data-guide-commands.test.mjs test/script-environment-guards.test.mjs`: **109 pass, 0 fail**. The full
+`npm run test:unit`: **1 677 tests, 1 621 pass, 0 fail, 56 skipped**, exit 0. `npm run lint`: **0**;
+`npm run typecheck`: **0**.
+
+**Production, read-only.** All three accounts read `Codes : 0 both, 0 SKU only, 0 barcode only,
+1 000 neither — none`; the three-account run with `--expect-codes=none` exited **0**. The first account
+with `--expect-codes=both` exited **1** with `code coverage is none, expected both — 1 000 products:
+0 both, 0 SKU only, 0 barcode only, 1 000 neither`; the bare flag exited **2** before reading. No
+production document was created, changed or deleted, so no production tenant currently carries a
+non-`none` mode to measure; the four non-empty modes are covered by the DB suite against the test
+database, not by production data.
+
+**Documented.** Guides 6, 9, 10 and 14 describe the flag, the per-entry form, the `Codes` line, the
+exit-code change and the fact that coverage is not format validation. No seed or cleanup command was
+changed, and nothing was committed or pushed.
+
+---
+
+# 27GV. The empty-tenant CLI verdict becomes an executed test (2026-10-30)
+
+**What was open.** §27GU tested the coverage reader against real products and exercised the CLI's
+mismatch path, but the `empty` branch was only asserted through the helper and a source scan. A change
+that moved the coverage line after the empty-tenant return — or removed it from that path — could have
+left the helper tests green while the command an operator runs printed no `Codes` line at all.
+
+**The change.** `DEMO4-verify-cli.test.mjs` creates one disposable `Business` and one `User` in the test
+database, with no categories, locations, suppliers, products, inventory, movements or purchase orders.
+It then runs the real `scripts/verify-demo-data.mjs` as a child process and pins the exact
+`Codes    : 0 both, 0 SKU only, 0 barcode only, 0 neither — empty` line, the
+`the tenant is empty — it holds no seeded documents` failure, exit **1**, and the fact that the fixture
+business and user still exist afterwards. The file is registered in the runner's `PURE_DB` list.
+
+**Measured.** `TEST_MODE=db node --test test/DEMO4-verify-cli.test.mjs`: **1 pass, 0 fail**. The same
+file with `TEST_MODE=unit`: **1 skipped**, with the DB-backed reason. `npm run lint`: exit **0**.
+
+**Documented.** No command or guide changed; this record pins the behavior §27GU documented. Nothing
+was committed or pushed.
+
+---
+
+# 27GW. The barcode report checks the value, not just the field (2026-10-30)
+
+**The gap.** `verify:demo` read four counts — total, SKU, barcode, both — so it could prove a product
+*had* a barcode and nothing about the value. Two products could share one code, or a thirteen-digit
+value could carry a wrong mod-10 check digit, and the report would still print `Codes … both`. The
+seeder allocates valid, unique EAN-13 values, but the verifier's job is to disbelieve the seeder: a
+partial write, an edited tenant, a missing index or a legacy row can all produce a value the count cannot
+see.
+
+**The change.** `scripts/demo/codeCoverage.mjs` now projects each product's `barcode` in the same
+read-only batch (`Product.find(filter).select('barcode').lean()`), and returns the non-empty strings.
+`classifyBarcodeHealth` in `scripts/demo/verify.mjs` classifies every value into four mutually exclusive
+buckets — a 13-digit value with a correct or wrong check digit, and every other string as non-EAN-13 —
+and counts duplicate values with the number of extra rows that share them. `formatBarcodeHealth` prints
+one line beside `Codes`; `barcodeHealthProblem` turns an invalid check digit or a duplicate into the
+failure sentence. Non-EAN-13 values are reported but do not fail, because a manufacturer code need not
+be EAN-13. `scripts/verify-demo-data.mjs` prints the line on every account, including an empty tenant,
+and adds the failure to the existing exit-1 path. It is still read-only: no write call was added.
+
+**Guarded.** `DEMO1-demo-tenant.test.mjs` asserts all six counters, the exact line with singular and
+plural labels, the joined failure sentence, the empty line, and that a valid EAN-13 or a non-EAN-13 value
+alone is not a failure. `DEMO3-code-coverage.test.mjs` writes one valid and one wrong-check-digit product
+and reads them through the real counter, and writes a non-EAN-13 value to prove it is counted without
+being failed. `DEMO4-verify-cli.test.mjs` runs the actual command against a disposable two-product tenant
+and pins `Barcodes : 2 present — 1 valid EAN-13, 1 invalid check digit, 0 duplicate values, 0 non-EAN-13`,
+the failure reason and exit **1**. Duplicate detection is asserted on the pure classifier rather than on
+real rows: the model's partial unique `(businessId, barcode)` index makes a duplicate impossible while
+the suite has created the indexes, and dropping it would break every DB suite sharing the collection.
+The verifier keeps the duplicate check as a defensive read for a legacy tenant or a missing index.
+
+**Measured.** `TEST_MODE=unit node --test test/DEMO1-demo-tenant.test.mjs`: **25 pass, 0 fail**.
+`TEST_MODE=db node --test test/DEMO3-code-coverage.test.mjs`: **5 pass, 0 fail**. `TEST_MODE=db node
+--test test/DEMO4-verify-cli.test.mjs`: **2 pass, 0 fail**. The documentation suites: **49 pass, 0 fail**.
+`npm run lint`: exit **0**.
+
+**Documented.** Guides 9, 10 and 14 now describe the `Barcodes` line, its four counters, which conditions
+fail the run and which are reported only. Guide 14 records the new line as covered by the three suites
+but **not yet observed against production data**; the production `Codes` evidence it already carried is
+unchanged. Nothing was committed or pushed.
 
 ---
 

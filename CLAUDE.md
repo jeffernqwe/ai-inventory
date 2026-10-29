@@ -527,6 +527,11 @@ anchor (`§27…`) in that file.
 - **§27GP** — The seeding documentation measured against the scripts — six stale statements (2026-10-29)
 - **§27GQ** — A typed tenant id is a claim, and it is checked in every environment (2026-10-29)
 - **§27GR** — The seeding commands run against a database — four code modes, 1 000 products, and a corrupted tenant caught (2026-10-29)
+- **§27GS** — One verification command for the accounts workflow — and the expected size made checkable (2026-10-29)
+- **§27GT** — The unrelated-tenant witness for `cleanup:account` (2026-10-29)
+- **§27GU** — The seed's SKU/barcode mode becomes verifiable — from the products, not the plan (2026-10-30)
+- **§27GV** — The empty-tenant CLI verdict becomes an executed test (2026-10-30)
+- **§27GW** — The barcode report checks the value, not just the field (2026-10-30)
 
 ---
 

@@ -32,7 +32,19 @@ import {
   isProductionDatabase,
   planSeed,
 } from '../scripts/demo/lib.mjs';
-import { ledgerViolations, tenantEmptinessProblem } from '../scripts/demo/verify.mjs';
+import {
+  barcodeHealthProblem,
+  classifyBarcodeHealth,
+  classifyCodeCoverage,
+  codeCoverageProblem,
+  formatBarcodeHealth,
+  formatCodeCoverage,
+  ledgerViolations,
+  parseExpectedCodeMode,
+  parseExpectedProducts,
+  parseVerificationAccounts,
+  tenantEmptinessProblem,
+} from '../scripts/demo/verify.mjs';
 import { isEmailAddress, normaliseBusinessId } from '../scripts/seed/lib.mjs';
 
 const SEED = {
@@ -166,6 +178,36 @@ test('DEMO-1 the named database must equal the one the run actually resolved', (
   );
 });
 
+test('DEMO-1 a MONGODB_URI naming a different database is refused', () => {
+  // Regression: `--database` and the resolved name could agree while the URI's path
+  // named another database. The connection obeys the resolved name, so the seed would
+  // have written to the correct database from a shell configured for the wrong one.
+  assert.throws(
+    () =>
+      assertDemoTarget({
+        ...SEED,
+        mongodbUri: `mongodb://example.invalid/${DATABASE_NAMES.development}`,
+      }),
+    (err) =>
+      err instanceof DemoTenantError &&
+      /MONGODB_URI names the database "inventoryai_dev_db"/.test(err.message) &&
+      /resolved "inventoryai_prod_db"/.test(err.message),
+  );
+
+  // Control: the same URI shape naming the target itself is accepted, so the refusal
+  // is about disagreement and not about having a path at all.
+  assert.equal(
+    assertDemoTarget({
+      ...SEED,
+      mongodbUri: `mongodb://example.invalid/${DATABASE_NAMES.production}`,
+    }),
+    DATABASE_NAMES.production,
+  );
+
+  // A URI with no path names no database; the resolved name continues to govern.
+  assert.equal(assertDemoTarget(SEED), DATABASE_NAMES.production);
+});
+
 test('DEMO-1 no confirmation phrase means no write, and the phrases differ per command', () => {
   assert.throws(
     () => assertDemoTarget({ ...SEED, confirm: '' }),
@@ -230,6 +272,133 @@ test('DEMO-1 every movement type, and a negative quantity, is counted where it b
   assert.equal(badTotal, 2);
 });
 
+test('DEMO-1 verification parses one list of accounts and their expected product counts', () => {
+  assert.equal(parseExpectedProducts(undefined), null);
+  assert.equal(parseExpectedProducts('1000'), 1000);
+  assert.throws(() => parseExpectedProducts('0'), /greater than 0/);
+  assert.throws(() => parseExpectedProducts('1 000'), /whole number/);
+
+  assert.deepEqual(parseVerificationAccounts('a@x.com:1000, b@y.com', 500), [
+    { email: 'a@x.com', expectedProducts: 1000, expectedCodes: null },
+    { email: 'b@y.com', expectedProducts: 500, expectedCodes: null },
+  ]);
+  assert.deepEqual(parseVerificationAccounts('a@x.com'), [
+    { email: 'a@x.com', expectedProducts: null, expectedCodes: null },
+  ]);
+  assert.throws(() => parseVerificationAccounts(''), /names no addresses/);
+  assert.throws(() => parseVerificationAccounts('a@x.com:'), /whole number/);
+  assert.throws(() => parseVerificationAccounts('a@x.com:1000:extra'), /address\[:products\]/);
+});
+
+test('DEMO-1 verification parses expected code modes run-wide and per account', () => {
+  assert.equal(parseExpectedCodeMode(undefined), null);
+  assert.equal(parseExpectedCodeMode(' BOTH '), 'both');
+  assert.equal(parseExpectedCodeMode('barcode'), 'barcode');
+  assert.throws(() => parseExpectedCodeMode(''), /both, none, sku or barcode/);
+  assert.throws(() => parseExpectedCodeMode('both,sku'), /both, none, sku or barcode/);
+
+  assert.deepEqual(
+    parseVerificationAccounts('a@x.com:1000:codes=both, b@y.com:codes=sku', 500, 'none'),
+    [
+      { email: 'a@x.com', expectedProducts: 1000, expectedCodes: 'both' },
+      { email: 'b@y.com', expectedProducts: 500, expectedCodes: 'sku' },
+    ],
+  );
+  assert.deepEqual(parseVerificationAccounts('a@x.com:codes=barcode', 500, 'none'), [
+    { email: 'a@x.com', expectedProducts: 500, expectedCodes: 'barcode' },
+  ]);
+  assert.throws(() => parseVerificationAccounts('a@x.com:1000:codes=both:codes=sku'), /codes=/);
+  assert.throws(() => parseVerificationAccounts('a@x.com:1000:1000'), /address\[:products\]/);
+});
+
+test('DEMO-1 code coverage names exactly one mode and fails a mismatch with the counts', () => {
+  const mixed = classifyCodeCoverage({ total: 10, sku: 5, barcode: 6, both: 2 });
+  assert.deepEqual(mixed, {
+    total: 10,
+    withSku: 5,
+    withBarcode: 6,
+    both: 2,
+    skuOnly: 3,
+    barcodeOnly: 4,
+    neither: 1,
+    mode: 'mixed',
+  });
+
+  assert.equal(classifyCodeCoverage({ total: 3, sku: 3, barcode: 3, both: 3 }).mode, 'both');
+  assert.equal(classifyCodeCoverage({ total: 3, sku: 3, barcode: 0, both: 0 }).mode, 'sku');
+  assert.equal(classifyCodeCoverage({ total: 3, sku: 0, barcode: 3, both: 0 }).mode, 'barcode');
+  assert.equal(classifyCodeCoverage({ total: 3, sku: 0, barcode: 0, both: 0 }).mode, 'none');
+  assert.equal(classifyCodeCoverage({ total: 0, sku: 0, barcode: 0, both: 0 }).mode, 'empty');
+  assert.throws(
+    () => classifyCodeCoverage({ total: 2, sku: 3, barcode: 0, both: 0 }),
+    /cannot exceed/,
+  );
+
+  assert.equal(
+    formatCodeCoverage(mixed),
+    'Codes    : 2 both, 3 SKU only, 4 barcode only, 1 neither — MIXED',
+  );
+  assert.equal(
+    formatCodeCoverage(classifyCodeCoverage({ total: 3, sku: 3, barcode: 3, both: 3 }), 'both'),
+    'Codes    : 3 both, 0 SKU only, 0 barcode only, 0 neither — both (expected both)',
+  );
+  assert.equal(
+    formatCodeCoverage(classifyCodeCoverage({ total: 0, sku: 0, barcode: 0, both: 0 })),
+    'Codes    : 0 both, 0 SKU only, 0 barcode only, 0 neither — empty',
+  );
+  assert.equal(codeCoverageProblem(mixed, null), null);
+  assert.match(
+    codeCoverageProblem(mixed, 'both'),
+    /code coverage is MIXED, expected both — 10 products: 2 both, 3 SKU only, 4 barcode only, 1 neither/,
+  );
+});
+
+test('DEMO-1 barcode health checks EAN-13 check digits and duplicate values', () => {
+  const health = classifyBarcodeHealth([
+    '4006381333931', // valid EAN-13
+    '4006381333931', // duplicate (1 extra row)
+    '4006381333931', // duplicate (2 extra rows total)
+    '2000000000008', // valid internal-prefix EAN-13
+    '2000000000001', // 13 digits, wrong check digit
+    'ABC-123', // not an EAN-13; reported, not failed
+  ]);
+  assert.deepEqual(health, {
+    present: 6,
+    valid: 4,
+    invalid: 1,
+    notEan13: 1,
+    duplicateValues: 1,
+    duplicateRows: 2,
+  });
+  assert.equal(
+    formatBarcodeHealth(health),
+    'Barcodes : 6 present — 4 valid EAN-13, 1 invalid check digit, 1 duplicate value, 1 non-EAN-13',
+  );
+  assert.equal(
+    barcodeHealthProblem(health),
+    '1 barcode carries an invalid EAN-13 check digit; ' +
+      '1 barcode value is shared by 2 extra product rows',
+  );
+
+  // A non-EAN-13 value is not a failed check digit. A valid EAN-13 on its own is healthy.
+  assert.equal(barcodeHealthProblem(classifyBarcodeHealth(['ABC-123'])), null);
+  assert.equal(barcodeHealthProblem(classifyBarcodeHealth(['4006381333931'])), null);
+
+  const empty = classifyBarcodeHealth([]);
+  assert.deepEqual(empty, {
+    present: 0,
+    valid: 0,
+    invalid: 0,
+    notEan13: 0,
+    duplicateValues: 0,
+    duplicateRows: 0,
+  });
+  assert.equal(
+    formatBarcodeHealth(empty),
+    'Barcodes : 0 present — 0 valid EAN-13, 0 invalid check digits, 0 duplicate values, 0 non-EAN-13',
+  );
+});
+
 test('DEMO-1 an empty or product-less tenant is reported, not passed', () => {
   assert.match(
     tenantEmptinessProblem({ categories: 0, locations: 0, suppliers: 0, products: 0, inventory: 0 }),
@@ -239,12 +408,48 @@ test('DEMO-1 an empty or product-less tenant is reported, not passed', () => {
   assert.equal(tenantEmptinessProblem({ categories: 1, products: 3 }), null);
 });
 
+test('DEMO-1 one account that cannot be read does not become a data violation', () => {
+  const source = readFileSync(new URL('../scripts/verify-demo-data.mjs', import.meta.url), 'utf8');
+  assert.match(
+    source,
+    /for \(const account of accounts\) \{[\s\S]*try \{[\s\S]*verifyTenant\(account\)[\s\S]*catch \(err\)/,
+    'a per-account read failure must be caught, not allowed to abort the run',
+  );
+  assert.match(source, /status: 'unchecked'/);
+  assert.match(source, /if \(unchecked > 0\)/);
+  assert.match(source, /process\.exit\(2\)/);
+});
+
 test('DEMO-1 verify:demo applies the emptiness and business checks, and names TRANSFER', () => {
   const source = readFileSync(new URL('../scripts/verify-demo-data.mjs', import.meta.url), 'utf8');
   assert.match(source, /tenantEmptinessProblem\(counts\)/);
   assert.match(source, /Business\.findById\(businessId\)/);
   assert.match(source, /TRANSFER movements whose arithmetic does not hold/);
   assert.match(source, /NOT VERIFIED \(exit 2\)/);
+});
+
+test('DEMO-1 verify:demo reads code coverage read-only and parses the mode before connecting', () => {
+  const source = readFileSync(new URL('../scripts/verify-demo-data.mjs', import.meta.url), 'utf8');
+  assert.match(source, /--expect-codes/);
+  assert.match(source, /readProductCodeCoverage\(businessId\)/);
+  assert.match(source, /codeCoverageProblem\(/);
+  assert.match(source, /formatCodeCoverage\(/);
+  assert.match(source, /classifyBarcodeHealth\(/);
+  assert.match(source, /formatBarcodeHealth\(/);
+  assert.match(source, /barcodeHealthProblem\(/);
+
+  const parseAt = source.indexOf('parseExpectedCodeMode');
+  const connectAt = source.indexOf('await mongoose.connect');
+  assert.ok(parseAt >= 0, 'the code mode must be parsed');
+  assert.ok(connectAt >= 0, 'the verifier must connect');
+  assert.ok(parseAt < connectAt, 'the code mode must be parsed before the database is opened');
+
+  const coverage = readFileSync(new URL('../scripts/demo/codeCoverage.mjs', import.meta.url), 'utf8');
+  assert.match(coverage, /countDocuments/);
+  assert.ok(
+    !/insertMany|updateMany|updateOne|deleteMany|deleteOne|findOneAndUpdate/.test(coverage),
+    'the coverage reader must not write',
+  );
 });
 
 test('DEMO-1 an address must be usable, and a business id gets one spelling', () => {

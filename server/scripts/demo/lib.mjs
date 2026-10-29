@@ -15,6 +15,10 @@
 //     from config, never from the URI's path segment). A `SEED_CONFIRM` alone cannot
 //     be copied from a shell history into the wrong target by accident; typing the
 //     target's name can still be, but only after reading it.
+//   * the CONNECTION STRING must not name a DIFFERENT database. The connection obeys
+//     the resolved `dbName`, so the run would still write to the right place — and that
+//     is exactly why a disagreement stops it: the shell it came from was set up for
+//     another environment.
 //   * the TEST database is refused outright, because `npm test` clears it.
 //   * the seeder requires its own `SEED_CONFIRM=seed-demo-tenant`; the teardown's
 //     first phrase is `CLEANUP_CONFIRM=cleanup:demo-tenant`, plus the database
@@ -35,6 +39,7 @@
 import mongoose from 'mongoose';
 
 import { DATABASE_NAMES } from '../../src/config/env.ts';
+import { databaseNameInUri } from '../lib/mongo-uri.mjs';
 import Business from '../../src/models/business.model.ts';
 import Category from '../../src/models/category.model.ts';
 import Inventory from '../../src/models/inventory.model.ts';
@@ -107,6 +112,19 @@ export function assertDemoTarget({
     throw new DemoTenantError(
       `--database is "${requested}" but the resolved database is "${resolved}". ` +
         'Refusing to touch a database the run is not connected to. Nothing was written or deleted.',
+    );
+  }
+  // The flag and the resolved name can agree while the URI's path names something else.
+  // The connection obeys `dbName` and would therefore write to the resolved database, so
+  // this run is not actually ambiguous — but the shell it came from is, and every earlier
+  // instruction in it was written for the other database. Stop on that evidence rather
+  // than proceed correctly-but-unexpectedly, exactly as every other data command does.
+  const uriDatabase = databaseNameInUri(mongodbUri);
+  if (uriDatabase && uriDatabase !== resolved) {
+    throw new DemoTenantError(
+      `MONGODB_URI names the database "${uriDatabase}", but this run resolved "${resolved}". ` +
+        'The connection string and the environment were configured for different databases; ' +
+        'fix one of them. Nothing was written or deleted.',
     );
   }
   if (resolved === DATABASE_NAMES.test) {

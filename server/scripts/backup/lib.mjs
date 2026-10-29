@@ -41,6 +41,7 @@ import { createGunzip, createGzip } from 'node:zlib';
 import mongoose from 'mongoose';
 
 import { MONGODB_CLEANUP_TARGETS } from '../cleanup/lib.mjs';
+import { uriDatabaseMismatch } from '../lib/mongo-uri.mjs';
 
 /** Canonical Extended JSON — the only serialization that round-trips ObjectId/Date/Decimal128. */
 const { EJSON } = mongoose.mongo.BSON;
@@ -94,14 +95,20 @@ function looksProduction(name) {
 }
 
 /**
- * Guard — a restore target must be one of `RESTORE_ALLOWED_DATABASES`, exactly.
+ * Guard — a restore target must be one of `RESTORE_ALLOWED_DATABASES`, exactly, and the
+ * connection string must not name a different database.
  *
  * Exact match, not a prefix or a case-insensitive comparison: MongoDB database names
  * are case-sensitive, so `InventoryAI_Test_DB` is a different database and is refused.
  * The production check runs first so the refusal explains the real reason rather than
  * merely "not in the list".
+ *
+ * `mongodbUri` is REQUIRED. The connection uses `{ dbName }`, so a URI ending
+ * `/inventoryai_prod_db` beside a target of `inventoryai_test_db` would still restore into
+ * the test database — and that is why it must stop: the shell was configured for the wrong
+ * place. Making the argument optional would let a caller skip the check and look guarded.
  */
-export function assertRestoreTarget(databaseName) {
+export function assertRestoreTarget(databaseName, { mongodbUri } = {}) {
   const value = String(databaseName ?? '').trim();
   if (!value) {
     throw new BackupSafetyError(
@@ -118,6 +125,20 @@ export function assertRestoreTarget(databaseName) {
     throw new BackupSafetyError(
       `Refusing to restore: "${value}" is not an approved restore target. ` +
         `Allowed: ${RESTORE_ALLOWED_DATABASES.join(', ')}.`
+    );
+  }
+  if (!String(mongodbUri ?? '').trim()) {
+    throw new BackupSafetyError(
+      `Refusing to restore: MONGODB_URI is not set, so the connection string cannot be checked ` +
+        `against "${value}". Nothing was restored.`
+    );
+  }
+  const uriDatabase = uriDatabaseMismatch(mongodbUri, value);
+  if (uriDatabase) {
+    throw new BackupSafetyError(
+      `MONGODB_URI names the database "${uriDatabase}", but this run targets "${value}". ` +
+        'The connection string and the target were configured for different databases; fix one ' +
+        'of them. Nothing was restored.'
     );
   }
   return value;

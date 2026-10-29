@@ -60,6 +60,22 @@ export class CleanupSafetyError extends Error {
 }
 
 /**
+ * Format the per-collection counts a tenant cleanup preview would remove.
+ *
+ * WHY THIS IS A FORMATTER, NOT A SECOND COUNT. `countTenantDataRemoval` already returns the
+ * plan's counts; the preview only failed to print them, so an operator saw one total and had
+ * to guess where 13 332 documents lived. Every key is printed, including a zero, so a
+ * collection that is unexpectedly empty is visible rather than absent. The caller owns the
+ * tenant heading; this owns one line per collection.
+ */
+export function formatCollectionCounts(counts) {
+  return Object.entries(counts ?? {}).map(
+    ([name, count]) =>
+      `  ${String(name).padEnd(24)} ${(Number(count) || 0).toLocaleString('en-US')}`,
+  );
+}
+
+/**
  * Names that must never be treated as a non-production environment. Compared
  * case-insensitively after trimming, because NODE_ENV is compared that way
  * everywhere else in the project (config/env.ts).
@@ -391,6 +407,7 @@ export default {
   ALL_MONGODB_CLEANUP_TARGETS,
   PRODUCTION_CONFIRM_PHRASE,
   CleanupSafetyError,
+  formatCollectionCounts,
   isProductionEnv,
   looksProduction,
   assertNonProductionEnv,

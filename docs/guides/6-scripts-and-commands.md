@@ -11,6 +11,7 @@ their own guides.
 | Deleting data — development | [11. Deleting data — development](11-deleting-development.md) |
 | Deleting data — production | [12. Deleting data — production](12-deleting-production.md) |
 | Firebase logins | [13. Firebase identities](13-firebase-identities.md) |
+| Every complete development and production invocation, in one runbook | [14. Command runbook](14-command-runbook.md) |
 | Which accounts exist | [4. Test accounts and mock data](4-test-accounts-and-mock-data.md) |
 | A word you do not know | [5. Words explained](5-words-explained.md) |
 
@@ -135,7 +136,8 @@ node scripts/device/run.mjs --journey=transfer --sku=SMOKE-1 \
 ## Part 3 — Data
 
 Putting data in, taking it out and handling logins are documented where they belong, so there is one
-copy of each rule:
+copy of each rule. [Guide 14](14-command-runbook.md) is the complete development and production
+command sheet; the rules stay in Guides 9–13:
 
 | Task | Guide | The command, in one line |
 |---|---|---|
@@ -147,7 +149,7 @@ copy of each rule:
 | Seed the fixed-figure demo tenant | [9](9-seeding-development.md) | `npm run seed:demo-tenant -- --database=…` |
 | Seed a large tenant you can sign into | [9](9-seeding-development.md) / [10](10-seeding-production.md) | `npm run seed:perf-tenant -- --database=… --size=…` |
 | Seed the no-login measurement tenant | [9](9-seeding-development.md) | `npm run seed:perf -- --size=…` |
-| Read a seed back | [9](9-seeding-development.md) | `npm run verify:demo -- --email=…` / `verify:roles -- --business=…` |
+| Read a seed back | [9](9-seeding-development.md) | `npm run verify:demo -- --email=…` (one account) / `--accounts="…:1000[:codes=both],…" --expect-codes=…` (several) / `verify:roles -- --business=…` |
 | Clear a whole database | [11](11-deleting-development.md) / [12](12-deleting-production.md) | `npm run cleanup -- --target=database --database=…` |
 | Empty one tenant | [11](11-deleting-development.md) | `npm run cleanup:demo\|cleanup:roles\|…` |
 | Delete a Firebase login | [13](13-firebase-identities.md) | `npm run cleanup -- --target=firebase --database=… --email=…` |

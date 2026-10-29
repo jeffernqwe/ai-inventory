@@ -61,7 +61,7 @@ async function main() {
 
   // Guard FIRST, before a connection exists: if the target is wrong, nothing should be
   // opened at all, not even a read.
-  const target = assertRestoreTarget(env.mongodbDbName);
+  const target = assertRestoreTarget(env.mongodbDbName, { mongodbUri: env.mongodbUri });
   assertConfirm(process.env.CONFIRM, RESTORE_CONFIRM_PHRASE);
 
   const manifest = await readManifest(from);

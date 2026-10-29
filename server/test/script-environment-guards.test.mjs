@@ -35,9 +35,12 @@ import {
 } from '../scripts/perf/lib.mjs';
 import { assertTenantNamedForReset } from '../scripts/seed/lib.mjs';
 
+/** A URI whose path names the same database the run resolved; every guard compares the two. */
+const uriFor = (dbName) => `mongodb://127.0.0.1:27017/${dbName}`;
+
 /** A resolved environment as `config/env.ts` would hand it to a script. */
 const envOf = (dbName = 'inventoryai_dev_db') => ({
-  mongodbUri: 'mongodb://127.0.0.1:27017/unused',
+  mongodbUri: uriFor(dbName),
   mongodbDbName: dbName,
   nodeEnv: 'development',
 });
@@ -136,6 +139,44 @@ describe('a seeder refuses an environment it cannot name (2026-10-22)', () => {
     });
   });
 
+  it('refuses a MONGODB_URI that names a different database', async () => {
+    // The connection obeys the resolved name, so this run would still write to development.
+    // It stops because the shell was configured for production, and every instruction in it
+    // was written for that database. `seed:perf` / `cleanup:perf` reach this branch.
+    await withNodeEnv('development', () =>
+      withEnvValue('SEED_CONFIRM', 'seed:test', () => {
+        const message = messageOf(() =>
+          assertSafeTarget(
+            { ...envOf(DATABASE_NAMES.development), mongodbUri: uriFor(DATABASE_NAMES.production) },
+            'seed:test',
+            { confirmPhrase: 'seed:test' },
+          ),
+        );
+        assert.match(
+          message,
+          /MONGODB_URI names the database "inventoryai_prod_db", but this run resolved "inventoryai_dev_db"/,
+        );
+        assert.match(message, /Nothing was written or deleted/);
+      }),
+    );
+  });
+
+  it('accepts a URI that names no database, which Atlas commonly uses', async () => {
+    // A pathless connection string is not evidence of a different target: the connection
+    // takes `dbName` from config. Refusing it would break the normal Atlas form.
+    await withNodeEnv('development', () =>
+      withEnvValue('SEED_CONFIRM', 'seed:test', () => {
+        assert.doesNotThrow(() =>
+          assertSafeTarget(
+            { ...envOf(), mongodbUri: 'mongodb://127.0.0.1:27017' },
+            'seed:test',
+            { confirmPhrase: 'seed:test' },
+          ),
+        );
+      }),
+    );
+  });
+
   it('refuses a missing URI and a missing confirmation phrase', async () => {
     await withNodeEnv('development', () => {
       const noUri = messageOf(() =>
@@ -197,7 +238,7 @@ describe('a measurement refuses the wrong database before it reads or spends', (
  */
 describe('naming the database is how an account seeder reaches production', () => {
   const productionEnv = {
-    mongodbUri: 'mongodb://127.0.0.1:27017/unused',
+    mongodbUri: uriFor(DATABASE_NAMES.production),
     mongodbDbName: DATABASE_NAMES.production,
     nodeEnv: 'production',
   };
@@ -231,11 +272,34 @@ describe('naming the database is how an account seeder reaches production', () =
     });
   });
 
+  it('refuses a URI that names a different database, even with a matching flag', async () => {
+    // `verify:roles` reaches the named form, so this branch must not merely delegate to a
+    // guard that has the rule; it must pass the URI through and refuse here.
+    await withEnvValue('SEED_CONFIRM', 'seed-demo-account', () => {
+      const message = messageOf(() =>
+        assertSafeTarget(
+          { ...productionEnv, mongodbUri: uriFor(DATABASE_NAMES.development) },
+          'seed:demo',
+          named,
+        ),
+      );
+      assert.match(
+        message,
+        /MONGODB_URI names the database "inventoryai_dev_db", but this run resolved "inventoryai_prod_db"/,
+      );
+      assert.match(message, /Nothing was written or deleted/);
+    });
+  });
+
   it('refuses the test database even when it is named', async () => {
     await withEnvValue('SEED_CONFIRM', 'seed-demo-account', () => {
       const message = messageOf(() =>
         assertSafeTarget(
-          { ...productionEnv, mongodbDbName: DATABASE_NAMES.test },
+          {
+            ...productionEnv,
+            mongodbDbName: DATABASE_NAMES.test,
+            mongodbUri: uriFor(DATABASE_NAMES.test),
+          },
           'seed:demo',
           { ...named, database: DATABASE_NAMES.test },
         ),
@@ -271,7 +335,7 @@ describe('naming the database is how an account seeder reaches production', () =
  */
 describe('a read-only verification names production instead of being refused', () => {
   const read = (db, requestedDatabase = db) => ({
-    mongodbUri: 'mongodb://127.0.0.1:27017/unused',
+    mongodbUri: uriFor(db),
     resolvedDbName: db,
     requestedDatabase,
     command: 'verify:demo',
@@ -317,7 +381,7 @@ describe('a read-only verification names production instead of being refused', (
  */
 describe('the production-capable tenant names its target instead of being refused', () => {
   const named = (over = {}) => ({
-    mongodbUri: 'mongodb://127.0.0.1:27017/unused',
+    mongodbUri: uriFor('inventoryai_prod_db'),
     resolvedDbName: 'inventoryai_prod_db',
     requestedDatabase: 'inventoryai_prod_db',
     confirm: PERF_TENANT_SEED_CONFIRM,
@@ -345,9 +409,28 @@ describe('the production-capable tenant names its target instead of being refuse
     assert.match(message, /but the resolved database is "inventoryai_prod_db"/);
   });
 
+  it('refuses a URI that names a different database', () => {
+    // `verify:roles` reaches production through this guard, and it mints sessions while it
+    // runs. A flag that matches the resolved name is not enough when the URI points elsewhere.
+    const message = messageOf(() =>
+      assertNamedDatabaseTarget(named({ mongodbUri: uriFor(DATABASE_NAMES.development) })),
+    );
+    assert.match(
+      message,
+      /MONGODB_URI names the database "inventoryai_dev_db", but this run resolved "inventoryai_prod_db"/,
+    );
+    assert.match(message, /Nothing was written or deleted/);
+  });
+
   it('refuses the test database, which npm test clears', () => {
     const message = messageOf(() =>
-      assertNamedDatabaseTarget(named({ resolvedDbName: 'inventoryai_test_db', requestedDatabase: 'inventoryai_test_db' })),
+      assertNamedDatabaseTarget(
+        named({
+          resolvedDbName: 'inventoryai_test_db',
+          requestedDatabase: 'inventoryai_test_db',
+          mongodbUri: uriFor('inventoryai_test_db'),
+        }),
+      ),
     );
     assert.match(message, /test database/);
   });
@@ -372,7 +455,7 @@ describe('the production-capable tenant names its target instead of being refuse
  */
 describe('a measurement reaches production only by naming it', () => {
   const measurement = (over = {}) => ({
-    mongodbUri: 'mongodb://127.0.0.1:27017/unused',
+    mongodbUri: uriFor('inventoryai_prod_db'),
     resolvedDbName: 'inventoryai_prod_db',
     requestedDatabase: 'inventoryai_prod_db',
     confirm: PERF_TURNS_PROD_CONFIRM,
@@ -385,11 +468,36 @@ describe('a measurement reaches production only by naming it', () => {
     for (const db of ['inventoryai_dev_db', 'inventoryai_test_db']) {
       assert.deepEqual(
         assertMeasurementTarget(
-          measurement({ resolvedDbName: db, requestedDatabase: undefined, confirm: undefined }),
+          measurement({
+            resolvedDbName: db,
+            requestedDatabase: undefined,
+            confirm: undefined,
+            mongodbUri: uriFor(db),
+          }),
         ),
         { database: db, production: false },
       );
     }
+  });
+
+  it('refuses a URI that names another database, even in development', () => {
+    // This branch is the one that used to return a target without naming it, so a URI
+    // pointing at production beside a development name would have measured the wrong rows.
+    const message = messageOf(() =>
+      assertMeasurementTarget(
+        measurement({
+          resolvedDbName: DATABASE_NAMES.development,
+          requestedDatabase: undefined,
+          confirm: undefined,
+          mongodbUri: uriFor(DATABASE_NAMES.production),
+        }),
+      ),
+    );
+    assert.match(
+      message,
+      /MONGODB_URI names the database "inventoryai_prod_db", but this run resolved "inventoryai_dev_db"/,
+    );
+    assert.match(message, /Nothing was read or spent/);
   });
 
   it('refuses production when it is not named', () => {
@@ -416,7 +524,12 @@ describe('a measurement reaches production only by naming it', () => {
   it('refuses a database it does not recognise unless that database is named too', () => {
     const message = messageOf(() =>
       assertMeasurementTarget(
-        measurement({ resolvedDbName: 'some_other_db', requestedDatabase: undefined, confirm: undefined }),
+        measurement({
+          resolvedDbName: 'some_other_db',
+          requestedDatabase: undefined,
+          confirm: undefined,
+          mongodbUri: uriFor('some_other_db'),
+        }),
       ),
     );
     assert.match(message, /Name it with --database=some_other_db/);
@@ -638,6 +751,15 @@ describe('command audit — the refusals and previews fixed on 2026-10-27', () =
     const remove = source.indexOf('removeTenant(ids)');
     assert.notEqual(preview, -1, 'the dry run must count the shared teardown plan');
     assert.ok(preview < remove, 'the preview must be decided before anything is removed');
+  });
+
+  it('restore:db hands its guard the URI as well as the target', () => {
+    // The guard now fails closed without a URI, but a call site that drops it would be a
+    // regression the unit test cannot see. This pins the CLI half of the rule.
+    assert.match(
+      read('restore-db.mjs'),
+      /assertRestoreTarget\(env\.mongodbDbName, \{ mongodbUri: env\.mongodbUri \}\)/,
+    );
   });
 });
 

@@ -59,6 +59,9 @@ import {
 const here = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(here, '../..');
 
+/** A URI whose path names the same database the restore targets. */
+const uriFor = (dbName) => `mongodb://127.0.0.1:27017/${dbName}`;
+
 /** A database of this suite's own, on the connection `helpers.mjs` already proved. */
 const SCRATCH_DB = 'inventoryai_ops1_scratch_db';
 const A = 'ops1_backup_a';
@@ -297,7 +300,7 @@ dbSuite('OPS-1 — backup and restore', dbOk, () => {
 
   it('a restore may only ever target a disposable database', () => {
     for (const allowed of RESTORE_ALLOWED_DATABASES) {
-      assert.equal(assertRestoreTarget(allowed), allowed);
+      assert.equal(assertRestoreTarget(allowed, { mongodbUri: uriFor(allowed) }), allowed);
     }
     assert.deepEqual(
       [...RESTORE_ALLOWED_DATABASES].sort(),
@@ -312,15 +315,40 @@ dbSuite('OPS-1 — backup and restore', dbOk, () => {
       'InventoryAI_Test_DB',
     ]) {
       assert.throws(
-        () => assertRestoreTarget(forbidden),
+        () => assertRestoreTarget(forbidden, { mongodbUri: uriFor(forbidden) }),
         (error) => error instanceof BackupSafetyError,
         `"${forbidden}" must be refused`
       );
     }
     assert.throws(
-      () => assertRestoreTarget(DATABASE_NAMES.production),
+      () => assertRestoreTarget(DATABASE_NAMES.production, { mongodbUri: uriFor(DATABASE_NAMES.production) }),
       (error) => /production database/.test(error.message),
       'a production target is refused for the real reason, not merely as an unknown name'
+    );
+  });
+
+  it('a restore refuses a connection string that names a different database', () => {
+    // `{ dbName }` makes this restore actually target the test database, which is why the
+    // mismatch has to stop it: the shell was prepared for development.
+    assert.throws(
+      () =>
+        assertRestoreTarget(DATABASE_NAMES.test, {
+          mongodbUri: uriFor(DATABASE_NAMES.development),
+        }),
+      (error) =>
+        error instanceof BackupSafetyError &&
+        /MONGODB_URI names the database "inventoryai_dev_db", but this run targets "inventoryai_test_db"/.test(
+          error.message
+        ),
+      'a URI naming another database must be refused even when the target name is allowed'
+    );
+  });
+
+  it('a restore refuses to skip the URI check when no connection string is supplied', () => {
+    assert.throws(
+      () => assertRestoreTarget(DATABASE_NAMES.test),
+      (error) => error instanceof BackupSafetyError && /MONGODB_URI is not set/.test(error.message),
+      'the guard must fail closed rather than silently omitting the comparison'
     );
   });
 });

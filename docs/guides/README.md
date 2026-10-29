@@ -16,6 +16,7 @@ technical documents listed at the bottom; if they disagree with a guide, they wi
 | Delete data from the development database | [11. Deleting data — development](11-deleting-development.md) |
 | Delete data from the production database | [12. Deleting data — production](12-deleting-production.md) |
 | Work with Firebase logins | [13. Firebase identities](13-firebase-identities.md) |
+| Run a data command in either environment from one page | [14. Command runbook — development and production](14-command-runbook.md) |
 | Look up any other command or script | [6. Scripts and commands](6-scripts-and-commands.md) |
 | Update an installed app without reinstalling it | [7. Updating the app](7-over-the-air-updates.md) |
 | Prepare the Google Play submission | [8. Preparing the Play submission](8-play-store-submission.md) |
@@ -23,7 +24,8 @@ technical documents listed at the bottom; if they disagree with a guide, they wi
 
 Guides 5 and 6 are references — jump to the word or command you need. Guides 9–13 own the data commands
 — one guide for each half in each environment (put it in, take it out), one for the logins — so Guide 6
-does not repeat them.
+does not repeat them. Guide 14 is the one-page runbook of complete development and production
+invocations; it repeats the commands, never the rules.
 
 ## Five things to know first
 

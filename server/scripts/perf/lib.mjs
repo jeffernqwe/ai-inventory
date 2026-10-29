@@ -12,6 +12,7 @@
 
 
 import { DATABASE_NAMES, classifyNodeEnv, isRecognisedNodeEnv } from '../../src/config/env.ts';
+import { uriDatabaseMismatch } from '../lib/mongo-uri.mjs';
 import Business from '../../src/models/business.model.ts';
 import User from '../../src/models/user.model.ts';
 
@@ -57,6 +58,24 @@ function assertNamedEnvironment(command, { what = 'written or deleted' } = {}) {
     );
   }
   return kind;
+}
+
+/**
+ * Refuse a connection string whose path names a database other than the resolved one.
+ *
+ * The connection obeys `dbName`, so a mismatch would still touch the resolved database — and
+ * that is precisely why it stops: the shell was configured for the other environment, and every
+ * instruction in it was written for that one. The message names both databases but never echoes
+ * the URI, because a connection string can carry credentials.
+ */
+function assertUriMatchesResolved(mongodbUri, resolvedDbName, command, what) {
+  const uriDatabase = uriDatabaseMismatch(mongodbUri, resolvedDbName);
+  if (!uriDatabase) return;
+  throw new SeedSafetyError(
+    `MONGODB_URI names the database "${uriDatabase}", but this run resolved "${resolvedDbName}" ` +
+      `[${command}]. The connection string and the environment were configured for different ` +
+      `databases; fix one of them. Nothing was ${what}.`,
+  );
 }
 
 /**
@@ -110,6 +129,7 @@ export function assertSafeTarget(
   if (!env.mongodbUri) {
     throw new SeedSafetyError('MONGODB_URI is not set. Nothing was written or deleted.');
   }
+  assertUriMatchesResolved(env.mongodbUri, env.mongodbDbName, command, 'written or deleted');
   if (env.mongodbDbName !== DATABASE_NAMES.development) {
     throw new SeedSafetyError(
       `the resolved database is "${env.mongodbDbName}", not the development database ` +
@@ -225,6 +245,7 @@ export function assertNamedDatabaseTarget({
         `Refusing to touch a database the run is not connected to. Nothing was ${what}.`,
     );
   }
+  assertUriMatchesResolved(mongodbUri, resolved, command, what);
   if (resolved === DATABASE_NAMES.test) {
     throw new SeedSafetyError(
       `the resolved database is the test database "${DATABASE_NAMES.test}", which "npm test" ` +
@@ -269,6 +290,7 @@ export function assertMeasurementTarget({
       `the resolved database name is empty [${command}]. Nothing was read or spent.`,
     );
   }
+  assertUriMatchesResolved(mongodbUri, resolved, command, 'read or spent');
   if (allowed.includes(resolved)) {
     if (requested && requested !== resolved) {
       throw new SeedSafetyError(

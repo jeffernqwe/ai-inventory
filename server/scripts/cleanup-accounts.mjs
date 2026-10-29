@@ -10,8 +10,8 @@
 // WHAT IT REMOVES — exactly the business-owned rows `clearTenantData` defines, the same list
 // every other cleanup and account deletion use: inventory, movements, purchase orders,
 // products, categories, locations, suppliers, audit rows, invitations, and the assistant's
-// conversations and messages. Nothing outside the named tenants is read, and nothing inside
-// them survives except the account rows.
+// conversations and messages. Nothing outside the named tenants — apart from an explicitly
+// named `--witness` — is read, and nothing inside them survives except the account rows.
 //
 // WHY THE ACCOUNT IS RESOLVED BY ADDRESS. The person names the account the way they see it
 // in the app. The address resolves to a user row, and that row's own `businessId` is what is
@@ -31,6 +31,12 @@
 // `--dry-run` counts through the SAME plan the real run executes, prints every collection it
 // would empty, and deletes nothing. A run where nothing was ever seeded reports "nothing to
 // delete" and exits 0 — that is an answer, not a failure.
+//
+// `--witness=<address>` is an OPTIONAL, READ-ONLY control. It snapshots a tenant OUTSIDE the
+// cleanup plan — its data counts, login row, business row, role, status and Firebase linkage —
+// before the run, reads the same values again after it, and fails if any of them moved.
+// A witness in the plan is refused: it cannot be the tenant this run is emptying.
+// It only reads: the witness is never deleted, altered or written to.
 //
 // WHAT IT NEVER DOES: delete a user row, a business row, a session or a Firebase identity —
 // not even with a flag. Deleting a login whose database row has gone is what
@@ -57,6 +63,9 @@
 //
 //   The optional id is still accepted, and is checked against the account's own tenant:
 //     --accounts="you@example.com:<businessId>"
+//
+//   To prove a tenant OUTSIDE the plan was untouched, add an optional read-only witness:
+//     --witness="outside@example.com"
 
 import 'dotenv/config';
 import mongoose from 'mongoose';
@@ -65,7 +74,13 @@ import env from '../src/config/env.ts';
 import Business from '../src/models/business.model.ts';
 import User from '../src/models/user.model.ts';
 import { assertScopedCleanupTarget } from './cleanup/guard.mjs';
-import { CleanupSafetyError } from './cleanup/lib.mjs';
+import { CleanupSafetyError, formatCollectionCounts } from './cleanup/lib.mjs';
+import {
+  assertWitnessOutsidePlan,
+  assertWitnessUnchanged,
+  parseWitnessAddress,
+  witnessSnapshot,
+} from './cleanup/witness.mjs';
 import { SeedSafetyError, clearTenantData, countTenantDataRemoval } from './perf/lib.mjs';
 import {
   COMPARISON_ACCOUNTS,
@@ -149,10 +164,53 @@ function parsePlan(raw) {
     .map(parseEntry);
 }
 
+/**
+ * Resolve the witness to its tenant, prove it is outside the plan, and snapshot it.
+ *
+ * Called before the first `clearTenantData`; a missing account or an in-plan tenant stops
+ * the run while it is still a read. Every value captured here is read-only.
+ */
+async function resolveWitness({ email, database, plan }) {
+  const user = await User.findOne({ email })
+    .select('_id email businessId role status firebaseUid')
+    .lean();
+  if (!user) {
+    throw new CleanupSafetyError(
+      `--witness=${email} has no MongoDB account in ${database}. A witness must exist — ` +
+        'refusing to run a control that can prove nothing. Nothing was deleted.',
+    );
+  }
+  const business = user.businessId
+    ? await Business.findById(user.businessId).select('name status').lean()
+    : null;
+
+  assertWitnessOutsidePlan({
+    witness: { email, businessId: user.businessId },
+    plan,
+  });
+
+  // TEMPORAL: this count is a read taken before the deletion; the same read is repeated
+  // after it, and the comparison is what proves the tenant stayed still.
+  const { total, counts } = await countTenantDataRemoval([user.businessId]);
+  return {
+    email,
+    businessId: String(user.businessId),
+    before: witnessSnapshot({ user, business, total, counts }),
+  };
+}
+
 async function main() {
   const dryRun = process.argv.includes('--dry-run');
   const preset = presetValue();
   const requested = argValue('--accounts');
+
+  const witnessArg = process.argv.find((a) => a.startsWith('--witness='));
+  if (!witnessArg && process.argv.includes('--witness')) {
+    fail('--witness needs an address. Nothing was deleted.');
+  }
+  const witnessEmail = parseWitnessAddress(
+    witnessArg ? witnessArg.slice('--witness='.length) : undefined,
+  );
 
   if (preset && requested) {
     fail(`pass either --preset=${PRESET} or --accounts=…, not both. Nothing was deleted.`);
@@ -237,8 +295,13 @@ async function main() {
       .lean();
 
     if (!user) {
-      console.log(`\n${entry.email} — no account — nothing to delete`);
-      continue;
+      // A named account is a CLAIM, not a suggestion. Skipping it let a typo return
+      // `SUCCESS — nothing to delete` for a tenant the command never found, which is the
+      // one answer a destructive command must not give. Refuse before any delete.
+      fail(
+        `"${entry.email}" has no MongoDB account in ${target.database}. A named account must ` +
+          'exist — refusing to skip it. Nothing was deleted.',
+      );
     }
     if (entry.businessId && String(user.businessId) !== String(entry.businessId)) {
       fail(
@@ -305,6 +368,12 @@ async function main() {
     consequence: 'Nothing was deleted.',
   });
 
+  // ---- the optional witness: resolved and counted HERE, before anything is deleted, so an
+  // ---- absent or in-plan witness stops the run while it is still a read.
+  const witness = witnessEmail
+    ? await resolveWitness({ email: witnessEmail, database: target.database, plan: prepared })
+    : null;
+
   if (!prepared.length) {
     console.log('\nResult   : SUCCESS — nothing to delete');
     await mongoose.disconnect();
@@ -317,6 +386,18 @@ async function main() {
       `\n${entry.email} — ${entry.businessName} — ${entry.total.toLocaleString()} documents` +
         `${entry.total === 0 ? ' (already empty)' : ''}`,
     );
+    // The preview names every collection before it names the total it would remove. The
+    // real run keeps its existing per-tenant line; its proof is the `0 remaining` check.
+    if (dryRun) {
+      for (const line of formatCollectionCounts(entry.counts)) console.log(line);
+    }
+  }
+
+  if (witness) {
+    console.log(
+      `Witness  : ${witness.email} — ${witness.before.businessName ?? 'no business'} — ` +
+        `${witness.before.total.toLocaleString()} documents (outside the plan, read-only)`,
+    );
   }
 
   if (dryRun) {
@@ -324,6 +405,27 @@ async function main() {
     console.log(
       `Would remove : ${total.toLocaleString()} documents across ${prepared.length} tenants`,
     );
+    if (witness) {
+      const dryUser = await User.findOne({ email: witness.email })
+        .select('_id email businessId role status firebaseUid')
+        .lean();
+      const dryBusiness = dryUser?.businessId
+        ? await Business.findById(dryUser.businessId).select('name status').lean()
+        : null;
+      const dryCounts = await countTenantDataRemoval([witness.businessId]);
+      const after = witnessSnapshot({
+        user: dryUser ?? { email: witness.email },
+        business: dryBusiness,
+        total: dryCounts.total,
+        counts: dryCounts.counts,
+      });
+      assertWitnessUnchanged({
+        before: witness.before,
+        after,
+        context: 'the cleanup preview',
+      });
+      console.log(`Witness  : unchanged — ${witness.email} (${witness.before.total.toLocaleString()} documents)`);
+    }
     console.log('No data deleted.');
     console.log('Result   : DRY RUN SUCCESS');
     await mongoose.disconnect();
@@ -344,6 +446,24 @@ async function main() {
     console.log(
       `\n${entry.email} — ${entry.businessName} — removed ${removed.toLocaleString()} documents — 0 remaining`,
     );
+  }
+
+  if (witness) {
+    const afterUser = await User.findOne({ email: witness.email })
+      .select('_id email businessId role status firebaseUid')
+      .lean();
+    const afterBusiness = afterUser?.businessId
+      ? await Business.findById(afterUser.businessId).select('name status').lean()
+      : null;
+    const afterCounts = await countTenantDataRemoval([witness.before.businessId]);
+    const after = witnessSnapshot({
+      user: afterUser ?? { email: witness.email },
+      business: afterBusiness,
+      total: afterCounts.total,
+      counts: afterCounts.counts,
+    });
+    assertWitnessUnchanged({ before: witness.before, after, context: 'the cleanup' });
+    console.log(`Witness  : unchanged — ${witness.email} (${witness.before.total.toLocaleString()} documents, login and business rows intact)`);
   }
 
   console.log('');

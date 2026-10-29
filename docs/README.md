@@ -31,6 +31,7 @@ documents.
 | [11-deleting-development.md](guides/11-deleting-development.md) | Taking data out of the development database: wipes and tenant cleanups, what is verified |
 | [12-deleting-production.md](guides/12-deleting-production.md) | Taking data out of the production database: the same rules, and the space a delete does not free |
 | [13-firebase-identities.md](guides/13-firebase-identities.md) | Which commands create logins, and how to delete one without locking an account out |
+| [14-command-runbook.md](guides/14-command-runbook.md) | Every complete development and production invocation in one sheet: seed, verify, clean up, back up |
 
 ## 2. What the system is — reference
 

@@ -76,14 +76,15 @@ These are cleanup and security items, not a reason to transfer the repository ag
    `jeffernmalinaoqwe@gmail.com` is present, verified and primary for `jeffernqwerty`. The API could not
    list account emails because the current token lacks the `user` scope. Web-merge commits already use
    that address, which is strong evidence but not proof of verification.
-2. **Align the local Git identity.** The local configuration still uses the previous address. Future
-   local commits would carry the old identity until it is changed.
+2. **Local Git identity aligned.** The local `user.email` was set to
+   `jeffernmalinaoqwe@gmail.com` on 2026-10-30; `user.name` remains `jeffernzxc`. Existing commits
+   were not rewritten.
 3. **Current-state policy updated.** `CLAUDE.md`, `docs/SOURCE_PROTECTION.md` and
    `scripts/audit-access.mjs` now name the new account and no longer retain the old collaborator.
    Historical roadmap entries are records and remain unchanged.
 4. **Old account removed.** `nreffejzxc` was removed as a write collaborator on 2026-10-30, and its
-   local `gh` credential was removed. Only `jeffernqwerty` remains as admin. Review the old account's
-   server-side OAuth authorization and SSH keys separately.
+   local `gh` credential was removed. Only `jeffernqwerty` remains as admin. The old account publishes
+   no SSH keys; its server-side OAuth authorization still has to be revoked from that account.
 5. **Verify 2FA.** Account 2FA cannot be confirmed over the API. Check both accounts in
    **Settings → Password and authentication**.
 6. **Close the red dependency PR.** PR #98 proposes `@react-native-firebase/app` 27.1.0 while the
@@ -174,23 +175,25 @@ Perform these steps only after approval.
 5. Keep the old address only if it is needed for recovery; otherwise remove it after the old account is
    retired.
 
-### 4.2 Choose the commit identity
+### 4.2 Commit identity — chosen 2026-10-30
 
-Decide all three explicitly:
+The owner chose `jeffernzxc` with the target Gmail.
 
-| Choice | Options | Consequence |
+| Choice | Chosen | Consequence |
 | --- | --- | --- |
-| Git author name | `jeffernzxc` or `Jeffernqwerty` | Appears in future commit metadata |
-| Commit email | Target Gmail or GitHub `noreply` | The Gmail is public if used directly |
-| Policy text | Update `CLAUDE.md` to match | Removes the current contradiction |
+| Git author name | `jeffernzxc` | Appears in future commit metadata |
+| Commit email | `jeffernmalinaoqwe@gmail.com` | The Gmail is public if used directly |
+| Policy text | `CLAUDE.md` names the new email | Removes the previous contradiction |
 
-Update the local configuration only after the owner chooses:
+The local configuration was applied on 2026-10-30:
 
 ```bash
-# Example only; do not run until the identity is approved.
-# git config user.email "jeffernmalinaoqwe@gmail.com"
-# git config user.name "jeffernzxc"
+git config --local user.email "jeffernmalinaoqwe@gmail.com"
+git config --local user.name "jeffernzxc"
 ```
+
+Existing commits were not rewritten. Changing the attribution of an existing commit would require an
+amend and a force push, which is a separate, explicitly approved history rewrite.
 
 ### 4.3 Old account removal — repository access completed 2026-10-30
 
@@ -199,8 +202,13 @@ Update the local configuration only after the owner chooses:
 3. Removed the old GitHub CLI credential from the local credential store and signed the CLI out of
    that account.
 4. Re-ran `node scripts/audit-access.mjs` and confirmed it passes.
-5. Still separately review the old account's server-side OAuth authorization and SSH keys; this
-   cleanup did not revoke them.
+5. The old account's server-side OAuth authorization must be revoked from that account; it cannot be
+   revoked with the new account's token. The old account publishes **no SSH keys**
+   (`https://github.com/nreffejzxc.keys` returned none), so no SSH-key removal was possible or needed.
+6. Repository-level path check on 2026-10-30: direct collaborator lookup 404; collaborator count 1
+   (owner); invitations 0; deploy keys 0; webhooks 0; Actions secrets 0; environments 0; forks 0;
+   rulesets 0; branch-protection bypass list null. The old account retains only the public `read`
+   baseline that any GitHub visitor has; it has no `push`, `maintain`, `triage` or `admin` permission.
 
 ### 4.4 Update current-state documentation
 
@@ -476,12 +484,13 @@ Do these after Render is stable, because both keys live in its environment.
 The migration is complete only when all of these are true:
 
 - [ ] `jeffernmalinaoqwe@gmail.com` is verified and primary on GitHub.
-- [ ] Local Git identity matches the approved policy.
+- [x] Local Git identity matches the approved policy (2026-10-30).
 - [x] `CLAUDE.md`, `docs/SOURCE_PROTECTION.md` and `scripts/audit-access.mjs` no longer name the old
       account as current access.
 - [x] The old GitHub collaborator is removed (2026-10-30).
 - [x] The old GitHub CLI credential is removed from this machine (2026-10-30).
-- [ ] The old account's server-side OAuth authorization and SSH keys are reviewed.
+- [ ] The old account's server-side OAuth authorization is revoked; no SSH keys were found on
+      2026-10-30.
 - [ ] GitHub 2FA is verified; CI and branch protection still pass.
 - [ ] A real push and pull succeed after the changes.
 - [ ] Firebase is owned and billed under the Gmail; the new service-account key works.

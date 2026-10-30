@@ -196,7 +196,7 @@ git config --local user.name "jeffernzxc"
 Existing commits were not rewritten. Changing the attribution of an existing commit would require an
 amend and a force push, which is a separate, explicitly approved history rewrite.
 
-### 4.3 Old account removal — repository access completed 2026-10-30
+### 4.3 Old account removal — access and credentials completed 2026-10-30
 
 1. Confirmed the new account can sign in and push.
 2. Removed `nreffejzxc` from the repository collaborators.
@@ -458,7 +458,7 @@ Do these after Render is stable, because both keys live in its environment.
 | Action | Approval needed | Reason |
 | --- | --- | --- |
 | Change GitHub primary email or local Git identity | Yes | Changes future commit metadata and account recovery |
-| Remove the old GitHub collaborator or revoke its local token | **Completed 2026-10-30** | Repository access and the local credential are removed; the server-side OAuth grant still needs separate review |
+| Remove the old GitHub collaborator or revoke its local token | **Completed 2026-10-30** | Repository access and the local credential are removed; the old account's OAuth apps, PATs and sessions were revoked (owner-confirmed, security log as evidence) |
 | Rotate the Firebase service-account key | Yes | Production environment change and backend restart |
 | Add a Firebase Owner or change billing | Yes | Production ownership and billing |
 | Move the Atlas project | Yes | Changes organization ownership and billing |

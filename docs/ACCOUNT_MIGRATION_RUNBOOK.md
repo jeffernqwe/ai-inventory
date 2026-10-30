@@ -84,7 +84,8 @@ These are cleanup and security items, not a reason to transfer the repository ag
    Historical roadmap entries are records and remain unchanged.
 4. **Old account removed.** `nreffejzxc` was removed as a write collaborator on 2026-10-30, and its
    local `gh` credential was removed. Only `jeffernqwerty` remains as admin. The old account publishes
-   no SSH keys; its server-side OAuth authorization still has to be revoked from that account.
+   no SSH keys. The owner confirmed on 2026-10-30 that its OAuth apps, PATs and sessions were revoked;
+   the old account's GitHub security log is the evidence.
 5. **Verify 2FA.** Account 2FA cannot be confirmed over the API. Check both accounts in
    **Settings → Password and authentication**.
 6. **Close the red dependency PR.** PR #98 proposes `@react-native-firebase/app` 27.1.0 while the
@@ -202,9 +203,11 @@ amend and a force push, which is a separate, explicitly approved history rewrite
 3. Removed the old GitHub CLI credential from the local credential store and signed the CLI out of
    that account.
 4. Re-ran `node scripts/audit-access.mjs` and confirmed it passes.
-5. The old account's server-side OAuth authorization must be revoked from that account; it cannot be
-   revoked with the new account's token. The old account publishes **no SSH keys**
-   (`https://github.com/nreffejzxc.keys` returned none), so no SSH-key removal was possible or needed.
+5. The old account's OAuth apps, PATs and sessions were revoked. The owner confirmed completion on
+   2026-10-30; the old account's GitHub security log is the evidence. The log entries are not
+   reproduced or independently verified here because this workspace cannot read that account. The old
+   account publishes **no SSH keys** (`https://github.com/nreffejzxc.keys` returned none), so no
+   SSH-key removal was possible or needed.
 6. Repository-level path check on 2026-10-30: direct collaborator lookup 404; collaborator count 1
    (owner); invitations 0; deploy keys 0; webhooks 0; Actions secrets 0; environments 0; forks 0;
    rulesets 0; branch-protection bypass list null. The old account retains only the public `read`
@@ -489,8 +492,8 @@ The migration is complete only when all of these are true:
       account as current access.
 - [x] The old GitHub collaborator is removed (2026-10-30).
 - [x] The old GitHub CLI credential is removed from this machine (2026-10-30).
-- [ ] The old account's server-side OAuth authorization is revoked; no SSH keys were found on
-      2026-10-30.
+- [x] The old account's OAuth apps, PATs and sessions were revoked (owner-confirmed 2026-10-30;
+      the security log is the evidence; no SSH keys were found).
 - [ ] GitHub 2FA is verified; CI and branch protection still pass.
 - [ ] A real push and pull succeed after the changes.
 - [ ] Firebase is owned and billed under the Gmail; the new service-account key works.

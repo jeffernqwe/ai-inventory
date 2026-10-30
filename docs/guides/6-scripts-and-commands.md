@@ -231,7 +231,7 @@ npm run ai:usage -- --provider-only
 
 NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
   PERF_TURNS_CONFIRM=perf-turns:production \
-  PERF_ACCOUNT_PASSWORD='the password the seed was run with' \
+  PERF_ACCOUNT_PASSWORD='choose-a-strong-password' \
   node --env-file=../mobile/.env scripts/measure-ai-turns.mjs \
     --base=https://ai-inventory-l1mi.onrender.com \
     --database=inventoryai_prod_db \

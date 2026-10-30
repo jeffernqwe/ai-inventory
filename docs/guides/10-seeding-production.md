@@ -412,7 +412,7 @@ In production it must use `--signin`, because a session minted on this laptop is
 
 ```bash
 NODE_ENV=production MONGODB_DB_NAME=inventoryai_prod_db \
-  ROLE_TEST_PASSWORD='the password the role seeder used' \
+  ROLE_TEST_PASSWORD='choose-a-strong-password' \
   FIREBASE_WEB_API_KEY='the public Firebase web key' \
   SEED_CONFIRM=seed-roles \
   npm run verify:roles -- --database=inventoryai_prod_db \

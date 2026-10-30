@@ -240,9 +240,9 @@ editing an ADMIN or the OWNER.
 Its own tool with **one phrase** — it does not follow the two/three-phrase rule.
 
 ```bash
-DEMO_ACCOUNT_PASSWORD='<password>' SEED_CONFIRM=seed-demo-tenant \
+DEMO_ACCOUNT_PASSWORD='choose-a-strong-password' SEED_CONFIRM=seed-demo-tenant \
   npm run seed:demo-tenant -- --database=inventoryai_dev_db --dry-run   # preview first
-DEMO_ACCOUNT_PASSWORD='<password>' SEED_CONFIRM=seed-demo-tenant \
+DEMO_ACCOUNT_PASSWORD='choose-a-strong-password' SEED_CONFIRM=seed-demo-tenant \
   npm run seed:demo-tenant -- --database=inventoryai_dev_db
 ```
 
